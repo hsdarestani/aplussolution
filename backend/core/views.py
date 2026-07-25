@@ -353,10 +353,33 @@ class ShiftViewSet(BaseModelViewSet):
     def assign(self, request, pk=None):
         shift = self.get_object()
         worker_id = request.data.get('worker')
-        shift.worker = WorkerProfile.objects.get(pk=worker_id) if worker_id else None
-        shift.is_open = not bool(worker_id)
-        shift.status = Shift.Status.CONFIRMED if worker_id else Shift.Status.PUBLISHED
+        worker = WorkerProfile.objects.get(pk=worker_id, active=True) if worker_id else None
+        if worker:
+            if Shift.objects.filter(
+                worker=worker,
+                starts_at__lt=shift.ends_at,
+                ends_at__gt=shift.starts_at,
+            ).exclude(pk=shift.pk).exclude(status=Shift.Status.CANCELLED).exists():
+                return Response({'detail': 'Der Mitarbeiter hat in diesem Zeitraum bereits eine Schicht.'}, status=400)
+            if Availability.objects.filter(
+                worker=worker,
+                available=False,
+                starts_at__lt=shift.ends_at,
+                ends_at__gt=shift.starts_at,
+            ).exists():
+                return Response({'detail': 'Der Mitarbeiter ist in diesem Zeitraum nicht verfügbar.'}, status=400)
+        shift.worker = worker
+        shift.is_open = not bool(worker)
+        shift.status = Shift.Status.CONFIRMED if worker else Shift.Status.PUBLISHED
         shift.save()
+        if worker:
+            Notification.objects.create(
+                user=worker.user,
+                kind=f'shift-assigned-{shift.id}',
+                title='Neue Schicht zugeteilt',
+                body=f'{shift.starts_at:%d.%m.%Y %H:%M} – {shift.location.name}',
+                action_url='/schedule',
+            )
         audit(request, 'shift.assigned', shift, {'worker': worker_id})
         return Response(self.get_serializer(shift).data)
 
@@ -365,7 +388,21 @@ class ShiftViewSet(BaseModelViewSet):
         shift = self.get_object()
         if request.user.role != 'worker' or not shift.is_open:
             return Response({'detail': 'Diese Schicht kann nicht übernommen werden.'}, status=400)
-        shift.worker = request.user.worker_profile
+        worker = request.user.worker_profile
+        if Shift.objects.filter(
+            worker=worker,
+            starts_at__lt=shift.ends_at,
+            ends_at__gt=shift.starts_at,
+        ).exclude(pk=shift.pk).exclude(status=Shift.Status.CANCELLED).exists():
+            return Response({'detail': 'Du hast in diesem Zeitraum bereits eine Schicht.'}, status=400)
+        if Availability.objects.filter(
+            worker=worker,
+            available=False,
+            starts_at__lt=shift.ends_at,
+            ends_at__gt=shift.starts_at,
+        ).exists():
+            return Response({'detail': 'Du bist für diesen Zeitraum als nicht verfügbar eingetragen.'}, status=400)
+        shift.worker = worker
         shift.is_open = False
         shift.status = Shift.Status.CONFIRMED
         shift.save()
@@ -496,6 +533,19 @@ class ContractViewSet(BaseModelViewSet):
         contract.status = Contract.Status.SENT
         contract.sent_at = timezone.now()
         contract.save()
+        recipients = list(User.objects.filter(role__in=['admin', 'manager'], is_active=True))
+        if contract.worker_id:
+            recipients.append(contract.worker.user)
+        if contract.client_id:
+            recipients.extend(contract.client.contacts.filter(is_active=True))
+        for recipient in {item.pk: item for item in recipients}.values():
+            Notification.objects.create(
+                user=recipient,
+                kind=f'contract-sent-{contract.id}',
+                title='Vertrag zur Prüfung bereit',
+                body=contract.title,
+                action_url='/contracts',
+            )
         audit(request, 'contract.sent', contract)
         return Response(self.get_serializer(contract).data)
 
@@ -579,6 +629,15 @@ class ConversationViewSet(BaseModelViewSet):
         if not body:
             return Response({'detail': 'Nachricht darf nicht leer sein.'}, status=400)
         message = Message.objects.create(conversation=conversation, sender=request.user, body=body)
+        message.read_by.add(request.user)
+        for participant in conversation.participants.exclude(pk=request.user.pk):
+            Notification.objects.create(
+                user=participant,
+                kind=f'message-{message.id}',
+                title=conversation.title or 'Neue Nachricht',
+                body=body[:180],
+                action_url='/messages',
+            )
         return Response(MessageSerializer(message, context={'request': request}).data, status=201)
 
 

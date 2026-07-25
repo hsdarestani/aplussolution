@@ -45,6 +45,7 @@ import {
   trashOutline,
 } from 'ionicons/icons';
 import { api, consumeOAuth, login, logout, me, socialUrl, User } from './api';
+import Operations from './Operations';
 
 type View =
   | 'dashboard'
@@ -57,7 +58,8 @@ type View =
   | 'messages'
   | 'ranking'
   | 'ratings'
-  | 'profile';
+  | 'profile'
+  | 'operations';
 
 const icons: Record<string, string> = {
   dashboard: homeOutline,
@@ -71,6 +73,7 @@ const icons: Record<string, string> = {
   ranking: starOutline,
   ratings: starOutline,
   profile: peopleOutline,
+  operations: refreshOutline,
 };
 
 const nav: Record<string, [View, string][]> = {
@@ -83,6 +86,7 @@ const nav: Record<string, [View, string][]> = {
     ['orders', 'Aufträge'],
     ['people', 'Personal & Kunden'],
     ['messages', 'Nachrichten'],
+    ['operations', 'Steuerzentrale'],
   ],
   manager: [
     ['dashboard', 'Übersicht'],
@@ -93,11 +97,13 @@ const nav: Record<string, [View, string][]> = {
     ['orders', 'Aufträge'],
     ['people', 'Personal & Kunden'],
     ['messages', 'Nachrichten'],
+    ['operations', 'Steuerzentrale'],
   ],
   worker: [
     ['dashboard', 'Start'],
     ['schedule', 'Mein Dienstplan'],
     ['time', 'Arbeitszeitkonto'],
+    ['operations', 'Verfügbarkeit & Tausch'],
     ['contracts', 'Meine Verträge'],
     ['documents', 'Dokumente & Lohn'],
     ['messages', 'Nachrichten'],
@@ -105,6 +111,7 @@ const nav: Record<string, [View, string][]> = {
   ],
   client: [
     ['dashboard', 'Start'],
+    ['operations', 'Servicecenter'],
     ['orders', 'Aufträge'],
     ['schedule', 'Einsätze'],
     ['contracts', 'Verträge & Signatur'],
@@ -971,7 +978,7 @@ function People({ user }: { user: User }) {
         />
         <IonInput
           fill="outline"
-          type="color"
+          {...({ type: 'color' } as any)}
           label="Farbe"
           labelPlacement="floating"
           value={positionForm.color}
@@ -2984,6 +2991,7 @@ export default function App() {
   else if (view === 'ranking') content = <Ranking />;
   else if (view === 'ratings') content = <Ratings user={user} />;
   else if (view === 'profile') content = <Profile user={user} />;
+  else if (view === 'operations') content = <Operations user={user} />;
 
   return (
     <IonApp>

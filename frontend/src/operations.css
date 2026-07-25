@@ -345,3 +345,5 @@
     padding: 18px;
   }
 }
+
+.swap-target { min-width: 150px; border: 1px solid var(--line); border-radius: 10px; padding-inline: 8px; }

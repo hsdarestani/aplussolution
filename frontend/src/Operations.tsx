@@ -186,6 +186,7 @@ export default function Operations({ user }: { user: User }) {
   const [copyWeek, setCopyWeek] = useState<any>({});
   const [report, setReport] = useState<any>({ month: new Date().toISOString().slice(0, 7) });
   const [templateFile, setTemplateFile] = useState<File>();
+  const [swapTargets, setSwapTargets] = useState<Record<string, string>>({});
 
   const load = async () => {
     const overview = await api('operations/');
@@ -366,6 +367,21 @@ export default function Operations({ user }: { user: User }) {
 
           <div className="operations-grid two">
             <section className="operations-panel">
+              <div className="operations-head"><div><h3>Schichttausch freigeben</h3><p>Offene Anfragen prüfen und Zielmitarbeiter festlegen.</p></div><IonIcon icon={swapHorizontalOutline} /></div>
+              {data.swaps?.filter((item: any) => item.status === 'pending').map((item: any) => (
+                <div className="operations-row" key={item.id}>
+                  <IonIcon icon={swapHorizontalOutline} />
+                  <div className="operations-grow"><b>{item.requested_by_name} · {item.shift_title}</b><p>{dateTime(item.shift_starts_at)}</p><small>{item.note}</small></div>
+                  <IonSelect className="swap-target" interface="popover" placeholder="Ziel" value={swapTargets[item.id] || item.offered_to || ''} onIonChange={(event) => setSwapTargets({ ...swapTargets, [item.id]: String(value(event)) })}>
+                    {data.swap_candidates?.filter((candidate: any) => candidate.id !== item.requested_by).map((candidate: any) => <IonSelectOption value={candidate.id} key={candidate.id}>{candidate.name}</IonSelectOption>)}
+                  </IonSelect>
+                  <IonButton size="small" color="success" disabled={!swapTargets[item.id] && !item.offered_to} onClick={() => run(`operations/swaps/${item.id}/decide/`, { status: 'approved', offered_to: swapTargets[item.id] || item.offered_to }, 'Tausch wurde freigegeben.')}>Freigeben</IonButton>
+                  <IonButton size="small" color="danger" onClick={() => decideSwap(item.id, 'rejected')}>Ablehnen</IonButton>
+                </div>
+              ))}
+              {!data.swaps?.some((item: any) => item.status === 'pending') && <Empty>Keine offenen Tauschanfragen.</Empty>}
+            </section>
+            <section className="operations-panel">
               <div className="operations-head"><div><h3>Planungswerkzeuge</h3><p>Woche kopieren und Entwürfe gesammelt veröffentlichen.</p></div><IonIcon icon={calendarOutline} /></div>
               <div className="operations-actions">
                 <IonButton onClick={() => setModal('copy-week')}><IonIcon slot="start" icon={copyOutline} />Woche kopieren</IonButton>
@@ -431,8 +447,8 @@ export default function Operations({ user }: { user: User }) {
                 <IonIcon icon={swapHorizontalOutline} />
                 <div className="operations-grow"><b>{item.shift_title}</b><p>{dateTime(item.shift_starts_at)} · {item.offered_to_name || 'Offene Anfrage'}</p><small>{item.note}</small></div>
                 <IonBadge>{item.status}</IonBadge>
-                {item.status === 'pending' && item.requested_by === user.worker_profile_id && <IonButton fill="clear" color="danger" onClick={() => decideSwap(item.id, 'cancelled')}>Stornieren</IonButton>}
-                {item.status === 'pending' && item.offered_to_name && <div className="swap-actions"><IonButton size="small" color="success" onClick={() => decideSwap(item.id, 'approved')}>Annehmen</IonButton><IonButton size="small" color="danger" onClick={() => decideSwap(item.id, 'rejected')}>Ablehnen</IonButton></div>}
+                {item.status === 'pending' && item.requested_by === data.current_worker_id && <IonButton fill="clear" color="danger" onClick={() => decideSwap(item.id, 'cancelled')}>Stornieren</IonButton>}
+                {item.status === 'pending' && item.offered_to === data.current_worker_id && <div className="swap-actions"><IonButton size="small" color="success" onClick={() => decideSwap(item.id, 'approved')}>Annehmen</IonButton><IonButton size="small" color="danger" onClick={() => decideSwap(item.id, 'rejected')}>Ablehnen</IonButton></div>}
               </div>
             ))}
             {!data.swaps?.length && <Empty>Noch keine Tauschanfragen.</Empty>}

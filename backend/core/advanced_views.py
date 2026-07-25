@@ -173,6 +173,7 @@ def _schedule_findings(date_from=None, date_to=None):
         if gap:
             coverage.append({
                 'order': str(order.id),
+                'client': str(order.client_id),
                 'title': order.title,
                 'client_name': order.client.name,
                 'requested': order.requested_staff,
@@ -276,6 +277,16 @@ def operations_overview(request):
             **findings,
             'estimated_monthly_labor_cost': str(estimated_cost.quantize(Decimal('0.01'))),
             'pending_swaps': ShiftSwapRequest.objects.filter(status=ShiftSwapRequest.Status.PENDING).count(),
+            'swaps': [
+                _serialize_swap(item)
+                for item in ShiftSwapRequest.objects.select_related(
+                    'shift__position', 'requested_by__user', 'offered_to__user'
+                ).order_by('-created_at')[:50]
+            ],
+            'swap_candidates': [
+                {'id': str(worker.id), 'name': worker.user.get_full_name() or worker.user.email}
+                for worker in WorkerProfile.objects.filter(active=True).select_related('user').order_by('user__first_name')
+            ],
             'pending_time_off': TimeOffRequest.objects.filter(status=TimeOffRequest.Status.PENDING).count(),
             'unapproved_time_entries': TimeEntry.objects.filter(approved=False, clock_out__isnull=False).count(),
             'missing_clock_outs': TimeEntry.objects.filter(clock_out__isnull=True, clock_in__lt=now - timedelta(hours=16)).count(),
@@ -289,6 +300,11 @@ def operations_overview(request):
     elif user.role == User.Role.WORKER:
         worker = user.worker_profile
         data.update({
+            'current_worker_id': str(worker.id),
+            'swap_candidates': [
+                {'id': str(candidate.id), 'name': candidate.user.get_full_name() or candidate.user.email}
+                for candidate in WorkerProfile.objects.filter(active=True).exclude(pk=worker.pk).select_related('user').order_by('user__first_name')
+            ],
             'availabilities': AvailabilitySerializer(
                 Availability.objects.filter(worker=worker).order_by('-starts_at')[:30], many=True
             ).data,
@@ -304,8 +320,10 @@ def operations_overview(request):
         })
     else:
         companies = user.client_companies.all()
+        company_ids = {str(pk) for pk in companies.values_list('pk', flat=True)}
+        client_findings = _schedule_findings()['coverage_gaps']
         data.update({
-            'coverage_gaps': _schedule_findings()['coverage_gaps'],
+            'coverage_gaps': [item for item in client_findings if item.get('client') in company_ids],
             'contracts_due': Contract.objects.filter(
                 client__in=companies,
                 ends_on__range=(timezone.localdate(), timezone.localdate() + timedelta(days=30)),
@@ -417,6 +435,12 @@ def swap_decide(request, pk):
         return Response({'detail': 'Tauschanfrage wurde nicht gefunden.'}, status=404)
     decision = str(request.data.get('status', '')).lower()
     user = request.user
+    if _is_manager(user) and request.data.get('offered_to'):
+        try:
+            obj.offered_to = WorkerProfile.objects.get(pk=request.data.get('offered_to'), active=True)
+            obj.save(update_fields=['offered_to'])
+        except WorkerProfile.DoesNotExist:
+            return Response({'detail': 'Zielmitarbeiter wurde nicht gefunden.'}, status=404)
     if decision == ShiftSwapRequest.Status.CANCELLED:
         if obj.requested_by.user_id != user.id and not _is_manager(user):
             return Response({'detail': 'Keine Berechtigung.'}, status=403)
