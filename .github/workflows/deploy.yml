@@ -2,10 +2,12 @@ name: Validate and deploy production
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 concurrency:
-  group: aplus-production
-  cancel-in-progress: false
+  group: aplus-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -18,13 +20,14 @@ jobs:
         run: python -m compileall backend
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Build frontend
         working-directory: frontend
         env:
           VITE_API_URL: https://solution.smarbiz.sbs/api
         run: npm install --no-audit --no-fund && npm run build
   deploy:
+    if: github.event_name == 'push'
     needs: validate
     runs-on: ubuntu-latest
     steps:
