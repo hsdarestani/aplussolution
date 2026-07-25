@@ -1,30 +1,68 @@
-name: Debug frontend build
+name: Fix and validate frontend
 
 on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
-  debug:
+  fix-and-build:
+    if: github.head_ref == 'feature/admin-data-entry'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Capture frontend build output
+      - name: Replace unsupported Ionic color input
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('frontend/src/App.tsx')
+          text = path.read_text()
+          old = '''        <IonInput
+                    fill="outline"
+                    type="color"
+                    label="Farbe"
+                    labelPlacement="floating"
+                    value={positionForm.color}
+                    onIonInput={(event) => setPositionForm({ ...positionForm, color: value(event) })}
+                  />'''
+          old = old.replace('                  ', '          ')
+          if old not in text:
+              old = '''        <IonInput
+          fill="outline"
+          type="color"
+          label="Farbe"
+          labelPlacement="floating"
+          value={positionForm.color}
+          onIonInput={(event) => setPositionForm({ ...positionForm, color: value(event) })}
+        />'''
+          new = '''        <label style={{ display: 'flex', minHeight: 56, alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '9px 14px', border: '1px solid var(--line)', borderRadius: 12, color: 'var(--muted)', background: '#fff' }}>
+          <span>Farbe</span>
+          <input
+            type="color"
+            value={positionForm.color || '#155eef'}
+            onChange={(event) => setPositionForm({ ...positionForm, color: event.target.value })}
+          />
+        </label>'''
+          if old in text:
+              path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Build frontend
         working-directory: frontend
         run: |
           npm install
-          set +e
-          npm run build > ../frontend-build.log 2>&1
-          code=$?
-          echo "$code" > ../frontend-build-exit-code.txt
-          exit 0
-      - uses: actions/upload-artifact@v4
-        with:
-          name: frontend-build-debug
-          path: |
-            frontend-build.log
-            frontend-build-exit-code.txt
-          retention-days: 1
+          npm run build
+      - name: Commit validated fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/App.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m "Fix frontend color input type"
+          git push origin HEAD:${{ github.head_ref }}
