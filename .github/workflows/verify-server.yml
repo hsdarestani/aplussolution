@@ -1,4 +1,4 @@
-name: Deploy and verify production from main
+name: Diagnose production HTTPS
 
 on:
   pull_request:
@@ -6,100 +6,46 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy-and-verify:
+  diagnose:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout production source
-        uses: actions/checkout@v4
-        with:
-          ref: main
-
-      - name: Validate domain and SSH port
-        env:
-          HOST: ${{ secrets.HOST }}
-        run: |
-          set -euxo pipefail
-          getent ahostsv4 solution.smarbiz.sbs
-          test -n "$HOST"
-          timeout 10 bash -c "</dev/tcp/$HOST/22"
-
-      - name: Install deployment tools
+      - name: Install SSH client helper
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq sshpass rsync
+          sudo apt-get install -y -qq sshpass
 
-      - name: Upload main branch to VPS
-        env:
-          HOST: ${{ secrets.HOST }}
-          SSHPASS: ${{ secrets.PASS }}
-        run: |
-          set -euo pipefail
-          test -n "$HOST" && test -n "$SSHPASS"
-          sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 root@"$HOST" 'mkdir -p /opt/aplussolution'
-          sshpass -e rsync -az --delete \
-            --exclude '.git' \
-            --exclude '.env' \
-            --exclude 'frontend/node_modules' \
-            -e 'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15' \
-            ./ root@"$HOST":/opt/aplussolution/
-
-      - name: Configure and start production
+      - name: Inspect production server
         env:
           HOST: ${{ secrets.HOST }}
           SSHPASS: ${{ secrets.PASS }}
         run: |
           set -euo pipefail
           sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 root@"$HOST" <<'REMOTE'
-          set -euo pipefail
+          set -u
           cd /opt/aplussolution
-
-          if [ ! -f .env ]; then
-            cp .env.example .env
-            DB_PASS=$(openssl rand -hex 24)
-            DJANGO_KEY=$(openssl rand -hex 48)
-            ADMIN_PASS=$(openssl rand -hex 14)
-            sed -i 's/^DEBUG=.*/DEBUG=0/' .env
-            sed -i "s/^DJANGO_SECRET_KEY=.*/DJANGO_SECRET_KEY=$DJANGO_KEY/" .env
-            sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$DB_PASS/" .env
-            sed -i "s#^DATABASE_URL=.*#DATABASE_URL=postgresql://aplussolution:$DB_PASS@db:5432/aplussolution#" .env
-            sed -i "s/^DJANGO_SUPERUSER_PASSWORD=.*/DJANGO_SUPERUSER_PASSWORD=$ADMIN_PASS/" .env
-            printf 'Admin: admin@aplus-solution.de\nPasswort: %s\n' "$ADMIN_PASS" > /root/aplussolution-initial-admin.txt
-            chmod 600 /root/aplussolution-initial-admin.txt
-          fi
-
-          docker compose pull db redis caddy || true
-          if ! docker compose up -d --build --remove-orphans; then
-            docker compose ps || true
-            docker compose logs --tail=250 || true
-            exit 1
-          fi
-
-          healthy=0
-          for attempt in $(seq 1 36); do
-            if docker compose exec -T backend python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=5).read().decode())"; then
-              healthy=1
-              break
-            fi
-            sleep 5
-          done
-          if [ "$healthy" -ne 1 ]; then
-            docker compose ps || true
-            docker compose logs --tail=250 || true
-            exit 1
-          fi
-
-          docker compose ps
+          echo '=== COMPOSE PS ==='
+          docker compose ps || true
+          echo '=== LISTEN PORTS ==='
           ss -lntp | grep -E ':(22|80|443) ' || true
-          docker image prune -f
+          echo '=== LOCAL HTTP ==='
+          curl -sS -D - --max-time 10 -H 'Host: solution.smarbiz.sbs' http://127.0.0.1/health/ -o /tmp/http-body || true
+          cat /tmp/http-body 2>/dev/null || true
+          echo
+          echo '=== LOCAL HTTPS ==='
+          curl -ksS -D - --max-time 10 --resolve solution.smarbiz.sbs:443:127.0.0.1 https://solution.smarbiz.sbs/health/ -o /tmp/https-body || true
+          cat /tmp/https-body 2>/dev/null || true
+          echo
+          echo '=== CADDY LOGS ==='
+          docker compose logs --tail=120 caddy || true
+          echo '=== BACKEND LOGS ==='
+          docker compose logs --tail=40 backend || true
           REMOTE
 
-      - name: Verify origin and public HTTPS
-        env:
-          HOST: ${{ secrets.HOST }}
+      - name: Inspect public endpoint
         run: |
-          set -euxo pipefail
-          curl -kfsSL --retry 20 --retry-all-errors --retry-delay 5 \
-            --resolve solution.smarbiz.sbs:443:$HOST \
-            https://solution.smarbiz.sbs/health/
-          curl -fsSL --retry 20 --retry-all-errors --retry-delay 5 \
-            https://solution.smarbiz.sbs/health/
+          set +e
+          echo '=== PUBLIC DNS ==='
+          getent ahostsv4 solution.smarbiz.sbs
+          echo '=== PUBLIC HTTPS ==='
+          curl -vkI --max-time 20 https://solution.smarbiz.sbs/health/
+          exit 0
