@@ -1,4 +1,4 @@
-name: Diagnose production HTTPS
+name: Diagnose Caddy configuration
 
 on:
   pull_request:
@@ -6,46 +6,24 @@ on:
   workflow_dispatch:
 
 jobs:
-  diagnose:
+  diagnose-caddy:
     runs-on: ubuntu-latest
     steps:
-      - name: Install SSH client helper
+      - name: Install SSH helper
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq sshpass
-
-      - name: Inspect production server
+      - name: Read Caddy failure
         env:
           HOST: ${{ secrets.HOST }}
           SSHPASS: ${{ secrets.PASS }}
         run: |
           set -euo pipefail
-          sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 root@"$HOST" <<'REMOTE'
-          set -u
-          cd /opt/aplussolution
-          echo '=== COMPOSE PS ==='
-          docker compose ps || true
-          echo '=== LISTEN PORTS ==='
-          ss -lntp | grep -E ':(22|80|443) ' || true
-          echo '=== LOCAL HTTP ==='
-          curl -sS -D - --max-time 10 -H 'Host: solution.smarbiz.sbs' http://127.0.0.1/health/ -o /tmp/http-body || true
-          cat /tmp/http-body 2>/dev/null || true
-          echo
-          echo '=== LOCAL HTTPS ==='
-          curl -ksS -D - --max-time 10 --resolve solution.smarbiz.sbs:443:127.0.0.1 https://solution.smarbiz.sbs/health/ -o /tmp/https-body || true
-          cat /tmp/https-body 2>/dev/null || true
-          echo
-          echo '=== CADDY LOGS ==='
-          docker compose logs --tail=120 caddy || true
-          echo '=== BACKEND LOGS ==='
-          docker compose logs --tail=40 backend || true
-          REMOTE
-
-      - name: Inspect public endpoint
-        run: |
-          set +e
-          echo '=== PUBLIC DNS ==='
-          getent ahostsv4 solution.smarbiz.sbs
-          echo '=== PUBLIC HTTPS ==='
-          curl -vkI --max-time 20 https://solution.smarbiz.sbs/health/
-          exit 0
+          sshpass -e ssh -qT -o StrictHostKeyChecking=no -o ConnectTimeout=15 root@"$HOST" '
+            touch /root/.hushlogin
+            cd /opt/aplussolution
+            echo ===CADDY_LOG===
+            docker compose logs --no-color --tail=40 caddy 2>&1 || true
+            echo ===CADDY_VALIDATE===
+            docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile 2>&1 || true
+          '
