@@ -20,28 +20,14 @@ jobs:
         run: python -m compileall backend
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Build frontend
-        id: frontend_build
-        continue-on-error: true
         working-directory: frontend
         env:
           VITE_API_URL: https://solution.smarbiz.sbs/api
-        run: |
-          npm install --no-audit --no-fund --silent
-          npm run build > build.log 2>&1
-      - name: Upload frontend build log
-        if: steps.frontend_build.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-build-log
-          path: frontend/build.log
-          if-no-files-found: error
-      - name: Fail validation when frontend failed
-        if: steps.frontend_build.outcome == 'failure'
-        run: exit 1
+        run: npm install --no-audit --no-fund && npm run build
   deploy:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'push'
     needs: validate
     runs-on: ubuntu-latest
     steps:
