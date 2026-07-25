@@ -1,0 +1,16 @@
+Django==5.2.4
+djangorestframework==3.16.0
+djangorestframework-simplejwt==5.5.1
+django-cors-headers==4.7.0
+django-filter==25.1
+dj-database-url==3.0.1
+psycopg[binary]==3.2.9
+gunicorn==23.0.0
+celery==5.5.3
+redis==6.2.0
+reportlab==4.4.3
+requests==2.32.4
+PyJWT[crypto]==2.10.1
+google-auth==2.40.3
+python-dateutil==2.9.0.post0
+Pillow==11.3.0

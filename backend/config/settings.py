@@ -1,0 +1,30 @@
+import os
+from datetime import timedelta
+from pathlib import Path
+import dj_database_url
+BASE_DIR=Path(__file__).resolve().parent.parent
+SECRET_KEY=os.getenv('DJANGO_SECRET_KEY','development-only-key')
+DEBUG=os.getenv('DEBUG','0')=='1'
+ALLOWED_HOSTS=[x.strip() for x in os.getenv('ALLOWED_HOSTS','localhost,127.0.0.1').split(',') if x.strip()]
+INSTALLED_APPS=['django.contrib.admin','django.contrib.auth','django.contrib.contenttypes','django.contrib.sessions','django.contrib.messages','django.contrib.staticfiles','corsheaders','rest_framework','django_filters','core']
+MIDDLEWARE=['django.middleware.security.SecurityMiddleware','corsheaders.middleware.CorsMiddleware','django.contrib.sessions.middleware.SessionMiddleware','django.middleware.common.CommonMiddleware','django.middleware.csrf.CsrfViewMiddleware','django.contrib.auth.middleware.AuthenticationMiddleware','django.contrib.messages.middleware.MessageMiddleware','django.middleware.clickjacking.XFrameOptionsMiddleware']
+ROOT_URLCONF='config.urls'
+TEMPLATES=[{'BACKEND':'django.template.backends.django.DjangoTemplates','DIRS':[BASE_DIR/'templates'],'APP_DIRS':True,'OPTIONS':{'context_processors':['django.template.context_processors.request','django.contrib.auth.context_processors.auth','django.contrib.messages.context_processors.messages']}}]
+WSGI_APPLICATION='config.wsgi.application'
+DATABASES={'default':dj_database_url.config(default=f'sqlite:///{BASE_DIR/"db.sqlite3"}',conn_max_age=600)}
+AUTH_USER_MODEL='core.User'
+LANGUAGE_CODE='de-de'; TIME_ZONE='Europe/Berlin'; USE_I18N=True; USE_TZ=True
+STATIC_URL='/static/'; STATIC_ROOT=BASE_DIR/'staticfiles'; MEDIA_URL='/media/'; MEDIA_ROOT=BASE_DIR/'media'; DEFAULT_AUTO_FIELD='django.db.models.BigAutoField'
+CORS_ALLOWED_ORIGINS=[x.strip() for x in os.getenv('CORS_ALLOWED_ORIGINS','http://localhost:8080').split(',') if x.strip()]
+CSRF_TRUSTED_ORIGINS=[x.strip() for x in os.getenv('CSRF_TRUSTED_ORIGINS','http://localhost:8080').split(',') if x.strip()]
+CORS_ALLOW_CREDENTIALS=True; SECURE_PROXY_SSL_HEADER=('HTTP_X_FORWARDED_PROTO','https'); SESSION_COOKIE_SECURE=not DEBUG; CSRF_COOKIE_SECURE=not DEBUG
+REST_FRAMEWORK={'DEFAULT_AUTHENTICATION_CLASSES':('rest_framework_simplejwt.authentication.JWTAuthentication',),'DEFAULT_PERMISSION_CLASSES':('rest_framework.permissions.IsAuthenticated',),'DEFAULT_FILTER_BACKENDS':('django_filters.rest_framework.DjangoFilterBackend','rest_framework.filters.SearchFilter','rest_framework.filters.OrderingFilter'),'DEFAULT_PAGINATION_CLASS':'rest_framework.pagination.PageNumberPagination','PAGE_SIZE':50,'DEFAULT_RENDERER_CLASSES':('rest_framework.renderers.JSONRenderer',) if not DEBUG else ('rest_framework.renderers.JSONRenderer','rest_framework.renderers.BrowsableAPIRenderer')}
+SIMPLE_JWT={'ACCESS_TOKEN_LIFETIME':timedelta(minutes=30),'REFRESH_TOKEN_LIFETIME':timedelta(days=30),'ROTATE_REFRESH_TOKENS':True,'BLACKLIST_AFTER_ROTATION':False}
+CELERY_BROKER_URL=os.getenv('REDIS_URL','redis://localhost:6379/0'); CELERY_RESULT_BACKEND=CELERY_BROKER_URL
+CELERY_BEAT_SCHEDULE={'contract-reminders-daily':{'task':'core.tasks.send_contract_reminders','schedule':86400},'shift-reminders-hourly':{'task':'core.tasks.send_shift_reminders','schedule':3600}}
+EMAIL_BACKEND='django.core.mail.backends.smtp.EmailBackend' if os.getenv('EMAIL_HOST') else 'django.core.mail.backends.console.EmailBackend'
+EMAIL_HOST=os.getenv('EMAIL_HOST',''); EMAIL_PORT=int(os.getenv('EMAIL_PORT','587')); EMAIL_HOST_USER=os.getenv('EMAIL_HOST_USER',''); EMAIL_HOST_PASSWORD=os.getenv('EMAIL_HOST_PASSWORD',''); EMAIL_USE_TLS=os.getenv('EMAIL_USE_TLS','1')=='1'
+DEFAULT_FROM_EMAIL=os.getenv('DEFAULT_FROM_EMAIL','A+ Solution <noreply@aplus-solution.de>'); ADMIN_NOTIFICATION_EMAIL=os.getenv('ADMIN_NOTIFICATION_EMAIL','info@aplus-solution.de'); APP_URL=os.getenv('APP_URL','http://localhost:8080')
+GOOGLE_OAUTH_CLIENT_ID=os.getenv('GOOGLE_OAUTH_CLIENT_ID',''); GOOGLE_OAUTH_CLIENT_SECRET=os.getenv('GOOGLE_OAUTH_CLIENT_SECRET',''); GOOGLE_OAUTH_REDIRECT_URI=os.getenv('GOOGLE_OAUTH_REDIRECT_URI','')
+APPLE_SERVICE_ID=os.getenv('APPLE_SERVICE_ID',''); APPLE_TEAM_ID=os.getenv('APPLE_TEAM_ID',''); APPLE_KEY_ID=os.getenv('APPLE_KEY_ID',''); APPLE_PRIVATE_KEY=os.getenv('APPLE_PRIVATE_KEY','').replace('\\n','\n'); APPLE_PRIVATE_KEY_PATH=os.getenv('APPLE_PRIVATE_KEY_PATH',''); APPLE_OAUTH_REDIRECT_URI=os.getenv('APPLE_OAUTH_REDIRECT_URI','')
+COMPANY_NAME=os.getenv('COMPANY_NAME','A+ Solution GmbH'); COMPANY_ADDRESS=os.getenv('COMPANY_ADDRESS',''); AUEG_LICENSE_AUTHORITY=os.getenv('AUEG_LICENSE_AUTHORITY',''); AUEG_LICENSE_DATE=os.getenv('AUEG_LICENSE_DATE','')

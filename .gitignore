@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.sqlite3
+.venv/
+media/
+staticfiles/
+node_modules/
+dist/
+android/
+ios/
+.env
+*.p8
+.vscode/
+.idea/
+.DS_Store

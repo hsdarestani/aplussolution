@@ -1,0 +1,69 @@
+name: Validate and deploy production
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: aplus-production
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate backend syntax
+        run: python -m compileall backend
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_API_URL: https://solution.smarbiz.sbs/api
+        run: npm install --no-audit --no-fund && npm run build
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SSH tooling
+        run: sudo apt-get update && sudo apt-get install -y sshpass rsync
+      - name: Upload release
+        env:
+          SSHPASS: ${{ secrets.PASS }}
+          HOST: ${{ secrets.HOST }}
+        run: |
+          test -n "$HOST" && test -n "$SSHPASS"
+          sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'mkdir -p /opt/aplussolution'
+          sshpass -e rsync -az --delete --exclude '.git' --exclude '.env' --exclude 'frontend/node_modules' -e 'ssh -o StrictHostKeyChecking=no' ./ root@"$HOST":/opt/aplussolution/
+      - name: Configure and start production
+        env:
+          SSHPASS: ${{ secrets.PASS }}
+          HOST: ${{ secrets.HOST }}
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          if [ ! -f .env ]; then
+            cp .env.example .env
+            DB_PASS=$(openssl rand -hex 24)
+            DJANGO_KEY=$(openssl rand -hex 48)
+            ADMIN_PASS=$(openssl rand -base64 32 | tr -d '/+=' | head -c 28)
+            sed -i 's/^DEBUG=.*/DEBUG=0/' .env
+            sed -i "s/^DJANGO_SECRET_KEY=.*/DJANGO_SECRET_KEY=$DJANGO_KEY/" .env
+            sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$DB_PASS/" .env
+            sed -i "s#^DATABASE_URL=.*#DATABASE_URL=postgresql://aplussolution:$DB_PASS@db:5432/aplussolution#" .env
+            sed -i "s/^DJANGO_SUPERUSER_PASSWORD=.*/DJANGO_SUPERUSER_PASSWORD=$ADMIN_PASS/" .env
+            printf 'Admin: admin@aplus-solution.de\nPasswort: %s\n' "$ADMIN_PASS" > /root/aplussolution-initial-admin.txt
+            chmod 600 /root/aplussolution-initial-admin.txt
+          fi
+          if ! command -v docker >/dev/null 2>&1; then curl -fsSL https://get.docker.com | sh; fi
+          docker compose pull db redis caddy || true
+          docker compose up -d --build --remove-orphans
+          docker compose ps
+          docker compose exec -T backend curl -fsS --retry 10 --retry-delay 5 http://127.0.0.1:8000/health/ >/dev/null
+          docker image prune -f
+          REMOTE

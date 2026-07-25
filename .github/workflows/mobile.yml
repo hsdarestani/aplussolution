@@ -1,0 +1,51 @@
+name: Mobile build
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Build target
+        type: choice
+        options: [android, ios]
+        required: true
+jobs:
+  android:
+    if: inputs.platform == 'android'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - name: Build Android App Bundle
+        working-directory: frontend
+        env: {VITE_API_URL: 'https://solution.smarbiz.sbs/api'}
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          npx cap add android
+          npx cap sync android
+          cd android && ./gradlew bundleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aplus-android-aab-unsigned
+          path: frontend/android/app/build/outputs/bundle/release/*.aab
+  ios:
+    if: inputs.platform == 'ios'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
+      - name: Create iOS Xcode project
+        working-directory: frontend
+        env: {VITE_API_URL: 'https://solution.smarbiz.sbs/api'}
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          npx cap add ios
+          npx cap sync ios
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aplus-ios-xcode-project
+          path: frontend/ios

@@ -1,0 +1,63 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aplussolution}
+      POSTGRES_USER: ${POSTGRES_USER:-aplussolution}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aplussolution}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aplussolution}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes: [redis_data:/data]
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    command: /app/entrypoint.sh
+    volumes: [media_data:/app/media, static_data:/app/staticfiles]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_started}
+  celery:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    command: celery -A config worker -l info
+    volumes: [media_data:/app/media]
+    depends_on: [backend, redis]
+  celery-beat:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    command: celery -A config beat -l info
+    depends_on: [backend, redis]
+  frontend:
+    build:
+      context: ./frontend
+      args: {VITE_API_URL: "${API_URL:-http://localhost:8000/api}"}
+    restart: unless-stopped
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - media_data:/srv/media:ro
+      - static_data:/srv/static:ro
+    depends_on: [frontend, backend]
+volumes:
+  postgres_data:
+  redis_data:
+  media_data:
+  static_data:
+  caddy_data:
+  caddy_config:
