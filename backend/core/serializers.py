@@ -63,6 +63,7 @@ class ClientOrderSerializer(serializers.ModelSerializer):
         model = ClientOrder
         fields = '__all__'
         read_only_fields = ['created_by']
+        extra_kwargs = {'client': {'required': False}}
 
 
 class AvailabilitySerializer(serializers.ModelSerializer):
@@ -100,6 +101,7 @@ class TimeOffRequestSerializer(serializers.ModelSerializer):
         model = TimeOffRequest
         fields = '__all__'
         read_only_fields = ['decided_by']
+        extra_kwargs = {'worker': {'required': False}}
 
 
 class ShiftSwapRequestSerializer(serializers.ModelSerializer):
@@ -151,6 +153,7 @@ class WorkerRatingSerializer(serializers.ModelSerializer):
         model = WorkerRating
         fields = '__all__'
         read_only_fields = ['created_by']
+        extra_kwargs = {'client': {'required': False}}
 
 
 class MessageSerializer(serializers.ModelSerializer):
