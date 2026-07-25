@@ -1,54 +1,21 @@
 name: Validate and deploy production
-
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
-
-permissions:
-  contents: write
-
 concurrency:
   group: aplus-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Apply source compatibility fixes
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('frontend/src/App.tsx')
-          text = path.read_text()
-          old = '''        <IonInput
-          fill="outline"
-          type="color"
-          label="Farbe"
-          labelPlacement="floating"
-          value={positionForm.color}
-          onIonInput={(event) => setPositionForm({ ...positionForm, color: value(event) })}
-        />'''
-          new = '''        <label style={{ display: 'flex', minHeight: 56, alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '9px 14px', border: '1px solid var(--line)', borderRadius: 12, color: 'var(--muted)', background: '#fff' }}>
-          <span>Farbe</span>
-          <input
-            type="color"
-            value={positionForm.color || '#155eef'}
-            onChange={(event) => setPositionForm({ ...positionForm, color: event.target.value })}
-          />
-        </label>'''
-          if old in text:
-              path.write_text(text.replace(old, new, 1))
-          PY
       - name: Validate backend syntax
         run: python -m compileall backend
       - uses: actions/setup-node@v4
@@ -59,16 +26,6 @@ jobs:
         env:
           VITE_API_URL: https://solution.smarbiz.sbs/api
         run: npm install --no-audit --no-fund && npm run build
-      - name: Persist validated compatibility fix
-        if: github.event_name == 'pull_request'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add frontend/src/App.tsx
-          git diff --cached --quiet && exit 0
-          git commit -m "Fix frontend color input type"
-          git push origin HEAD:${{ github.head_ref }}
-
   deploy:
     if: github.event_name == 'push'
     needs: validate
