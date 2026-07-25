@@ -1,21 +1,22 @@
 name: One-time admin UI fixer
 
 on:
-  pull_request_target:
-    types: [synchronize, reopened]
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
   fix:
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feature/admin-data-entry'
+    if: github.event.issue.pull_request && github.event.issue.number == 5 && github.event.comment.body == '/fix-admin-ui'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          repository: hsdarestani/aplussolution
+          ref: feature/admin-data-entry
           token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/setup-node@v4
         with:
@@ -42,8 +43,9 @@ jobs:
             onChange={(event) => setPositionForm({ ...positionForm, color: event.target.value })}
           />
         </label>'''
-          if old in text:
-              path.write_text(text.replace(old, new, 1))
+          if old not in text:
+              raise SystemExit('Expected color input was not found')
+          path.write_text(text.replace(old, new, 1))
           PY
       - name: Validate frontend
         working-directory: frontend
@@ -53,6 +55,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add frontend/src/App.tsx
-          git diff --cached --quiet && exit 0
           git commit -m "Fix frontend color input type"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          git push origin HEAD:feature/admin-data-entry
