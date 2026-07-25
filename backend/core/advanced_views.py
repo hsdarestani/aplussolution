@@ -450,12 +450,10 @@ def swap_decide(request, pk):
         can_decide = _is_manager(user) or (obj.offered_to_id and obj.offered_to.user_id == user.id)
         if not can_decide:
             return Response({'detail': 'Keine Berechtigung.'}, status=403)
+        if decision == ShiftSwapRequest.Status.APPROVED and not obj.offered_to_id:
+            return Response({'detail': 'Für die Freigabe muss ein Zielmitarbeiter ausgewählt sein.'}, status=400)
         with transaction.atomic():
-            obj.status = decision
-            obj.save(update_fields=['status'])
             if decision == ShiftSwapRequest.Status.APPROVED:
-                if not obj.offered_to_id:
-                    return Response({'detail': 'Für die Freigabe muss ein Zielmitarbeiter ausgewählt sein.'}, status=400)
                 overlap = Shift.objects.filter(
                     worker=obj.offered_to,
                     starts_at__lt=obj.shift.ends_at,
@@ -467,6 +465,8 @@ def swap_decide(request, pk):
                 obj.shift.is_open = False
                 obj.shift.status = Shift.Status.CONFIRMED
                 obj.shift.save(update_fields=['worker', 'is_open', 'status'])
+            obj.status = decision
+            obj.save(update_fields=['status'])
     else:
         return Response({'detail': 'Ungültige Entscheidung.'}, status=400)
     Notification.objects.create(

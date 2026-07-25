@@ -36,7 +36,17 @@ def finish(provider,code,state):
     if data['provider']!=provider: raise ValueError('Ungültiger OAuth-Status')
     profile=exchange(provider,code); email=profile.get('email')
     if not email: raise ValueError('Der Anbieter hat keine E-Mail-Adresse geliefert.')
-    user,created=User.objects.get_or_create(email=email.lower(),defaults={'username':email.lower(),'first_name':profile.get('given_name',''),'last_name':profile.get('family_name',''),'role':User.Role.WORKER})
-    if created: user.set_unusable_password(); user.save()
+    try:
+        user=User.objects.get(email=email.lower())
+    except User.DoesNotExist as exc:
+        raise ValueError('Für diese E-Mail-Adresse wurde noch kein Portalzugang durch die Administration angelegt.') from exc
+    if not user.is_active:
+        raise ValueError('Dieser Portalzugang ist deaktiviert.')
+    changed=[]
+    if not user.first_name and profile.get('given_name'):
+        user.first_name=profile.get('given_name',''); changed.append('first_name')
+    if not user.last_name and profile.get('family_name'):
+        user.last_name=profile.get('family_name',''); changed.append('last_name')
+    if changed: user.save(update_fields=changed)
     refresh=RefreshToken.for_user(user); target=data['target']; separator='&' if '?' in target else '?'
     return f"{target}{separator}access={refresh.access_token}&refresh={refresh}"
