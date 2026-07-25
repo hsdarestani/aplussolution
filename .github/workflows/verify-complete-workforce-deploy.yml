@@ -1,0 +1,51 @@
+name: Verify completed workforce production deploy
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify-production:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install SSH helper
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+      - name: Verify deployed source, Django and containers
+        env:
+          HOST: ${{ secrets.HOST }}
+          SSHPASS: ${{ secrets.PASS }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            if sshpass -e ssh -qT -o StrictHostKeyChecking=no -o ConnectTimeout=15 root@"$HOST" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          grep -q 'def operations_overview' backend/core/advanced_views.py
+          grep -q 'geofence_error' backend/core/views.py
+          grep -q 'Für diese E-Mail-Adresse wurde noch kein Portalzugang' backend/core/oauth.py
+          grep -q "import Operations from './Operations'" frontend/src/App.tsx
+          grep -q 'Steuerzentrale' frontend/src/Operations.tsx
+          test -f .github/workflows/mobile-store-release.yml
+          test -f docs/contract-template-import.example.json
+          test ! -f .github/workflows/integrate-workforce-completion.yml
+          test ! -f scripts/apply_workforce_completion.py
+          test ! -f scripts/finalize_workforce_completion.py
+          docker compose ps
+          docker compose exec -T backend python manage.py check
+          docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null
+          curl -kfsS --resolve solution.smarbiz.sbs:443:127.0.0.1 https://solution.smarbiz.sbs/health/ >/dev/null
+          echo COMPLETE_WORKFORCE_DEPLOY_OK
+          REMOTE
+            then
+              exit 0
+            fi
+            echo "Production release not ready yet ($attempt/12); waiting 30 seconds..."
+            sleep 30
+          done
+          exit 1
+      - name: Verify public Cloudflare endpoint
+        run: |
+          curl -fsS --retry 10 --retry-delay 10 --retry-all-errors https://solution.smarbiz.sbs/health/ >/dev/null
+          echo PUBLIC_HTTPS_OK
