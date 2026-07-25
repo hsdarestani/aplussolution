@@ -1,0 +1,39 @@
+{
+  "templates": [
+    {
+      "name": "Arbeitsvertrag – Beispiel",
+      "kind": "employment",
+      "version": "1.0",
+      "active": true,
+      "schema": {
+        "required": [
+          "company_name",
+          "employee_name",
+          "einsatzbereich",
+          "start_date",
+          "taetigkeit",
+          "employment_type",
+          "tariff_hourly_rate"
+        ],
+        "properties": {
+          "company_name": {"type": "string", "label": "Arbeitgeber"},
+          "employee_name": {"type": "string", "label": "Mitarbeiter"},
+          "einsatzbereich": {"type": "string", "label": "1b Einsatzbereich"},
+          "start_date": {"type": "date", "label": "Vertragsbeginn"},
+          "end_date": {"type": "date", "label": "Vertragsende"},
+          "neuanstellung": {"type": "boolean", "label": "Neuanstellung"},
+          "taetigkeit": {"type": "string", "label": "Tätigkeit"},
+          "employment_type": {
+            "type": "choice",
+            "label": "Arbeitszeit / Beschäftigungsart",
+            "options": ["minijob", "teilzeit", "vollzeit", "student"]
+          },
+          "monthly_hours": {"type": "number", "label": "Monatsstunden"},
+          "tariff_hourly_rate": {"type": "money", "label": "Tariflicher Stundenlohn"},
+          "extra_allowance": {"type": "money", "label": "Übertarifliche Zulage"}
+        }
+      },
+      "html_template": "<h1>Arbeitsvertrag</h1><p>zwischen {{ company_name }} und {{ employee_name }}</p><p><strong>1b Einsatzbereich:</strong> {{ einsatzbereich }}</p><p><strong>Beginn:</strong> {{ start_date }}{% if end_date %} – <strong>Ende:</strong> {{ end_date }}{% endif %}</p><p><strong>Neuanstellung:</strong> {% if neuanstellung %}Ja{% else %}Nein{% endif %}</p><p><strong>Tätigkeit:</strong> {{ taetigkeit }}</p><p><strong>Beschäftigungsart:</strong> {{ employment_type }}</p><p><strong>Monatsstunden:</strong> {{ monthly_hours }}</p><p><strong>Tariflohn:</strong> {{ tariff_hourly_rate }} EUR</p><p><strong>Übertarifliche Zulage:</strong> {{ extra_allowance }} EUR</p>"
+    }
+  ]
+}
