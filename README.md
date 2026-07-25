@@ -20,6 +20,10 @@ Deutschsprachige Workforce-, Vertrags- und Portal-Plattform für **A+ Solution G
 
 Dienstplanung über mehrere Kunden/Orte, offene Schichten, Verfügbarkeiten, Schichttausch, GPS-Zeiterfassung, Freigaben, Abwesenheiten, Kundenaufträge, digitale Personalakten, Vertragsgenerator, PDF, Signatur-Hash/IP/Audit, 30-/7-Tage-Erinnerungen, Lohnabrechnungen, Nachrichten, Benachrichtigungen, Rollenrechte, Bewertungen und Ranking.
 
+## Dateneingabe und Ersteinrichtung
+
+Die operative Oberfläche enthält Formulare für Mitarbeiter, Kunden, Einsatzorte, Positionen, Aufträge, Schichten, Zeiten, Abwesenheiten, Verträge, Dokumente und Lohnabrechnungen. Mitarbeiter können per Drag & Drop auf Schichten verteilt werden. Für größere Erstimporte stehen CSV-Importe zur Verfügung. Optional kann die Administration über die Startseite einen isolierten Demodatensatz erzeugen.
+
 ## Lokaler Start
 
 ```bash
