@@ -45,6 +45,7 @@ import {
   trashOutline,
 } from 'ionicons/icons';
 import { api, consumeOAuth, login, logout, me, socialUrl, User } from './api';
+import Operations from './Operations';
 
 type View =
   | 'dashboard'
@@ -57,7 +58,8 @@ type View =
   | 'messages'
   | 'ranking'
   | 'ratings'
-  | 'profile';
+  | 'profile'
+  | 'operations';
 
 const icons: Record<string, string> = {
   dashboard: homeOutline,
@@ -71,6 +73,7 @@ const icons: Record<string, string> = {
   ranking: starOutline,
   ratings: starOutline,
   profile: peopleOutline,
+  operations: refreshOutline,
 };
 
 const nav: Record<string, [View, string][]> = {
@@ -83,6 +86,7 @@ const nav: Record<string, [View, string][]> = {
     ['orders', 'Aufträge'],
     ['people', 'Personal & Kunden'],
     ['messages', 'Nachrichten'],
+    ['operations', 'Steuerzentrale'],
   ],
   manager: [
     ['dashboard', 'Übersicht'],
@@ -93,11 +97,13 @@ const nav: Record<string, [View, string][]> = {
     ['orders', 'Aufträge'],
     ['people', 'Personal & Kunden'],
     ['messages', 'Nachrichten'],
+    ['operations', 'Steuerzentrale'],
   ],
   worker: [
     ['dashboard', 'Start'],
     ['schedule', 'Mein Dienstplan'],
     ['time', 'Arbeitszeitkonto'],
+    ['operations', 'Verfügbarkeit & Tausch'],
     ['contracts', 'Meine Verträge'],
     ['documents', 'Dokumente & Lohn'],
     ['messages', 'Nachrichten'],
@@ -105,6 +111,7 @@ const nav: Record<string, [View, string][]> = {
   ],
   client: [
     ['dashboard', 'Start'],
+    ['operations', 'Servicecenter'],
     ['orders', 'Aufträge'],
     ['schedule', 'Einsätze'],
     ['contracts', 'Verträge & Signatur'],
@@ -815,7 +822,7 @@ function People({ user }: { user: User }) {
         <IonInput
           fill="outline"
           type="number"
-          label="Zulage (€)"
+          label="Übertarifliche Zulage (€)"
           labelPlacement="floating"
           value={workerForm.extra_allowance}
           onIonInput={(event) => setWorkerForm({ ...workerForm, extra_allowance: value(event) })}
@@ -834,7 +841,7 @@ function People({ user }: { user: User }) {
         open={modal === 'client'}
         title="Neuen Kunden anlegen"
         onClose={() => setModal('')}
-        onSave={() => submit('clients/onboard/', clientForm, () => setClientForm({}))}
+        onSave={() => submit('clients/onboard/', clientForm, () => setClientForm({ contract_visibility_enabled: true }))}
         busy={busy}
       >
         <IonInput
@@ -865,6 +872,10 @@ function People({ user }: { user: User }) {
           value={clientForm.vat_id}
           onIonInput={(event) => setClientForm({ ...clientForm, vat_id: value(event) })}
         />
+        <IonItem lines="none" className="toggle-field">
+          <IonLabel>Vertragsunterlagen im Kundenportal sichtbar</IonLabel>
+          <IonToggle checked={clientForm.contract_visibility_enabled !== false} onIonChange={(event) => setClientForm({ ...clientForm, contract_visibility_enabled: event.detail.checked })} />
+        </IonItem>
         <div className="form-divider">Portal-Zugang für Ansprechpartner</div>
         <IonInput
           fill="outline"
@@ -971,7 +982,7 @@ function People({ user }: { user: User }) {
         />
         <IonInput
           fill="outline"
-          type="color"
+          {...({ type: 'color' } as any)}
           label="Farbe"
           labelPlacement="floating"
           value={positionForm.color}
@@ -1728,7 +1739,7 @@ function Contracts({ user }: { user: User }) {
       end_date: form.ends_on || '',
       neuanstellung: form.neuanstellung !== false,
       taetigkeit: form.taetigkeit || '',
-      employment_type: worker?.employment_type || '',
+      employment_type: form.employment_type || worker?.employment_type || '',
       monthly_hours: form.monthly_hours || worker?.monthly_hours || '',
       tariff_hourly_rate: form.tariff_hourly_rate || worker?.tariff_hourly_rate || '',
       extra_allowance: form.extra_allowance || worker?.extra_allowance || '0.00',
@@ -1854,7 +1865,7 @@ function Contracts({ user }: { user: User }) {
                 )}
               </div>
             )}
-            {user.role === 'client' && ['ready', 'sent'].includes(contract.status) && (
+            {['client', 'worker'].includes(user.role) && ['ready', 'sent'].includes(contract.status) && (
               <IonButton size="small" onClick={() => setSelected(contract)}>
                 Unterschreiben
               </IonButton>
@@ -1944,9 +1955,19 @@ function Contracts({ user }: { user: User }) {
           onIonInput={(event) => setForm({ ...form, reminder_date: value(event) })}
         />
         <div className="form-divider">Variablen für das Grundmuster</div>
+        <IonItem lines="none" className="toggle-field">
+          <IonLabel>Neuanstellung</IonLabel>
+          <IonToggle checked={form.neuanstellung !== false} onIonChange={(event) => setForm({ ...form, neuanstellung: event.detail.checked })} />
+        </IonItem>
+        <IonSelect fill="outline" label="Arbeitszeit / Beschäftigungsart" labelPlacement="floating" value={form.employment_type} onIonChange={(event) => setForm({ ...form, employment_type: value(event) })}>
+          <IonSelectOption value="minijob">Minijob</IonSelectOption>
+          <IonSelectOption value="teilzeit">Teilzeit</IonSelectOption>
+          <IonSelectOption value="vollzeit">Vollzeit</IonSelectOption>
+          <IonSelectOption value="student">Studentische Aushilfe</IonSelectOption>
+        </IonSelect>
         <IonInput
           fill="outline"
-          label="Einsatzbereich"
+          label="1b Einsatzbereich"
           labelPlacement="floating"
           value={form.einsatzbereich}
           onIonInput={(event) => setForm({ ...form, einsatzbereich: value(event) })}
@@ -2984,6 +3005,7 @@ export default function App() {
   else if (view === 'ranking') content = <Ranking />;
   else if (view === 'ratings') content = <Ratings user={user} />;
   else if (view === 'profile') content = <Profile user={user} />;
+  else if (view === 'operations') content = <Operations user={user} />;
 
   return (
     <IonApp>

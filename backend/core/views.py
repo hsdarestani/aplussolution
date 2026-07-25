@@ -1,6 +1,7 @@
 import csv
 import io
 import secrets
+from math import asin, cos, radians, sin, sqrt
 from datetime import timedelta
 
 from django.conf import settings
@@ -13,6 +14,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import *
@@ -43,6 +45,45 @@ def next_number(model, field, prefix):
         number += 1
         candidate = f'{prefix}-{number:04d}'
     return candidate
+
+
+def ensure_worker_assignable(worker, starts_at, ends_at, exclude_shift=None):
+    if not worker:
+        return
+    overlaps = Shift.objects.filter(
+        worker=worker,
+        starts_at__lt=ends_at,
+        ends_at__gt=starts_at,
+    ).exclude(status=Shift.Status.CANCELLED)
+    if exclude_shift:
+        overlaps = overlaps.exclude(pk=exclude_shift)
+    if overlaps.exists():
+        raise ValidationError('Der Mitarbeiter hat in diesem Zeitraum bereits eine Schicht.')
+    if Availability.objects.filter(
+        worker=worker,
+        available=False,
+        starts_at__lt=ends_at,
+        ends_at__gt=starts_at,
+    ).exists():
+        raise ValidationError('Der Mitarbeiter ist in diesem Zeitraum nicht verfügbar.')
+
+
+def geofence_error(shift, lat, lng):
+    if not shift or shift.location.latitude is None or shift.location.longitude is None:
+        return None
+    if lat in (None, '') or lng in (None, ''):
+        return 'Für diesen Einsatz ist die Standortfreigabe erforderlich.'
+    try:
+        lat1, lon1 = radians(float(lat)), radians(float(lng))
+        lat2, lon2 = radians(float(shift.location.latitude)), radians(float(shift.location.longitude))
+    except (TypeError, ValueError):
+        return 'Die übermittelten Standortdaten sind ungültig.'
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    value = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    distance = 6371000 * 2 * asin(sqrt(value))
+    if distance > shift.location.geofence_radius_m:
+        return f'Du befindest dich {round(distance)} m vom Einsatzort entfernt. Erlaubt sind {shift.location.geofence_radius_m} m.'
+    return None
 
 
 def create_worker_account(data):
@@ -90,6 +131,7 @@ def create_client_account(data):
             customer_number=customer_number,
             address=str(data.get('address', '')).strip(),
             vat_id=str(data.get('vat_id', '')).strip(),
+            contract_visibility_enabled=data.get('contract_visibility_enabled', True) not in (False, 'false', '0', 0),
             notes=str(data.get('notes', '')).strip(),
         )
         if contact_email:
@@ -192,13 +234,22 @@ class BaseModelViewSet(viewsets.ModelViewSet):
         audit(self.request, f'{obj.__class__.__name__.lower()}.updated', obj)
 
 
+class ManagerMutationMixin:
+    manager_mutations = {'create', 'update', 'partial_update', 'destroy'}
+
+    def get_permissions(self):
+        if getattr(self, 'action', None) in self.manager_mutations:
+            return [IsAdminOrManager()]
+        return super().get_permissions()
+
+
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = User.objects.filter(is_active=True).order_by('first_name', 'last_name', 'email')
     serializer_class = UserAdminSerializer
     permission_classes = [IsAdminOrManager]
 
 
-class ClientCompanyViewSet(BaseModelViewSet):
+class ClientCompanyViewSet(ManagerMutationMixin, BaseModelViewSet):
     queryset = ClientCompany.objects.prefetch_related('contacts').all()
     serializer_class = ClientCompanySerializer
     search_fields = ['name', 'customer_number']
@@ -243,7 +294,7 @@ class ClientCompanyViewSet(BaseModelViewSet):
         return Response(self.get_serializer(client).data)
 
 
-class WorkerViewSet(BaseModelViewSet):
+class WorkerViewSet(ManagerMutationMixin, BaseModelViewSet):
     queryset = WorkerProfile.objects.select_related('user').all()
     serializer_class = WorkerProfileSerializer
     search_fields = ['user__first_name', 'user__last_name', 'user__email', 'employee_number']
@@ -289,7 +340,7 @@ class WorkerViewSet(BaseModelViewSet):
         return Response(self.get_serializer(worker).data)
 
 
-class LocationViewSet(BaseModelViewSet):
+class LocationViewSet(ManagerMutationMixin, BaseModelViewSet):
     queryset = Location.objects.all()
     serializer_class = LocationSerializer
 
@@ -297,7 +348,7 @@ class LocationViewSet(BaseModelViewSet):
         return self.queryset if self.request.user.role in {'admin', 'manager', 'worker'} else self.queryset.filter(client__contacts=self.request.user)
 
 
-class PositionViewSet(BaseModelViewSet):
+class PositionViewSet(ManagerMutationMixin, BaseModelViewSet):
     queryset = Position.objects.all()
     serializer_class = PositionSerializer
 
@@ -311,6 +362,8 @@ class OrderViewSet(BaseModelViewSet):
         return self.queryset if self.request.user.role in {'admin', 'manager'} else self.queryset.filter(client__contacts=self.request.user)
 
     def perform_create(self, serializer):
+        if self.request.user.role not in {'client', 'admin', 'manager'}:
+            raise ValidationError('Nur Kunden oder die Administration dürfen Bewertungen abgeben.')
         values = {'created_by': self.request.user}
         if self.request.user.role == 'client':
             values['client'] = self.request.user.client_companies.first()
@@ -318,7 +371,7 @@ class OrderViewSet(BaseModelViewSet):
         audit(self.request, 'order.created', obj)
 
 
-class AvailabilityViewSet(BaseModelViewSet):
+class AvailabilityViewSet(ManagerMutationMixin, BaseModelViewSet):
     queryset = Availability.objects.all()
     serializer_class = AvailabilitySerializer
 
@@ -326,7 +379,7 @@ class AvailabilityViewSet(BaseModelViewSet):
         return scoped(self.queryset, self.request.user, worker_field='worker', client_field='worker__user__client_companies')
 
 
-class ShiftViewSet(BaseModelViewSet):
+class ShiftViewSet(ManagerMutationMixin, BaseModelViewSet):
     queryset = Shift.objects.select_related('worker__user', 'client', 'location', 'position').all()
     serializer_class = ShiftSerializer
     filterset_fields = ['status', 'client', 'worker', 'location', 'is_open']
@@ -339,6 +392,22 @@ class ShiftViewSet(BaseModelViewSet):
         if user.role == 'worker':
             return self.queryset.filter(Q(worker__user=user) | Q(is_open=True, status=Shift.Status.PUBLISHED)).distinct()
         return self.queryset.filter(client__contacts=user)
+
+    def perform_create(self, serializer):
+        worker = serializer.validated_data.get('worker')
+        starts_at = serializer.validated_data.get('starts_at')
+        ends_at = serializer.validated_data.get('ends_at')
+        ensure_worker_assignable(worker, starts_at, ends_at)
+        obj = serializer.save()
+        if worker:
+            Notification.objects.create(
+                user=worker.user,
+                kind=f'shift-assigned-{obj.id}',
+                title='Neue Schicht zugeteilt',
+                body=f'{obj.starts_at:%d.%m.%Y %H:%M} – {obj.location.name}',
+                action_url='/schedule',
+            )
+        audit(self.request, 'shift.created', obj)
 
     @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
     def publish(self, request, pk=None):
@@ -353,10 +422,24 @@ class ShiftViewSet(BaseModelViewSet):
     def assign(self, request, pk=None):
         shift = self.get_object()
         worker_id = request.data.get('worker')
-        shift.worker = WorkerProfile.objects.get(pk=worker_id) if worker_id else None
-        shift.is_open = not bool(worker_id)
-        shift.status = Shift.Status.CONFIRMED if worker_id else Shift.Status.PUBLISHED
+        worker = WorkerProfile.objects.get(pk=worker_id, active=True) if worker_id else None
+        if worker:
+            try:
+                ensure_worker_assignable(worker, shift.starts_at, shift.ends_at, shift.pk)
+            except ValidationError as exc:
+                return Response({'detail': str(exc.detail[0])}, status=400)
+        shift.worker = worker
+        shift.is_open = not bool(worker)
+        shift.status = Shift.Status.CONFIRMED if worker else Shift.Status.PUBLISHED
         shift.save()
+        if worker:
+            Notification.objects.create(
+                user=worker.user,
+                kind=f'shift-assigned-{shift.id}',
+                title='Neue Schicht zugeteilt',
+                body=f'{shift.starts_at:%d.%m.%Y %H:%M} – {shift.location.name}',
+                action_url='/schedule',
+            )
         audit(request, 'shift.assigned', shift, {'worker': worker_id})
         return Response(self.get_serializer(shift).data)
 
@@ -365,7 +448,12 @@ class ShiftViewSet(BaseModelViewSet):
         shift = self.get_object()
         if request.user.role != 'worker' or not shift.is_open:
             return Response({'detail': 'Diese Schicht kann nicht übernommen werden.'}, status=400)
-        shift.worker = request.user.worker_profile
+        worker = request.user.worker_profile
+        try:
+            ensure_worker_assignable(worker, shift.starts_at, shift.ends_at, shift.pk)
+        except ValidationError as exc:
+            return Response({'detail': str(exc.detail[0])}, status=400)
+        shift.worker = worker
         shift.is_open = False
         shift.status = Shift.Status.CONFIRMED
         shift.save()
@@ -373,7 +461,7 @@ class ShiftViewSet(BaseModelViewSet):
         return Response(self.get_serializer(shift).data)
 
 
-class TimeEntryViewSet(BaseModelViewSet):
+class TimeEntryViewSet(ManagerMutationMixin, BaseModelViewSet):
     queryset = TimeEntry.objects.select_related('worker__user', 'shift').all()
     serializer_class = TimeEntrySerializer
     filterset_fields = ['worker', 'approved']
@@ -383,13 +471,31 @@ class TimeEntryViewSet(BaseModelViewSet):
 
     @action(detail=False, methods=['post'])
     def clock_in(self, request):
+        if request.user.role != 'worker':
+            return Response({'detail': 'Zeiterfassung ist nur im Mitarbeiterportal möglich.'}, status=403)
         worker = request.user.worker_profile
         if TimeEntry.objects.filter(worker=worker, clock_out__isnull=True).exists():
             return Response({'detail': 'Du bist bereits eingestempelt.'}, status=400)
+        now = timezone.now()
+        shift = None
+        if request.data.get('shift'):
+            shift = Shift.objects.filter(pk=request.data.get('shift'), worker=worker).select_related('location').first()
+            if not shift:
+                return Response({'detail': 'Die ausgewählte Schicht gehört nicht zu deinem Profil.'}, status=403)
+        else:
+            shift = Shift.objects.filter(
+                worker=worker,
+                starts_at__lte=now + timedelta(hours=4),
+                ends_at__gte=now - timedelta(hours=4),
+                status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
+            ).select_related('location').order_by('starts_at').first()
+        error = geofence_error(shift, request.data.get('lat'), request.data.get('lng'))
+        if error:
+            return Response({'detail': error}, status=400)
         entry = TimeEntry.objects.create(
             worker=worker,
-            shift_id=request.data.get('shift'),
-            clock_in=timezone.now(),
+            shift=shift,
+            clock_in=now,
             clock_in_lat=request.data.get('lat'),
             clock_in_lng=request.data.get('lng'),
         )
@@ -401,6 +507,11 @@ class TimeEntryViewSet(BaseModelViewSet):
         entry = TimeEntry.objects.filter(worker=request.user.worker_profile, clock_out__isnull=True).order_by('-clock_in').first()
         if not entry:
             return Response({'detail': 'Keine laufende Zeiterfassung gefunden.'}, status=400)
+        if entry.shift_id:
+            entry.shift = Shift.objects.select_related('location').get(pk=entry.shift_id)
+        error = geofence_error(entry.shift, request.data.get('lat'), request.data.get('lng'))
+        if error:
+            return Response({'detail': error}, status=400)
         entry.clock_out = timezone.now()
         entry.clock_out_lat = request.data.get('lat')
         entry.clock_out_lng = request.data.get('lng')
@@ -426,6 +537,11 @@ class TimeOffViewSet(BaseModelViewSet):
     def get_queryset(self):
         return scoped(self.queryset, self.request.user)
 
+    def get_permissions(self):
+        if getattr(self, 'action', None) in {'update', 'partial_update', 'destroy'}:
+            return [IsAdminOrManager()]
+        return super().get_permissions()
+
     def perform_create(self, serializer):
         values = {}
         if self.request.user.role == 'worker':
@@ -446,7 +562,7 @@ class TimeOffViewSet(BaseModelViewSet):
         return Response(self.get_serializer(obj).data)
 
 
-class ShiftSwapViewSet(BaseModelViewSet):
+class ShiftSwapViewSet(ManagerMutationMixin, BaseModelViewSet):
     queryset = ShiftSwapRequest.objects.all()
     serializer_class = ShiftSwapRequestSerializer
 
@@ -462,7 +578,7 @@ class ContractTemplateViewSet(BaseModelViewSet):
     permission_classes = [IsAdminOrManager]
 
 
-class ContractViewSet(BaseModelViewSet):
+class ContractViewSet(ManagerMutationMixin, BaseModelViewSet):
     queryset = Contract.objects.select_related('template', 'worker__user', 'client').all()
     serializer_class = ContractSerializer
     filterset_fields = ['status', 'template__kind', 'worker', 'client']
@@ -496,6 +612,19 @@ class ContractViewSet(BaseModelViewSet):
         contract.status = Contract.Status.SENT
         contract.sent_at = timezone.now()
         contract.save()
+        recipients = list(User.objects.filter(role__in=['admin', 'manager'], is_active=True))
+        if contract.worker_id:
+            recipients.append(contract.worker.user)
+        if contract.client_id:
+            recipients.extend(contract.client.contacts.filter(is_active=True))
+        for recipient in {item.pk: item for item in recipients}.values():
+            Notification.objects.create(
+                user=recipient,
+                kind=f'contract-sent-{contract.id}',
+                title='Vertrag zur Prüfung bereit',
+                body=contract.title,
+                action_url='/contracts',
+            )
         audit(request, 'contract.sent', contract)
         return Response(self.get_serializer(contract).data)
 
@@ -510,6 +639,11 @@ class ContractViewSet(BaseModelViewSet):
 
 class DocumentViewSet(BaseModelViewSet):
     queryset = Document.objects.select_related('worker__user', 'client').all()
+
+    def get_permissions(self):
+        if getattr(self, 'action', None) in {'update', 'partial_update', 'destroy'}:
+            return [IsAdminOrManager()]
+        return super().get_permissions()
     serializer_class = DocumentSerializer
     filterset_fields = ['folder', 'worker', 'client']
 
@@ -531,7 +665,7 @@ class DocumentViewSet(BaseModelViewSet):
         audit(self.request, 'document.uploaded', obj)
 
 
-class PayrollViewSet(BaseModelViewSet):
+class PayrollViewSet(ManagerMutationMixin, BaseModelViewSet):
     queryset = PayrollStatement.objects.select_related('worker__user').all()
     serializer_class = PayrollStatementSerializer
 
@@ -541,6 +675,11 @@ class PayrollViewSet(BaseModelViewSet):
 
 class RatingViewSet(BaseModelViewSet):
     queryset = WorkerRating.objects.select_related('worker__user', 'client', 'shift').all()
+
+    def get_permissions(self):
+        if getattr(self, 'action', None) in {'update', 'partial_update', 'destroy'}:
+            return [IsAdminOrManager()]
+        return super().get_permissions()
     serializer_class = WorkerRatingSerializer
 
     def get_queryset(self):
@@ -579,6 +718,15 @@ class ConversationViewSet(BaseModelViewSet):
         if not body:
             return Response({'detail': 'Nachricht darf nicht leer sein.'}, status=400)
         message = Message.objects.create(conversation=conversation, sender=request.user, body=body)
+        message.read_by.add(request.user)
+        for participant in conversation.participants.exclude(pk=request.user.pk):
+            Notification.objects.create(
+                user=participant,
+                kind=f'message-{message.id}',
+                title=conversation.title or 'Neue Nachricht',
+                body=body[:180],
+                action_url='/messages',
+            )
         return Response(MessageSerializer(message, context={'request': request}).data, status=201)
 
 
