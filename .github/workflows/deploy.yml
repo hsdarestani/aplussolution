@@ -25,7 +25,10 @@ jobs:
         working-directory: frontend
         env:
           VITE_API_URL: https://solution.smarbiz.sbs/api
-        run: npm install --no-audit --no-fund && npm run build
+        run: |
+          set -o pipefail
+          npm install --no-audit --no-fund --silent
+          npm run build 2>&1 | tail -n 100
   deploy:
     if: github.event_name != 'pull_request'
     needs: validate
