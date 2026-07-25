@@ -22,13 +22,24 @@ jobs:
         with:
           node-version: '20'
       - name: Build frontend
+        id: frontend_build
+        continue-on-error: true
         working-directory: frontend
         env:
           VITE_API_URL: https://solution.smarbiz.sbs/api
         run: |
-          set -o pipefail
           npm install --no-audit --no-fund --silent
-          npm run build 2>&1 | tail -n 100
+          npm run build > build.log 2>&1
+      - name: Upload frontend build log
+        if: steps.frontend_build.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build-log
+          path: frontend/build.log
+          if-no-files-found: error
+      - name: Fail validation when frontend failed
+        if: steps.frontend_build.outcome == 'failure'
+        run: exit 1
   deploy:
     if: github.event_name != 'pull_request'
     needs: validate
