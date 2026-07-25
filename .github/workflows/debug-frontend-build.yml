@@ -1,0 +1,30 @@
+name: Debug frontend build
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Capture frontend build output
+        working-directory: frontend
+        run: |
+          npm install
+          set +e
+          npm run build > ../frontend-build.log 2>&1
+          code=$?
+          echo "$code" > ../frontend-build-exit-code.txt
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build-debug
+          path: |
+            frontend-build.log
+            frontend-build-exit-code.txt
+          retention-days: 1
