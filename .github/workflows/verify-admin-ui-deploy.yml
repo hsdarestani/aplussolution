@@ -1,0 +1,43 @@
+name: Verify admin UI production deploy
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify-production:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install SSH helper
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+      - name: Verify deployed source, containers and health
+        env:
+          HOST: ${{ secrets.HOST }}
+          SSHPASS: ${{ secrets.PASS }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if sshpass -e ssh -qT -o StrictHostKeyChecking=no -o ConnectTimeout=15 root@"$HOST" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          grep -q 'def setup_demo' backend/core/views.py
+          grep -q "workers/onboard/" frontend/src/App.tsx
+          grep -q 'prepare:build' frontend/package.json
+          docker compose ps
+          docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null
+          curl -kfsS --resolve solution.smarbiz.sbs:443:127.0.0.1 https://solution.smarbiz.sbs/health/ >/dev/null
+          echo DEPLOYED_ADMIN_UI_OK
+          REMOTE
+            then
+              exit 0
+            fi
+            echo "Deployment not ready yet (attempt $attempt/5); waiting 30 seconds..."
+            sleep 30
+          done
+          exit 1
+      - name: Verify public Cloudflare endpoint
+        run: |
+          curl -fsS --retry 8 --retry-delay 10 --retry-all-errors https://solution.smarbiz.sbs/health/ >/dev/null
+          echo PUBLIC_HTTPS_OK
