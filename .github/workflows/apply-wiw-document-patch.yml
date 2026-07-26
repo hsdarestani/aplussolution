@@ -56,9 +56,26 @@ jobs:
               'swapHorizontalOutline', 'trashOutline', 'warningOutline',
           ]
           new = "vi.mock('ionicons/icons', () => ({ " + ", ".join(f"{icon}: 'icon'" for icon in icons) + " }));"
-          if old not in text:
-              raise SystemExit('Expected icon mock was not found')
-          path.write_text(text.replace(old, new, 1))
+          replacements = [
+              (old, new),
+              (
+                  "import { render, screen, waitFor } from '@testing-library/react';",
+                  "import { cleanup, render, screen, waitFor } from '@testing-library/react';",
+              ),
+              (
+                  "import { beforeEach, describe, expect, it, vi } from 'vitest';",
+                  "import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';",
+              ),
+              (
+                  "const admin = { id: '1', email: 'a', name: 'Admin', first_name: 'A', last_name: '', role: 'admin', phone: '' } as any;",
+                  "const admin = { id: '1', email: 'a', name: 'Admin', first_name: 'A', last_name: '', role: 'admin', phone: '' } as any;\n\nafterEach(() => cleanup());",
+              ),
+          ]
+          for source, target in replacements:
+              if source not in text:
+                  raise SystemExit(f'Expected frontend test text was not found: {source}')
+              text = text.replace(source, target, 1)
+          path.write_text(text)
           PY
           rm -rf .integration
           rm -f .github/workflows/apply-wiw-document-patch.yml
