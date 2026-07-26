@@ -137,3 +137,23 @@ def process_wiw_webhook(self, event_id):
         event.processing_error = str(exc)
         event.save(update_fields=['processing_error', 'updated_at'])
         raise
+
+
+@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3})
+def generate_due_client_contracts(self):
+    from .order_automation import generate_due_client_contracts as run
+    return run()
+
+
+@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3})
+def sync_working_time_current_year(self):
+    from .working_time import sync_working_time
+    today = timezone.localdate()
+    log = sync_working_time(today.replace(month=1, day=1), today)
+    return {'id': str(log.id), 'status': log.status, 'records_count': log.records_count}
+
+
+@shared_task
+def backup_working_time():
+    from .working_time import create_backup
+    return create_backup('weekly')

@@ -17,6 +17,7 @@ for model in [
     ClientCompany, WorkerProfile, EmployeeMasterData, Location, Position, ClientOrder,
     Availability, Shift, TimeEntry, TimeOffRequest, ShiftSwapRequest, ContractTemplate,
     Contract, ContractSignature, Document, PayrollStatement, WorkerRating, Conversation,
-    Message, Notification, AuditLog, IntegrationSyncRun, WebhookEvent,
+    Message, Notification, AuditLog, IntegrationSyncRun, WebhookEvent, ShiftImportPackage,
+    ShiftImportRevision, WorkingTimeSetting, WorkingTimeAccountRecord, WorkingTimeSyncLog,
 ]:
     admin.site.register(model)

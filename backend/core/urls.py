@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import advanced_views, integration_views, views
+from . import advanced_views, automation_views, integration_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -58,6 +58,19 @@ urlpatterns = [
     path('operations/folders/', advanced_views.folder_summary),
     path('operations/readiness/', advanced_views.readiness),
     path('operations/templates/import/', advanced_views.import_contract_templates),
+
+    path('automation/orders/parse/', automation_views.order_parse),
+    path('automation/orders/approve/', automation_views.order_approve),
+    path('automation/orders/packages/', automation_views.order_packages),
+    path('automation/orders/packages/<uuid:pk>/generate/', automation_views.order_generate),
+    path('automation/orders/sync-packages/', automation_views.order_sync_packages),
+    path('working-time/settings/', automation_views.worktime_settings),
+    path('working-time/sync/', automation_views.worktime_sync),
+    path('working-time/records/', automation_views.worktime_records),
+    path('working-time/records/<uuid:pk>/', automation_views.worktime_record_update),
+    path('working-time/export/<str:file_format>/', automation_views.worktime_export),
+    path('working-time/pdf/<uuid:worker_id>/', automation_views.worktime_pdf),
+    path('working-time/backup/', automation_views.worktime_backup),
     path('reports/timesheets.csv', advanced_views.export_timesheets),
     path('reports/schedule.csv', advanced_views.export_schedule),
     path('reports/payroll-estimate.csv', advanced_views.export_payroll_estimate),

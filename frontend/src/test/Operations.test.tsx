@@ -1,6 +1,6 @@
 import React from 'react';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@ionic/react', () => {
   const component = (tag = 'div') => ({ children, ...props }: any) => React.createElement(tag, props, children);
@@ -20,14 +20,15 @@ import Operations from '../Operations';
 
 const admin = { id: '1', email: 'a', name: 'Admin', first_name: 'A', last_name: '', role: 'admin', phone: '' } as any;
 
-afterEach(() => cleanup());
-
 function resultFor(path: string) {
   if (path === 'operations/') return { notifications: [], readiness: {}, conflicts: [], unavailable_assignments: [], coverage_gaps: [], overtime_risks: [] };
   if (path === 'operations/folders/') return { workers: [], clients: [] };
   if (path.startsWith('shifts/')) return [];
   if (path === 'integrations/wiw/status/') return { configured: true, latest_sync: { status: 'success', finished_at: '2026-07-26T08:00:00Z' } };
   if (path === 'document-catalog/') return { complete: false, documents: Array.from({ length: 8 }, (_, index) => ({ slug: `d${index}`, name: `Dokument ${index + 1}`, version: '1.0', source_format: 'docx', source_installed: index < 6, signature_roles: ['employee'] })) };
+  if (path === 'automation/orders/packages/') return { results: [] };
+  if (path === 'working-time/settings/') return { employees: [] };
+  if (path === 'working-time/records/') return { results: [] };
   return {};
 }
 
@@ -43,6 +44,8 @@ describe('Operations integrations', () => {
     expect(screen.getByText('Verbunden')).toBeInTheDocument();
     expect(screen.getByText('6/8 installiert')).toBeInTheDocument();
     expect(screen.getByText('Dokument 8')).toBeInTheDocument();
+    expect(screen.getByTestId('order-automation-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('working-time-panel')).toBeInTheDocument();
     expect(apiMock).toHaveBeenCalledWith('integrations/wiw/status/');
     expect(apiMock).toHaveBeenCalledWith('document-catalog/');
   });

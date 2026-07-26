@@ -117,6 +117,12 @@ class WhenIWorkClient:
     def get(self, path, params=None):
         return self.request('GET', path, params=params)
 
+    def post(self, path, payload=None, params=None):
+        return self.request('POST', path, params=params, json=payload or {})
+
+    def delete(self, path, params=None):
+        return self.request('DELETE', path, params=params)
+
     def discover(self):
         results = {}
         for name, path in self.RESOURCE_PATHS.items():

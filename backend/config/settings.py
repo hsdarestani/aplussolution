@@ -21,7 +21,7 @@ CORS_ALLOW_CREDENTIALS=True; SECURE_PROXY_SSL_HEADER=('HTTP_X_FORWARDED_PROTO','
 REST_FRAMEWORK={'DEFAULT_AUTHENTICATION_CLASSES':('rest_framework_simplejwt.authentication.JWTAuthentication',),'DEFAULT_PERMISSION_CLASSES':('rest_framework.permissions.IsAuthenticated',),'DEFAULT_FILTER_BACKENDS':('django_filters.rest_framework.DjangoFilterBackend','rest_framework.filters.SearchFilter','rest_framework.filters.OrderingFilter'),'DEFAULT_PAGINATION_CLASS':'rest_framework.pagination.PageNumberPagination','PAGE_SIZE':50,'DEFAULT_RENDERER_CLASSES':('rest_framework.renderers.JSONRenderer',) if not DEBUG else ('rest_framework.renderers.JSONRenderer','rest_framework.renderers.BrowsableAPIRenderer')}
 SIMPLE_JWT={'ACCESS_TOKEN_LIFETIME':timedelta(minutes=30),'REFRESH_TOKEN_LIFETIME':timedelta(days=30),'ROTATE_REFRESH_TOKENS':True,'BLACKLIST_AFTER_ROTATION':False}
 CELERY_BROKER_URL=os.getenv('REDIS_URL','redis://localhost:6379/0'); CELERY_RESULT_BACKEND=CELERY_BROKER_URL
-CELERY_BEAT_SCHEDULE={'contract-reminders-daily':{'task':'core.tasks.send_contract_reminders','schedule':86400},'shift-reminders-hourly':{'task':'core.tasks.send_shift_reminders','schedule':3600},'wiw-sync-hourly':{'task':'core.tasks.sync_when_i_work','schedule':3600,'args':['incremental',None]}}
+CELERY_BEAT_SCHEDULE={'contract-reminders-daily':{'task':'core.tasks.send_contract_reminders','schedule':86400},'shift-reminders-hourly':{'task':'core.tasks.send_shift_reminders','schedule':3600},'wiw-sync-hourly':{'task':'core.tasks.sync_when_i_work','schedule':3600,'args':['incremental',None]},'client-contract-generation-hourly':{'task':'core.tasks.generate_due_client_contracts','schedule':3600},'working-time-sync-daily':{'task':'core.tasks.sync_working_time_current_year','schedule':86400},'working-time-backup-weekly':{'task':'core.tasks.backup_working_time','schedule':604800}}
 EMAIL_BACKEND='django.core.mail.backends.smtp.EmailBackend' if os.getenv('EMAIL_HOST') else 'django.core.mail.backends.console.EmailBackend'
 EMAIL_HOST=os.getenv('EMAIL_HOST',''); EMAIL_PORT=int(os.getenv('EMAIL_PORT','587')); EMAIL_HOST_USER=os.getenv('EMAIL_HOST_USER',''); EMAIL_HOST_PASSWORD=os.getenv('EMAIL_HOST_PASSWORD',''); EMAIL_USE_TLS=os.getenv('EMAIL_USE_TLS','1')=='1'
 DEFAULT_FROM_EMAIL=os.getenv('DEFAULT_FROM_EMAIL','A+ Solution <noreply@aplus-solution.de>'); ADMIN_NOTIFICATION_EMAIL=os.getenv('ADMIN_NOTIFICATION_EMAIL','info@aplus-solution.de'); APP_URL=os.getenv('APP_URL','http://localhost:8080')
@@ -40,3 +40,9 @@ WIW_TOKEN_CACHE_SECONDS=int(os.getenv('WIW_TOKEN_CACHE_SECONDS','3300'))
 WIW_SYNC_ENABLED=os.getenv('WIW_SYNC_ENABLED','1')=='1'
 LIBREOFFICE_BINARY=os.getenv('LIBREOFFICE_BINARY','libreoffice')
 COMPANY_BUSINESS_NUMBER=os.getenv('COMPANY_BUSINESS_NUMBER','')
+
+WIW_DEFAULT_LOCATION_ID=os.getenv('WIW_DEFAULT_LOCATION_ID','')
+WIW_OPENAI_MODEL=os.getenv('WIW_OPENAI_MODEL','gpt-4o-mini')
+WORKING_TIME_DEFAULT_BREAK_MINUTES=int(os.getenv('WORKING_TIME_DEFAULT_BREAK_MINUTES','0'))
+WORKING_TIME_DEFAULT_MONTHLY_LIMIT=os.getenv('WORKING_TIME_DEFAULT_MONTHLY_LIMIT','0')
+WORKING_TIME_DEFAULT_HOURLY_RATE=os.getenv('WORKING_TIME_DEFAULT_HOURLY_RATE','0')

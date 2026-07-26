@@ -454,3 +454,87 @@ class WebhookEvent(TimestampedModel):
 
     class Meta:
         unique_together = ('provider', 'external_id')
+
+
+class ShiftImportPackage(TimestampedModel):
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Ausstehend'
+        GENERATED = 'generated', 'Vertrag erstellt'
+        PLACE = 'place', 'Nur Einsatzort'
+        FAILED = 'failed', 'Fehlgeschlagen'
+        ARCHIVED = 'archived', 'Archiviert'
+
+    request_id = models.CharField(max_length=120, unique=True)
+    client = models.ForeignKey(ClientCompany, on_delete=models.SET_NULL, null=True, blank=True, related_name='shift_import_packages')
+    site_name = models.CharField(max_length=255)
+    site_address = models.TextField(blank=True)
+    first_shift_time = models.DateTimeField()
+    first_shift_end_time = models.DateTimeField(blank=True, null=True)
+    raw_text = models.TextField(blank=True)
+    source_hash = models.CharField(max_length=64, blank=True)
+    payload = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=30, choices=Status.choices, default=Status.PENDING)
+    pdf = models.FileField(upload_to='client_contracts/%Y/%m/', blank=True, null=True)
+    contract = models.ForeignKey(Contract, on_delete=models.SET_NULL, null=True, blank=True, related_name='shift_import_packages')
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_shift_import_packages')
+
+    class Meta:
+        ordering = ['first_shift_time', '-created_at']
+        indexes = [models.Index(fields=['status', 'first_shift_time'])]
+
+
+class ShiftImportRevision(TimestampedModel):
+    package = models.ForeignKey(ShiftImportPackage, on_delete=models.CASCADE, related_name='revisions')
+    version = models.PositiveIntegerField(default=1)
+    action = models.CharField(max_length=30)
+    old_shift_ids = models.JSONField(default=list, blank=True)
+    new_shift_ids = models.JSONField(default=list, blank=True)
+    old_payload = models.JSONField(default=dict, blank=True)
+    new_payload = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        unique_together = ('package', 'version')
+        ordering = ['-version']
+
+
+class WorkingTimeSetting(TimestampedModel):
+    worker = models.OneToOneField(WorkerProfile, on_delete=models.CASCADE, related_name='working_time_setting')
+    monthly_limit = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    active = models.BooleanField(default=True)
+    excluded = models.BooleanField(default=False)
+    notes = models.TextField(blank=True)
+
+
+class WorkingTimeAccountRecord(TimestampedModel):
+    worker = models.ForeignKey(WorkerProfile, on_delete=models.CASCADE, related_name='working_time_records')
+    year_month = models.DateField(help_text='Erster Tag des Monats')
+    ist_hours = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    soll_hours = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    difference_hours = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    carryover_previous = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    paid_hours = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    manual_adjustment = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    saldo_cumulative = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    gross_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    raw_entries = models.JSONField(default=list, blank=True)
+    source = models.CharField(max_length=40, default='wiw_times')
+    synced_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        unique_together = ('worker', 'year_month')
+        ordering = ['worker__employee_number', 'year_month']
+        indexes = [models.Index(fields=['year_month']), models.Index(fields=['worker', 'year_month'])]
+
+
+class WorkingTimeSyncLog(TimestampedModel):
+    range_start = models.DateField(blank=True, null=True)
+    range_end = models.DateField(blank=True, null=True)
+    status = models.CharField(max_length=30, default='ok')
+    message = models.TextField(blank=True)
+    records_count = models.PositiveIntegerField(default=0)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
