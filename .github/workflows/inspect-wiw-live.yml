@@ -1,0 +1,37 @@
+name: Inspect live WIW fix status
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: github.head_ref == 'ops/verify-wiw-production-fix'
+    runs-on: ubuntu-latest
+    env:
+      HOST: ${{ secrets.HOST }}
+      SSHPASS: ${{ secrets.PASS }}
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Inspect deployed WIW context and resources
+        run: |
+          set -euo pipefail
+          set +x
+          sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE' 2>&1 | tee live-wiw-inspection.txt
+          set -euo pipefail
+          cd /opt/aplussolution
+          echo "SOURCE_FIX_PRESENT $(grep -q 'USER_CONTEXT_CACHE_KEY' backend/core/wiw.py && echo true || echo false)"
+          echo "CONTAINER_FIX_PRESENT $(docker compose exec -T backend python -c "from core.wiw import WhenIWorkClient; print(hasattr(WhenIWorkClient, 'resolve_user_context'))" | tail -n1)"
+          docker compose exec -T backend python manage.py shell -c "from django.core.cache import cache; from core.wiw import WhenIWorkClient; cache.delete(WhenIWorkClient.TOKEN_CACHE_KEY); cache.delete(WhenIWorkClient.USER_CONTEXT_CACHE_KEY); c=WhenIWorkClient(); t=c.login(force=True); uid=c.resolve_user_context(t,force=True); s=c.collection('shifts',params={'limit':1}); x=c.collection('times',params={'limit':1}); print('CONTEXT_OK',bool(uid)); print('SHIFTS_OK',s.status_code,len(s.items)); print('TIMES_OK',x.status_code,len(x.items))"
+          docker compose exec -T backend python manage.py shell -c "from core.models import IntegrationSyncRun,WorkingTimeSyncLog; a=IntegrationSyncRun.objects.filter(provider='wiw').order_by('-created_at').first(); w=WorkingTimeSyncLog.objects.order_by('-created_at').first(); print('LAST_WIW_SYNC',getattr(a,'status',None),getattr(a,'counts',None),len(getattr(a,'errors',[]) or [])); print('LAST_WORKING_TIME',getattr(w,'status',None),getattr(w,'records_count',None),getattr(w,'message',None))"
+          REMOTE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-wiw-inspection
+          path: live-wiw-inspection.txt
+          retention-days: 1
