@@ -13,8 +13,8 @@ cache.delete(WhenIWorkClient.USER_CONTEXT_CACHE_KEY)
 client = WhenIWorkClient()
 token = client.login(force=True)
 context = client.resolve_user_context(token, force=True)
-shifts = client.collection('shifts', params={'limit': 1})
-times = client.collection('times', params={'limit': 1})
+shifts = client.collection('shifts', params={'limit': 5})
+times = client.collection('times', params={'limit': 5})
 
 print('WIW_CONTEXT_RESOLVED', bool(context))
 print('WIW_SHIFTS_ACCESS', shifts.status_code, len(shifts.items))
@@ -22,6 +22,17 @@ print('WIW_TIMES_ACCESS', times.status_code, len(times.items))
 assert context
 assert shifts.status_code == 200
 assert times.status_code == 200
+
+for index, item in enumerate(shifts.items[:3], start=1):
+    safe = {
+        key: item.get(key)
+        for key in (
+            'id', 'shift_id', 'start_time', 'end_time', 'start', 'end',
+            'starts_at', 'ends_at', 'user_id', 'location_id', 'site_id', 'position_id'
+        )
+        if key in item
+    }
+    print('WIW_SHIFT_SHAPE', index, sorted(item.keys()), safe)
 
 today = date.today()
 attendance, source, warning = fetch_attendance(
@@ -34,6 +45,16 @@ print('WIW_ATTENDANCE_PATH', source, len(attendance), bool(warning))
 sync_run = WhenIWorkSynchronizer(client=client).sync('full')
 print('WIW_FULL_SYNC_STATUS', sync_run.status)
 print('WIW_FULL_SYNC_ERRORS', len(sync_run.errors or []))
+print(
+    'WIW_FULL_SYNC_ERROR_DETAILS',
+    [
+        {
+            'resource': row.get('resource'),
+            'error': row.get('error'),
+        }
+        for row in (sync_run.errors or [])
+    ],
+)
 assert sync_run.status in {'success', 'partial'}
 
 working_log = sync_working_time(date(today.year, 1, 1), today, client=client)
