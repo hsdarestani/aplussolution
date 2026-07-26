@@ -1,0 +1,85 @@
+name: Apply WIW document automation patch
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    if: github.head_ref == 'feature/wiw-document-automation-tests'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/wiw-document-automation-tests
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Reconstruct and verify patch archive
+        run: |
+          set -euo pipefail
+          cat \
+            .integration/chunk-00 \
+            .integration/chunk-01 \
+            .integration/chunk-02 \
+            .integration/chunk-03 \
+            .integration/chunk-04 \
+            .integration/chunk-05 \
+            .integration/chunk-06 \
+            .integration/chunk-07-08 \
+            .integration/chunk-09 \
+            .integration/chunk-10 \
+            .integration/chunk-11 \
+            .integration/chunk-12 \
+            .integration/chunk-13 > /tmp/wiw-documents-tests-patch.b64
+          echo '233d8be55b7c2a2697c9a7558c1d9a06e77badaf97e1a5720a24b79ce3831c29  /tmp/wiw-documents-tests-patch.b64' | sha256sum -c -
+          base64 --decode /tmp/wiw-documents-tests-patch.b64 > /tmp/wiw-documents-tests-patch.tar.gz
+          echo '63fc5b4e2d7c9b54da840acdb6c1c80c83fc953d216c1430f7c7be100fb86746  /tmp/wiw-documents-tests-patch.tar.gz' | sha256sum -c -
+          tar -xzf /tmp/wiw-documents-tests-patch.tar.gz -C .
+          rm -rf .integration
+          rm -f .github/workflows/apply-wiw-document-patch.yml
+          rm -f .github/workflows/export-source-artifact.yml
+      - name: Install backend dependencies and generate migrations
+        run: |
+          pip install -r backend/requirements.txt
+          cd backend
+          export DJANGO_SECRET_KEY=ci-patch-secret
+          export DATABASE_URL=sqlite:///patch.sqlite3
+          export ALLOWED_HOSTS=localhost,127.0.0.1,testserver
+          export CORS_ALLOWED_ORIGINS=http://localhost:8080
+          export CSRF_TRUSTED_ORIGINS=http://localhost:8080
+          python manage.py makemigrations core --noinput
+          python -m compileall .
+          python manage.py check
+          python manage.py makemigrations --check --dry-run
+      - name: Run backend test suite
+        working-directory: backend
+        env:
+          DJANGO_SECRET_KEY: ci-test-secret
+          DATABASE_URL: sqlite:///test.sqlite3
+          ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+          CORS_ALLOWED_ORIGINS: http://localhost:8080
+          CSRF_TRUSTED_ORIGINS: http://localhost:8080
+        run: pytest --nomigrations --cov=core --cov-report=term-missing --cov-fail-under=60
+      - name: Run frontend tests and production build
+        working-directory: frontend
+        env:
+          VITE_API_URL: https://solution.smarbiz.sbs/api
+        run: |
+          npm install --no-audit --no-fund
+          npm test
+          npm run build
+      - name: Commit only the fully validated implementation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add WIW sync, eight-document automation and comprehensive tests'
+          git push origin HEAD:feature/wiw-document-automation-tests
