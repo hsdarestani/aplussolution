@@ -3,9 +3,34 @@ set -euo pipefail
 
 cd /opt/aplussolution
 
-grep -q 'USER_CONTEXT_CACHE_KEY' backend/core/wiw.py
-docker compose exec -T backend python -c "from core.wiw import WhenIWorkClient; assert hasattr(WhenIWorkClient, 'resolve_user_context'); print('CONTAINER_FIX_PRESENT true')" </dev/null
+for attempt in $(seq 1 24); do
+  if grep -q 'parse_flexible_datetime' backend/core/wiw_sync.py; then
+    echo 'SOURCE_RFC_DATE_FIX_PRESENT true'
+    break
+  fi
+  if [ "$attempt" = 24 ]; then
+    echo 'SOURCE_RFC_DATE_FIX_PRESENT false'
+    exit 1
+  fi
+  sleep 20
+done
 
+grep -q 'USER_CONTEXT_CACHE_KEY' backend/core/wiw.py
+docker compose build --no-cache backend </dev/null
+docker compose up -d --force-recreate backend celery celery-beat </dev/null
+
+for attempt in $(seq 1 30); do
+  if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1 </dev/null; then
+    break
+  fi
+  if [ "$attempt" = 30 ]; then
+    docker compose logs --tail=100 backend </dev/null
+    exit 1
+  fi
+  sleep 4
+done
+
+docker compose exec -T backend python -c "from core.wiw import WhenIWorkClient; from core.wiw_sync import parse_flexible_datetime; assert hasattr(WhenIWorkClient, 'resolve_user_context'); print('CONTAINER_AUTH_FIX_PRESENT true'); print('CONTAINER_RFC_DATE_FIX_PRESENT true')" </dev/null
 docker compose exec -T backend python manage.py migrate --noinput </dev/null
 docker compose exec -T backend python manage.py check </dev/null
 
@@ -22,4 +47,4 @@ HTTP_CODE=$(curl -sS -o /tmp/login-check.json -w '%{http_code}' -X POST https://
 test "$HTTP_CODE" != 502
 test "$HTTP_CODE" != 503
 echo "PUBLIC_LOGIN_HTTP $HTTP_CODE"
-echo "WIW_PRODUCTION_FIX_VERIFIED true"
+echo "WIW_PRODUCTION_SHIFT_IMPORT_VERIFIED true"
