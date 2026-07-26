@@ -62,6 +62,30 @@ jobs:
           base64 --decode /tmp/wordpress-plugin-migration.tar.gz.b64 > /tmp/wordpress-plugin-migration.tar.gz
           echo 'b4807dccb2b9f956b2db102590b891d489b0913d1e6ea634c06072f4684128c0  /tmp/wordpress-plugin-migration.tar.gz' | sha256sum -c -
           tar -xzf /tmp/wordpress-plugin-migration.tar.gz -C .
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('backend/tests/test_plugin_migration.py')
+          text = path.read_text()
+          old = '''@pytest.mark.django_db
+def test_migrated_endpoints_require_manager(auth_worker, auth_admin):
+    assert auth_worker.get('/api/automation/orders/packages/').status_code == 403
+    assert auth_worker.get('/api/working-time/settings/').status_code == 403
+    assert auth_admin.get('/api/automation/orders/packages/').status_code == 200
+    assert auth_admin.get('/api/working-time/settings/').status_code == 200
+'''
+          new = '''@pytest.mark.django_db
+def test_migrated_endpoints_require_manager(api_client, worker_user, admin_user):
+    api_client.force_authenticate(worker_user)
+    assert api_client.get('/api/automation/orders/packages/').status_code == 403
+    assert api_client.get('/api/working-time/settings/').status_code == 403
+    api_client.force_authenticate(admin_user)
+    assert api_client.get('/api/automation/orders/packages/').status_code == 200
+    assert api_client.get('/api/working-time/settings/').status_code == 200
+'''
+          if old not in text:
+              raise SystemExit('Expected permission test block was not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
           rm -rf .plugin-integration
 
       - name: Generate and validate Django migrations
