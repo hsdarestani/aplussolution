@@ -16,13 +16,22 @@ jobs:
       SSHPASS: ${{ secrets.PASS }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Install SSH tooling
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
-      - name: Repair and verify production state
+      - name: Recover validated private template builder
         run: |
+          git show 153f828b27c9251850d3acc3de776ac5ef9dd22f:.ops-template-payload/build_private_templates.py > /tmp/build_private_templates.py
+          test -s /tmp/build_private_templates.py
+      - name: Repair and verify production state
+        shell: bash
+        run: |
+          set -euo pipefail
           set +x
           test -n "$HOST"
           test -n "$SSHPASS"
+          sshpass -e scp -q -o StrictHostKeyChecking=no /tmp/build_private_templates.py root@"$HOST":/root/build_private_templates.py
           sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE' 2>&1 | tee production-repair-result.txt
           set -euo pipefail
           cd /opt/aplussolution
@@ -86,51 +95,31 @@ jobs:
           docker exec "$FRONTEND_ID" sh -c "grep -R -q 'Zeiterfassung' /usr/share/nginx/html"
           echo 'FRONTEND_ACTIONS_OK=1'
 
-          echo 'PHASE=TEMPLATE_RECOVERY'
-          PRIVATE_KEY=''
-          for candidate in /root/aplus-template-private.pem /root/aplussolution-template-private.pem /root/aplus-template-private-key.pem; do
-            if [ -s "$candidate" ]; then PRIVATE_KEY="$candidate"; break; fi
-          done
-          if [ -z "$PRIVATE_KEY" ]; then
-            PRIVATE_KEY=$(find /root -maxdepth 3 -type f -name '*.pem' -size +1k 2>/dev/null | head -n 1 || true)
-          fi
-          ENC_BUNDLE=$(find /root /opt/aplussolution -maxdepth 5 -type f \( -name 'aplus-document-templates.enc' -o -name 'templates.enc' \) 2>/dev/null | head -n 1 || true)
-          ENC_KEY=$(find /root /opt/aplussolution -maxdepth 5 -type f \( -name 'keyiv.enc' -o -name 'keyiv.oaep.enc' \) 2>/dev/null | head -n 1 || true)
-          if [ -n "$PRIVATE_KEY" ] && [ -n "$ENC_BUNDLE" ] && [ -n "$ENC_KEY" ]; then
-            rm -f /tmp/keyiv.bin /tmp/original-templates.zip
-            if ! openssl pkeyutl -decrypt -inkey "$PRIVATE_KEY" -in "$ENC_KEY" -out /tmp/keyiv.bin -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 2>/dev/null; then
-              if ! openssl pkeyutl -decrypt -inkey "$PRIVATE_KEY" -in "$ENC_KEY" -out /tmp/keyiv.bin -pkeyopt rsa_padding_mode:oaep 2>/dev/null; then
-                openssl pkeyutl -decrypt -inkey "$PRIVATE_KEY" -in "$ENC_KEY" -out /tmp/keyiv.bin -pkeyopt rsa_padding_mode:pkcs1 2>/dev/null
-              fi
-            fi
-            test "$(stat -c %s /tmp/keyiv.bin)" = '48'
-            KEY_HEX=$(dd if=/tmp/keyiv.bin bs=1 count=32 status=none | od -An -tx1 | tr -d ' \n')
-            IV_HEX=$(dd if=/tmp/keyiv.bin bs=1 skip=32 count=16 status=none | od -An -tx1 | tr -d ' \n')
-            openssl enc -d -aes-256-cbc -K "$KEY_HEX" -iv "$IV_HEX" -in "$ENC_BUNDLE" -out /tmp/original-templates.zip
-            test "$(sha256sum /tmp/original-templates.zip | awk '{print $1}')" = '74dabc4bfd7df1357164e9821f2752388023902be1969b7ebba80a1568812f09'
-            BACKEND_ID=$(docker compose ps -q backend)
-            docker cp /tmp/original-templates.zip "$BACKEND_ID":/tmp/original-templates.zip
-            docker compose exec -T backend python manage.py import_document_bundle /tmp/original-templates.zip
-            docker compose exec -T backend rm -f /tmp/original-templates.zip
-            rm -f /tmp/keyiv.bin /tmp/original-templates.zip
-            echo 'EXISTING_ENCRYPTED_TEMPLATE_PAYLOAD_USED=1'
-          else
-            echo 'EXISTING_ENCRYPTED_TEMPLATE_PAYLOAD_USED=0'
-          fi
-
+          echo 'PHASE=TEMPLATE_INSTALL'
+          BACKEND_ID=$(docker compose ps -q backend)
+          test -n "$BACKEND_ID"
+          docker cp /root/build_private_templates.py "$BACKEND_ID":/tmp/build_private_templates.py
+          docker compose exec -T backend env TEMPLATE_BUNDLE_OUTPUT=/tmp/aplus-document-templates.zip python /tmp/build_private_templates.py
+          docker compose exec -T backend python manage.py import_document_bundle /tmp/aplus-document-templates.zip
           docker compose exec -T backend python manage.py shell <<'PY'
+          from core.document_catalog import CATALOG_BY_SLUG
           from core.document_engine import seed_document_catalog
           from core.models import ContractTemplate
           seed_document_catalog()
-          required = list(ContractTemplate.objects.filter(required_document=True).order_by('slug'))
-          installed = [item for item in required if item.source_file and item.source_file.storage.exists(item.source_file.name) and item.source_checksum]
-          print('TEMPLATE_REQUIRED', len(required))
+          ContractTemplate.objects.filter(slug__isnull=True).update(required_document=False, active=False)
+          expected = set(CATALOG_BY_SLUG)
+          templates = list(ContractTemplate.objects.filter(slug__in=expected).order_by('slug'))
+          installed = [item for item in templates if item.source_file and item.source_file.storage.exists(item.source_file.name) and item.source_checksum]
+          print('TEMPLATE_EXPECTED', len(expected))
           print('TEMPLATE_INSTALLED', len(installed))
-          for item in required:
+          for item in templates:
               print('TEMPLATE_STATE', item.slug, bool(item.source_file), bool(item.source_file and item.source_file.storage.exists(item.source_file.name)), bool(item.source_checksum))
-          assert len(required) == 8
+          assert len(expected) == 8
+          assert len(templates) == 8
           assert len(installed) == 8
           PY
+          docker compose exec -T backend rm -f /tmp/build_private_templates.py /tmp/aplus-document-templates.zip
+          rm -f /root/build_private_templates.py
 
           echo 'PHASE=API_VERIFICATION'
           TOKEN=$(docker compose exec -T backend python manage.py shell -c "from rest_framework_simplejwt.tokens import RefreshToken; from core.models import User; u=User.objects.filter(role='admin',is_active=True).order_by('date_joined').first(); print(str(RefreshToken.for_user(u).access_token))" | tail -n 1 | tr -d '\r')
@@ -166,3 +155,6 @@ jobs:
           name: production-repair-result
           path: production-repair-result.txt
           retention-days: 1
+      - name: Remove local builder
+        if: always()
+        run: rm -f /tmp/build_private_templates.py
