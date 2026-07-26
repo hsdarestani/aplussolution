@@ -1,0 +1,19 @@
+name: Export source artifact
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ops/export-source-for-integration]
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package source
+        run: tar --exclude=.git -czf /tmp/aplussolution-source.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aplus-source
+          path: /tmp/aplussolution-source.tar.gz
+          retention-days: 1
