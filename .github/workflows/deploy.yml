@@ -141,7 +141,7 @@ jobs:
           docker compose up -d --build --remove-orphans
           docker compose exec -T backend python manage.py migrate --noinput
           docker compose exec -T backend python manage.py check
-          docker compose exec -T backend python manage.py shell -c "from core.wiw import WhenIWorkClient; WhenIWorkClient().login(force=True); print('WIW authentication OK')"
+          docker compose exec -T backend python manage.py shell -c "from core.wiw import WhenIWorkClient; client=WhenIWorkClient(); client.login(force=True); client.collection('shifts', params={'limit': 1}); client.collection('times', params={'limit': 1}); print('WIW authentication and resource access OK')"
           docker compose exec -T backend curl -fsS --retry 10 --retry-delay 5 http://127.0.0.1:8000/health/ >/dev/null
           curl -fsS --retry 10 --retry-delay 5 https://solution.smarbiz.sbs/health/ >/dev/null
           docker compose ps
