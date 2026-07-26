@@ -33,7 +33,8 @@ jobs:
             .integration/chunk-04 \
             .integration/chunk-05 \
             .integration/chunk-06 \
-            .integration/chunk-07-08 \
+            .integration/chunk-07 \
+            .integration/chunk-08 \
             .integration/chunk-09 \
             .integration/chunk-10 \
             .integration/chunk-11 \
