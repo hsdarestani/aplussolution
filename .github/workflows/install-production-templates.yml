@@ -44,8 +44,8 @@ jobs:
           test -n "$FRONTEND_ID"
 
           docker cp /root/build_private_templates.py "$BACKEND_ID":/tmp/build_private_templates.py
-          docker compose exec -T backend env TEMPLATE_BUNDLE_OUTPUT=/tmp/aplus-document-templates.zip python /tmp/build_private_templates.py
-          docker compose exec -T backend python manage.py import_document_bundle /tmp/aplus-document-templates.zip
+          docker compose exec -T backend env TEMPLATE_BUNDLE_OUTPUT=/tmp/aplus-document-templates.zip python /tmp/build_private_templates.py < /dev/null
+          docker compose exec -T backend python manage.py import_document_bundle /tmp/aplus-document-templates.zip < /dev/null
 
           docker compose exec -T backend python manage.py shell <<'PY'
           from django.db.models import Q
@@ -73,13 +73,13 @@ jobs:
           assert demo == {'workers': 0, 'clients': 0, 'orders': 0}
           PY
 
-          docker compose exec -T backend rm -f /tmp/build_private_templates.py /tmp/aplus-document-templates.zip
+          docker compose exec -T backend rm -f /tmp/build_private_templates.py /tmp/aplus-document-templates.zip < /dev/null
           rm -f /root/build_private_templates.py
 
           docker exec "$FRONTEND_ID" sh -c "grep -R -q 'Woche kopieren' /usr/share/nginx/html"
           docker exec "$FRONTEND_ID" sh -c "grep -R -q 'Zeiterfassung' /usr/share/nginx/html"
 
-          TOKEN=$(docker compose exec -T backend python manage.py shell -c "from rest_framework_simplejwt.tokens import RefreshToken; from core.models import User; u=User.objects.filter(role='admin',is_active=True).order_by('date_joined').first(); print(str(RefreshToken.for_user(u).access_token))" | tail -n 1 | tr -d '\r')
+          TOKEN=$(docker compose exec -T backend python manage.py shell -c "from rest_framework_simplejwt.tokens import RefreshToken; from core.models import User; u=User.objects.filter(role='admin',is_active=True).order_by('date_joined').first(); print(str(RefreshToken.for_user(u).access_token))" < /dev/null | tail -n 1 | tr -d '\r')
           test -n "$TOKEN"
           curl -fsS https://solution.smarbiz.sbs/api/document-catalog/ -H "Authorization: Bearer $TOKEN" -o /tmp/catalog.json
           curl -fsS https://solution.smarbiz.sbs/api/operations/folders/ -H "Authorization: Bearer $TOKEN" -o /tmp/folders.json
@@ -99,7 +99,7 @@ jobs:
           print('API_DEMO_FREE', True)
           PY
           rm -f /tmp/catalog.json /tmp/folders.json
-          docker compose exec -T backend python manage.py check
+          docker compose exec -T backend python manage.py check < /dev/null
           curl -fsS https://solution.smarbiz.sbs/health/ >/dev/null
           HTTP_CODE=$(curl -sS -o /tmp/login-smoke.json -w '%{http_code}' -X POST https://solution.smarbiz.sbs/api/auth/login/ -H 'Content-Type: application/json' --data '{"email":"invalid@example.com","password":"invalid"}')
           test "$HTTP_CODE" != '502'
