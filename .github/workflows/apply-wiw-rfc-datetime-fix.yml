@@ -1,0 +1,42 @@
+name: Apply WIW RFC datetime fix
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'hotfix/wiw-rfc-shift-dates'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hotfix/wiw-rfc-shift-dates
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply deterministic source patch
+        run: python scripts/apply_wiw_rfc_datetime_fix.py
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Run parser and WIW regression tests
+        working-directory: backend
+        env:
+          DJANGO_SECRET_KEY: ci-test-secret-only
+          DATABASE_URL: sqlite:///test.sqlite3
+          ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+          CORS_ALLOWED_ORIGINS: http://localhost:8080
+          CSRF_TRUSTED_ORIGINS: http://localhost:8080
+        run: pytest --nomigrations tests/test_wiw.py
+      - name: Commit only the validated permanent fix
+        run: |
+          rm -f scripts/apply_wiw_rfc_datetime_fix.py .github/workflows/apply-wiw-rfc-datetime-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/core/wiw_sync.py backend/tests/test_wiw.py scripts/apply_wiw_rfc_datetime_fix.py .github/workflows/apply-wiw-rfc-datetime-fix.yml
+          git commit -m "Parse WIW RFC and Unix shift timestamps"
+          git push origin HEAD:hotfix/wiw-rfc-shift-dates
