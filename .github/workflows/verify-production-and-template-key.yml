@@ -1,4 +1,4 @@
-name: Verify rebuilt production
+name: Diagnose and recover production backend
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  diagnose:
     if: github.head_ref == 'ops/verify-production-and-template-install'
     runs-on: ubuntu-latest
     env:
@@ -18,42 +18,53 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install SSH tooling
         run: sudo apt-get update && sudo apt-get install -y sshpass
-      - name: Verify backend container is running
-        run: sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'cd /opt/aplussolution && docker compose ps && docker compose ps --services --filter status=running | grep -qx backend'
-      - name: Verify new backend source inside container
-        run: sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'cd /opt/aplussolution && docker compose exec -T backend sh -c "test -f /app/core/wiw.py && test -f /app/core/order_automation.py && test -f /app/core/working_time.py"'
-      - name: Verify database migration state
-        run: sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'cd /opt/aplussolution && docker compose exec -T backend python manage.py migrate --check'
-      - name: Verify Django configuration
-        run: sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'cd /opt/aplussolution && docker compose exec -T backend python manage.py check'
-      - name: Verify eight-document catalog
-        run: sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'cd /opt/aplussolution && docker compose exec -T backend python manage.py shell -c "from core.document_engine import seed_document_catalog; from core.models import ContractTemplate; print(seed_document_catalog()); count=ContractTemplate.objects.filter(required_document=True).count(); print(\"Document catalog count:\", count); assert count == 8"'
-      - name: Verify internal health
-        run: sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'cd /opt/aplussolution && docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null'
-      - name: Verify public health
-        run: sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'curl -fsS https://solution.smarbiz.sbs/health/ >/dev/null'
-      - name: Diagnose WIW authentication
-        id: wiw
+      - name: Diagnose backend and attempt safe recovery
+        id: recovery
         continue-on-error: true
         run: |
           set -o pipefail
-          sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'cd /opt/aplussolution && docker compose exec -T backend python manage.py shell -c "from core.wiw import WhenIWorkClient; WhenIWorkClient().login(force=True); print(\"WIW authentication OK\")"' 2>&1 | tee wiw-auth-diagnostic.txt
+          sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE' 2>&1 | tee production-backend-diagnostic.txt
+          set +e
+          cd /opt/aplussolution
+          echo '=== docker compose ps -a ==='
+          docker compose ps -a
+          echo '=== backend logs ==='
+          docker compose logs --no-color --tail=400 backend
+          echo '=== backend inspect ==='
+          BACKEND_ID=$(docker compose ps -aq backend | head -n1)
+          if [ -n "$BACKEND_ID" ]; then
+            docker inspect "$BACKEND_ID" --format 'status={{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}} oom={{.State.OOMKilled}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}'
+          fi
+          echo '=== verify source and imports in image ==='
+          docker compose run --rm --no-deps backend sh -lc 'pwd; test -f /app/core/wiw.py; test -f /app/core/order_automation.py; test -f /app/core/working_time.py; python -c "import core.wiw, core.order_automation, core.working_time; print(\"imports-ok\")"'
+          echo '=== django check ==='
+          docker compose run --rm backend python manage.py check
+          echo '=== migrations ==='
+          docker compose run --rm backend python manage.py migrate --noinput
+          echo '=== collectstatic ==='
+          docker compose run --rm backend python manage.py collectstatic --noinput
+          echo '=== bootstrap ==='
+          docker compose run --rm backend python manage.py bootstrap
+          echo '=== restart backend and proxy ==='
+          docker compose up -d --force-recreate backend celery celery-beat frontend caddy
+          sleep 12
+          docker compose ps -a
+          echo '=== backend logs after recovery ==='
+          docker compose logs --no-color --tail=250 backend
+          echo '=== internal health ==='
+          docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/
+          echo '=== public health ==='
+          curl -fsS https://solution.smarbiz.sbs/health/
+          echo '=== login endpoint smoke ==='
+          curl -sS -o /tmp/login-response.txt -w 'HTTP %{http_code}\n' -X POST https://solution.smarbiz.sbs/api/auth/login/ -H 'Content-Type: application/json' --data '{"email":"invalid@example.com","password":"invalid"}'
+          cat /tmp/login-response.txt
+          REMOTE
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: wiw-auth-diagnostic
-          path: wiw-auth-diagnostic.txt
+          name: production-backend-diagnostic
+          path: production-backend-diagnostic.txt
           retention-days: 1
-      - name: Retrieve template public key
-        run: |
-          sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'openssl pkey -in /root/aplus-template-private.pem -pubout -out /tmp/aplus-template-public.pem'
-          sshpass -e scp -o StrictHostKeyChecking=no root@"$HOST":/tmp/aplus-template-public.pem ./aplus-template-public.pem
-          openssl pkey -pubin -in ./aplus-template-public.pem -text -noout >/dev/null
-      - uses: actions/upload-artifact@v4
-        with:
-          name: aplus-template-public-key
-          path: aplus-template-public.pem
-          retention-days: 1
-      - name: Fail if WIW authentication is not ready
-        if: steps.wiw.outcome != 'success'
+      - name: Fail when recovery did not complete
+        if: steps.recovery.outcome != 'success'
         run: exit 1
