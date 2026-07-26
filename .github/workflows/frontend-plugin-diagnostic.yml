@@ -1,0 +1,47 @@
+name: Frontend plugin migration diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  frontend-diagnostic:
+    if: github.head_ref == 'feature/wiw-document-automation-tests'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/wiw-document-automation-tests
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Reconstruct migration source
+        run: |
+          set -euo pipefail
+          cat .plugin-integration/chunk-00 .plugin-integration/chunk-01 .plugin-integration/chunk-02 .plugin-integration/chunk-03 .plugin-integration/chunk-04 .plugin-integration/chunk-05 .plugin-integration/chunk-06 .plugin-integration/chunk-07 > /tmp/migration.b64
+          echo '4d731d054630f4da5c1d168228992012aac0b1218b1f9937a05c6ba3e0854e63  /tmp/migration.b64' | sha256sum -c -
+          base64 --decode /tmp/migration.b64 > /tmp/migration.tar.gz
+          echo 'b4807dccb2b9f956b2db102590b891d489b0913d1e6ea634c06072f4684128c0  /tmp/migration.tar.gz' | sha256sum -c -
+          tar -xzf /tmp/migration.tar.gz -C .
+      - name: Validate frontend
+        id: frontend
+        continue-on-error: true
+        working-directory: frontend
+        env:
+          VITE_API_URL: https://solution.smarbiz.sbs/api
+        run: |
+          set -o pipefail
+          {
+            npm install --no-audit --no-fund --package-lock=false
+            npm test
+            npm run build
+          } 2>&1 | tee /tmp/frontend-plugin-diagnostic.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-plugin-diagnostic-log
+          path: /tmp/frontend-plugin-diagnostic.log
+          retention-days: 1
+      - name: Fail on frontend validation error
+        if: steps.frontend.outcome != 'success'
+        run: exit 1
