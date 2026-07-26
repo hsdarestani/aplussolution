@@ -28,34 +28,75 @@ def wiw_settings(settings):
 @pytest.mark.django_db
 @responses.activate
 def test_wiw_login_and_authenticated_request_headers(wiw_settings):
-    responses.post(WhenIWorkClient.LOGIN_URL, json={'token': 'token-value'}, status=200)
+    responses.post(WhenIWorkClient.LOGIN_URL, json={'person': {'token': 'token-value'}}, status=200)
+    responses.get(
+        f'{WhenIWorkClient.API_BASE}/login',
+        json={'users': [{'id': 123, 'account_id': 900, 'role': 1}]},
+        status=200,
+    )
     responses.get(f'{WhenIWorkClient.API_BASE}/users', json={'users': [{'id': 1}]}, status=200)
     client = WhenIWorkClient()
     result = client.collection('users')
     assert len(result.items) == 1
-    request = responses.calls[1].request
+    request = responses.calls[2].request
     assert request.headers['W-Key'] == 'dev-secret'
     assert request.headers['W-Token'] == 'token-value'
-    assert request.headers['W-UserID'] == '123'
+    assert request.headers['W-UserId'] == '123'
     assert request.headers['Authorization'] == 'Bearer token-value'
 
 
 @pytest.mark.django_db
 @responses.activate
-def test_wiw_reauthenticates_once_after_401(wiw_settings):
+def test_wiw_maps_configured_account_id_to_authorized_user_context(wiw_settings):
+    wiw_settings.WIW_USER_ID = '4138062'
+    responses.post(WhenIWorkClient.LOGIN_URL, json={'token': 'token-value'}, status=200)
+    responses.get(
+        f'{WhenIWorkClient.API_BASE}/login',
+        json={
+            'users': [{'id': 48430803, 'account_id': 4138062, 'role': 1}],
+            'accounts': [{'id': 4138062, 'role': 3}],
+        },
+        status=200,
+    )
+    responses.get(f'{WhenIWorkClient.API_BASE}/shifts', json={'shifts': []}, status=200)
+    result = WhenIWorkClient().collection('shifts')
+    assert result.items == []
+    assert responses.calls[2].request.headers['W-UserId'] == '48430803'
+
+
+@pytest.mark.django_db
+@responses.activate
+def test_wiw_reauthenticates_and_reresolves_context_after_401(wiw_settings):
     responses.post(WhenIWorkClient.LOGIN_URL, json={'token': 'old'}, status=200)
+    responses.get(
+        f'{WhenIWorkClient.API_BASE}/login',
+        json={'users': [{'id': 123, 'account_id': 900, 'role': 1}]},
+        status=200,
+    )
     responses.get(f'{WhenIWorkClient.API_BASE}/users', json={'error': 'expired'}, status=401)
     responses.post(WhenIWorkClient.LOGIN_URL, json={'token': 'new'}, status=200)
+    responses.get(
+        f'{WhenIWorkClient.API_BASE}/login',
+        json={'users': [{'id': 124, 'account_id': 123, 'role': 1}]},
+        status=200,
+    )
     responses.get(f'{WhenIWorkClient.API_BASE}/users', json={'users': []}, status=200)
     result = WhenIWorkClient().collection('users')
     assert result.items == []
-    assert len(responses.calls) == 4
+    assert len(responses.calls) == 6
+    assert responses.calls[-1].request.headers['W-UserId'] == '124'
+    assert responses.calls[-1].request.headers['Authorization'] == 'Bearer new'
 
 
 @pytest.mark.django_db
 @responses.activate
 def test_wiw_429_retries_without_leaking_secrets(wiw_settings):
     responses.post(WhenIWorkClient.LOGIN_URL, json={'token': 'token'}, status=200)
+    responses.get(
+        f'{WhenIWorkClient.API_BASE}/login',
+        json={'users': [{'id': 123, 'account_id': 900, 'role': 1}]},
+        status=200,
+    )
     responses.get(f'{WhenIWorkClient.API_BASE}/users', json={'error': 'rate'}, status=429, headers={'Retry-After': '0'})
     responses.get(f'{WhenIWorkClient.API_BASE}/users', json={'users': []}, status=200)
     with patch('core.wiw.time.sleep'):
@@ -73,6 +114,7 @@ def test_collection_extraction_handles_official_shapes():
 @pytest.mark.django_db
 def test_wiw_sync_is_idempotent_and_maps_resources(wiw_settings):
     mock = Mock()
+
     def resource(name, params=None, optional=False):
         payloads = {
             'users': [{'id': 10, 'email': 'anna@wiw.test', 'first_name': 'Anna', 'last_name': 'WIW', 'phone': '123', 'hourly_rate': '16.50'}],
@@ -83,6 +125,7 @@ def test_wiw_sync_is_idempotent_and_maps_resources(wiw_settings):
             'times': [], 'availabilities': [], 'requests': [],
         }
         return type('Result', (), {'items': payloads[name]})()
+
     mock.collection.side_effect = resource
     first = WhenIWorkSynchronizer(client=mock).sync('full')
     second = WhenIWorkSynchronizer(client=mock).sync('full')
