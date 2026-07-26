@@ -1,0 +1,130 @@
+name: Activate WIW production sync
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  activate:
+    if: github.head_ref == 'ops/activate-wiw-install-templates'
+    runs-on: ubuntu-latest
+    env:
+      HOST: ${{ secrets.HOST }}
+      SSHPASS: ${{ secrets.PASS }}
+      WIW_DEV_KEY: ${{ secrets.WIW_DEV_KEY }}
+      WIW_EMAIL: ${{ secrets.WIW_EMAIL }}
+      WIW_PASSWORD: ${{ secrets.WIW_PASSWORD }}
+      WIW_USER_ID: ${{ secrets.WIW_USER_ID }}
+      WIW_OPENAI_KEY: ${{ secrets.WIW_OPENAI_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SSH tooling
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Validate required secrets without exposing values
+        run: |
+          set +x
+          test -n "$HOST"
+          test -n "$SSHPASS"
+          test -n "$WIW_DEV_KEY"
+          test -n "$WIW_EMAIL"
+          test -n "$WIW_PASSWORD"
+          test -n "$WIW_USER_ID"
+      - name: Create protected WIW environment payload
+        run: |
+          set +x
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          keys = ['WIW_DEV_KEY','WIW_EMAIL','WIW_PASSWORD','WIW_USER_ID','WIW_OPENAI_KEY']
+          lines = []
+          for key in keys:
+              value = os.environ.get(key, '')
+              if '\n' in value or '\r' in value:
+                  raise SystemExit(f'{key} must be a single-line value')
+              lines.append(f'{key}={value}')
+          lines.extend(['WIW_SYNC_ENABLED=1','WIW_HTTP_TIMEOUT=45','WIW_TOKEN_CACHE_SECONDS=3300'])
+          Path('/tmp/wiw-production.env').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          os.chmod('/tmp/wiw-production.env', 0o600)
+          PY
+      - name: Install secrets on VPS and run full WIW synchronization
+        id: sync
+        run: |
+          set +x
+          sshpass -e scp -q -o StrictHostKeyChecking=no /tmp/wiw-production.env root@"$HOST":/root/wiw-production.env
+          sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE' 2>&1 | tee wiw-production-result.txt
+          set -euo pipefail
+          cd /opt/aplussolution
+          chmod 600 /root/wiw-production.env
+          python3 - <<'PY'
+          from pathlib import Path
+          env_path = Path('/opt/aplussolution/.env')
+          incoming = {}
+          for raw in Path('/root/wiw-production.env').read_text(encoding='utf-8').splitlines():
+              if raw and not raw.startswith('#') and '=' in raw:
+                  key, value = raw.split('=', 1)
+                  incoming[key] = value
+          existing = env_path.read_text(encoding='utf-8').splitlines() if env_path.exists() else []
+          output = []
+          seen = set()
+          for raw in existing:
+              if raw and not raw.lstrip().startswith('#') and '=' in raw:
+                  key = raw.split('=', 1)[0]
+                  if key in incoming:
+                      output.append(f'{key}={incoming[key]}')
+                      seen.add(key)
+                      continue
+              output.append(raw)
+          for key, value in incoming.items():
+              if key not in seen:
+                  output.append(f'{key}={value}')
+          if not any(line.startswith('WIW_WEBHOOK_SECRET=') and line.split('=',1)[1] for line in output if '=' in line):
+              import secrets
+              output = [line for line in output if not line.startswith('WIW_WEBHOOK_SECRET=')]
+              output.append('WIW_WEBHOOK_SECRET=' + secrets.token_urlsafe(48))
+          env_path.write_text('\n'.join(output).rstrip() + '\n', encoding='utf-8')
+          env_path.chmod(0o600)
+          PY
+          rm -f /root/wiw-production.env
+          docker compose up -d --force-recreate backend celery celery-beat
+          for attempt in $(seq 1 30); do
+            if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then break; fi
+            sleep 3
+          done
+          docker compose exec -T backend python manage.py check
+          docker compose exec -T backend python manage.py shell -c "from core.wiw import WhenIWorkClient; client=WhenIWorkClient(); client.login(force=True); print('WIW_LOGIN_OK'); print(client.discover())"
+          docker compose exec -T backend python manage.py sync_wiw --full
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from core.models import ClientCompany, Contract, User, WorkerProfile, IntegrationSyncRun
+          last = IntegrationSyncRun.objects.filter(provider='wiw').order_by('-created_at').first()
+          if not last or last.status not in {'success','partial'}:
+              raise SystemExit('WIW full sync did not finish successfully')
+          print('WIW_SYNC_STATUS', last.status)
+          print('WIW_SYNC_COUNTS', last.counts)
+          print('WIW_SYNC_ERRORS', len(last.errors or []))
+          demo_workers = WorkerProfile.objects.filter(employee_number__startswith='DEMO-')
+          Contract.objects.filter(worker__in=demo_workers).delete()
+          demo_user_ids = list(demo_workers.values_list('user_id', flat=True))
+          User.objects.filter(id__in=demo_user_ids, email__startswith='demo.worker').delete()
+          ClientCompany.objects.filter(customer_number='KD-DEMO', name='A+ Demo Kunde').delete()
+          print('DEMO_DATA_REMOVED')
+          print('ACTIVE_WIW_WORKERS', WorkerProfile.objects.exclude(wiw_user_id__isnull=True).exclude(wiw_user_id='').count())
+          print('ACTIVE_WIW_CLIENTS', ClientCompany.objects.exclude(wiw_location_id__isnull=True).exclude(wiw_location_id='').count())
+          PY
+          curl -fsS https://solution.smarbiz.sbs/health/ >/dev/null
+          HTTP_CODE=$(curl -sS -o /tmp/login-smoke.json -w '%{http_code}' -X POST https://solution.smarbiz.sbs/api/auth/login/ -H 'Content-Type: application/json' --data '{"email":"invalid@example.com","password":"invalid"}')
+          test "$HTTP_CODE" != '502'
+          test "$HTTP_CODE" != '503'
+          echo "PUBLIC_LOGIN_ENDPOINT_HTTP=$HTTP_CODE"
+          REMOTE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wiw-production-activation-result
+          path: wiw-production-result.txt
+          retention-days: 1
+      - name: Remove local secret payload
+        if: always()
+        run: rm -f /tmp/wiw-production.env
