@@ -116,15 +116,23 @@ class ContractTemplateSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class ContractSignatureSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ContractSignature
+        fields = ['id', 'role', 'signer_name', 'signature_hash', 'signed_at']
+
+
 class ContractSerializer(serializers.ModelSerializer):
     template_name = serializers.CharField(source='template.name', read_only=True)
+    template_slug = serializers.CharField(source='template.slug', read_only=True)
     worker_name = serializers.CharField(source='worker.user.get_full_name', read_only=True)
     client_name = serializers.CharField(source='client.name', read_only=True)
+    signatures = ContractSignatureSerializer(many=True, read_only=True)
 
     class Meta:
         model = Contract
         fields = '__all__'
-        read_only_fields = ['created_by', 'pdf', 'sent_at', 'signed_at', 'signature_hash', 'signature_ip']
+        read_only_fields = ['created_by', 'pdf', 'docx', 'sent_at', 'generated_at', 'signed_at', 'signature_hash', 'signature_ip', 'data_snapshot']
 
 
 class DocumentSerializer(serializers.ModelSerializer):
@@ -179,3 +187,22 @@ class NotificationSerializer(serializers.ModelSerializer):
         model = Notification
         fields = '__all__'
         read_only_fields = ['user']
+
+
+class EmployeeMasterDataSerializer(serializers.ModelSerializer):
+    worker_name = serializers.CharField(source='worker.user.get_full_name', read_only=True)
+    employee_number = serializers.CharField(source='worker.employee_number', read_only=True)
+    verified_by_name = serializers.CharField(source='verified_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = EmployeeMasterData
+        fields = '__all__'
+        read_only_fields = ['worker', 'source_map', 'missing_fields', 'completeness', 'verified_at', 'verified_by']
+
+
+class IntegrationSyncRunSerializer(serializers.ModelSerializer):
+    triggered_by_name = serializers.CharField(source='triggered_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = IntegrationSyncRun
+        fields = '__all__'

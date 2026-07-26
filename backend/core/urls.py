@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import advanced_views, views
+from . import advanced_views, integration_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -37,6 +37,15 @@ urlpatterns = [
     path('auth/oauth/<str:provider>/callback/', views.oauth_callback),
     path('setup/demo/', views.setup_demo),
     path('dashboard/', views.dashboard),
+    path('integrations/wiw/status/', integration_views.wiw_status),
+    path('integrations/wiw/discover/', integration_views.wiw_discover),
+    path('integrations/wiw/sync/', integration_views.wiw_sync),
+    path('integrations/wiw/webhook/', integration_views.wiw_webhook),
+    path('workers/<uuid:pk>/master-data/', integration_views.worker_master_data),
+    path('workers/<uuid:pk>/master-data/verify/', integration_views.verify_worker_master_data),
+    path('document-catalog/', integration_views.document_catalog),
+    path('document-catalog/seed/', integration_views.seed_catalog),
+    path('document-catalog/import-bundle/', integration_views.import_bundle),
     path('operations/', advanced_views.operations_overview),
     path('operations/schedule-quality/', advanced_views.schedule_quality),
     path('operations/availability/', advanced_views.availability_create),

@@ -111,3 +111,29 @@ def send_shift_reminders():
                 fail_silently=True,
             )
     return count
+
+
+@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3})
+def sync_when_i_work(self, mode='incremental', triggered_by_id=None):
+    from .models import User
+    from .wiw_sync import WhenIWorkSynchronizer
+    user = User.objects.filter(pk=triggered_by_id).first() if triggered_by_id else None
+    run = WhenIWorkSynchronizer(triggered_by=user).sync(mode=mode)
+    return {'id': str(run.id), 'status': run.status, 'counts': run.counts, 'errors': run.errors}
+
+
+@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3})
+def process_wiw_webhook(self, event_id):
+    from .models import WebhookEvent
+    from .wiw_sync import WhenIWorkSynchronizer
+    event = WebhookEvent.objects.get(pk=event_id)
+    try:
+        run = WhenIWorkSynchronizer().sync(mode='incremental')
+        event.processed_at = timezone.now()
+        event.processing_error = ''
+        event.save(update_fields=['processed_at', 'processing_error', 'updated_at'])
+        return {'event': str(event.id), 'sync': str(run.id), 'status': run.status}
+    except Exception as exc:
+        event.processing_error = str(exc)
+        event.save(update_fields=['processing_error', 'updated_at'])
+        raise

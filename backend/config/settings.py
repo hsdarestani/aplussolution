@@ -21,10 +21,22 @@ CORS_ALLOW_CREDENTIALS=True; SECURE_PROXY_SSL_HEADER=('HTTP_X_FORWARDED_PROTO','
 REST_FRAMEWORK={'DEFAULT_AUTHENTICATION_CLASSES':('rest_framework_simplejwt.authentication.JWTAuthentication',),'DEFAULT_PERMISSION_CLASSES':('rest_framework.permissions.IsAuthenticated',),'DEFAULT_FILTER_BACKENDS':('django_filters.rest_framework.DjangoFilterBackend','rest_framework.filters.SearchFilter','rest_framework.filters.OrderingFilter'),'DEFAULT_PAGINATION_CLASS':'rest_framework.pagination.PageNumberPagination','PAGE_SIZE':50,'DEFAULT_RENDERER_CLASSES':('rest_framework.renderers.JSONRenderer',) if not DEBUG else ('rest_framework.renderers.JSONRenderer','rest_framework.renderers.BrowsableAPIRenderer')}
 SIMPLE_JWT={'ACCESS_TOKEN_LIFETIME':timedelta(minutes=30),'REFRESH_TOKEN_LIFETIME':timedelta(days=30),'ROTATE_REFRESH_TOKENS':True,'BLACKLIST_AFTER_ROTATION':False}
 CELERY_BROKER_URL=os.getenv('REDIS_URL','redis://localhost:6379/0'); CELERY_RESULT_BACKEND=CELERY_BROKER_URL
-CELERY_BEAT_SCHEDULE={'contract-reminders-daily':{'task':'core.tasks.send_contract_reminders','schedule':86400},'shift-reminders-hourly':{'task':'core.tasks.send_shift_reminders','schedule':3600}}
+CELERY_BEAT_SCHEDULE={'contract-reminders-daily':{'task':'core.tasks.send_contract_reminders','schedule':86400},'shift-reminders-hourly':{'task':'core.tasks.send_shift_reminders','schedule':3600},'wiw-sync-hourly':{'task':'core.tasks.sync_when_i_work','schedule':3600,'args':['incremental',None]}}
 EMAIL_BACKEND='django.core.mail.backends.smtp.EmailBackend' if os.getenv('EMAIL_HOST') else 'django.core.mail.backends.console.EmailBackend'
 EMAIL_HOST=os.getenv('EMAIL_HOST',''); EMAIL_PORT=int(os.getenv('EMAIL_PORT','587')); EMAIL_HOST_USER=os.getenv('EMAIL_HOST_USER',''); EMAIL_HOST_PASSWORD=os.getenv('EMAIL_HOST_PASSWORD',''); EMAIL_USE_TLS=os.getenv('EMAIL_USE_TLS','1')=='1'
 DEFAULT_FROM_EMAIL=os.getenv('DEFAULT_FROM_EMAIL','A+ Solution <noreply@aplus-solution.de>'); ADMIN_NOTIFICATION_EMAIL=os.getenv('ADMIN_NOTIFICATION_EMAIL','info@aplus-solution.de'); APP_URL=os.getenv('APP_URL','http://localhost:8080')
 GOOGLE_OAUTH_CLIENT_ID=os.getenv('GOOGLE_OAUTH_CLIENT_ID',''); GOOGLE_OAUTH_CLIENT_SECRET=os.getenv('GOOGLE_OAUTH_CLIENT_SECRET',''); GOOGLE_OAUTH_REDIRECT_URI=os.getenv('GOOGLE_OAUTH_REDIRECT_URI','')
 APPLE_SERVICE_ID=os.getenv('APPLE_SERVICE_ID',''); APPLE_TEAM_ID=os.getenv('APPLE_TEAM_ID',''); APPLE_KEY_ID=os.getenv('APPLE_KEY_ID',''); APPLE_PRIVATE_KEY=os.getenv('APPLE_PRIVATE_KEY','').replace('\\n','\n'); APPLE_PRIVATE_KEY_PATH=os.getenv('APPLE_PRIVATE_KEY_PATH',''); APPLE_OAUTH_REDIRECT_URI=os.getenv('APPLE_OAUTH_REDIRECT_URI','')
 COMPANY_NAME=os.getenv('COMPANY_NAME','A+ Solution GmbH'); COMPANY_ADDRESS=os.getenv('COMPANY_ADDRESS',''); AUEG_LICENSE_AUTHORITY=os.getenv('AUEG_LICENSE_AUTHORITY',''); AUEG_LICENSE_DATE=os.getenv('AUEG_LICENSE_DATE','')
+
+WIW_DEV_KEY=os.getenv('WIW_DEV_KEY','')
+WIW_EMAIL=os.getenv('WIW_EMAIL','')
+WIW_PASSWORD=os.getenv('WIW_PASSWORD','')
+WIW_USER_ID=os.getenv('WIW_USER_ID','')
+WIW_WEBHOOK_SECRET=os.getenv('WIW_WEBHOOK_SECRET','')
+WIW_OPENAI_KEY=os.getenv('WIW_OPENAI_KEY','')
+WIW_HTTP_TIMEOUT=int(os.getenv('WIW_HTTP_TIMEOUT','30'))
+WIW_TOKEN_CACHE_SECONDS=int(os.getenv('WIW_TOKEN_CACHE_SECONDS','3300'))
+WIW_SYNC_ENABLED=os.getenv('WIW_SYNC_ENABLED','1')=='1'
+LIBREOFFICE_BINARY=os.getenv('LIBREOFFICE_BINARY','libreoffice')
+COMPANY_BUSINESS_NUMBER=os.getenv('COMPANY_BUSINESS_NUMBER','')

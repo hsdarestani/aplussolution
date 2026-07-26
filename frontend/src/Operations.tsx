@@ -125,6 +125,7 @@ function Readiness({ data }: { data: any }) {
     ['E-Mail-Versand', data.email_delivery],
     ['Firmendaten', data.company_legal_data],
     ['AÜG-Angaben', data.aueg_data],
+    ['When I Work', data.wiw_configured],
     ['8 finale Vertragsvorlagen', data.final_contract_set_complete],
     ['Android-Signierung', data.android_signing_configured],
     ['iOS-Signierung', data.ios_signing_configured],
@@ -187,6 +188,8 @@ export default function Operations({ user }: { user: User }) {
   const [report, setReport] = useState<any>({ month: new Date().toISOString().slice(0, 7) });
   const [templateFile, setTemplateFile] = useState<File>();
   const [swapTargets, setSwapTargets] = useState<Record<string, string>>({});
+  const [wiwStatus, setWiwStatus] = useState<any>();
+  const [documentCatalog, setDocumentCatalog] = useState<any>();
 
   const load = async () => {
     const overview = await api('operations/');
@@ -194,8 +197,14 @@ export default function Operations({ user }: { user: User }) {
     const folderData = await api('operations/folders/');
     setFolders(folderData);
     if (isManager(user)) {
-      const shifts = await api('shifts/?status=draft&ordering=starts_at');
+      const [shifts, wiw, catalog] = await Promise.all([
+        api('shifts/?status=draft&ordering=starts_at'),
+        api('integrations/wiw/status/'),
+        api('document-catalog/'),
+      ]);
       setDraftShifts(unpack(shifts));
+      setWiwStatus(wiw);
+      setDocumentCatalog(catalog);
     }
   };
 
@@ -270,10 +279,28 @@ export default function Operations({ user }: { user: User }) {
     const form = new FormData();
     form.append('file', templateFile);
     try {
-      const result: any = await api('operations/templates/import/', { method: 'POST', body: form });
-      setToast(`${result.created} Vorlage(n) erstellt, ${result.updated} aktualisiert, ${result.errors?.length || 0} Fehler.`);
+      const result: any = await api('document-catalog/import-bundle/', { method: 'POST', body: form });
+      setToast(`${result.updated || 0} Quelldatei(en) installiert, ${result.errors?.length || 0} Fehler.`);
       setTemplateFile(undefined);
       setModal('');
+      await load();
+    } catch (reason: any) {
+      setToast(reason.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function syncWiw(mode: 'incremental' | 'full') {
+    await run('integrations/wiw/sync/', { mode }, `WIW-${mode === 'full' ? 'Vollabgleich' : 'Synchronisierung'} wurde gestartet.`);
+  }
+
+  async function discoverWiw() {
+    setBusy(true);
+    try {
+      const result: any = await api('integrations/wiw/discover/', { method: 'POST', body: '{}' });
+      const available = Object.values(result).filter((item: any) => item.supported).length;
+      setToast(`${available} WIW-Ressourcen wurden erfolgreich geprüft.`);
       await load();
     } catch (reason: any) {
       setToast(reason.message);
@@ -405,10 +432,29 @@ export default function Operations({ user }: { user: User }) {
           </div>
 
           <div className="operations-grid two">
+            <section className="operations-panel" data-testid="wiw-integration-panel">
+              <div className="operations-head"><div><h3>When I Work</h3><p>Personal, Orte, Positionen, Schichten, Zeiten und Abwesenheiten automatisch übernehmen.</p></div><IonBadge color={wiwStatus?.configured ? 'success' : 'warning'}>{wiwStatus?.configured ? 'Verbunden' : 'Nicht konfiguriert'}</IonBadge></div>
+              <div className="operations-actions">
+                <IonButton disabled={!wiwStatus?.configured || busy} onClick={() => syncWiw('incremental')}>Jetzt synchronisieren</IonButton>
+                <IonButton fill="outline" disabled={!wiwStatus?.configured || busy} onClick={() => syncWiw('full')}>Vollabgleich</IonButton>
+                <IonButton fill="clear" disabled={!wiwStatus?.configured || busy} onClick={discoverWiw}>API prüfen</IonButton>
+              </div>
+              {wiwStatus?.latest_sync && <div className="operations-note">Letzter Lauf: {wiwStatus.latest_sync.status} · {dateTime(wiwStatus.latest_sync.finished_at || wiwStatus.latest_sync.started_at)}</div>}
+              <div className="operations-note">WIW liefert Betriebsdaten wie Name, Kontakt, Position, Stundenlohn, Einsatzorte, Schichten und Zeiten. Steuer-ID, IBAN, Sozialversicherungsnummer und Unterschriften werden aus der digitalen Personalakte ergänzt.</div>
+            </section>
+            <section className="operations-panel" data-testid="document-catalog-panel">
+              <div className="operations-head"><div><h3>8 Dokumentmodelle</h3><p>Originalvorlagen, Pflichtfelder, PDF/DOCX und Mehrfachsignaturen.</p></div><IonBadge color={documentCatalog?.complete ? 'success' : 'warning'}>{documentCatalog?.documents?.filter((item: any) => item.source_installed).length || 0}/8 installiert</IonBadge></div>
+              <div className="folder-scroll">
+                {documentCatalog?.documents?.map((item: any) => <div className="folder-card" key={item.slug}><b>{item.name}</b><small>Version {item.version} · {item.source_format}</small><span>{item.source_installed ? 'Quelldatei installiert' : 'Quelldatei fehlt'} · Signaturen: {item.signature_roles?.join(', ') || 'keine'}</span></div>)}
+              </div>
+              <IonButton fill="outline" onClick={() => setModal('templates')}><IonIcon slot="start" icon={documentTextOutline} />Privates Vorlagenpaket importieren</IonButton>
+            </section>
+          </div>
+
+          <div className="operations-grid two">
             <section className="operations-panel">
               <div className="operations-head"><div><h3>Produktionsbereitschaft</h3><p>Externe Credentials und finale Inhalte.</p></div><IonIcon icon={checkmarkCircleOutline} /></div>
               <Readiness data={data.readiness} />
-              <IonButton fill="outline" onClick={() => setModal('templates')}><IonIcon slot="start" icon={documentTextOutline} />Vertragsvorlagen importieren</IonButton>
             </section>
             <section className="operations-panel">
               <div className="operations-head"><div><h3>Digitale Akten</h3><p>Vollständigkeit je Mitarbeiter und Kunde.</p></div><IonIcon icon={peopleOutline} /></div>
@@ -496,9 +542,9 @@ export default function Operations({ user }: { user: User }) {
         <div className="operations-note full">Die Zielwoche wird immer Montag bis Sonntag berechnet. Neue Schichten starten als Entwurf.</div>
       </Modal>
 
-      <Modal open={modal === 'templates'} title="Vertragsvorlagen importieren" close={() => setModal('')} save={importTemplates} busy={busy} saveLabel="JSON importieren">
-        <label className="operations-file full"><span>JSON-Datei mit einer oder mehreren Vorlagen</span><input type="file" accept=".json,application/json" onChange={(event) => setTemplateFile(event.target.files?.[0])} /><b>{templateFile?.name || 'Keine Datei ausgewählt'}</b></label>
-        <div className="operations-note full">Pflichtfelder: name, kind, version, schema und html_template. Bestehende Kombinationen aus Name und Version werden aktualisiert.</div>
+      <Modal open={modal === 'templates'} title="Privates Dokumentvorlagenpaket importieren" close={() => setModal('')} save={importTemplates} busy={busy} saveLabel="ZIP importieren">
+        <label className="operations-file full"><span>ZIP-Paket mit manifest.json und den acht Originalvorlagen</span><input type="file" accept=".zip,application/zip" onChange={(event) => setTemplateFile(event.target.files?.[0])} /><b>{templateFile?.name || 'Keine Datei ausgewählt'}</b></label>
+        <div className="operations-note full">Das Paket wird anhand der SHA-256-Prüfsummen validiert. Die privaten Originaldateien werden nicht im öffentlichen Repository gespeichert.</div>
       </Modal>
 
       <IonToast isOpen={!!toast} message={toast} duration={4500} onDidDismiss={() => setToast('')} />

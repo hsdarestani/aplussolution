@@ -235,7 +235,8 @@ def _readiness():
         'company_legal_data': bool(settings.COMPANY_NAME and settings.COMPANY_ADDRESS),
         'aueg_data': bool(settings.AUEG_LICENSE_AUTHORITY and settings.AUEG_LICENSE_DATE),
         'contract_templates': template_counts,
-        'final_contract_set_complete': ContractTemplate.objects.filter(active=True).count() >= 8,
+        'final_contract_set_complete': ContractTemplate.objects.filter(active=True, required_document=True).exclude(source_file='').count() >= 8,
+        'wiw_configured': bool(settings.WIW_DEV_KEY and settings.WIW_EMAIL and settings.WIW_PASSWORD),
         'android_signing_configured': bool(os.getenv('ANDROID_KEYSTORE_BASE64') and os.getenv('ANDROID_KEY_ALIAS')),
         'ios_signing_configured': bool(os.getenv('IOS_CERTIFICATE_BASE64') and os.getenv('IOS_PROVISIONING_PROFILE_BASE64')),
         'store_api_credentials_configured': bool(
