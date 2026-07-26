@@ -28,7 +28,8 @@ class ResourceResult:
 class WhenIWorkClient:
     LOGIN_URL = 'https://api.login.wheniwork.com/login'
     API_BASE = 'https://api.wheniwork.com/2'
-    TOKEN_CACHE_KEY = 'wiw:token:v2'
+    TOKEN_CACHE_KEY = 'wiw:token:v3'
+    USER_CONTEXT_CACHE_KEY = 'wiw:user-context:v2'
     RESOURCE_PATHS = {
         'users': '/users',
         'locations': '/locations',
@@ -45,7 +46,8 @@ class WhenIWorkClient:
         self.dev_key = settings.WIW_DEV_KEY
         self.email = settings.WIW_EMAIL
         self.password = settings.WIW_PASSWORD
-        self.user_id = settings.WIW_USER_ID
+        self.configured_user_id = str(settings.WIW_USER_ID or '').strip()
+        self.user_id = self.configured_user_id
         self.timeout = settings.WIW_HTTP_TIMEOUT
         if not self.dev_key or not self.email or not self.password:
             raise WhenIWorkError('When-I-Work-Zugangsdaten sind nicht vollständig konfiguriert.')
@@ -63,26 +65,112 @@ class WhenIWorkClient:
         )
         self._raise_for_status(response, 'WIW login')
         payload = response.json()
-        token = payload.get('token') or payload.get('access_token') or (payload.get('login') or {}).get('token')
+        person = payload.get('person') if isinstance(payload.get('person'), dict) else {}
+        token = (
+            payload.get('token')
+            or payload.get('access_token')
+            or (payload.get('login') or {}).get('token')
+            or person.get('token')
+        )
         if not token:
             raise WhenIWorkError('When I Work hat keinen Login-Token zurückgegeben.')
         cache.set(self.TOKEN_CACHE_KEY, token, settings.WIW_TOKEN_CACHE_SECONDS)
-        if not self.user_id:
-            user_id = payload.get('user_id') or (payload.get('user') or {}).get('id')
-            if user_id:
-                self.user_id = str(user_id)
         return token
 
-    def _headers(self, force_login=False):
-        token = self.login(force=force_login)
-        headers = {
+    def _base_headers(self, token):
+        return {
             'W-Key': self.dev_key,
             'W-Token': token,
             'Authorization': f'Bearer {token}',
             'Accept': 'application/json',
         }
-        if self.user_id:
-            headers['W-UserID'] = str(self.user_id)
+
+    @staticmethod
+    def _context_candidates(payload):
+        candidates = []
+
+        def collect(value):
+            if isinstance(value, list):
+                for item in value:
+                    collect(item)
+                return
+            if not isinstance(value, dict):
+                return
+            if value.get('id') is not None and value.get('account_id') is not None:
+                candidates.append(value)
+            for key in ('users', 'user', 'logins', 'data', 'items', 'results'):
+                if key in value:
+                    collect(value[key])
+
+        collect(payload)
+        if candidates:
+            return candidates
+
+        # Defensive fallback for older WIW response shapes that omit account_id.
+        def collect_fallback(value):
+            if isinstance(value, list):
+                for item in value:
+                    collect_fallback(item)
+                return
+            if not isinstance(value, dict):
+                return
+            if value.get('id') is not None and any(
+                key in value for key in ('email', 'first_name', 'last_name', 'role', 'type', 'is_admin', 'is_manager')
+            ):
+                candidates.append(value)
+            for key in ('users', 'user', 'logins', 'data', 'items', 'results'):
+                if key in value:
+                    collect_fallback(value[key])
+
+        collect_fallback(payload)
+        return candidates
+
+    def resolve_user_context(self, token, force=False):
+        if not force:
+            cached = cache.get(self.USER_CONTEXT_CACHE_KEY)
+            if cached:
+                self.user_id = str(cached)
+                return self.user_id
+
+        response = self.session.get(
+            f'{self.API_BASE}/login',
+            headers=self._base_headers(token),
+            params={'show_pending': 'true'},
+            timeout=self.timeout,
+        )
+        self._raise_for_status(response, 'WIW Benutzerkontext')
+        payload = response.json() if response.content else {}
+        candidates = self._context_candidates(payload)
+        if not candidates:
+            raise WhenIWorkError('When I Work hat keinen verwendbaren Benutzerkontext zurückgegeben.')
+
+        configured = self.configured_user_id
+        selected = None
+        if configured:
+            selected = next((item for item in candidates if str(item.get('id')) == configured), None)
+            if selected is None:
+                selected = next((item for item in candidates if str(item.get('account_id')) == configured), None)
+
+        if selected is None:
+            active = [
+                item
+                for item in candidates
+                if item.get('active', True) is not False and item.get('pending', False) is not True
+            ]
+            selected = (active or candidates)[0]
+
+        user_id = str(selected.get('id') or '').strip()
+        if not user_id:
+            raise WhenIWorkError('When I Work hat keinen gültigen W-UserId-Kontext zurückgegeben.')
+        self.user_id = user_id
+        cache.set(self.USER_CONTEXT_CACHE_KEY, user_id, settings.WIW_TOKEN_CACHE_SECONDS)
+        return user_id
+
+    def _headers(self, force_login=False, force_context=False):
+        token = self.login(force=force_login)
+        user_id = self.resolve_user_context(token, force=force_context)
+        headers = self._base_headers(token)
+        headers['W-UserId'] = str(user_id)
         return headers
 
     def request(self, method, path, params=None, json=None, retry=True):
@@ -97,10 +185,12 @@ class WhenIWorkClient:
         )
         if response.status_code == 401 and retry:
             cache.delete(self.TOKEN_CACHE_KEY)
+            cache.delete(self.USER_CONTEXT_CACHE_KEY)
+            self.user_id = self.configured_user_id
             response = self.session.request(
                 method,
                 url,
-                headers=self._headers(force_login=True),
+                headers=self._headers(force_login=True, force_context=True),
                 params=params,
                 json=json,
                 timeout=self.timeout,
@@ -128,7 +218,11 @@ class WhenIWorkClient:
         for name, path in self.RESOURCE_PATHS.items():
             try:
                 payload = self.get(path, params={'limit': 1})
-                results[name] = {'supported': True, 'count': len(self.extract_collection(payload, name)), 'keys': sorted(payload.keys()) if isinstance(payload, dict) else []}
+                results[name] = {
+                    'supported': True,
+                    'count': len(self.extract_collection(payload, name)),
+                    'keys': sorted(payload.keys()) if isinstance(payload, dict) else [],
+                }
             except WhenIWorkError as exc:
                 results[name] = {'supported': False, 'error': str(exc)}
         return results
