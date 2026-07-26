@@ -40,6 +40,8 @@ jobs:
           path.write_text(text)
           PY
           rm -rf .integration
+          git checkout -- .github/workflows/deploy.yml
+          rm -f .github/workflows/wiw-smoke.yml
       - name: Commit and push source
         id: push
         continue-on-error: true
