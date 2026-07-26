@@ -22,17 +22,7 @@ print('WIW_TIMES_ACCESS', times.status_code, len(times.items))
 assert context
 assert shifts.status_code == 200
 assert times.status_code == 200
-
-for index, item in enumerate(shifts.items[:3], start=1):
-    safe = {
-        key: item.get(key)
-        for key in (
-            'id', 'shift_id', 'start_time', 'end_time', 'start', 'end',
-            'starts_at', 'ends_at', 'user_id', 'location_id', 'site_id', 'position_id'
-        )
-        if key in item
-    }
-    print('WIW_SHIFT_SHAPE', index, sorted(item.keys()), safe)
+assert len(shifts.items) > 0
 
 today = date.today()
 attendance, source, warning = fetch_attendance(
@@ -43,34 +33,30 @@ attendance, source, warning = fetch_attendance(
 print('WIW_ATTENDANCE_PATH', source, len(attendance), bool(warning))
 
 sync_run = WhenIWorkSynchronizer(client=client).sync('full')
+errors = [
+    {'resource': row.get('resource'), 'error': row.get('error')}
+    for row in (sync_run.errors or [])
+]
+shift_errors = [row for row in errors if row.get('resource') == 'shifts']
 print('WIW_FULL_SYNC_STATUS', sync_run.status)
-print('WIW_FULL_SYNC_ERRORS', len(sync_run.errors or []))
-print(
-    'WIW_FULL_SYNC_ERROR_DETAILS',
-    [
-        {
-            'resource': row.get('resource'),
-            'error': row.get('error'),
-        }
-        for row in (sync_run.errors or [])
-    ],
-)
+print('WIW_FULL_SYNC_ERRORS', len(errors))
+print('WIW_FULL_SYNC_ERROR_DETAILS', errors)
 assert sync_run.status in {'success', 'partial'}
+assert shift_errors == []
 
 working_log = sync_working_time(date(today.year, 1, 1), today, client=client)
+workers_count = WorkerProfile.objects.exclude(wiw_user_id__isnull=True).exclude(wiw_user_id='').count()
+shifts_count = Shift.objects.exclude(wiw_shift_id__isnull=True).exclude(wiw_shift_id='').count()
+times_count = TimeEntry.objects.exclude(wiw_time_id__isnull=True).exclude(wiw_time_id='').count()
+working_rows = WorkingTimeAccountRecord.objects.count()
+
 print('WORKING_TIME_SYNC_STATUS', working_log.status)
 print('WORKING_TIME_RECORDS_CREATED', working_log.records_count)
-print(
-    'PRODUCTION_WIW_WORKERS',
-    WorkerProfile.objects.exclude(wiw_user_id__isnull=True).exclude(wiw_user_id='').count(),
-)
-print(
-    'PRODUCTION_WIW_SHIFTS',
-    Shift.objects.exclude(wiw_shift_id__isnull=True).exclude(wiw_shift_id='').count(),
-)
-print(
-    'PRODUCTION_WIW_TIMES',
-    TimeEntry.objects.exclude(wiw_time_id__isnull=True).exclude(wiw_time_id='').count(),
-)
-print('PRODUCTION_WORKING_TIME_ROWS', WorkingTimeAccountRecord.objects.count())
+print('PRODUCTION_WIW_WORKERS', workers_count)
+print('PRODUCTION_WIW_SHIFTS', shifts_count)
+print('PRODUCTION_WIW_TIMES', times_count)
+print('PRODUCTION_WORKING_TIME_ROWS', working_rows)
 assert working_log.status in {'ok', 'warning'}
+assert workers_count > 0
+assert shifts_count > 0
+assert working_rows > 0
