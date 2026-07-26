@@ -1,4 +1,4 @@
-name: Repair production schema and restore login
+name: Verify permanent production schema hotfix
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  repair:
+  verify:
     if: github.head_ref == 'ops/verify-production-and-template-install'
     runs-on: ubuntu-latest
     env:
@@ -18,72 +18,34 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install SSH tooling
         run: sudo apt-get update && sudo apt-get install -y sshpass
-      - name: Repair missing Django tables and columns
+      - name: Verify permanent fix on VPS
         run: |
           sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
-          cat > /tmp/repair_core_schema.py <<'PY'
-          from django.apps import apps
-          from django.db import connection
 
-          app_config = apps.get_app_config('core')
+          for attempt in $(seq 1 36); do
+            if test -f backend/core/migrations/0002_repair_legacy_schema.py && ! grep -q 'makemigrations core' backend/entrypoint.sh; then
+              break
+            fi
+            if [ "$attempt" -eq 36 ]; then
+              echo 'Permanent hotfix did not reach the VPS in time.' >&2
+              exit 1
+            fi
+            sleep 10
+          done
 
-          def table_names():
-              with connection.cursor() as cursor:
-                  return set(connection.introspection.table_names(cursor))
-
-          def column_names(table):
-              with connection.cursor() as cursor:
-                  return {column.name for column in connection.introspection.get_table_description(cursor, table)}
-
-          existing_tables = table_names()
-          repaired = []
-
-          with connection.schema_editor() as schema_editor:
-              for model in app_config.get_models(include_auto_created=False):
-                  options = model._meta
-                  if options.proxy or not options.managed:
-                      continue
-                  table = options.db_table
-                  if table not in existing_tables:
-                      print(f'CREATE TABLE {table}')
-                      schema_editor.create_model(model)
-                      repaired.append(f'table:{table}')
-                      existing_tables = table_names()
-                      continue
-
-                  existing_columns = column_names(table)
-                  for field in options.local_fields:
-                      if field.column and field.column not in existing_columns:
-                          print(f'ADD COLUMN {table}.{field.column}')
-                          schema_editor.add_field(model, field)
-                          repaired.append(f'column:{table}.{field.column}')
-                          existing_columns = column_names(table)
-
-                  for field in options.local_many_to_many:
-                      through = field.remote_field.through
-                      through_table = through._meta.db_table
-                      if through_table not in existing_tables:
-                          print(f'CREATE M2M TABLE {through_table}')
-                          schema_editor.create_model(through)
-                          repaired.append(f'table:{through_table}')
-                          existing_tables = table_names()
-
-          print('REPAIRED', repaired)
-          PY
-
-          cat /tmp/repair_core_schema.py | docker compose run --rm -T backend python manage.py shell
-          docker compose up -d --force-recreate backend celery celery-beat
+          docker compose up -d --build backend celery celery-beat
           sleep 15
-          docker compose ps -a
+          docker compose exec -T backend python manage.py migrate --noinput
+          docker compose exec -T backend python manage.py showmigrations core | grep -E '^ \[X\] 0002_repair_legacy_schema$'
           docker compose exec -T backend python manage.py check
-          docker compose exec -T backend python manage.py bootstrap
           docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/
           curl -fsS https://solution.smarbiz.sbs/health/
+
           HTTP_CODE=$(curl -sS -o /tmp/login-response.txt -w '%{http_code}' -X POST https://solution.smarbiz.sbs/api/auth/login/ -H 'Content-Type: application/json' --data '{"email":"invalid@example.com","password":"invalid"}')
           cat /tmp/login-response.txt
           echo "Login smoke HTTP: $HTTP_CODE"
-          test "$HTTP_CODE" != "502"
-          test "$HTTP_CODE" != "503"
+          test "$HTTP_CODE" -lt 500
+          docker compose ps --services --filter status=running | grep -qx backend
           REMOTE
