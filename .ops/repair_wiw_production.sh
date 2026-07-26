@@ -30,7 +30,7 @@ for attempt in $(seq 1 30); do
   sleep 4
 done
 
-docker compose exec -T backend python -c "from core.wiw import WhenIWorkClient; from core.wiw_sync import parse_flexible_datetime; assert hasattr(WhenIWorkClient, 'resolve_user_context'); print('CONTAINER_AUTH_FIX_PRESENT true'); print('CONTAINER_RFC_DATE_FIX_PRESENT true')" </dev/null
+docker compose exec -T backend python manage.py shell -c "from core.wiw import WhenIWorkClient; from core.wiw_sync import parse_flexible_datetime; assert hasattr(WhenIWorkClient, 'resolve_user_context'); assert parse_flexible_datetime; print('CONTAINER_AUTH_FIX_PRESENT true'); print('CONTAINER_RFC_DATE_FIX_PRESENT true')" </dev/null
 docker compose exec -T backend python manage.py migrate --noinput </dev/null
 docker compose exec -T backend python manage.py check </dev/null
 
