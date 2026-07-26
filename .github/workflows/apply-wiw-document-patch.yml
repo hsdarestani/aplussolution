@@ -78,8 +78,6 @@ jobs:
           path.write_text(text)
           PY
           rm -rf .integration
-          rm -f .github/workflows/apply-wiw-document-patch.yml
-          rm -f .github/workflows/export-source-artifact.yml
       - name: Install backend dependencies and generate migrations
         run: |
           pip install -r backend/requirements.txt
