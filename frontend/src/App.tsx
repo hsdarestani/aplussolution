@@ -25,6 +25,7 @@ import {
 } from '@ionic/react';
 import {
   addOutline,
+  appsOutline,
   briefcaseOutline,
   businessOutline,
   calendarOutline,
@@ -213,9 +214,9 @@ function Login({ done }: { done: (user: User) => void }) {
   );
 }
 
-function Header({ title }: { title: string }) {
+function Header({ title, appShell = false }: { title: string; appShell?: boolean }) {
   return (
-    <IonHeader>
+    <IonHeader className={appShell ? 'app-header' : ''}>
       <IonToolbar>
         <IonTitle>{title}</IonTitle>
       </IonToolbar>
@@ -2921,6 +2922,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const [view, setView] = useState<View>('dashboard');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     consumeOAuth();
@@ -2948,7 +2950,29 @@ export default function App() {
   if (!user) return <IonApp><Login done={setUser} /></IonApp>;
 
   const items = nav[user.role] || nav.worker;
-  let content: React.ReactNode = <Dashboard user={user} navigate={setView} />;
+  const primaryViews: View[] = ['dashboard', 'schedule', 'time', 'messages'];
+  const mobilePrimaryItems = items.filter(([key]) => primaryViews.includes(key));
+  const mobileMoreItems = items.filter(([key]) => !primaryViews.includes(key));
+  const currentLabel = view === 'profile' ? 'Profil' : items.find(([key]) => key === view)?.[1] || 'A+ Solution';
+  const roleLabel: Record<string, string> = {
+    admin: 'Administration',
+    manager: 'Management',
+    worker: 'Mitarbeiter',
+    client: 'Kundenportal',
+  };
+  const mobileLabels: Partial<Record<View, string>> = {
+    dashboard: 'Start',
+    schedule: 'Plan',
+    time: 'Zeit',
+    messages: 'Chat',
+  };
+  const navigateTo = (next: View) => {
+    setView(next);
+    setMobileMenuOpen(false);
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
+  };
+
+  let content: React.ReactNode = <Dashboard user={user} navigate={navigateTo} />;
 
   if (view === 'schedule') content = <Schedule user={user} />;
   else if (view === 'time') content = <Time user={user} />;
@@ -2963,11 +2987,25 @@ export default function App() {
   else if (view === 'operations') content = <Operations user={user} />;
 
   return (
-    <IonApp>
+    <IonApp className="mobile-first-app-shell-v1">
       <IonPage>
-        <Header title="A+ Solution" />
-        <IonContent>
+        <Header title="A+ Solution" appShell />
+        <IonContent className="app-content">
           <div className="app">
+            <header className="mobile-appbar">
+              <button className="mobile-brand" type="button" onClick={() => navigateTo('dashboard')} aria-label="Zur Startseite">
+                <span>A+</span>
+                <small>Solution</small>
+              </button>
+              <div className="mobile-page-title">
+                <small>{roleLabel[user.role] || user.role}</small>
+                <strong>{currentLabel}</strong>
+              </div>
+              <button className="mobile-avatar" type="button" onClick={() => navigateTo('profile')} aria-label="Profil öffnen">
+                {user.name[0]}
+              </button>
+            </header>
+
             <aside>
               <div className="menu-logo">
                 A+<span>Solution</span>
@@ -2986,7 +3024,7 @@ export default function App() {
                     detail={false}
                     key={item[0]}
                     className={view === item[0] ? 'active' : ''}
-                    onClick={() => setView(item[0])}
+                    onClick={() => navigateTo(item[0])}
                   >
                     <IonIcon slot="start" icon={icons[item[0]]} />
                     <IonLabel>{item[1]}</IonLabel>
@@ -2996,7 +3034,7 @@ export default function App() {
                   button
                   detail={false}
                   className={view === 'profile' ? 'active' : ''}
-                  onClick={() => setView('profile')}
+                  onClick={() => navigateTo('profile')}
                 >
                   <IonIcon slot="start" icon={peopleOutline} />
                   <IonLabel>Profil</IonLabel>
@@ -3007,9 +3045,83 @@ export default function App() {
                 Abmelden
               </IonButton>
             </aside>
-            <main>{content}</main>
+
+            <main className="app-main">{content}</main>
           </div>
         </IonContent>
+
+        <nav className="mobile-tabbar" aria-label="Hauptnavigation">
+          {mobilePrimaryItems.map(([key, label]) => (
+            <button
+              type="button"
+              key={key}
+              className={view === key ? 'active' : ''}
+              onClick={() => navigateTo(key)}
+              aria-current={view === key ? 'page' : undefined}
+            >
+              <IonIcon icon={icons[key]} />
+              <span>{mobileLabels[key] || label}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            className={!primaryViews.includes(view) ? 'active' : ''}
+            onClick={() => setMobileMenuOpen(true)}
+            aria-label="Weitere Bereiche öffnen"
+          >
+            <IonIcon icon={appsOutline} />
+            <span>Mehr</span>
+          </button>
+        </nav>
+
+        <IonModal
+          isOpen={mobileMenuOpen}
+          onDidDismiss={() => setMobileMenuOpen(false)}
+          initialBreakpoint={0.72}
+          breakpoints={[0, 0.72, 1]}
+          className="mobile-menu-modal"
+        >
+          <IonContent>
+            <div className="mobile-menu-sheet">
+              <div className="mobile-menu-handle" />
+              <div className="mobile-menu-user">
+                <div className="avatar">{user.name[0]}</div>
+                <div>
+                  <strong>{user.name}</strong>
+                  <small>{user.email}</small>
+                </div>
+              </div>
+              <div className="mobile-menu-heading">
+                <div>
+                  <small>A+ WORKFORCE</small>
+                  <h2>Weitere Bereiche</h2>
+                </div>
+                <button type="button" onClick={() => setMobileMenuOpen(false)}>Fertig</button>
+              </div>
+              <div className="mobile-menu-grid">
+                {mobileMoreItems.map(([key, label]) => (
+                  <button
+                    type="button"
+                    key={key}
+                    className={view === key ? 'active' : ''}
+                    onClick={() => navigateTo(key)}
+                  >
+                    <span className="mobile-menu-icon"><IonIcon icon={icons[key]} /></span>
+                    <strong>{label}</strong>
+                  </button>
+                ))}
+                <button type="button" className={view === 'profile' ? 'active' : ''} onClick={() => navigateTo('profile')}>
+                  <span className="mobile-menu-icon"><IonIcon icon={peopleOutline} /></span>
+                  <strong>Profil</strong>
+                </button>
+              </div>
+              <button className="mobile-logout" type="button" onClick={logout}>
+                <IonIcon icon={exitOutline} />
+                Abmelden
+              </button>
+            </div>
+          </IonContent>
+        </IonModal>
       </IonPage>
     </IonApp>
   );

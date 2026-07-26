@@ -351,3 +351,117 @@
 .working-time-settings { display: grid; gap: 12px; }
 .working-time-setting { display: grid; grid-template-columns: minmax(170px, 1.2fr) 1fr 1fr auto; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 14px; }
 @media (max-width: 800px) { .working-time-setting { grid-template-columns: 1fr; } }
+
+/* mobile-first-app-shell-v1 */
+@media (max-width: 900px) {
+  .operations-grid.two {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .operations-panel {
+    border-color: rgba(228, 231, 236, .82);
+    box-shadow: 0 10px 28px rgba(16, 24, 40, .055);
+  }
+
+  .operations-actions,
+  .swap-actions {
+    width: 100%;
+  }
+
+  .operations-actions ion-button,
+  .swap-actions ion-button {
+    flex: 1 1 145px;
+    min-height: 44px;
+  }
+
+  .operations-modal {
+    padding: 20px 16px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .operations-modal-head {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    padding: 4px 0 12px;
+    background: #fff;
+  }
+
+  .operations-modal-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    padding: 14px 0 calc(8px + env(safe-area-inset-bottom));
+    background: #fff;
+  }
+}
+
+@media (max-width: 620px) {
+  .operations-stats {
+    margin-inline: -14px;
+    padding: 2px 14px 8px;
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+
+  .operations-stats::-webkit-scrollbar {
+    display: none;
+  }
+
+  .operations-stats ion-card {
+    min-width: 152px;
+    scroll-snap-align: start;
+    box-shadow: 0 10px 25px rgba(16, 24, 40, .06);
+  }
+
+  .operations-panel {
+    padding: 16px;
+    border-radius: 20px;
+  }
+
+  .operations-head {
+    gap: 10px;
+  }
+
+  .operations-head > div {
+    min-width: 0;
+  }
+
+  .operations-head p {
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .operations-row {
+    min-height: 64px;
+    padding: 14px 2px;
+  }
+
+  .report-fields,
+  .readiness-list,
+  .client-summary,
+  .working-time-setting {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .readiness-item {
+    min-height: 50px;
+    background: #fbfcfe;
+  }
+
+  .folder-scroll {
+    max-height: none;
+  }
+
+  .operations-form {
+    gap: 12px;
+  }
+
+  .operations-modal-actions ion-button {
+    flex: 1;
+    margin: 0;
+  }
+}
+
