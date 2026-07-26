@@ -1,0 +1,93 @@
+name: Verify WIW production authentication fix
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.head_ref == 'ops/verify-wiw-production-fix'
+    runs-on: ubuntu-latest
+    env:
+      HOST: ${{ secrets.HOST }}
+      SSHPASS: ${{ secrets.PASS }}
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Wait for deploy, run full WIW sync and verify working time
+        run: |
+          set -euo pipefail
+          set +x
+          sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE' > wiw-production-verification.txt 2>&1
+          set -euo pipefail
+          cd /opt/aplussolution
+
+          for attempt in $(seq 1 20); do
+            if grep -q 'USER_CONTEXT_CACHE_KEY' backend/core/wiw.py && docker compose exec -T backend python -c "from core.wiw import WhenIWorkClient; assert hasattr(WhenIWorkClient, 'resolve_user_context')" >/dev/null 2>&1; then
+              echo "DEPLOYED_FIX_VISIBLE true"
+              break
+            fi
+            if [ "$attempt" = 20 ]; then
+              echo "DEPLOYED_FIX_VISIBLE false"
+              exit 1
+            fi
+            sleep 20
+          done
+
+          docker compose exec -T backend python manage.py check
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from datetime import date, timedelta
+          from django.core.cache import cache
+          from core.models import IntegrationSyncRun, Shift, TimeEntry, WorkerProfile, WorkingTimeAccountRecord
+          from core.wiw import WhenIWorkClient
+          from core.working_time import fetch_attendance, sync_working_time
+          from core.wiw_sync import WhenIWorkSynchronizer
+
+          cache.delete(WhenIWorkClient.TOKEN_CACHE_KEY)
+          cache.delete(WhenIWorkClient.USER_CONTEXT_CACHE_KEY)
+          client = WhenIWorkClient()
+          token = client.login(force=True)
+          context = client.resolve_user_context(token, force=True)
+          shifts = client.collection('shifts', params={'limit': 1})
+          times = client.collection('times', params={'limit': 1})
+          print('WIW_CONTEXT_RESOLVED', bool(context))
+          print('WIW_SHIFTS_ACCESS', shifts.status_code, len(shifts.items))
+          print('WIW_TIMES_ACCESS', times.status_code, len(times.items))
+
+          today = date.today()
+          attendance, source, warning = fetch_attendance(client, today - timedelta(days=1), today + timedelta(days=1))
+          print('WIW_ATTENDANCE_PATH', source, len(attendance), bool(warning))
+
+          sync_run = WhenIWorkSynchronizer(client=client).sync('full')
+          print('WIW_FULL_SYNC_STATUS', sync_run.status)
+          print('WIW_FULL_SYNC_ERRORS', len(sync_run.errors or []))
+          assert sync_run.status in {'success', 'partial'}
+
+          working_log = sync_working_time(date(today.year, 1, 1), today, client=client)
+          print('WORKING_TIME_SYNC_STATUS', working_log.status)
+          print('WORKING_TIME_RECORDS_CREATED', working_log.records_count)
+          print('PRODUCTION_WIW_WORKERS', WorkerProfile.objects.exclude(wiw_user_id__isnull=True).exclude(wiw_user_id='').count())
+          print('PRODUCTION_WIW_SHIFTS', Shift.objects.exclude(wiw_shift_id__isnull=True).exclude(wiw_shift_id='').count())
+          print('PRODUCTION_WIW_TIMES', TimeEntry.objects.exclude(wiw_time_id__isnull=True).exclude(wiw_time_id='').count())
+          print('PRODUCTION_WORKING_TIME_ROWS', WorkingTimeAccountRecord.objects.count())
+          assert working_log.status in {'ok', 'warning'}
+          PY
+
+          docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null
+          curl -fsS https://solution.smarbiz.sbs/health/ >/dev/null
+          HTTP_CODE=$(curl -sS -o /tmp/login-check.json -w '%{http_code}' -X POST https://solution.smarbiz.sbs/api/auth/login/ -H 'Content-Type: application/json' --data '{"email":"invalid@example.com","password":"invalid"}')
+          test "$HTTP_CODE" != 502
+          test "$HTTP_CODE" != 503
+          echo "PUBLIC_LOGIN_HTTP $HTTP_CODE"
+          echo "WIW_PRODUCTION_FIX_VERIFIED true"
+          REMOTE
+          cat wiw-production-verification.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wiw-production-verification
+          path: wiw-production-verification.txt
+          retention-days: 1
