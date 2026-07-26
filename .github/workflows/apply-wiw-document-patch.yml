@@ -70,13 +70,28 @@ jobs:
           CSRF_TRUSTED_ORIGINS: http://localhost:8080
         run: pytest --nomigrations --cov=core --cov-report=term-missing --cov-fail-under=60
       - name: Run frontend tests and production build
+        id: frontend
+        continue-on-error: true
         working-directory: frontend
         env:
           VITE_API_URL: https://solution.smarbiz.sbs/api
         run: |
-          npm install --no-audit --no-fund
-          npm test
-          npm run build
+          set -o pipefail
+          {
+            npm install --no-audit --no-fund
+            npm test
+            npm run build
+          } 2>&1 | tee /tmp/frontend-validation.log
+      - name: Upload frontend validation log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-validation-log
+          path: /tmp/frontend-validation.log
+          retention-days: 1
+      - name: Fail when frontend validation failed
+        if: steps.frontend.outcome != 'success'
+        run: exit 1
       - name: Commit only the fully validated implementation
         run: |
           git config user.name 'github-actions[bot]'
