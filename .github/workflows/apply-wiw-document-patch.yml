@@ -44,6 +44,22 @@ jobs:
           base64 --decode /tmp/wiw-documents-tests-patch.b64 > /tmp/wiw-documents-tests-patch.tar.gz
           echo '63fc5b4e2d7c9b54da840acdb6c1c80c83fc953d216c1430f7c7be100fb86746  /tmp/wiw-documents-tests-patch.tar.gz' | sha256sum -c -
           tar -xzf /tmp/wiw-documents-tests-patch.tar.gz -C .
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('frontend/src/test/Operations.test.tsx')
+          text = path.read_text()
+          old = "vi.mock('ionicons/icons', () => new Proxy({}, { get: () => 'icon' }));"
+          icons = [
+              'alertCircleOutline', 'calendarOutline', 'checkmarkCircleOutline',
+              'cloudDownloadOutline', 'copyOutline', 'documentTextOutline',
+              'notificationsOutline', 'peopleOutline', 'refreshOutline',
+              'swapHorizontalOutline', 'trashOutline', 'warningOutline',
+          ]
+          new = "vi.mock('ionicons/icons', () => ({ " + ", ".join(f"{icon}: 'icon'" for icon in icons) + " }));"
+          if old not in text:
+              raise SystemExit('Expected icon mock was not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
           rm -rf .integration
           rm -f .github/workflows/apply-wiw-document-patch.yml
           rm -f .github/workflows/export-source-artifact.yml
