@@ -48,7 +48,8 @@ jobs:
           docker exec "$FRONTEND_ID" sh -c "grep -R -q 'Woche kopieren' /usr/share/nginx/html"
           docker exec "$FRONTEND_ID" sh -c "grep -R -q 'Zeiterfassung' /usr/share/nginx/html"
           echo 'DEPLOYED_FRONTEND_ACTIONS true'
-          TOKEN=$(docker compose exec -T backend python manage.py shell -c "from rest_framework_simplejwt.tokens import RefreshToken; from core.models import User; u=User.objects.filter(role='admin',is_active=True).order_by('date_joined').first(); print(str(RefreshToken.for_user(u).access_token))" | tail -n 1 | tr -d '\r')
+          TOKEN=$(docker compose exec -T backend python manage.py shell -c "from rest_framework_simplejwt.tokens import RefreshToken; from core.models import User; u=User.objects.filter(role='admin',is_active=True).order_by('date_joined').first(); print(str(RefreshToken.for_user(u).access_token))" < /dev/null | tail -n 1 | tr -d '\r')
+          test -n "$TOKEN"
           curl -fsS https://solution.smarbiz.sbs/api/document-catalog/ -H "Authorization: Bearer $TOKEN" -o /tmp/catalog-verify.json
           python3 - <<'PY'
           import json
