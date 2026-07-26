@@ -1,0 +1,136 @@
+name: Verify mobile-first production UI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.head_ref == 'ops/verify-mobile-first-production'
+    runs-on: ubuntu-latest
+    env:
+      HOST: ${{ secrets.HOST }}
+      SSHPASS: ${{ secrets.PASS }}
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Wait for mobile release and create temporary browser token
+        run: |
+          set -euo pipefail
+          set +x
+          for attempt in $(seq 1 30); do
+            if sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" "grep -q 'mobile-first-app-shell-v1' /opt/aplussolution/frontend/src/App.tsx"; then
+              break
+            fi
+            if [ "$attempt" = 30 ]; then
+              echo 'Mobile source was not deployed in time.'
+              exit 1
+            fi
+            sleep 20
+          done
+
+          sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          if ! docker compose exec -T frontend sh -c "grep -R -q 'mobile-first-app-shell-v1' /usr/share/nginx/html/assets" </dev/null; then
+            docker compose build --no-cache frontend </dev/null
+            docker compose up -d --force-recreate frontend caddy </dev/null
+          fi
+          docker compose exec -T backend python -c "import os,json; os.environ.setdefault('DJANGO_SETTINGS_MODULE','config.settings'); import django; django.setup(); from core.models import User; from rest_framework_simplejwt.tokens import RefreshToken; u=User.objects.filter(is_superuser=True).order_by('date_joined').first(); r=RefreshToken.for_user(u); print(json.dumps({'access':str(r.access_token),'refresh':str(r)}))" > /root/mobile-ui-tokens.json
+          chmod 600 /root/mobile-ui-tokens.json
+          REMOTE
+          sshpass -e scp -q -o StrictHostKeyChecking=no root@"$HOST":/root/mobile-ui-tokens.json ./mobile-ui-tokens.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install browser
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund playwright@1.52.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+
+      - name: Verify authenticated mobile layout and capture screenshots
+        run: |
+          cat > verify-mobile.cjs <<'JS'
+          const fs = require('fs');
+          const { chromium } = require('playwright');
+
+          (async () => {
+            const tokens = JSON.parse(fs.readFileSync('mobile-ui-tokens.json', 'utf8'));
+            const browser = await chromium.launch({ headless: true });
+            const context = await browser.newContext({
+              viewport: { width: 390, height: 844 },
+              deviceScaleFactor: 2,
+              isMobile: true,
+              hasTouch: true,
+              locale: 'de-DE',
+            });
+            const page = await context.newPage();
+            await page.goto('https://solution.smarbiz.sbs/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.evaluate(({ access, refresh }) => {
+              localStorage.setItem('access', access);
+              localStorage.setItem('refresh', refresh);
+            }, tokens);
+            await page.reload({ waitUntil: 'networkidle', timeout: 90000 });
+            await page.locator('.mobile-appbar').waitFor({ state: 'visible', timeout: 30000 });
+            await page.locator('.mobile-tabbar').waitFor({ state: 'visible', timeout: 30000 });
+
+            const layout = await page.evaluate(() => ({
+              viewport: window.innerWidth,
+              documentWidth: document.documentElement.scrollWidth,
+              appbarVisible: getComputedStyle(document.querySelector('.mobile-appbar')).display !== 'none',
+              tabbarVisible: getComputedStyle(document.querySelector('.mobile-tabbar')).display !== 'none',
+              tabCount: document.querySelectorAll('.mobile-tabbar button').length,
+            }));
+            if (!layout.appbarVisible || !layout.tabbarVisible) throw new Error('Mobile navigation is not visible');
+            if (layout.tabCount !== 5) throw new Error(`Expected 5 mobile tabs, found ${layout.tabCount}`);
+            if (layout.documentWidth > layout.viewport + 2) throw new Error(`Horizontal overflow: ${layout.documentWidth}px > ${layout.viewport}px`);
+            console.log('MOBILE_LAYOUT_OK', JSON.stringify(layout));
+
+            await page.screenshot({ path: 'mobile-dashboard.png', fullPage: true });
+            await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
+            await page.locator('.mobile-menu-sheet').waitFor({ state: 'visible', timeout: 10000 });
+            await page.screenshot({ path: 'mobile-more-menu.png', fullPage: true });
+
+            const operations = page.getByRole('button', { name: /Steuerzentrale/ });
+            if (await operations.count()) {
+              await operations.first().click();
+              await page.waitForLoadState('networkidle');
+              await page.locator('.operations-panel').first().waitFor({ state: 'visible', timeout: 30000 });
+              const operationsWidth = await page.evaluate(() => ({
+                viewport: window.innerWidth,
+                documentWidth: document.documentElement.scrollWidth,
+              }));
+              if (operationsWidth.documentWidth > operationsWidth.viewport + 2) {
+                throw new Error(`Operations horizontal overflow: ${operationsWidth.documentWidth}px > ${operationsWidth.viewport}px`);
+              }
+              console.log('MOBILE_OPERATIONS_OK', JSON.stringify(operationsWidth));
+              await page.screenshot({ path: 'mobile-steuerzentrale.png', fullPage: true });
+            }
+            await browser.close();
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          JS
+          node verify-mobile.cjs
+
+      - name: Remove temporary credentials
+        if: always()
+        run: |
+          rm -f mobile-ui-tokens.json verify-mobile.cjs
+          set +x
+          sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'rm -f /root/mobile-ui-tokens.json' || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mobile-production-screenshots
+          path: mobile-*.png
+          retention-days: 1
