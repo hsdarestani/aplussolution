@@ -41,7 +41,7 @@ def manager_user(db):
 @pytest.fixture
 def worker_user(db):
     user = User.objects.create_user('worker@example.com', 'StrongPass123!', first_name='Anna', last_name='Becker', phone='+491234', role=User.Role.WORKER, is_onboarded=True)
-    profile = WorkerProfile.objects.create(user=user, employee_number='MA-001', employment_type='minijob', monthly_hours='38.90', tariff_hourly_rate='14.50')
+    WorkerProfile.objects.create(user=user, employee_number='MA-001', employment_type='minijob', monthly_hours='38.90', tariff_hourly_rate='14.50')
     return user
 
 
@@ -89,18 +89,21 @@ def shift(worker_user, company, location, position):
 
 
 @pytest.fixture
-def auth_admin(api_client, admin_user):
-    api_client.force_authenticate(admin_user)
-    return api_client
+def auth_admin(admin_user):
+    client = APIClient()
+    client.force_authenticate(admin_user)
+    return client
 
 
 @pytest.fixture
-def auth_worker(api_client, worker_user):
-    api_client.force_authenticate(worker_user)
-    return api_client
+def auth_worker(worker_user):
+    client = APIClient()
+    client.force_authenticate(worker_user)
+    return client
 
 
 @pytest.fixture
-def auth_client(api_client, client_user):
-    api_client.force_authenticate(client_user)
-    return api_client
+def auth_client(client_user):
+    client = APIClient()
+    client.force_authenticate(client_user)
+    return client
