@@ -20,9 +20,7 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt
-      - name: Validate backend syntax
-        run: python -m compileall backend
-      - name: Run Django system and migration checks
+      - name: Validate backend syntax and Django configuration
         working-directory: backend
         env:
           DJANGO_SECRET_KEY: ci-validation-secret-only
@@ -31,16 +29,32 @@ jobs:
           CORS_ALLOWED_ORIGINS: http://localhost:8080
           CSRF_TRUSTED_ORIGINS: http://localhost:8080
         run: |
+          python -m compileall .
           python manage.py check
           python manage.py makemigrations --check --dry-run
+      - name: Run backend tests with coverage
+        working-directory: backend
+        env:
+          DJANGO_SECRET_KEY: ci-test-secret-only
+          DATABASE_URL: sqlite:///test.sqlite3
+          ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+          CORS_ALLOWED_ORIGINS: http://localhost:8080
+          CSRF_TRUSTED_ORIGINS: http://localhost:8080
+        run: pytest --nomigrations --cov=core --cov-report=term-missing --cov-report=xml --cov-fail-under=60
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install --no-audit --no-fund --package-lock=false
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test
       - name: Build frontend
         working-directory: frontend
         env:
           VITE_API_URL: https://solution.smarbiz.sbs/api
-        run: npm install --no-audit --no-fund && npm run build
+        run: npm run build
   deploy:
     if: github.event_name == 'push'
     needs: validate
@@ -57,12 +71,28 @@ jobs:
           test -n "$HOST" && test -n "$SSHPASS"
           sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'mkdir -p /opt/aplussolution'
           sshpass -e rsync -az --delete --exclude '.git' --exclude '.env' --exclude 'frontend/node_modules' -e 'ssh -o StrictHostKeyChecking=no' ./ root@"$HOST":/opt/aplussolution/
-      - name: Configure and start production
+      - name: Configure production secrets and start release
         env:
           SSHPASS: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
+          WIW_DEV_KEY: ${{ secrets.WIW_DEV_KEY }}
+          WIW_EMAIL: ${{ secrets.WIW_EMAIL }}
+          WIW_PASSWORD: ${{ secrets.WIW_PASSWORD }}
+          WIW_USER_ID: ${{ secrets.WIW_USER_ID }}
+          WIW_OPENAI_KEY: ${{ secrets.WIW_OPENAI_KEY }}
+          WIW_WEBHOOK_SECRET: ${{ secrets.WIW_WEBHOOK_SECRET }}
         run: |
-          sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" <<'REMOTE'
+          set -euo pipefail
+          test -n "$WIW_DEV_KEY" && test -n "$WIW_EMAIL" && test -n "$WIW_PASSWORD" && test -n "$WIW_USER_ID"
+          b64() { printf '%s' "$1" | base64 -w0; }
+          export WIW_DEV_KEY_B64="$(b64 "$WIW_DEV_KEY")"
+          export WIW_EMAIL_B64="$(b64 "$WIW_EMAIL")"
+          export WIW_PASSWORD_B64="$(b64 "$WIW_PASSWORD")"
+          export WIW_USER_ID_B64="$(b64 "$WIW_USER_ID")"
+          export WIW_OPENAI_KEY_B64="$(b64 "$WIW_OPENAI_KEY")"
+          export WIW_WEBHOOK_SECRET_B64="$(b64 "$WIW_WEBHOOK_SECRET")"
+          sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" \
+            "WIW_DEV_KEY_B64='$WIW_DEV_KEY_B64' WIW_EMAIL_B64='$WIW_EMAIL_B64' WIW_PASSWORD_B64='$WIW_PASSWORD_B64' WIW_USER_ID_B64='$WIW_USER_ID_B64' WIW_OPENAI_KEY_B64='$WIW_OPENAI_KEY_B64' WIW_WEBHOOK_SECRET_B64='$WIW_WEBHOOK_SECRET_B64' bash -s" <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
           if [ ! -f .env ]; then
@@ -78,11 +108,42 @@ jobs:
             printf 'Admin: admin@aplus-solution.de\nPasswort: %s\n' "$ADMIN_PASS" > /root/aplussolution-initial-admin.txt
             chmod 600 /root/aplussolution-initial-admin.txt
           fi
+          upsert_b64() {
+            key="$1"; encoded="$2"
+            [ -n "$encoded" ] || return 0
+            value=$(printf '%s' "$encoded" | base64 -d)
+            KEY="$key" VALUE="$value" python - <<'PY'
+          import os
+          from pathlib import Path
+          key, value = os.environ['KEY'], os.environ['VALUE']
+          path = Path('.env')
+          rows = path.read_text().splitlines()
+          replacement = f'{key}={value}'
+          for index, row in enumerate(rows):
+              if row.startswith(key + '='):
+                  rows[index] = replacement
+                  break
+          else:
+              rows.append(replacement)
+          path.write_text('\n'.join(rows) + '\n')
+          PY
+          }
+          upsert_b64 WIW_DEV_KEY "$WIW_DEV_KEY_B64"
+          upsert_b64 WIW_EMAIL "$WIW_EMAIL_B64"
+          upsert_b64 WIW_PASSWORD "$WIW_PASSWORD_B64"
+          upsert_b64 WIW_USER_ID "$WIW_USER_ID_B64"
+          upsert_b64 WIW_OPENAI_KEY "$WIW_OPENAI_KEY_B64"
+          upsert_b64 WIW_WEBHOOK_SECRET "$WIW_WEBHOOK_SECRET_B64"
+          grep -q '^WIW_WEBHOOK_SECRET=.' .env || printf 'WIW_WEBHOOK_SECRET=%s\n' "$(openssl rand -hex 32)" >> .env
+          if grep -q '^WIW_SYNC_ENABLED=' .env; then sed -i 's/^WIW_SYNC_ENABLED=.*/WIW_SYNC_ENABLED=1/' .env; else printf 'WIW_SYNC_ENABLED=1\n' >> .env; fi
           if ! command -v docker >/dev/null 2>&1; then curl -fsSL https://get.docker.com | sh; fi
           docker compose pull db redis caddy || true
           docker compose up -d --build --remove-orphans
-          docker compose ps
+          docker compose exec -T backend python manage.py migrate --noinput
           docker compose exec -T backend python manage.py check
+          docker compose exec -T backend python manage.py shell -c "from core.wiw import WhenIWorkClient; WhenIWorkClient().login(force=True); print('WIW authentication OK')"
           docker compose exec -T backend curl -fsS --retry 10 --retry-delay 5 http://127.0.0.1:8000/health/ >/dev/null
+          curl -fsS --retry 10 --retry-delay 5 https://solution.smarbiz.sbs/health/ >/dev/null
+          docker compose ps
           docker image prune -f
           REMOTE

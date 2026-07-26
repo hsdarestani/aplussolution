@@ -125,6 +125,7 @@ function Readiness({ data }: { data: any }) {
     ['E-Mail-Versand', data.email_delivery],
     ['Firmendaten', data.company_legal_data],
     ['AÜG-Angaben', data.aueg_data],
+    ['When I Work', data.wiw_configured],
     ['8 finale Vertragsvorlagen', data.final_contract_set_complete],
     ['Android-Signierung', data.android_signing_configured],
     ['iOS-Signierung', data.ios_signing_configured],
@@ -187,6 +188,14 @@ export default function Operations({ user }: { user: User }) {
   const [report, setReport] = useState<any>({ month: new Date().toISOString().slice(0, 7) });
   const [templateFile, setTemplateFile] = useState<File>();
   const [swapTargets, setSwapTargets] = useState<Record<string, string>>({});
+  const [wiwStatus, setWiwStatus] = useState<any>();
+  const [documentCatalog, setDocumentCatalog] = useState<any>();
+  const [orderText, setOrderText] = useState('');
+  const [parsedOrder, setParsedOrder] = useState<any>();
+  const [orderPackages, setOrderPackages] = useState<any[]>([]);
+  const [workingTime, setWorkingTime] = useState<any>({ employees: [] });
+  const [workingTimeRecords, setWorkingTimeRecords] = useState<any[]>([]);
+  const [workingTimeRange, setWorkingTimeRange] = useState<any>({ start: `${new Date().getFullYear()}-01-01`, end: new Date().toISOString().slice(0, 10) });
 
   const load = async () => {
     const overview = await api('operations/');
@@ -194,8 +203,20 @@ export default function Operations({ user }: { user: User }) {
     const folderData = await api('operations/folders/');
     setFolders(folderData);
     if (isManager(user)) {
-      const shifts = await api('shifts/?status=draft&ordering=starts_at');
+      const [shifts, wiw, catalog, packages, wtSettings, wtRecords] = await Promise.all([
+        api('shifts/?status=draft&ordering=starts_at'),
+        api('integrations/wiw/status/'),
+        api('document-catalog/'),
+        api('automation/orders/packages/'),
+        api('working-time/settings/'),
+        api('working-time/records/'),
+      ]);
       setDraftShifts(unpack(shifts));
+      setWiwStatus(wiw);
+      setDocumentCatalog(catalog);
+      setOrderPackages(unpack(packages));
+      setWorkingTime(wtSettings || { employees: [] });
+      setWorkingTimeRecords(unpack(wtRecords));
     }
   };
 
@@ -270,10 +291,67 @@ export default function Operations({ user }: { user: User }) {
     const form = new FormData();
     form.append('file', templateFile);
     try {
-      const result: any = await api('operations/templates/import/', { method: 'POST', body: form });
-      setToast(`${result.created} Vorlage(n) erstellt, ${result.updated} aktualisiert, ${result.errors?.length || 0} Fehler.`);
+      const result: any = await api('document-catalog/import-bundle/', { method: 'POST', body: form });
+      setToast(`${result.updated || 0} Quelldatei(en) installiert, ${result.errors?.length || 0} Fehler.`);
       setTemplateFile(undefined);
       setModal('');
+      await load();
+    } catch (reason: any) {
+      setToast(reason.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function syncWiw(mode: 'incremental' | 'full') {
+    await run('integrations/wiw/sync/', { mode }, `WIW-${mode === 'full' ? 'Vollabgleich' : 'Synchronisierung'} wurde gestartet.`);
+  }
+
+  async function parseOrder() {
+    setBusy(true);
+    try {
+      const result: any = await api('automation/orders/parse/', { method: 'POST', body: JSON.stringify({ text: orderText }) });
+      setParsedOrder(result);
+      setToast(`${result.shifts?.length || 0} Schicht(en) erkannt. Bitte prüfen und freigeben.`);
+    } catch (reason: any) {
+      setToast(reason.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approveParsedOrder() {
+    if (!parsedOrder) return;
+    const result = await run('automation/orders/approve/', { parsed: parsedOrder, raw_text: orderText }, 'OpenShifts wurden in When I Work erstellt.');
+    if (result) {
+      setOrderText('');
+      setParsedOrder(undefined);
+      setModal('');
+    }
+  }
+
+  async function generateClientContract(id: string) {
+    await run(`automation/orders/packages/${id}/generate/`, {}, 'Kundenvertrag wurde erstellt.');
+  }
+
+  async function syncWorkingTime() {
+    await run('working-time/sync/', workingTimeRange, 'Arbeitszeitkonten wurden synchronisiert.');
+  }
+
+  async function saveWorkingTimeSettings() {
+    await run('working-time/settings/', { employees: workingTime.employees }, 'Arbeitszeitkonto-Einstellungen wurden gespeichert.');
+  }
+
+  async function createWorkingTimeBackup() {
+    await run('working-time/backup/', {}, 'Arbeitszeitkonto-Backup wurde erstellt.');
+  }
+
+  async function discoverWiw() {
+    setBusy(true);
+    try {
+      const result: any = await api('integrations/wiw/discover/', { method: 'POST', body: '{}' });
+      const available = Object.values(result).filter((item: any) => item.supported).length;
+      setToast(`${available} WIW-Ressourcen wurden erfolgreich geprüft.`);
       await load();
     } catch (reason: any) {
       setToast(reason.message);
@@ -405,10 +483,58 @@ export default function Operations({ user }: { user: User }) {
           </div>
 
           <div className="operations-grid two">
+            <section className="operations-panel" data-testid="wiw-integration-panel">
+              <div className="operations-head"><div><h3>When I Work</h3><p>Personal, Orte, Positionen, Schichten, Zeiten und Abwesenheiten automatisch übernehmen.</p></div><IonBadge color={wiwStatus?.configured ? 'success' : 'warning'}>{wiwStatus?.configured ? 'Verbunden' : 'Nicht konfiguriert'}</IonBadge></div>
+              <div className="operations-actions">
+                <IonButton disabled={!wiwStatus?.configured || busy} onClick={() => syncWiw('incremental')}>Jetzt synchronisieren</IonButton>
+                <IonButton fill="outline" disabled={!wiwStatus?.configured || busy} onClick={() => syncWiw('full')}>Vollabgleich</IonButton>
+                <IonButton fill="clear" disabled={!wiwStatus?.configured || busy} onClick={discoverWiw}>API prüfen</IonButton>
+              </div>
+              {wiwStatus?.latest_sync && <div className="operations-note">Letzter Lauf: {wiwStatus.latest_sync.status} · {dateTime(wiwStatus.latest_sync.finished_at || wiwStatus.latest_sync.started_at)}</div>}
+              <div className="operations-note">WIW liefert Betriebsdaten wie Name, Kontakt, Position, Stundenlohn, Einsatzorte, Schichten und Zeiten. Steuer-ID, IBAN, Sozialversicherungsnummer und Unterschriften werden aus der digitalen Personalakte ergänzt.</div>
+            </section>
+            <section className="operations-panel" data-testid="document-catalog-panel">
+              <div className="operations-head"><div><h3>8 Dokumentmodelle</h3><p>Originalvorlagen, Pflichtfelder, PDF/DOCX und Mehrfachsignaturen.</p></div><IonBadge color={documentCatalog?.complete ? 'success' : 'warning'}>{documentCatalog?.documents?.filter((item: any) => item.source_installed).length || 0}/8 installiert</IonBadge></div>
+              <div className="folder-scroll">
+                {documentCatalog?.documents?.map((item: any) => <div className="folder-card" key={item.slug}><b>{item.name}</b><small>Version {item.version} · {item.source_format}</small><span>{item.source_installed ? 'Quelldatei installiert' : 'Quelldatei fehlt'} · Signaturen: {item.signature_roles?.join(', ') || 'keine'}</span></div>)}
+              </div>
+              <IonButton fill="outline" onClick={() => setModal('templates')}><IonIcon slot="start" icon={documentTextOutline} />Privates Vorlagenpaket importieren</IonButton>
+            </section>
+          </div>
+
+          <div className="operations-grid two">
+            <section className="operations-panel" data-testid="order-automation-panel">
+              <div className="operations-head"><div><h3>Auftragsautomation & ANÜ</h3><p>Deutschen Auftragstext analysieren, OpenShifts in WIW erzeugen und Kundenvertrag vorbereiten.</p></div><IonIcon icon={documentTextOutline} /></div>
+              <div className="operations-actions">
+                <IonButton onClick={() => setModal('order-parser')}>Auftrag einlesen</IonButton>
+                <IonButton fill="outline" onClick={() => run('automation/orders/sync-packages/', {}, 'WIW-Schichten wurden in Vertragspakete übernommen.')}>WIW-Pakete aktualisieren</IonButton>
+              </div>
+              <div className="folder-scroll">
+                {orderPackages.slice(0, 12).map((item: any) => <div className="folder-card" key={item.id}><b>{item.request_id} · {item.client_name}</b><small>{dateTime(item.first_shift_time)} · {item.shift_count} Schichten</small><span>Status: {item.status}</span>{item.status !== 'generated' && <IonButton size="small" fill="outline" onClick={() => generateClientContract(item.id)}>ANÜ-Vertrag erstellen</IonButton>}</div>)}
+                {!orderPackages.length && <Empty>Noch keine Auftragspakete vorhanden.</Empty>}
+              </div>
+            </section>
+            <section className="operations-panel" data-testid="working-time-panel">
+              <div className="operations-head"><div><h3>Arbeitszeitkonto</h3><p>Ist-/Sollstunden, Plusstunden, Übertrag, Auszahlung, Korrektur und kumulierter Saldo.</p></div><IonIcon icon={calendarOutline} /></div>
+              <div className="report-fields">
+                <IonInput fill="outline" type="date" label="Von" labelPlacement="floating" value={workingTimeRange.start} onIonInput={(event) => setWorkingTimeRange({ ...workingTimeRange, start: value(event) })} />
+                <IonInput fill="outline" type="date" label="Bis" labelPlacement="floating" value={workingTimeRange.end} onIonInput={(event) => setWorkingTimeRange({ ...workingTimeRange, end: value(event) })} />
+              </div>
+              <div className="operations-actions">
+                <IonButton onClick={syncWorkingTime}>Aus WIW synchronisieren</IonButton>
+                <IonButton fill="outline" onClick={() => setModal('working-time-settings')}>Einstellungen</IonButton>
+                <IonButton fill="outline" onClick={() => download('working-time/export/xlsx/', 'arbeitszeitkonto.xlsx')}>Excel</IonButton>
+                <IonButton fill="outline" onClick={() => download('working-time/export/csv/', 'arbeitszeitkonto.csv')}>CSV</IonButton>
+                <IonButton fill="clear" onClick={createWorkingTimeBackup}>Backup</IonButton>
+              </div>
+              <div className="operations-note">{workingTimeRecords.length} Monatsdatensätze · {workingTime.employees?.length || 0} Mitarbeiter. Manuelle Auszahlungen und Korrekturen bleiben bei jeder WIW-Synchronisierung erhalten.</div>
+            </section>
+          </div>
+
+          <div className="operations-grid two">
             <section className="operations-panel">
               <div className="operations-head"><div><h3>Produktionsbereitschaft</h3><p>Externe Credentials und finale Inhalte.</p></div><IonIcon icon={checkmarkCircleOutline} /></div>
               <Readiness data={data.readiness} />
-              <IonButton fill="outline" onClick={() => setModal('templates')}><IonIcon slot="start" icon={documentTextOutline} />Vertragsvorlagen importieren</IonButton>
             </section>
             <section className="operations-panel">
               <div className="operations-head"><div><h3>Digitale Akten</h3><p>Vollständigkeit je Mitarbeiter und Kunde.</p></div><IonIcon icon={peopleOutline} /></div>
@@ -496,9 +622,20 @@ export default function Operations({ user }: { user: User }) {
         <div className="operations-note full">Die Zielwoche wird immer Montag bis Sonntag berechnet. Neue Schichten starten als Entwurf.</div>
       </Modal>
 
-      <Modal open={modal === 'templates'} title="Vertragsvorlagen importieren" close={() => setModal('')} save={importTemplates} busy={busy} saveLabel="JSON importieren">
-        <label className="operations-file full"><span>JSON-Datei mit einer oder mehreren Vorlagen</span><input type="file" accept=".json,application/json" onChange={(event) => setTemplateFile(event.target.files?.[0])} /><b>{templateFile?.name || 'Keine Datei ausgewählt'}</b></label>
-        <div className="operations-note full">Pflichtfelder: name, kind, version, schema und html_template. Bestehende Kombinationen aus Name und Version werden aktualisiert.</div>
+      <Modal open={modal === 'templates'} title="Privates Dokumentvorlagenpaket importieren" close={() => setModal('')} save={importTemplates} busy={busy} saveLabel="ZIP importieren">
+        <label className="operations-file full"><span>ZIP-Paket mit manifest.json und den acht Originalvorlagen</span><input type="file" accept=".zip,application/zip" onChange={(event) => setTemplateFile(event.target.files?.[0])} /><b>{templateFile?.name || 'Keine Datei ausgewählt'}</b></label>
+        <div className="operations-note full">Das Paket wird anhand der SHA-256-Prüfsummen validiert. Die privaten Originaldateien werden nicht im öffentlichen Repository gespeichert.</div>
+      </Modal>
+
+      <Modal open={modal === 'order-parser'} title="Auftrag analysieren und OpenShifts erstellen" close={() => setModal('')} save={parsedOrder ? approveParsedOrder : parseOrder} busy={busy} saveLabel={parsedOrder ? 'Prüfen & in WIW erstellen' : 'Mit AI analysieren'}>
+        <IonTextarea className="full" autoGrow label="Deutscher Auftragstext" labelPlacement="floating" fill="outline" value={orderText} onIonInput={(event) => { setOrderText(value(event)); setParsedOrder(undefined); }} />
+        {parsedOrder && <div className="operations-note full"><b>{parsedOrder.request_id}</b><br/>{parsedOrder.shifts?.map((item: any, index: number) => <span key={index}>{item.date} · {item.start_time}–{item.end_time} · {item.count}× {item.role} · {item.site_text}<br/></span>)}</div>}
+      </Modal>
+
+      <Modal open={modal === 'working-time-settings'} title="Arbeitszeitkonto-Einstellungen" close={() => setModal('')} save={saveWorkingTimeSettings} busy={busy} saveLabel="Einstellungen speichern">
+        <div className="full working-time-settings">
+          {workingTime.employees?.map((employee: any, index: number) => <div className="working-time-setting" key={employee.worker_id}><b>{employee.employee_name}</b><IonInput type="number" label="Monatliche Sollstunden" labelPlacement="floating" fill="outline" value={employee.monthly_limit} onIonInput={(event) => { const employees = [...workingTime.employees]; employees[index] = { ...employee, monthly_limit: value(event) }; setWorkingTime({ ...workingTime, employees }); }} /><IonInput type="number" label="Stundensatz" labelPlacement="floating" fill="outline" value={employee.hourly_rate} onIonInput={(event) => { const employees = [...workingTime.employees]; employees[index] = { ...employee, hourly_rate: value(event) }; setWorkingTime({ ...workingTime, employees }); }} /><IonItem lines="none"><IonLabel>Aktiv</IonLabel><IonToggle checked={employee.active} onIonChange={(event) => { const employees = [...workingTime.employees]; employees[index] = { ...employee, active: event.detail.checked }; setWorkingTime({ ...workingTime, employees }); }} /></IonItem></div>)}
+        </div>
       </Modal>
 
       <IonToast isOpen={!!toast} message={toast} duration={4500} onDidDismiss={() => setToast('')} />

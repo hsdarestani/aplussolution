@@ -20,7 +20,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .models import *
 from .serializers import *
 from .permissions import IsAdminOrManager
-from .services import audit, render_contract_pdf, sign_contract
+from .services import audit, sign_contract
+from .document_engine import DocumentGenerationError, contract_data, generate_contract_files, generate_worker_packet, validate_required_fields
 from . import oauth
 
 
@@ -113,6 +114,15 @@ def create_worker_account(data):
             extra_allowance=data.get('extra_allowance') or 0,
             skills=data.get('skills') or [],
         )
+        master_payload = {
+            key: data.get(key) for key in [
+                'salutation', 'street', 'postal_code', 'city', 'birth_date', 'birth_name',
+                'birth_place', 'birth_country', 'nationality', 'social_insurance_number',
+                'health_insurance_name', 'insurance_type', 'tax_identification_number',
+                'tax_class', 'iban', 'bank_account_holder', 'bank_name', 'signature_place',
+            ] if data.get(key) not in (None, '')
+        }
+        EmployeeMasterData.objects.create(worker=worker, data=master_payload, source_map={key: 'administration' for key in master_payload})
     return worker, password
 
 
@@ -330,6 +340,13 @@ class WorkerViewSet(ManagerMutationMixin, BaseModelViewSet):
         return Response({'created': created, 'errors': errors, 'credentials': credentials})
 
     @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
+    def generate_packet(self, request, pk=None):
+        worker = self.get_object()
+        contracts = generate_worker_packet(worker, created_by=request.user, variables=request.data.get('variables') or {})
+        audit(request, 'worker.document_packet_generated', worker, {'contracts': [str(item.id) for item in contracts]})
+        return Response(ContractSerializer(contracts, many=True, context={'request': request}).data, status=201)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
     def archive(self, request, pk=None):
         worker = self.get_object()
         worker.active = False
@@ -363,7 +380,7 @@ class OrderViewSet(BaseModelViewSet):
 
     def perform_create(self, serializer):
         if self.request.user.role not in {'client', 'admin', 'manager'}:
-            raise ValidationError('Nur Kunden oder die Administration dürfen Bewertungen abgeben.')
+            raise ValidationError('Nur Kunden oder die Administration dürfen Aufträge anlegen.')
         values = {'created_by': self.request.user}
         if self.request.user.role == 'client':
             values['client'] = self.request.user.client_companies.first()
@@ -579,9 +596,9 @@ class ContractTemplateViewSet(BaseModelViewSet):
 
 
 class ContractViewSet(ManagerMutationMixin, BaseModelViewSet):
-    queryset = Contract.objects.select_related('template', 'worker__user', 'client').all()
+    queryset = Contract.objects.select_related('template', 'worker__user', 'client').prefetch_related('signatures').all()
     serializer_class = ContractSerializer
-    filterset_fields = ['status', 'template__kind', 'worker', 'client']
+    filterset_fields = ['status', 'template__kind', 'worker', 'client', 'template__slug']
 
     def get_queryset(self):
         user = self.request.user
@@ -595,35 +612,53 @@ class ContractViewSet(ManagerMutationMixin, BaseModelViewSet):
         obj = serializer.save(created_by=self.request.user)
         audit(self.request, 'contract.created', obj)
 
+    @action(detail=True, methods=['get'])
+    def preview_data(self, request, pk=None):
+        contract = self.get_object()
+        data = contract_data(contract)
+        missing = []
+        try:
+            validate_required_fields(contract.template, data)
+        except DocumentGenerationError as exc:
+            missing = [item for item in contract.template.schema.get('fields', []) if item.get('required') and data.get(item['name']) in (None, '', [], {})]
+            return Response({'data': data, 'missing': missing, 'ready': False, 'detail': str(exc)})
+        return Response({'data': data, 'missing': [], 'ready': True})
+
     @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
     def generate_pdf(self, request, pk=None):
         contract = self.get_object()
-        contract.pdf.save(f'{contract.id}.pdf', render_contract_pdf(contract))
-        contract.status = Contract.Status.READY
-        contract.save()
-        audit(request, 'contract.pdf_generated', contract)
+        try:
+            generate_contract_files(contract)
+        except DocumentGenerationError as exc:
+            return Response({'detail': str(exc)}, status=400)
+        audit(request, 'contract.document_generated', contract)
         return Response(self.get_serializer(contract).data)
 
     @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
     def send(self, request, pk=None):
         contract = self.get_object()
         if not contract.pdf:
-            contract.pdf.save(f'{contract.id}.pdf', render_contract_pdf(contract))
+            try:
+                generate_contract_files(contract)
+            except DocumentGenerationError as exc:
+                return Response({'detail': str(exc)}, status=400)
         contract.status = Contract.Status.SENT
         contract.sent_at = timezone.now()
-        contract.save()
+        contract.save(update_fields=['status', 'sent_at', 'updated_at'])
         recipients = list(User.objects.filter(role__in=['admin', 'manager'], is_active=True))
         if contract.worker_id:
             recipients.append(contract.worker.user)
         if contract.client_id:
             recipients.extend(contract.client.contacts.filter(is_active=True))
         for recipient in {item.pk: item for item in recipients}.values():
-            Notification.objects.create(
+            Notification.objects.get_or_create(
                 user=recipient,
                 kind=f'contract-sent-{contract.id}',
-                title='Vertrag zur Prüfung bereit',
-                body=contract.title,
-                action_url='/contracts',
+                defaults={
+                    'title': 'Dokument zur Prüfung bereit',
+                    'body': contract.title,
+                    'action_url': '/contracts',
+                },
             )
         audit(request, 'contract.sent', contract)
         return Response(self.get_serializer(contract).data)
@@ -631,9 +666,19 @@ class ContractViewSet(ManagerMutationMixin, BaseModelViewSet):
     @action(detail=True, methods=['post'])
     def sign(self, request, pk=None):
         contract = self.get_object()
-        if contract.status not in {Contract.Status.READY, Contract.Status.SENT}:
-            return Response({'detail': 'Der Vertrag kann aktuell nicht unterzeichnet werden.'}, status=400)
-        sign_contract(contract, request.data.get('name', '').strip(), request.data.get('signature', ''), request)
+        if contract.status not in {Contract.Status.READY, Contract.Status.SENT, Contract.Status.SIGNED}:
+            return Response({'detail': 'Das Dokument kann aktuell nicht unterzeichnet werden.'}, status=400)
+        try:
+            sign_contract(
+                contract,
+                str(request.data.get('name', '')).strip(),
+                request.data.get('signature', ''),
+                request,
+                requested_role=request.data.get('role'),
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=400)
+        contract.refresh_from_db()
         return Response(self.get_serializer(contract).data)
 
 
@@ -690,6 +735,8 @@ class RatingViewSet(BaseModelViewSet):
         return self.queryset.filter(client__contacts=self.request.user)
 
     def perform_create(self, serializer):
+        if self.request.user.role not in {'client', 'admin', 'manager'}:
+            raise ValidationError('Nur Kunden oder die Administration dürfen Bewertungen abgeben.')
         values = {'created_by': self.request.user}
         if self.request.user.role == 'client':
             values['client'] = self.request.user.client_companies.first()

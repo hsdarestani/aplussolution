@@ -347,3 +347,7 @@
 }
 
 .swap-target { min-width: 150px; border: 1px solid var(--line); border-radius: 10px; padding-inline: 8px; }
+
+.working-time-settings { display: grid; gap: 12px; }
+.working-time-setting { display: grid; grid-template-columns: minmax(170px, 1.2fr) 1fr 1fr auto; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 14px; }
+@media (max-width: 800px) { .working-time-setting { grid-template-columns: 1fr; } }

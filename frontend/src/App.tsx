@@ -1728,22 +1728,14 @@ function Contracts({ user }: { user: User }) {
     void load();
   }, []);
 
+  const selectedTemplate = templates.find((item) => item.id === form.template);
+  const variableFields = (selectedTemplate?.schema?.fields || []).filter((item: any) =>
+    !item.source || String(item.source).startsWith('contract.variables.'),
+  );
+
   async function create() {
     setBusy(true);
-    const worker = workers.find((item) => item.id === form.worker);
-    const variables = {
-      company_name: 'A+ Solution GmbH',
-      employee_name: worker?.user_detail?.name || '',
-      einsatzbereich: form.einsatzbereich || '',
-      start_date: form.starts_on || '',
-      end_date: form.ends_on || '',
-      neuanstellung: form.neuanstellung !== false,
-      taetigkeit: form.taetigkeit || '',
-      employment_type: form.employment_type || worker?.employment_type || '',
-      monthly_hours: form.monthly_hours || worker?.monthly_hours || '',
-      tariff_hourly_rate: form.tariff_hourly_rate || worker?.tariff_hourly_rate || '',
-      extra_allowance: form.extra_allowance || worker?.extra_allowance || '0.00',
-    };
+    const variables = { ...(form.variables || {}) };
     try {
       await api('contracts/', {
         method: 'POST',
@@ -1865,9 +1857,9 @@ function Contracts({ user }: { user: User }) {
                 )}
               </div>
             )}
-            {['client', 'worker'].includes(user.role) && ['ready', 'sent'].includes(contract.status) && (
+            {(['client', 'worker'].includes(user.role) || isManager(user)) && ['ready', 'sent', 'signed'].includes(contract.status) && !contract.signatures?.some((item: any) => item.role === (isManager(user) ? 'employer' : user.role === 'worker' ? 'employee' : 'client')) && (
               <IonButton size="small" onClick={() => setSelected(contract)}>
-                Unterschreiben
+                {isManager(user) ? 'Als Arbeitgeber unterschreiben' : 'Unterschreiben'}
               </IonButton>
             )}
           </div>
@@ -1887,7 +1879,7 @@ function Contracts({ user }: { user: User }) {
           label="Vorlage *"
           labelPlacement="floating"
           value={form.template}
-          onIonChange={(event) => setForm({ ...form, template: value(event) })}
+          onIonChange={(event) => { const id = value(event); const template = templates.find((item) => item.id === id); setForm({ ...form, template: id, title: form.title || template?.name || '', variables: {} }); }}
         >
           {templates.map((template) => (
             <IonSelectOption value={template.id} key={template.id}>
@@ -1954,55 +1946,18 @@ function Contracts({ user }: { user: User }) {
           value={form.reminder_date}
           onIonInput={(event) => setForm({ ...form, reminder_date: value(event) })}
         />
-        <div className="form-divider">Variablen für das Grundmuster</div>
-        <IonItem lines="none" className="toggle-field">
-          <IonLabel>Neuanstellung</IonLabel>
-          <IonToggle checked={form.neuanstellung !== false} onIonChange={(event) => setForm({ ...form, neuanstellung: event.detail.checked })} />
-        </IonItem>
-        <IonSelect fill="outline" label="Arbeitszeit / Beschäftigungsart" labelPlacement="floating" value={form.employment_type} onIonChange={(event) => setForm({ ...form, employment_type: value(event) })}>
-          <IonSelectOption value="minijob">Minijob</IonSelectOption>
-          <IonSelectOption value="teilzeit">Teilzeit</IonSelectOption>
-          <IonSelectOption value="vollzeit">Vollzeit</IonSelectOption>
-          <IonSelectOption value="student">Studentische Aushilfe</IonSelectOption>
-        </IonSelect>
-        <IonInput
-          fill="outline"
-          label="1b Einsatzbereich"
-          labelPlacement="floating"
-          value={form.einsatzbereich}
-          onIonInput={(event) => setForm({ ...form, einsatzbereich: value(event) })}
-        />
-        <IonInput
-          fill="outline"
-          label="Tätigkeit"
-          labelPlacement="floating"
-          value={form.taetigkeit}
-          onIonInput={(event) => setForm({ ...form, taetigkeit: value(event) })}
-        />
-        <IonInput
-          fill="outline"
-          type="number"
-          label="Monatsstunden"
-          labelPlacement="floating"
-          value={form.monthly_hours}
-          onIonInput={(event) => setForm({ ...form, monthly_hours: value(event) })}
-        />
-        <IonInput
-          fill="outline"
-          type="number"
-          label="Stundenlohn (€)"
-          labelPlacement="floating"
-          value={form.tariff_hourly_rate}
-          onIonInput={(event) => setForm({ ...form, tariff_hourly_rate: value(event) })}
-        />
-        <IonInput
-          fill="outline"
-          type="number"
-          label="Zulage (€)"
-          labelPlacement="floating"
-          value={form.extra_allowance}
-          onIonInput={(event) => setForm({ ...form, extra_allowance: value(event) })}
-        />
+        {!!variableFields.length && <div className="form-divider">Dokumentspezifische Angaben</div>}
+        {variableFields.map((field: any) => {
+          const current = form.variables?.[field.name] ?? '';
+          const updateVariable = (next: any) => setForm({ ...form, variables: { ...(form.variables || {}), [field.name]: next } });
+          if (field.type === 'boolean') {
+            return <IonItem lines="none" className="toggle-field" key={field.name}><IonLabel>{field.label}{field.required ? ' *' : ''}</IonLabel><IonToggle checked={!!current} onIonChange={(event) => updateVariable(event.detail.checked)} /></IonItem>;
+          }
+          if (field.type === 'choice') {
+            return <IonSelect fill="outline" label={`${field.label}${field.required ? ' *' : ''}`} labelPlacement="floating" value={current} onIonChange={(event) => updateVariable(value(event))} key={field.name}>{(field.choices || []).map((choice: string) => <IonSelectOption value={choice} key={choice}>{choice}</IonSelectOption>)}</IonSelect>;
+          }
+          return <IonInput fill="outline" type={field.type === 'date' ? 'date' : ['number', 'money'].includes(field.type) ? 'number' : 'text'} label={`${field.label}${field.required ? ' *' : ''}`} labelPlacement="floating" value={current} onIonInput={(event) => updateVariable(value(event))} key={field.name} />;
+        })}
       </FormModal>
 
       <FormModal

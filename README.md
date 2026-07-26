@@ -93,3 +93,16 @@ Code und Bedienoberfläche sind vorbereitet; folgende Inhalte können nicht aus 
 ## Rechtlicher Hinweis
 
 Die Software ersetzt keine Rechts- oder Steuerberatung. Vertragsmuster, Tarifdaten, AÜG-Angaben, elektronische Signaturstufe, Datenschutztexte und Aufbewahrungsfristen müssen vor Produktivnutzung fachlich freigegeben werden.
+
+## Migration der früheren WIW-WordPress-Plugins
+
+Die Funktionen von **WIW SaaS V3** und **WIW Arbeitszeitkonto Add-on** sind im Django-/Ionic-Portal unter Auftragsautomation und Arbeitszeitkonto integriert. API-Zugangsdaten werden ausschließlich aus Server-Umgebungsvariablen gelesen.
+
+Historische WordPress-Datensätze wie manuelle Arbeitszeitkorrekturen oder alte Revisionsstände sind nicht Bestandteil des PHP-Quellcodes. Ein privater JSON-Export kann ohne Ablage im öffentlichen Repository importiert werden:
+
+```bash
+python manage.py import_legacy_wiw_data /privater/pfad/wiw-export.json --dry-run
+python manage.py import_legacy_wiw_data /privater/pfad/wiw-export.json
+```
+
+Erwartete Bereiche im JSON sind optional: `contracts`, `revisions`, `settings`, `records` und `logs`. Mitarbeiter werden über ihre When-I-Work-User-ID zugeordnet.

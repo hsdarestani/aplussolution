@@ -111,3 +111,49 @@ def send_shift_reminders():
                 fail_silently=True,
             )
     return count
+
+
+@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3})
+def sync_when_i_work(self, mode='incremental', triggered_by_id=None):
+    from .models import User
+    from .wiw_sync import WhenIWorkSynchronizer
+    user = User.objects.filter(pk=triggered_by_id).first() if triggered_by_id else None
+    run = WhenIWorkSynchronizer(triggered_by=user).sync(mode=mode)
+    return {'id': str(run.id), 'status': run.status, 'counts': run.counts, 'errors': run.errors}
+
+
+@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3})
+def process_wiw_webhook(self, event_id):
+    from .models import WebhookEvent
+    from .wiw_sync import WhenIWorkSynchronizer
+    event = WebhookEvent.objects.get(pk=event_id)
+    try:
+        run = WhenIWorkSynchronizer().sync(mode='incremental')
+        event.processed_at = timezone.now()
+        event.processing_error = ''
+        event.save(update_fields=['processed_at', 'processing_error', 'updated_at'])
+        return {'event': str(event.id), 'sync': str(run.id), 'status': run.status}
+    except Exception as exc:
+        event.processing_error = str(exc)
+        event.save(update_fields=['processing_error', 'updated_at'])
+        raise
+
+
+@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3})
+def generate_due_client_contracts(self):
+    from .order_automation import generate_due_client_contracts as run
+    return run()
+
+
+@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3})
+def sync_working_time_current_year(self):
+    from .working_time import sync_working_time
+    today = timezone.localdate()
+    log = sync_working_time(today.replace(month=1, day=1), today)
+    return {'id': str(log.id), 'status': log.status, 'records_count': log.records_count}
+
+
+@shared_task
+def backup_working_time():
+    from .working_time import create_backup
+    return create_backup('weekly')
