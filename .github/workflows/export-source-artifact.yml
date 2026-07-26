@@ -2,8 +2,8 @@ name: Export source artifact
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ops/export-source-for-integration]
+  pull_request:
+    branches: [main]
 
 jobs:
   export:
