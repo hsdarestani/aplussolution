@@ -1,0 +1,60 @@
+name: Verify production and prepare template key
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.head_ref == 'ops/verify-production-and-template-install'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SSH tooling
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Verify live deployment and generate encryption key
+        env:
+          SSHPASS: ${{ secrets.PASS }}
+          HOST: ${{ secrets.HOST }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$SSHPASS"
+          for attempt in $(seq 1 24); do
+            if sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'test -f /opt/aplussolution/backend/core/order_automation.py'; then
+              break
+            fi
+            if [ "$attempt" -eq 24 ]; then
+              echo 'The merged release did not appear on the server in time.' >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          test -f backend/core/order_automation.py
+          test -f backend/core/working_time.py
+          docker compose ps
+          docker compose exec -T backend python manage.py migrate --check
+          docker compose exec -T backend python manage.py check
+          docker compose exec -T backend python manage.py shell -c "from core.wiw import WhenIWorkClient; WhenIWorkClient().login(force=True); print('WIW authentication OK')"
+          docker compose exec -T backend python manage.py shell -c "from core.document_engine import seed_document_catalog; from core.models import ContractTemplate; seed_document_catalog(); print('Document catalog:', ContractTemplate.objects.filter(required_document=True).count(), 'templates; installed sources:', ContractTemplate.objects.filter(required_document=True, source_file__isnull=False).exclude(source_file='').count())"
+          docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null
+          curl -fsS https://solution.smarbiz.sbs/health/ >/dev/null
+          if [ ! -f /root/aplus-template-private.pem ]; then
+            umask 077
+            openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out /root/aplus-template-private.pem
+          fi
+          chmod 600 /root/aplus-template-private.pem
+          openssl pkey -in /root/aplus-template-private.pem -pubout -out /tmp/aplus-template-public.pem
+          REMOTE
+          sshpass -e scp -o StrictHostKeyChecking=no root@"$HOST":/tmp/aplus-template-public.pem ./aplus-template-public.pem
+          openssl pkey -pubin -in ./aplus-template-public.pem -text -noout >/dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aplus-template-public-key
+          path: aplus-template-public.pem
+          retention-days: 1
