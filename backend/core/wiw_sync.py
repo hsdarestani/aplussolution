@@ -2,6 +2,7 @@ from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
+from dateutil.parser import parse as parse_flexible_datetime
 from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
@@ -68,10 +69,19 @@ def as_datetime(value):
         return None
     if isinstance(value, datetime):
         result = value
+    elif isinstance(value, (int, float)) or str(value).strip().isdigit():
+        try:
+            result = datetime.fromtimestamp(float(value), tz=timezone.get_current_timezone())
+        except (OverflowError, OSError, TypeError, ValueError):
+            return None
     else:
-        result = parse_datetime(str(value))
-    if not result:
-        return None
+        raw = str(value).strip()
+        result = parse_datetime(raw)
+        if not result:
+            try:
+                result = parse_flexible_datetime(raw)
+            except (OverflowError, TypeError, ValueError):
+                return None
     if timezone.is_naive(result):
         result = timezone.make_aware(result, timezone.get_current_timezone())
     return result
