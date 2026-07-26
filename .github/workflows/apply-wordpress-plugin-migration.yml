@@ -83,6 +83,8 @@ jobs:
           python manage.py makemigrations --check --dry-run
 
       - name: Run complete backend test suite
+        id: backend
+        continue-on-error: true
         if: steps.staged.outputs.present == 'true'
         working-directory: backend
         env:
@@ -91,7 +93,21 @@ jobs:
           ALLOWED_HOSTS: localhost,127.0.0.1,testserver
           CORS_ALLOWED_ORIGINS: http://localhost:8080
           CSRF_TRUSTED_ORIGINS: http://localhost:8080
-        run: pytest --nomigrations --cov=core --cov-report=term-missing --cov-fail-under=60
+        run: |
+          set -o pipefail
+          pytest --nomigrations --cov=core --cov-report=term-missing --cov-fail-under=60 2>&1 | tee /tmp/backend-migration-tests.log
+
+      - name: Upload backend test log
+        if: always() && steps.staged.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-migration-tests-log
+          path: /tmp/backend-migration-tests.log
+          retention-days: 1
+
+      - name: Stop after backend failure
+        if: steps.backend.outcome != 'success'
+        run: exit 1
 
       - name: Run frontend tests and production build
         if: steps.staged.outputs.present == 'true'
