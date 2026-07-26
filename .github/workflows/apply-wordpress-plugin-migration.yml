@@ -3,17 +3,19 @@ name: Apply WordPress workflow migration
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [feature/wiw-document-automation-tests]
 
 permissions:
   contents: write
 
 concurrency:
-  group: wordpress-migration-${{ github.head_ref }}
+  group: wordpress-migration-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   migrate-and-test:
-    if: github.head_ref == 'feature/wiw-document-automation-tests'
+    if: github.event_name == 'push' || github.head_ref == 'feature/wiw-document-automation-tests'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
