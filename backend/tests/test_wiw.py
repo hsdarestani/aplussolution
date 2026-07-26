@@ -162,3 +162,16 @@ def test_status_endpoint_never_returns_secrets(auth_admin, wiw_settings):
     assert 'dev-secret' not in body
     assert 'password-secret' not in body
     assert 'tax_identification_number' in response.data['not_available_from_wiw']
+
+@pytest.mark.django_db
+def test_wiw_datetime_parser_accepts_rfc_2822_and_unix_values():
+    from core.wiw_sync import as_datetime
+
+    rfc_value = as_datetime('Tue, 28 Jul 2026 16:00:00 +0200')
+    unix_value = as_datetime(1785254400)
+
+    assert rfc_value is not None
+    assert rfc_value.isoformat() == '2026-07-28T16:00:00+02:00'
+    assert unix_value is not None
+    assert timezone.is_aware(unix_value)
+
