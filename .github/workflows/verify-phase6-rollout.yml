@@ -1,0 +1,51 @@
+name: Verify Phase 6 production rollout
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  verify-production:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Wait for Phase 6 production markers
+        env:
+          HOST: ${{ secrets.HOST }}
+          SSHPASS: ${{ secrets.PASS }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 40); do
+            if sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          grep -F -q "if(user.role==='client')" frontend/src/ScheduleV2.tsx
+          grep -F -q "KUNDENPORTAL" frontend/src/ScheduleV2.tsx
+          grep -F -q "Schicht freigeben?" frontend/src/ScheduleV2.tsx
+          grep -F -q "Laufenden Timer beenden?" frontend/src/AttendanceV3.tsx
+          grep -F -q "Originalvorlage installieren" frontend/src/DocumentCenterV5.tsx
+          docker compose exec -T frontend sh -c "grep -R -F -q 'Geplante Einsätze und aktueller Besetzungsstatus' /usr/share/nginx/html/assets && grep -R -F -q 'Schicht freigeben?' /usr/share/nginx/html/assets"
+          REMOTE
+            then
+              echo "Phase 6 production markers detected."
+              break
+            fi
+            if [ "$attempt" = 40 ]; then
+              echo 'Phase 6 main changes did not reach the production source and served frontend bundle.' >&2
+              exit 1
+            fi
+            sleep 10
+          done
+      - name: Verify production runtime
+        env:
+          HOST: ${{ secrets.HOST }}
+          SSHPASS: ${{ secrets.PASS }}
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py check </dev/null
+          curl -kfsS --resolve solution.smarbiz.sbs:443:127.0.0.1 https://solution.smarbiz.sbs/health/ >/dev/null
+          REMOTE
+      - name: Verify public HTTPS
+        run: curl -fsS --retry 10 --retry-delay 10 --retry-all-errors https://solution.smarbiz.sbs/health/ >/dev/null
