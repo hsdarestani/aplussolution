@@ -24,7 +24,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'ordering': ['-created_at'],
-                'indexes': [models.Index(fields=['user', 'used_at', 'expires_at'], name='core_portal_user_id_eab938_idx')],
+                'indexes': [models.Index(fields=['user', 'used_at', 'expires_at'], name='core_portal_user_id_9034ec_idx')],
             },
         ),
     ]
