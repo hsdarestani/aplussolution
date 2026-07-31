@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  IonAlert,
   IonBadge,
   IonButton,
   IonInput,
@@ -62,6 +63,7 @@ export default function AttendanceV3({ user }: { user: User }) {
   const [now, setNow] = useState(Date.now());
   const [correction, setCorrection] = useState<any>();
   const [absence, setAbsence] = useState<any>();
+  const [closeTarget, setCloseTarget] = useState<any>();
 
   const load = async () => {
     const [main, timeOff] = await Promise.all([
@@ -159,18 +161,20 @@ export default function AttendanceV3({ user }: { user: User }) {
     }
   }
 
-  async function closeLongRunning(id: string) {
-    const reason = window.prompt('Warum wird dieser laufende Zeiteintrag beendet?');
-    if (!reason) return;
+  async function closeLongRunning(id: string, reason: string) {
+    setBusy(true);
     try {
       await api(`attendance/entries/${id}/close/`, {
         method: 'POST',
         body: JSON.stringify({ reason }),
       });
+      setCloseTarget(undefined);
       setToast('Laufender Zeiteintrag wurde beendet und zur Prüfung markiert.');
       await load();
     } catch (error: any) {
       setToast(error.message);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -245,12 +249,35 @@ export default function AttendanceV3({ user }: { user: User }) {
             <div className="attendance-row" key={entry.id}>
               <div className="attendance-person"><b>{entry.worker_name}</b><small>Start {dateTime(entry.clock_in)}</small></div>
               <div className="running-time">{durationLabel(entry.clock_in, undefined, now)} Std.</div>
-              <IonButton size="small" color="danger" onClick={() => closeLongRunning(entry.id)}>Timer beenden</IonButton>
+              <IonButton size="small" color="danger" disabled={busy} onClick={() => setCloseTarget(entry)}>Timer beenden</IonButton>
             </div>
           )) : <Empty text="Keine auffällig langen Timer." />}
         </section>
 
         <AbsencePanel rows={absences} manager onDecision={decideAbsence} />
+        <IonAlert
+          isOpen={!!closeTarget}
+          onDidDismiss={() => setCloseTarget(undefined)}
+          header="Laufenden Timer beenden?"
+          message={closeTarget ? `${closeTarget.worker_name || 'Dieser Mitarbeiter'} ist seit ${dateTime(closeTarget.clock_in)} eingestempelt. Der Grund wird im Prüfverlauf gespeichert.` : ''}
+          inputs={[{ name: 'reason', type: 'textarea', placeholder: 'Grund für das Beenden' }]}
+          buttons={[
+            { text: 'Abbrechen', role: 'cancel' },
+            {
+              text: 'Timer beenden',
+              role: 'destructive',
+              handler: (values) => {
+                const reason = String(values?.reason || '').trim();
+                if (!reason) {
+                  setToast('Bitte einen Grund für das Beenden angeben.');
+                  return false;
+                }
+                if (closeTarget?.id) void closeLongRunning(closeTarget.id, reason);
+                return true;
+              },
+            },
+          ]}
+        />
         <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={() => setToast('')} />
       </>
     );
