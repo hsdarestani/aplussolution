@@ -30,3 +30,60 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report
           retention-days: 7
+
+  production-verify:
+    if: github.event_name == 'pull_request' && github.head_ref == 'verify/routing-production'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install SSH tooling
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Wait for current main source and split bundle
+        env:
+          SSHPASS: ${{ secrets.PASS }}
+          HOST: ${{ secrets.HOST }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$SSHPASS"
+          ready=0
+          for attempt in $(seq 1 60); do
+            if sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          grep -q 'export function useViewRouting' frontend/src/viewRouting.ts
+          grep -q 'app-shell-transforms' frontend/vite.config.ts
+          docker compose exec -T frontend sh -lc '
+            set -eu
+            set -- /usr/share/nginx/html/assets/ScheduleV2-*.js; test -f "$1"
+            set -- /usr/share/nginx/html/assets/AttendanceV3-*.js; test -f "$1"
+            set -- /usr/share/nginx/html/assets/Operations-*.js; test -f "$1"
+            main="$(ls /usr/share/nginx/html/assets/index-*.js | head -n1)"
+            test -n "$main"
+            size="$(wc -c < "$main")"
+            echo "production_main_bundle_bytes=$size"
+            test "$size" -lt 100000
+          '
+          REMOTE
+            then
+              ready=1
+              echo "Current routing source and split frontend bundle are live."
+              break
+            fi
+            echo "Production is not on the merged bundle yet (attempt $attempt)."
+            sleep 10
+          done
+          test "$ready" -eq 1
+      - name: Verify production runtime and integrations
+        env:
+          SSHPASS: ${{ secrets.PASS }}
+          HOST: ${{ secrets.HOST }}
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py check
+          docker compose exec -T backend python manage.py shell -c "from core.wiw import WhenIWorkClient; client=WhenIWorkClient(); client.login(force=True); client.collection('shifts', params={'limit': 1}); client.collection('times', params={'limit': 1}); print('WIW authentication and resource access OK')"
+          docker compose exec -T backend curl -fsS --retry 5 --retry-delay 2 http://127.0.0.1:8000/health/ >/dev/null
+          curl -fsS --retry 5 --retry-delay 2 https://solution.smarbiz.sbs/health/ >/dev/null
+          echo 'Production runtime, WIW and HTTPS checks passed.'
+          REMOTE
