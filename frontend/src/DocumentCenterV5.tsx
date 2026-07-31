@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { IonBadge, IonButton, IonIcon, IonSpinner, IonToast } from '@ionic/react';
+import { IonAlert, IonBadge, IonButton, IonIcon, IonSpinner, IonToast } from '@ionic/react';
 import {
   alertCircleOutline,
   checkmarkCircleOutline,
@@ -59,6 +59,7 @@ export default function DocumentCenterV5({ onChanged }: { onChanged?: () => void
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
   const [expanded, setExpanded] = useState(false);
+  const [pendingSource, setPendingSource] = useState<{ template: TemplateState; file: File }>();
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const load = async () => {
@@ -100,9 +101,21 @@ export default function DocumentCenterV5({ onChanged }: { onChanged?: () => void
     }
   }
 
-  async function uploadSource(template: TemplateState, file?: File) {
+  function clearPendingSource() {
+    const slug = pendingSource?.template.slug;
+    if (slug) {
+      const input = fileInputs.current[slug];
+      if (input) input.value = '';
+    }
+    setPendingSource(undefined);
+  }
+
+  function selectSource(template: TemplateState, file?: File) {
     if (!file) return;
-    const version = window.prompt('Version der Originalvorlage', template.version || '') ?? template.version;
+    setPendingSource({ template, file });
+  }
+
+  async function installSource(template: TemplateState, file: File, version: string) {
     const form = new FormData();
     form.append('file', file);
     if (version) form.append('version', version);
@@ -115,9 +128,10 @@ export default function DocumentCenterV5({ onChanged }: { onChanged?: () => void
     } catch (error: any) {
       setToast(error.message);
     } finally {
-      setBusy(false);
       const input = fileInputs.current[template.slug];
       if (input) input.value = '';
+      setPendingSource(undefined);
+      setBusy(false);
     }
   }
 
@@ -196,14 +210,38 @@ export default function DocumentCenterV5({ onChanged }: { onChanged?: () => void
                   type="file"
                   hidden
                   accept={template.source_format === 'docx' ? '.docx' : '.pdf'}
-                  onChange={(event) => void uploadSource(template, event.target.files?.[0])}
+                  onChange={(event) => selectSource(template, event.target.files?.[0])}
                 />
-                <IonButton size="small" fill="clear" onClick={() => fileInputs.current[template.slug]?.click()}>{template.source_installed ? 'Ersetzen' : 'Installieren'}</IonButton>
+                <IonButton size="small" fill="clear" disabled={busy} onClick={() => fileInputs.current[template.slug]?.click()}>{template.source_installed ? 'Ersetzen' : 'Installieren'}</IonButton>
               </div>
             ))}
           </div>
         </div>
       </div>
+      <IonAlert
+        isOpen={!!pendingSource}
+        onDidDismiss={clearPendingSource}
+        header="Originalvorlage installieren"
+        message={pendingSource ? `${pendingSource.template.name} · ${pendingSource.file.name}` : ''}
+        inputs={[{
+          name: 'version',
+          type: 'text',
+          placeholder: 'Version',
+          value: pendingSource?.template.version || '',
+        }]}
+        buttons={[
+          { text: 'Abbrechen', role: 'cancel' },
+          {
+            text: pendingSource?.template.source_installed ? 'Ersetzen' : 'Installieren',
+            handler: (values) => {
+              if (!pendingSource) return false;
+              const version = String(values?.version ?? pendingSource.template.version ?? '').trim();
+              void installSource(pendingSource.template, pendingSource.file, version);
+              return true;
+            },
+          },
+        ]}
+      />
       <IonToast isOpen={!!toast} message={toast} duration={4200} onDidDismiss={() => setToast('')} />
     </section>
   );
