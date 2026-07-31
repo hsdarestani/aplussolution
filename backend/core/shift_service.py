@@ -44,12 +44,18 @@ def refresh_shift_state(shift: Shift) -> Shift:
 
 
 def ensure_worker_can_claim(worker: WorkerProfile, shift: Shift) -> None:
-    if ShiftSlot.objects.filter(
+    slot_overlap = ShiftSlot.objects.filter(
         worker=worker,
         status=ShiftSlot.Status.CLAIMED,
         shift__starts_at__lt=shift.ends_at,
         shift__ends_at__gt=shift.starts_at,
-    ).exclude(shift=shift).exists():
+    ).exclude(shift=shift).exists()
+    legacy_overlap = Shift.objects.filter(
+        worker=worker,
+        starts_at__lt=shift.ends_at,
+        ends_at__gt=shift.starts_at,
+    ).exclude(pk=shift.pk).exclude(status=Shift.Status.CANCELLED).exists()
+    if slot_overlap or legacy_overlap:
         raise ValidationError('Du hast in diesem Zeitraum bereits eine Schicht.')
     if Availability.objects.filter(
         worker=worker,
