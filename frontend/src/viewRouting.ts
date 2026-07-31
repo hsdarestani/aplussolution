@@ -1,4 +1,6 @@
-type View =
+import { useCallback, useEffect, useState } from 'react';
+
+export type View =
   | 'dashboard'
   | 'schedule'
   | 'time'
@@ -12,183 +14,136 @@ type View =
   | 'profile'
   | 'operations';
 
-const VIEW_LABELS: Record<View, string[]> = {
-  dashboard: ['Übersicht', 'Start'],
-  schedule: ['Dienstplanung', 'Mein Dienstplan', 'Einsätze'],
-  time: ['Zeiterfassung', 'Arbeitszeitkonto'],
-  contracts: ['Verträge', 'Meine Verträge', 'Verträge & Signatur'],
-  documents: ['Dokumente', 'Dokumente & Lohn'],
-  orders: ['Aufträge'],
-  people: ['Personal & Kunden'],
-  messages: ['Nachrichten'],
-  ranking: ['Ranking'],
-  ratings: ['Mitarbeiter bewerten'],
-  profile: ['Profil'],
-  operations: ['Steuerzentrale', 'Verfügbarkeit & Tausch', 'Servicecenter'],
+const ROLE_VIEWS: Record<string, ReadonlySet<View>> = {
+  admin: new Set<View>([
+    'dashboard',
+    'schedule',
+    'time',
+    'contracts',
+    'documents',
+    'orders',
+    'people',
+    'messages',
+    'operations',
+  ]),
+  manager: new Set<View>([
+    'dashboard',
+    'schedule',
+    'time',
+    'contracts',
+    'documents',
+    'orders',
+    'people',
+    'messages',
+    'operations',
+  ]),
+  worker: new Set<View>([
+    'dashboard',
+    'schedule',
+    'time',
+    'operations',
+    'contracts',
+    'documents',
+    'messages',
+    'ranking',
+  ]),
+  client: new Set<View>([
+    'dashboard',
+    'operations',
+    'orders',
+    'schedule',
+    'contracts',
+    'documents',
+    'ratings',
+    'messages',
+  ]),
 };
 
-const ALL_VIEWS = new Set<View>(Object.keys(VIEW_LABELS) as View[]);
-const LABEL_TO_VIEW = new Map<string, View>(
-  Object.entries(VIEW_LABELS).flatMap(([view, labels]) =>
-    labels.map((label) => [label, view as View] as const),
-  ),
-);
+const KNOWN_VIEWS = new Set<View>([
+  'dashboard',
+  'schedule',
+  'time',
+  'contracts',
+  'documents',
+  'orders',
+  'people',
+  'messages',
+  'ranking',
+  'ratings',
+  'profile',
+  'operations',
+]);
 
-function itemLabel(item: Element) {
-  return item.querySelector('ion-label')?.textContent?.trim() || '';
+function requestedView() {
+  return new URLSearchParams(window.location.search).get('view');
 }
 
-function sidebarItems() {
-  return Array.from(document.querySelectorAll<HTMLElement>('aside ion-item'));
-}
-
-function findItem(view: View) {
-  const labels = VIEW_LABELS[view];
-  return sidebarItems().find((item) => labels.includes(itemLabel(item)));
-}
-
-function activeView(): View | null {
-  const active = document.querySelector('aside ion-item.active');
-  return active ? LABEL_TO_VIEW.get(itemLabel(active)) || null : null;
-}
-
-function requestedView(): { raw: string | null; view: View | null } {
-  const raw = new URLSearchParams(window.location.search).get('view');
-  return {
-    raw,
-    view: raw && ALL_VIEWS.has(raw as View) ? (raw as View) : null,
-  };
-}
-
-function urlForView(view: View) {
+function canonicalUrl(view: View) {
   const url = new URL(window.location.href);
   if (view === 'dashboard') url.searchParams.delete('view');
   else url.searchParams.set('view', view);
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
+function safeView(role?: string | null): View {
+  if (window.location.pathname !== '/') return 'dashboard';
+
+  const requested = requestedView();
+  if (!requested || requested === 'dashboard') return 'dashboard';
+  if (requested === 'profile') return 'profile';
+  if (!KNOWN_VIEWS.has(requested as View)) return 'dashboard';
+  if (!role || !ROLE_VIEWS[role]?.has(requested as View)) return 'dashboard';
+  return requested as View;
+}
+
 /**
- * App.tsx still owns the in-memory view while the shell is being decomposed.
- * This adapter makes that view durable browser state without rewriting the
- * legacy monolith: URL deep links drive the existing navigation, and every
- * App navigation is reflected back into history via the active sidebar item.
+ * Browser-history adapter for the legacy App shell.
+ *
+ * App.tsx still owns all rendering and navigation decisions. Vite replaces its
+ * single `useState<View>('dashboard')` declaration with this hook at transform
+ * time, giving the existing `setView(...)` calls durable URL state without a
+ * risky rewrite of the large shell.
  */
-export function installViewHistory() {
-  if (window.location.pathname !== '/') return () => undefined;
+export function useViewRouting(role?: string | null) {
+  const [view, setViewState] = useState<View>('dashboard');
 
-  let applyingFromHistory: View | null = null;
-  let historySyncReady = false;
-  let observedAside: Element | null = null;
-  let asideObserver: MutationObserver | null = null;
-  let settleFrame = 0;
+  useEffect(() => {
+    if (!role || window.location.pathname !== '/') return;
 
-  const settleLocationApplication = () => {
-    window.cancelAnimationFrame(settleFrame);
-    settleFrame = window.requestAnimationFrame(() => {
-      if (applyingFromHistory && activeView() === applyingFromHistory) {
-        applyingFromHistory = null;
+    const applyLocation = () => {
+      const requested = requestedView();
+      const next = safeView(role);
+      setViewState(next);
+
+      // Unknown, forbidden and explicit dashboard URLs are canonicalized to
+      // the clean start URL. This is the role guard for direct links.
+      if (requested && next === 'dashboard') {
+        window.history.replaceState({ view: next }, '', canonicalUrl(next));
       }
-      historySyncReady = true;
-    });
-  };
+    };
 
-  const syncUrlFromApp = () => {
-    // During the initial React/Ionic shell commit the sidebar briefly reports
-    // dashboard as active. Do not let that transient state overwrite a deep
-    // link before the requested view has been applied.
-    if (!historySyncReady) return;
+    applyLocation();
+    window.addEventListener('popstate', applyLocation);
+    return () => window.removeEventListener('popstate', applyLocation);
+  }, [role]);
 
-    const active = activeView();
-    if (!active) return;
+  const setView = useCallback(
+    (next: View) => {
+      const allowed =
+        next === 'profile' ||
+        next === 'dashboard' ||
+        (!!role && ROLE_VIEWS[role]?.has(next));
+      const safe = allowed ? next : 'dashboard';
 
-    if (applyingFromHistory) {
-      if (active === applyingFromHistory) applyingFromHistory = null;
-      return;
-    }
+      setViewState((current) => {
+        if (window.location.pathname === '/' && current !== safe) {
+          window.history.pushState({ view: safe }, '', canonicalUrl(safe));
+        }
+        return safe;
+      });
+    },
+    [role],
+  );
 
-    const requested = requestedView();
-    const canonicalUrl = urlForView(active);
-    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    const urlAlreadyMatches =
-      requested.view === active &&
-      !(active === 'dashboard' && requested.raw !== null) &&
-      currentUrl === canonicalUrl;
-
-    if (!urlAlreadyMatches) {
-      window.history.pushState({ view: active }, '', canonicalUrl);
-    }
-  };
-
-  const applyLocationToApp = () => {
-    if (window.location.pathname !== '/') return;
-
-    historySyncReady = false;
-    const requested = requestedView();
-    const desired = requested.raw === null ? 'dashboard' : requested.view;
-
-    if (!desired) {
-      applyingFromHistory = null;
-      window.history.replaceState({ view: 'dashboard' }, '', urlForView('dashboard'));
-      const dashboard = findItem('dashboard');
-      if (dashboard && activeView() !== 'dashboard') {
-        applyingFromHistory = 'dashboard';
-        dashboard.click();
-      }
-      settleLocationApplication();
-      return;
-    }
-
-    const target = findItem(desired);
-    if (!target) {
-      // The requested view exists globally but is not available for this role.
-      applyingFromHistory = null;
-      window.history.replaceState({ view: 'dashboard' }, '', urlForView('dashboard'));
-      const dashboard = findItem('dashboard');
-      if (dashboard && activeView() !== 'dashboard') {
-        applyingFromHistory = 'dashboard';
-        dashboard.click();
-      }
-      settleLocationApplication();
-      return;
-    }
-
-    if (desired === 'dashboard' && requested.raw !== null) {
-      window.history.replaceState({ view: 'dashboard' }, '', urlForView('dashboard'));
-    }
-
-    if (activeView() !== desired) {
-      applyingFromHistory = desired;
-      target.click();
-    }
-    settleLocationApplication();
-  };
-
-  const attachToShell = () => {
-    const aside = document.querySelector('aside');
-    if (!aside || aside === observedAside) return;
-
-    asideObserver?.disconnect();
-    observedAside = aside;
-    asideObserver = new MutationObserver(syncUrlFromApp);
-    asideObserver.observe(aside, {
-      subtree: true,
-      childList: true,
-      attributes: true,
-      attributeFilter: ['class'],
-    });
-
-    queueMicrotask(applyLocationToApp);
-  };
-
-  const shellObserver = new MutationObserver(attachToShell);
-  shellObserver.observe(document.body, { childList: true, subtree: true });
-  window.addEventListener('popstate', applyLocationToApp);
-  attachToShell();
-
-  return () => {
-    window.removeEventListener('popstate', applyLocationToApp);
-    shellObserver.disconnect();
-    asideObserver?.disconnect();
-    window.cancelAnimationFrame(settleFrame);
-  };
+  return [view, setView] as const;
 }
