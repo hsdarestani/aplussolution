@@ -49,7 +49,7 @@ jobs:
           set -euo pipefail
           cd /opt/aplussolution
           grep -q 'historical_archive_stub' backend/core/wiw_migration.py
-          docker compose exec -T backend python -c "from core.wiw_migration import _ensure_historical_time_workers" </dev/null
+          docker compose exec -T backend python manage.py shell -c "from core.wiw_migration import _ensure_historical_time_workers; print('historical_time_fix=ready')" </dev/null
           REMOTE
             then
               ready=1
