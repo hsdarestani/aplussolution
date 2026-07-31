@@ -3,34 +3,41 @@ on:
   pull_request:
     branches: [main]
 jobs:
-  diagnose-production:
+  repair-and-verify-production:
     runs-on: ubuntu-latest
     steps:
       - name: Install SSH helper
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
-      - name: Inspect production rollout state
+      - name: Rebuild stale production frontend from deployed main source
         env:
           HOST: ${{ secrets.HOST }}
           SSHPASS: ${{ secrets.PASS }}
         run: |
           set -euo pipefail
           sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
-          set +e
-          cd /opt/aplussolution || exit 1
-          check_file() {
-            label="$1"; pattern="$2"; file="$3"
-            if grep -F -q "$pattern" "$file" 2>/dev/null; then echo "$label=yes"; else echo "$label=no"; fi
-          }
-          check_file source_client_scope "if(user.role==='client')" frontend/src/ScheduleV2.tsx
-          check_file source_client_copy "KUNDENPORTAL" frontend/src/ScheduleV2.tsx
-          check_file source_shift_alert "Schicht freigeben?" frontend/src/ScheduleV2.tsx
-          check_file source_timer_alert "Laufenden Timer beenden?" frontend/src/AttendanceV3.tsx
-          check_file source_document_alert "Originalvorlage installieren" frontend/src/DocumentCenterV5.tsx
-          if docker compose exec -T frontend sh -c "grep -R -F -q 'Geplante Einsätze und aktueller Besetzungsstatus' /usr/share/nginx/html/assets"; then echo "bundle_client_copy=yes"; else echo "bundle_client_copy=no"; fi
-          if docker compose exec -T frontend sh -c "grep -R -F -q 'Schicht freigeben?' /usr/share/nginx/html/assets"; then echo "bundle_shift_alert=yes"; else echo "bundle_shift_alert=no"; fi
-          if docker compose exec -T backend python manage.py check </dev/null; then echo "django_check=yes"; else echo "django_check=no"; fi
-          if curl -kfsS --resolve solution.smarbiz.sbs:443:127.0.0.1 https://solution.smarbiz.sbs/health/ >/dev/null; then echo "local_https_health=yes"; else echo "local_https_health=no"; fi
-          docker compose ps frontend backend caddy || true
+          set -euo pipefail
+          cd /opt/aplussolution
+          grep -F -q "if(user.role==='client')" frontend/src/ScheduleV2.tsx
+          grep -F -q "KUNDENPORTAL" frontend/src/ScheduleV2.tsx
+          grep -F -q "Schicht freigeben?" frontend/src/ScheduleV2.tsx
+          grep -F -q "Laufenden Timer beenden?" frontend/src/AttendanceV3.tsx
+          grep -F -q "Originalvorlage installieren" frontend/src/DocumentCenterV5.tsx
+          docker compose build frontend
+          docker compose up -d --force-recreate frontend caddy
+          for attempt in $(seq 1 20); do
+            if docker compose exec -T frontend sh -c "grep -R -F -q 'Geplante Einsätze und aktueller Besetzungsstatus' /usr/share/nginx/html/assets && grep -R -F -q 'Schicht freigeben?' /usr/share/nginx/html/assets"; then
+              echo "Phase 6 frontend bundle is current."
+              break
+            fi
+            if [ "$attempt" = 20 ]; then
+              echo 'Frontend container did not serve the rebuilt Phase 6 bundle.' >&2
+              exit 1
+            fi
+            sleep 3
+          done
+          docker compose exec -T backend python manage.py check </dev/null
+          curl -kfsS --retry 10 --retry-delay 3 --resolve solution.smarbiz.sbs:443:127.0.0.1 https://solution.smarbiz.sbs/health/ >/dev/null
+          docker compose ps frontend backend caddy
           REMOTE
       - name: Verify public HTTPS
-        run: curl -fsS --retry 3 --retry-delay 3 --retry-all-errors https://solution.smarbiz.sbs/health/ >/dev/null
+        run: curl -fsS --retry 10 --retry-delay 5 --retry-all-errors https://solution.smarbiz.sbs/health/ >/dev/null
