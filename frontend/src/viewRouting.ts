@@ -135,14 +135,14 @@ export function useViewRouting(role?: string | null) {
         (!!role && ROLE_VIEWS[role]?.has(next));
       const safe = allowed ? next : 'dashboard';
 
-      setViewState((current) => {
-        if (window.location.pathname === '/' && current !== safe) {
-          window.history.pushState({ view: safe }, '', canonicalUrl(safe));
-        }
-        return safe;
-      });
+      // Keep history writes outside the React state updater. StrictMode may
+      // invoke updater functions more than once during development.
+      if (window.location.pathname === '/' && view !== safe) {
+        window.history.pushState({ view: safe }, '', canonicalUrl(safe));
+      }
+      setViewState(safe);
     },
-    [role],
+    [role, view],
   );
 
   return [view, setView] as const;
