@@ -10,11 +10,12 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from .models import ShiftImportPackage, WorkingTimeAccountRecord, WorkingTimeSetting, WorkerProfile
-from .order_automation import (
+from .order_automation import parse_order_text
+from .native_workforce import (
     approve_order,
     generate_client_contract,
-    parse_order_text,
     sync_packages_from_local_shifts,
+    sync_working_time,
 )
 from .permissions import IsAdminOrManager
 from .services import audit
@@ -25,7 +26,6 @@ from .working_time import (
     export_xlsx,
     record_dict,
     settings_rows,
-    sync_working_time,
     update_record,
     worker_pdf,
 )
