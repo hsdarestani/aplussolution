@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, integration_views, portal_views, searchable_views, shift_views, time_views, views
+from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_center_views, integration_views, portal_views, searchable_views, shift_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -17,7 +17,7 @@ for prefix, view in [
     ('time-off', views.TimeOffViewSet),
     ('shift-swaps', views.ShiftSwapViewSet),
     ('contract-templates', views.ContractTemplateViewSet),
-    ('contracts', searchable_views.ContractViewSet),
+    ('contracts', contract_views.ContractViewSet),
     ('documents', searchable_views.DocumentViewSet),
     ('payroll', views.PayrollViewSet),
     ('ratings', views.RatingViewSet),
@@ -40,6 +40,10 @@ urlpatterns = [
     path('employee/home/', portal_views.employee_home),
     path('admin/exceptions/', admin_center_views.admin_exception_center),
     path('search/global/', admin_center_views.global_search),
+    path('document-center/', document_center_views.document_center),
+    path('document-center/templates/<slug:slug>/source/', document_center_views.upload_template_source),
+    path('document-center/reminders/run/', document_center_views.run_contract_reminders),
+    path('contracts/<uuid:pk>/readiness/', document_center_views.contract_readiness_view),
     path('attendance/home/', attendance_views.employee_attendance_home),
     path('attendance/entries/<uuid:entry_id>/correction/', attendance_views.request_time_correction),
     path('attendance/entries/<uuid:pk>/close/', attendance_actions.close_running_entry),
