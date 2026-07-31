@@ -1,0 +1,194 @@
+import { expect, Page, Route, test } from '@playwright/test';
+
+type Role = 'admin' | 'manager' | 'worker' | 'client';
+
+const worker = {
+  id: 'worker-user-1',
+  email: 'worker@example.test',
+  name: 'Mina Berger',
+  first_name: 'Mina',
+  last_name: 'Berger',
+  role: 'worker' as Role,
+  phone: '',
+};
+
+const admin = {
+  id: 'admin-user-1',
+  email: 'admin@example.test',
+  name: 'Alex Admin',
+  first_name: 'Alex',
+  last_name: 'Admin',
+  role: 'admin' as Role,
+  phone: '',
+};
+
+const availableShift = {
+  id: 'shift-1',
+  client_name: 'Main Suites Frankfurt',
+  position_name: 'Servicekraft',
+  location_name: 'Frankfurt Innenstadt',
+  starts_at: '2026-08-03T16:00:00+02:00',
+  ends_at: '2026-08-03T23:00:00+02:00',
+  break_minutes: 30,
+  status: 'published',
+  required_count: 4,
+  filled_count: 2,
+  open_count: 2,
+};
+
+async function fulfill(route: Route, body: unknown, status = 200) {
+  await route.fulfill({
+    status,
+    contentType: 'application/json',
+    body: JSON.stringify(body),
+  });
+}
+
+async function mockApi(page: Page, user: typeof worker | typeof admin) {
+  await page.addInitScript(() => {
+    localStorage.setItem('access', 'phase6-e2e-access');
+    localStorage.setItem('refresh', 'phase6-e2e-refresh');
+  });
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname.replace(/^\/api\//, '');
+
+    if (path === 'auth/me/') return fulfill(route, user);
+
+    if (path === 'employee/home/') {
+      return fulfill(route, {
+        worker: { name: worker.name, employee_number: 'MA-2048', employment_type: 'Teilzeit' },
+        unread_notifications: 2,
+        next_shift: availableShift,
+        month_worked_minutes: 2325,
+        available_count: 2,
+        contract_actions: 1,
+        contracts_expiring_30: 0,
+        available_shifts: [availableShift],
+      });
+    }
+
+    if (path.startsWith('shifts/available/')) return fulfill(route, [availableShift]);
+    if (path.startsWith('shifts/mine/')) return fulfill(route, []);
+
+    if (path === 'attendance/home/') {
+      return fulfill(route, {
+        active_entry: null,
+        eligible_shift: availableShift,
+        month_worked_minutes: 2325,
+        pending_corrections: 0,
+        history: [],
+        corrections: [],
+      });
+    }
+    if (path === 'time-off/') return fulfill(route, []);
+
+    if (path.startsWith('admin/exceptions/')) {
+      return fulfill(route, {
+        summary: {
+          critical: 1,
+          warning: 2,
+          by_category: { staffing: 1, attendance: 1, contracts: 1, documents: 0, integrations: 0, requests: 0 },
+        },
+        results: [
+          {
+            category: 'staffing',
+            severity: 'critical',
+            title: 'Schicht noch nicht vollständig besetzt',
+            message: 'Main Suites Frankfurt · 2 von 4 Positionen besetzt',
+            view: 'schedule',
+            object_id: 'shift-1',
+            meta: { open_count: 2, filled_count: 2, required_count: 4 },
+          },
+        ],
+      });
+    }
+
+    if (path === 'shifts/') return fulfill(route, [availableShift]);
+    if (path === 'clients/') return fulfill(route, []);
+    if (path === 'locations/') return fulfill(route, []);
+    if (path === 'positions/') return fulfill(route, []);
+    if (path === 'orders/') return fulfill(route, []);
+
+    return fulfill(route, []);
+  });
+}
+
+async function expectNoHorizontalPageOverflow(page: Page) {
+  await expect.poll(() => page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }))).toEqual(expect.objectContaining({ scrollWidth: expect.any(Number), clientWidth: expect.any(Number) }));
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow, 'page must not create horizontal viewport overflow').toBeLessThanOrEqual(1);
+}
+
+test.describe('Phase 6 mobile QA', () => {
+  test('worker can move through the primary mobile flows without layout overflow', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockApi(page, worker);
+    await page.goto('/');
+
+    await expect(page.getByRole('heading', { name: 'Mina Berger' })).toBeVisible();
+    await expect(page.locator('.mobile-tabbar')).toBeVisible();
+    await expect(page.locator('.mobile-tabbar button')).toHaveCount(5);
+    await expect(page.locator('aside')).toBeHidden();
+    await expectNoHorizontalPageOverflow(page);
+
+    await page.locator('.mobile-tabbar button').filter({ hasText: 'Plan' }).click();
+    await expect(page.getByRole('heading', { name: 'Schichten' })).toBeVisible();
+    await expect(page.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('Main Suites Frankfurt', { exact: true }).first()).toBeVisible();
+    await expectNoHorizontalPageOverflow(page);
+
+    await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeit' }).click();
+    await expect(page.getByRole('heading', { name: 'Bereit für deinen Einsatz?' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Einstempeln' })).toBeEnabled();
+    await expectNoHorizontalPageOverflow(page);
+
+    await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
+    await expect(page.getByRole('heading', { name: 'Weitere Bereiche' })).toBeVisible();
+    const moreMenu = page.locator('.mobile-menu-grid');
+    await expect(moreMenu.getByRole('button', { name: 'Meine Verträge', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Dokumente & Lohn', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Ranking', exact: true })).toBeVisible();
+  });
+
+  test('admin exception center remains usable on a narrow viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockApi(page, admin);
+    await page.goto('/');
+
+    await expect(page.getByTestId('admin-exception-center')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Nur das, was heute Aufmerksamkeit braucht.' })).toBeVisible();
+    await expect(page.getByText('Schicht noch nicht vollständig besetzt')).toBeVisible();
+    await expect(page.locator('.mobile-tabbar button')).toHaveCount(5);
+    await expectNoHorizontalPageOverflow(page);
+
+    await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
+    const moreMenu = page.locator('.mobile-menu-grid');
+    await expect(moreMenu.getByRole('button', { name: 'Verträge', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Personal & Kunden', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Steuerzentrale', exact: true })).toBeVisible();
+  });
+});
+
+test.describe('Phase 6 desktop smoke', () => {
+  test('admin shell keeps full navigation and opens staffing from the exception center', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await mockApi(page, admin);
+    await page.goto('/');
+
+    await expect(page.locator('aside')).toBeVisible();
+    await expect(page.locator('.mobile-tabbar')).toBeHidden();
+    await expect(page.getByTestId('admin-exception-center')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Öffnen' }).first().click();
+    await expect(page.getByRole('heading', { name: 'Personalbedarf & Schichten' })).toBeVisible();
+    await expect(page.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
+    await expectNoHorizontalPageOverflow(page);
+  });
+});

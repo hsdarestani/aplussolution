@@ -11,7 +11,8 @@
     "cap:sync": "npm run build && cap sync",
     "test": "vitest run",
     "test:watch": "vitest",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@capacitor/app": "^7.0.1",
@@ -30,6 +31,7 @@
     "@capacitor/android": "^7.4.2",
     "@capacitor/cli": "^7.4.2",
     "@capacitor/ios": "^7.4.2",
+    "@playwright/test": "^1.55.0",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^4.7.0",
