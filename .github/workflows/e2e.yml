@@ -31,12 +31,12 @@ jobs:
           path: frontend/playwright-report
           retention-days: 7
 
-  production-final-audit:
+  production-final-migration:
     runs-on: ubuntu-latest
     steps:
       - name: Install SSH tooling
         run: sudo apt-get update && sudo apt-get install -y sshpass
-      - name: Verify final WIW reconciliation on production
+      - name: Run final import and strict reconciliation on production
         env:
           SSHPASS: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
@@ -46,11 +46,12 @@ jobs:
           sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
-          docker compose exec -T backend python manage.py check
-          docker compose exec -T backend python manage.py shell -c "from django.conf import settings; from core.models import IntegrationSyncRun; run=IntegrationSyncRun.objects.filter(provider='wiw', mode='final_full').order_by('-finished_at').first(); print('final_full_status=' + (run.status if run else 'missing')); print('final_full_counts=' + str(run.counts if run else {})); print('final_full_errors=' + str(run.errors if run else [])); assert run and run.status in ('success','partial'); assert settings.WIW_SYNC_ENABLED is False; assert 'wiw-sync-hourly' not in settings.CELERY_BEAT_SCHEDULE"
-          docker compose exec -T backend python manage.py shell -c "from core.wiw_migration import build_wiw_migration_report; r=build_wiw_migration_report(apply_full_sync=False); print('cutover_ready=' + str(r['cutover_ready'])); [print(f'{name}: remote={row[\"remote_count\"]} local={row[\"local_count\"]} matched={row[\"matched_count\"]} missing={row[\"missing_local_count\"]} extra={row[\"extra_local_count\"]} error={row[\"error\"]}') for name,row in r['resources'].items()]; assert r['cutover_ready']"
-          docker compose exec -T backend python manage.py shell -c "from core.native_cutover import approve_order, sync_working_time; print('native_cutover_runtime=ok')"
-          docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null
+          docker compose exec -T backend python manage.py check </dev/null
+          docker compose exec -T backend python manage.py migrate_wiw_final --apply --strict --compact </dev/null
+          docker compose exec -T backend python manage.py shell -c "from django.conf import settings; from core.models import IntegrationSyncRun; run=IntegrationSyncRun.objects.filter(provider='wiw', mode='final_full').order_by('-finished_at').first(); print('final_full_status=' + (run.status if run else 'missing')); print('final_full_counts=' + str(run.counts if run else {})); print('final_full_errors=' + str(run.errors if run else [])); assert run and run.status == 'success'; assert settings.WIW_SYNC_ENABLED is False; assert 'wiw-sync-hourly' not in settings.CELERY_BEAT_SCHEDULE" </dev/null
+          docker compose exec -T backend python manage.py shell -c "from core.wiw_migration import build_wiw_migration_report; r=build_wiw_migration_report(apply_full_sync=False); print('cutover_ready=' + str(r['cutover_ready'])); [print(f'{name}: remote={row[\"remote_count\"]} local={row[\"local_count\"]} matched={row[\"matched_count\"]} missing={row[\"missing_local_count\"]} extra={row[\"extra_local_count\"]} error={row[\"error\"]}') for name,row in r['resources'].items()]; assert r['cutover_ready']" </dev/null
+          docker compose exec -T backend python manage.py shell -c "from core.native_cutover import approve_order, sync_working_time; print('native_cutover_runtime=ok')" </dev/null
+          docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ </dev/null >/dev/null
           curl -fsS https://solution.smarbiz.sbs/health/ >/dev/null
-          echo 'production_final_audit=ok'
+          echo 'production_final_cutover=ok'
           REMOTE
