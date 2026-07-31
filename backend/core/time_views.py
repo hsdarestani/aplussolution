@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -10,11 +11,7 @@ from .views import TimeEntryViewSet as LegacyTimeEntryViewSet, geofence_error
 
 
 class TimeEntryViewSet(LegacyTimeEntryViewSet):
-    """Slot-aware attendance during the scheduling-model transition.
-
-    A multi-place staffing demand deliberately has no single Shift.worker. Attendance
-    therefore follows the employee's claimed ShiftSlot instead of the legacy worker FK.
-    """
+    """Attendance for both new self-service slots and legacy assigned shifts."""
 
     @action(detail=False, methods=['post'])
     def clock_in(self, request):
@@ -24,19 +21,15 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
         if TimeEntry.objects.filter(worker=worker, clock_out__isnull=True).exists():
             return Response({'detail': 'Du bist bereits eingestempelt.'}, status=400)
 
+        ownership = Q(slots__worker=worker, slots__status='claimed') | Q(worker=worker)
         now = timezone.now()
         if request.data.get('shift'):
-            shift = Shift.objects.filter(
-                pk=request.data.get('shift'),
-                slots__worker=worker,
-                slots__status='claimed',
-            ).select_related('location').distinct().first()
+            shift = Shift.objects.filter(ownership, pk=request.data.get('shift')).select_related('location').distinct().first()
             if not shift:
                 return Response({'detail': 'Die ausgewählte Schicht gehört nicht zu deinem Profil.'}, status=403)
         else:
             shift = Shift.objects.filter(
-                slots__worker=worker,
-                slots__status='claimed',
+                ownership,
                 starts_at__lte=now + timedelta(hours=4),
                 ends_at__gte=now - timedelta(hours=4),
                 status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
