@@ -22,6 +22,16 @@ const admin = {
   phone: '',
 };
 
+const client = {
+  id: 'client-user-1',
+  email: 'lara@main-suites.example.test',
+  name: 'Lara Becker',
+  first_name: 'Lara',
+  last_name: 'Becker',
+  role: 'client' as Role,
+  phone: '',
+};
+
 const availableShift = {
   id: 'shift-1',
   client_name: 'Main Suites Frankfurt',
@@ -51,7 +61,7 @@ async function fulfill(route: Route, body: unknown, status = 200) {
   });
 }
 
-async function mockApi(page: Page, user: typeof worker | typeof admin) {
+async function mockApi(page: Page, user: typeof worker | typeof admin | typeof client, seenPaths?: string[]) {
   await page.addInitScript(() => {
     localStorage.setItem('access', 'phase6-e2e-access');
     localStorage.setItem('refresh', 'phase6-e2e-refresh');
@@ -61,8 +71,17 @@ async function mockApi(page: Page, user: typeof worker | typeof admin) {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname.replace(/^\/api\//, '');
+    seenPaths?.push(path);
 
     if (path === 'auth/me/') return fulfill(route, user);
+
+    if (path === 'dashboard/') {
+      return fulfill(route, user.role === 'client' ? {
+        active_orders: 2,
+        upcoming_shifts: 1,
+        contracts_to_sign: 1,
+      } : {});
+    }
 
     if (path === 'employee/home/') {
       return fulfill(route, {
@@ -132,7 +151,7 @@ async function mockApi(page: Page, user: typeof worker | typeof admin) {
       });
     }
 
-    if (path === 'shifts/') return fulfill(route, [availableShift]);
+    if (path === 'shifts/' || path.startsWith('shifts/?')) return fulfill(route, [availableShift]);
     if (path === 'clients/') return fulfill(route, []);
     if (path === 'locations/') return fulfill(route, []);
     if (path === 'positions/') return fulfill(route, []);
@@ -216,6 +235,40 @@ test.describe('Phase 6 mobile QA', () => {
     await expect(moreMenu.getByRole('button', { name: 'Verträge', exact: true })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: 'Personal & Kunden', exact: true })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: 'Steuerzentrale', exact: true })).toBeVisible();
+  });
+
+  test('client sees a client-scoped schedule without manager controls or manager API fan-out', async ({ page }) => {
+    const seenPaths: string[] = [];
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockApi(page, client, seenPaths);
+    await page.goto('/');
+
+    await expect(page.getByRole('heading', { name: 'Guten Tag, Lara' })).toBeVisible();
+    await expect(page.getByText('Personal genau dann, wenn du es brauchst.')).toBeVisible();
+    await expect(page.getByText('Aktive Aufträge')).toBeVisible();
+    await expect(page.getByText('Zu unterzeichnen')).toBeVisible();
+    await expect(page.locator('.mobile-tabbar button')).toHaveCount(4);
+    await expectNoHorizontalPageOverflow(page);
+
+    await page.locator('.mobile-tabbar button').filter({ hasText: 'Plan' }).click();
+    await expect(page.getByRole('heading', { name: 'Einsätze' })).toBeVisible();
+    await expect(page.getByText('Geplante Einsätze und aktueller Besetzungsstatus für Ihre Aufträge.')).toBeVisible();
+    await expect(page.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
+    await expect(page.locator('ion-segment')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Personalbedarf/i })).toHaveCount(0);
+    await expectNoHorizontalPageOverflow(page);
+
+    expect(seenPaths).not.toContain('clients/');
+    expect(seenPaths).not.toContain('locations/');
+    expect(seenPaths).not.toContain('positions/');
+    expect(seenPaths).not.toContain('orders/');
+
+    await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
+    const moreMenu = page.locator('.mobile-menu-grid');
+    await expect(moreMenu.getByRole('button', { name: 'Servicecenter', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Aufträge', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Verträge & Signatur', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Mitarbeiter bewerten', exact: true })).toBeVisible();
   });
 });
 
