@@ -63,12 +63,40 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install SSH tooling
         run: sudo apt-get update && sudo apt-get install -y sshpass rsync
+      - name: Preflight production configuration
+        env:
+          SSHPASS: ${{ secrets.PASS }}
+          HOST: ${{ secrets.HOST }}
+          WIW_DEV_KEY: ${{ secrets.WIW_DEV_KEY }}
+          WIW_EMAIL: ${{ secrets.WIW_EMAIL }}
+          WIW_PASSWORD: ${{ secrets.WIW_PASSWORD }}
+          WIW_USER_ID: ${{ secrets.WIW_USER_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$SSHPASS"
+          if [ -n "$WIW_DEV_KEY" ] && [ -n "$WIW_EMAIL" ] && [ -n "$WIW_PASSWORD" ] && [ -n "$WIW_USER_ID" ]; then
+            echo 'Required WIW configuration is available from GitHub Actions secrets.'
+            exit 0
+          fi
+          if sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          test -f /opt/aplussolution/.env
+          cd /opt/aplussolution
+          for key in WIW_DEV_KEY WIW_EMAIL WIW_PASSWORD WIW_USER_ID; do
+            grep -q "^${key}=." .env || exit 1
+          done
+          REMOTE
+          then
+            echo 'Required WIW configuration already exists on the production host; missing Actions values will be preserved.'
+          else
+            echo 'Required WIW configuration is missing from both GitHub Actions and the production host. Refusing to upload a partial release.' >&2
+            exit 1
+          fi
       - name: Upload release
         env:
           SSHPASS: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
         run: |
-          test -n "$HOST" && test -n "$SSHPASS"
           sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'mkdir -p /opt/aplussolution'
           sshpass -e rsync -az --delete --exclude '.git' --exclude '.env' --exclude 'frontend/node_modules' -e 'ssh -o StrictHostKeyChecking=no' ./ root@"$HOST":/opt/aplussolution/
       - name: Configure production secrets and start release
@@ -83,7 +111,6 @@ jobs:
           WIW_WEBHOOK_SECRET: ${{ secrets.WIW_WEBHOOK_SECRET }}
         run: |
           set -euo pipefail
-          test -n "$WIW_DEV_KEY" && test -n "$WIW_EMAIL" && test -n "$WIW_PASSWORD" && test -n "$WIW_USER_ID"
           b64() { printf '%s' "$1" | base64 -w0; }
           export WIW_DEV_KEY_B64="$(b64 "$WIW_DEV_KEY")"
           export WIW_EMAIL_B64="$(b64 "$WIW_EMAIL")"
@@ -134,6 +161,9 @@ jobs:
           upsert_b64 WIW_USER_ID "$WIW_USER_ID_B64"
           upsert_b64 WIW_OPENAI_KEY "$WIW_OPENAI_KEY_B64"
           upsert_b64 WIW_WEBHOOK_SECRET "$WIW_WEBHOOK_SECRET_B64"
+          for key in WIW_DEV_KEY WIW_EMAIL WIW_PASSWORD WIW_USER_ID; do
+            grep -q "^${key}=." .env || { echo "Missing required ${key} in production .env" >&2; exit 1; }
+          done
           grep -q '^WIW_WEBHOOK_SECRET=.' .env || printf 'WIW_WEBHOOK_SECRET=%s\n' "$(openssl rand -hex 32)" >> .env
           if grep -q '^WIW_SYNC_ENABLED=' .env; then sed -i 's/^WIW_SYNC_ENABLED=.*/WIW_SYNC_ENABLED=1/' .env; else printf 'WIW_SYNC_ENABLED=1\n' >> .env; fi
           if ! command -v docker >/dev/null 2>&1; then curl -fsSL https://get.docker.com | sh; fi
