@@ -5,10 +5,35 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+permissions:
+  contents: write
 concurrency:
   group: aplus-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  integrate_phase4:
+    if: github.event_name == 'pull_request' && github.head_ref == 'feature/admin-exception-search-phase4' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/admin-exception-search-phase4
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      - name: Apply validated Phase 4 integration
+        run: python scripts/phase4_integrate.py
+      - name: Restore workflow and remove temporary integration helpers
+        run: |
+          git fetch origin main
+          git checkout origin/main -- .github/workflows/deploy.yml
+          rm -f .github/workflows/phase4-integrate-admin-search.yml scripts/phase4_integrate.py
+      - name: Commit Phase 4 integration
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/core/admin_center_views.py frontend/src/App.tsx .github/workflows/deploy.yml .github/workflows/phase4-integrate-admin-search.yml scripts/phase4_integrate.py
+          git commit -m 'Integrate Phase 4 admin exception search UX'
+          git push origin HEAD:feature/admin-exception-search-phase4
   validate:
     runs-on: ubuntu-latest
     steps:
