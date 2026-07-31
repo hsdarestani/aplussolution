@@ -30,3 +30,43 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report
           retention-days: 7
+
+  production-final-migration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install SSH tooling
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Wait for native cutover release and run final WIW migration
+        env:
+          SSHPASS: ${{ secrets.PASS }}
+          HOST: ${{ secrets.HOST }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$SSHPASS"
+          ready=0
+          for attempt in $(seq 1 90); do
+            if sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          test -f backend/core/native_workforce.py
+          grep -q "WIW_SYNC_ENABLED=os.getenv('WIW_SYNC_ENABLED','0')=='1'" backend/config/settings.py
+          docker compose exec -T backend python manage.py help migrate_wiw_final >/dev/null
+          REMOTE
+            then
+              ready=1
+              break
+            fi
+            sleep 10
+          done
+          test "$ready" = 1
+
+          sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py check
+          docker compose exec -T backend python manage.py migrate_wiw_final --apply --strict --compact
+          docker compose exec -T backend python manage.py shell -c "from django.conf import settings; assert settings.WIW_SYNC_ENABLED is False; assert 'wiw-sync-hourly' not in settings.CELERY_BEAT_SCHEDULE; from core.native_cutover import approve_order, sync_working_time; print('native_cutover_runtime=ok')"
+          docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null
+          curl -fsS https://solution.smarbiz.sbs/health/ >/dev/null
+          echo 'production_final_cutover=ok'
+          REMOTE
