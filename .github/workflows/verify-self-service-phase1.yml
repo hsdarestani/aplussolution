@@ -33,6 +33,11 @@ jobs:
           from core.models import ClientCompany, Location, Position, Shift, User, WorkerProfile, TimeEntry
           from core.shift_slots import ShiftSlot
 
+          def client_for(user):
+              api = APIClient(HTTP_HOST='solution.smarbiz.sbs')
+              api.force_authenticate(user)
+              return api
+
           with transaction.atomic():
               client = ClientCompany.objects.create(name='VERIFY PHASE1', customer_number='VERIFY-PHASE1')
               location = Location.objects.create(client=client, name='VERIFY LOCATION', address='Frankfurt', latitude=50.1101, longitude=8.6801, geofence_radius_m=250)
@@ -46,18 +51,14 @@ jobs:
               shift=Shift.objects.create(client=client, location=location, position=position, starts_at=start, ends_at=start+timedelta(hours=4), status='published', is_open=True, required_count=2)
               assert ShiftSlot.objects.filter(shift=shift, status='open').count() == 2
               for worker in workers[:2]:
-                  api=APIClient(); api.force_authenticate(worker.user)
-                  response=api.post(f'/api/shifts/{shift.id}/claim/', {}, format='json')
-                  assert response.status_code == 200, response.data
-              third=APIClient(); third.force_authenticate(workers[2].user)
-              assert third.post(f'/api/shifts/{shift.id}/claim/', {}, format='json').status_code == 400
+                  response=client_for(worker.user).post(f'/api/shifts/{shift.id}/claim/', {}, format='json')
+                  assert response.status_code == 200, getattr(response, 'data', response.content)
+              assert client_for(workers[2].user).post(f'/api/shifts/{shift.id}/claim/', {}, format='json').status_code == 400
               shift.refresh_from_db(); assert shift.worker_id is None
-              attendance=APIClient(); attendance.force_authenticate(workers[1].user)
-              response=attendance.post('/api/time-entries/clock_in/', {'shift': str(shift.id), 'lat': 50.1101, 'lng': 8.6801}, format='json')
-              assert response.status_code == 201, response.data
+              response=client_for(workers[1].user).post('/api/time-entries/clock_in/', {'shift': str(shift.id), 'lat': 50.1101, 'lng': 8.6801}, format='json')
+              assert response.status_code == 201, getattr(response, 'data', response.content)
               assert TimeEntry.objects.filter(worker=workers[1], shift=shift, clock_out__isnull=True).exists()
-              releaser=APIClient(); releaser.force_authenticate(workers[0].user)
-              assert releaser.post(f'/api/shifts/{shift.id}/release/', {}, format='json').status_code == 200
+              assert client_for(workers[0].user).post(f'/api/shifts/{shift.id}/release/', {}, format='json').status_code == 200
               assert ShiftSlot.objects.filter(shift=shift, status='open').count() == 1
               transaction.set_rollback(True)
           print('PHASE1_TRANSACTIONAL_SMOKE_OK')
