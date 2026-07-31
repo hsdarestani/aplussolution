@@ -32,17 +32,21 @@ def wiw_status(request):
         'user_id_configured': bool(settings.WIW_USER_ID),
         'webhook_secret_configured': bool(settings.WIW_WEBHOOK_SECRET),
         'sync_enabled': settings.WIW_SYNC_ENABLED,
+        'operational_source': 'aplus',
+        'migration_only': True,
         'latest_sync': IntegrationSyncRunSerializer(latest).data if latest else None,
         'supported_resources': list(WhenIWorkClient.RESOURCE_PATHS),
         'wiw_supported_employee_fields': sorted(WIW_SUPPORTED_MASTER_FIELDS),
         'not_available_from_wiw': sorted(WIW_UNSUPPORTED_LEGAL_FIELDS),
-        'note': 'Steuer-, Bank-, Sozialversicherungs- und Signaturdaten sind nicht Bestandteil des normalen WIW-Benutzerprofils und müssen aus Personalakten, Mitarbeiterangaben oder einer weiteren Integration stammen.',
+        'note': 'A+ Workforce ist die operative Datenquelle. WIW-Zugangsdaten werden nur noch für einen kontrollierten finalen Import/Audit aufbewahrt.',
     })
 
 
 @api_view(['POST'])
 @permission_classes([IsAdminOrManager])
 def wiw_discover(request):
+    if not settings.WIW_SYNC_ENABLED:
+        return Response({'detail': 'WIW ist im normalen Betrieb deaktiviert. API-Prüfungen erfolgen nur im finalen Migrationslauf.'}, status=409)
     try:
         result = WhenIWorkClient().discover()
     except WhenIWorkError as exc:
@@ -54,6 +58,10 @@ def wiw_discover(request):
 @api_view(['POST'])
 @permission_classes([IsAdminOrManager])
 def wiw_sync(request):
+    if not settings.WIW_SYNC_ENABLED:
+        return Response({
+            'detail': 'Die laufende WIW-Synchronisierung ist deaktiviert. Für den einmaligen Abschlussimport bitte migrate_wiw_final --apply --strict verwenden.'
+        }, status=409)
     if not configured():
         return Response({'detail': 'WIW-Secrets fehlen.'}, status=400)
     mode = str(request.data.get('mode') or 'incremental')
@@ -159,6 +167,8 @@ def import_bundle(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def wiw_webhook(request):
+    if not settings.WIW_SYNC_ENABLED:
+        return Response({'accepted': False, 'ignored': True, 'detail': 'WIW-Synchronisierung ist deaktiviert; A+ Workforce ist die Datenquelle.'}, status=202)
     raw = request.body
     signature = request.headers.get('X-WIW-Signature') or request.headers.get('X-Webhook-Signature') or request.headers.get('X-Signature') or ''
     valid = verify_webhook_signature(raw, signature)
