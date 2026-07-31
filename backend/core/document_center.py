@@ -7,8 +7,9 @@ from django.core.files.base import ContentFile
 from django.core.mail import send_mail
 from django.utils import timezone
 
-from .document_catalog import CATALOG_BY_SLUG, DOCUMENT_CATALOG
-from .document_engine import contract_data, format_value, seed_document_catalog
+from .document_catalog import CATALOG_BY_SLUG
+from .document_catalog_service import ensure_document_catalog
+from .document_engine import contract_data, format_value
 from .models import Contract, ContractSignature, ContractTemplate, Notification, User
 from .services import required_signature_roles
 
@@ -151,7 +152,7 @@ def contract_readiness(contract):
 
 
 def document_center_overview():
-    seed_document_catalog()
+    ensure_document_catalog()
     templates = list(ContractTemplate.objects.all().order_by('name'))
     template_states = [template_readiness(template) for template in templates]
     contracts = Contract.objects.select_related(
@@ -227,7 +228,7 @@ def document_center_overview():
 
 
 def install_template_source(slug, upload, version=None):
-    seed_document_catalog()
+    ensure_document_catalog()
     catalog = CATALOG_BY_SLUG.get(slug)
     if not catalog:
         raise DocumentCenterError('Unbekannte Dokumentvorlage.')
@@ -316,8 +317,9 @@ def dispatch_contract_reminders(today=None):
             if days in {30, 14, 7, 1, 0} and contract.status in {Contract.Status.READY, Contract.Status.SENT, Contract.Status.SIGNED}:
                 title = 'Vertrag endet heute' if days == 0 else f'Vertrag endet in {days} Tagen'
                 body = f'{contract.title} · {state["subject"]}'
+                event_key = f'contract-{days}' if days in {30, 7} else f'contract-end-{days}d'
                 created, mailed = _create_notice(
-                    contract, f'contract-end-{days}d', title, body, reminder_recipients(contract)
+                    contract, event_key, title, body, reminder_recipients(contract)
                 )
                 notifications += created; emails += mailed; events += int(bool(created))
 
