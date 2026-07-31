@@ -48,6 +48,7 @@ import {
 import { api, consumeOAuth, login, logout, me, socialUrl, User } from './api';
 import Operations from './Operations';
 import ScheduleV2 from './ScheduleV2';
+import AttendanceV3 from './AttendanceV3';
 import ActivationPage from './ActivationPage';
 import EmployeeHome from './EmployeeHome';
 import PortalAccessPanel from './PortalAccessPanel';
@@ -2982,7 +2983,7 @@ export default function App() {
   let content: React.ReactNode = user.role === 'worker' ? <EmployeeHome user={user} navigate={navigateTo} /> : <Dashboard user={user} navigate={navigateTo} />;
 
   if (view === 'schedule') content = <ScheduleV2 user={user} />;
-  else if (view === 'time') content = <Time user={user} />;
+  else if (view === 'time') content = <AttendanceV3 user={user} />;
   else if (view === 'contracts') content = <Contracts user={user} />;
   else if (view === 'documents') content = <Documents user={user} />;
   else if (view === 'orders') content = <Orders user={user} />;
