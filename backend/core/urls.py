@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import advanced_views, automation_views, integration_views, shift_views, views
+from . import advanced_views, automation_views, integration_views, shift_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -13,7 +13,7 @@ for prefix, view in [
     ('orders', views.OrderViewSet),
     ('availabilities', views.AvailabilityViewSet),
     ('shifts', shift_views.StaffingShiftViewSet),
-    ('time-entries', views.TimeEntryViewSet),
+    ('time-entries', time_views.TimeEntryViewSet),
     ('time-off', views.TimeOffViewSet),
     ('shift-swaps', views.ShiftSwapViewSet),
     ('contract-templates', views.ContractTemplateViewSet),
