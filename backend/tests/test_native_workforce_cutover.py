@@ -4,11 +4,11 @@ from types import SimpleNamespace
 import pytest
 from django.utils import timezone
 
-from core.models import Contract, Shift, ShiftImportPackage, TimeEntry, User, WorkingTimeAccountRecord
+from core.models import Contract, Shift, ShiftImportPackage, TimeEntry, User, WorkerProfile, WorkingTimeAccountRecord
 from core.native_cutover import approve_order, sync_working_time
 from core.order_automation import seed_client_contract_template
 from core.shift_slots import ShiftSlot
-from core.wiw_migration import build_wiw_migration_report
+from core.wiw_migration import _run_final_import, build_wiw_migration_report
 
 
 def parsed_order(*, count=3, start='09:00', end='17:00'):
@@ -156,3 +156,40 @@ def test_final_wiw_report_reconciles_external_ids(worker_user):
     assert report['resources']['users']['matched_count'] == 1
     assert report['resources']['users']['missing_local_count'] == 0
     assert report['cutover_ready'] is True
+
+
+@pytest.mark.django_db
+def test_final_import_preserves_times_for_historical_users_missing_from_wiw_users():
+    snapshot = {
+        'users': [],
+        'positions': [],
+        'locations': [],
+        'sites': [],
+        'shifts': [],
+        'times': [{
+            'id': 9001,
+            'user_id': 7777,
+            'shift_id': 1234,
+            'start_time': '2026-01-15T08:00:00+00:00',
+            'end_time': '2026-01-15T12:30:00+00:00',
+            'is_approved': True,
+        }],
+        'availabilities': [],
+        'requests': [],
+    }
+
+    run = _run_final_import(snapshot, client=FakeWiwClient(snapshot))
+
+    user = User.objects.get(wiw_id='7777')
+    worker = WorkerProfile.objects.get(wiw_user_id='7777')
+    entry = TimeEntry.objects.get(wiw_time_id='9001')
+
+    assert user.is_active is False
+    assert user.has_usable_password() is False
+    assert worker.active is False
+    assert entry.worker_id == worker.id
+    assert entry.approved is True
+    assert run.status == 'success'
+    assert run.counts['historical_users_created'] == 1
+    assert run.counts['historical_workers_created'] == 1
+    assert run.counts['times_created'] == 1
