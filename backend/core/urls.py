@@ -1,24 +1,24 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import advanced_views, attendance_actions, attendance_views, automation_views, integration_views, portal_views, shift_views, time_views, views
+from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, integration_views, portal_views, searchable_views, shift_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
     ('users', views.UserViewSet),
-    ('clients', views.ClientCompanyViewSet),
-    ('workers', views.WorkerViewSet),
+    ('clients', searchable_views.ClientCompanyViewSet),
+    ('workers', searchable_views.WorkerViewSet),
     ('locations', views.LocationViewSet),
     ('positions', views.PositionViewSet),
-    ('orders', views.OrderViewSet),
+    ('orders', searchable_views.OrderViewSet),
     ('availabilities', views.AvailabilityViewSet),
     ('shifts', shift_views.StaffingShiftViewSet),
     ('time-entries', time_views.TimeEntryViewSet),
     ('time-off', views.TimeOffViewSet),
     ('shift-swaps', views.ShiftSwapViewSet),
     ('contract-templates', views.ContractTemplateViewSet),
-    ('contracts', views.ContractViewSet),
-    ('documents', views.DocumentViewSet),
+    ('contracts', searchable_views.ContractViewSet),
+    ('documents', searchable_views.DocumentViewSet),
     ('payroll', views.PayrollViewSet),
     ('ratings', views.RatingViewSet),
     ('conversations', views.ConversationViewSet),
@@ -38,6 +38,8 @@ urlpatterns = [
     path('auth/activation/validate/', portal_views.activation_validate),
     path('auth/activation/complete/', portal_views.activation_complete),
     path('employee/home/', portal_views.employee_home),
+    path('admin/exceptions/', admin_center_views.admin_exception_center),
+    path('search/global/', admin_center_views.global_search),
     path('attendance/home/', attendance_views.employee_attendance_home),
     path('attendance/entries/<uuid:entry_id>/correction/', attendance_views.request_time_correction),
     path('attendance/entries/<uuid:pk>/close/', attendance_actions.close_running_entry),

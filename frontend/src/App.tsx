@@ -52,6 +52,9 @@ import AttendanceV3 from './AttendanceV3';
 import ActivationPage from './ActivationPage';
 import EmployeeHome from './EmployeeHome';
 import PortalAccessPanel from './PortalAccessPanel';
+import AdminHomeV4 from './AdminHomeV4';
+import GlobalSearch from './GlobalSearch';
+import ListToolbar from './ListToolbar';
 
 type View =
   | 'dashboard'
@@ -508,6 +511,8 @@ function People({ user }: { user: User }) {
   const [credentials, setCredentials] = useState<any>();
   const [csvFile, setCsvFile] = useState<File>();
   const [csvType, setCsvType] = useState('workers');
+  const [listQuery, setListQuery] = useState('');
+  const [listSort, setListSort] = useState('name');
 
   const [workerForm, setWorkerForm] = useState<any>({
     employment_type: 'minijob',
@@ -518,9 +523,12 @@ function People({ user }: { user: User }) {
   const [positionForm, setPositionForm] = useState<any>({ color: '#155eef' });
 
   const load = async () => {
+    const search = listQuery.trim() ? `&search=${encodeURIComponent(listQuery.trim())}` : '';
+    const workerOrdering = listSort === 'number' ? 'employee_number' : 'user__last_name';
+    const clientOrdering = listSort === 'number' ? 'customer_number' : 'name';
     const [workerData, clientData, locationData, positionData] = await Promise.all([
-      api('workers/'),
-      api('clients/'),
+      api(`workers/?ordering=${workerOrdering}${search}`),
+      api(`clients/?ordering=${clientOrdering}${search}`),
       api('locations/'),
       api('positions/'),
     ]);
@@ -531,8 +539,9 @@ function People({ user }: { user: User }) {
   };
 
   useEffect(() => {
-    void load();
-  }, []);
+    const timer = window.setTimeout(() => void load(), listQuery ? 250 : 0);
+    return () => window.clearTimeout(timer);
+  }, [listQuery, listSort]);
 
   async function submit(path: string, payload: any, done: () => void) {
     setBusy(true);
@@ -625,6 +634,16 @@ function People({ user }: { user: User }) {
       />
 
       {isManager(user) && <PortalAccessPanel />}
+
+      <ListToolbar
+        query={listQuery}
+        onQuery={setListQuery}
+        placeholder="Mitarbeiter oder Kunden suchen …"
+        sort={listSort}
+        onSort={setListSort}
+        sortOptions={[{ value: 'name', label: 'Nach Name' }, { value: 'number', label: 'Nach Nummer' }]}
+        count={workers.length + clients.length}
+      />
 
       <div className="columns">
         <div className="panel">
@@ -1716,15 +1735,22 @@ function Contracts({ user }: { user: User }) {
   const [signature, setSignature] = useState('');
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
+  const [listQuery, setListQuery] = useState('');
+  const [listStatus, setListStatus] = useState('');
+  const [listSort, setListSort] = useState('-updated_at');
 
   const load = async () => {
-    const contractData = await api('contracts/');
+    const params = new URLSearchParams();
+    if (listQuery.trim()) params.set('search', listQuery.trim());
+    if (listStatus) params.set('status', listStatus);
+    params.set('ordering', listSort);
+    const contractData = await api(`contracts/?${params.toString()}`);
     setRows(unpack(contractData));
     if (isManager(user)) {
       const [templateData, workerData, clientData] = await Promise.all([
         api('contract-templates/'),
-        api('workers/'),
-        api('clients/'),
+        api('workers/?ordering=user__last_name'),
+        api('clients/?ordering=name'),
       ]);
       setTemplates(unpack(templateData).filter((template: any) => template.active));
       setWorkers(unpack(workerData).filter((worker: any) => worker.active));
@@ -1733,8 +1759,9 @@ function Contracts({ user }: { user: User }) {
   };
 
   useEffect(() => {
-    void load();
-  }, []);
+    const timer = window.setTimeout(() => void load(), listQuery ? 250 : 0);
+    return () => window.clearTimeout(timer);
+  }, [listQuery, listStatus, listSort]);
 
   const selectedTemplate = templates.find((item) => item.id === form.template);
   const variableFields = (selectedTemplate?.schema?.fields || []).filter((item: any) =>
@@ -1824,6 +1851,18 @@ function Contracts({ user }: { user: User }) {
             </IonButton>
           ) : undefined
         }
+      />
+      <ListToolbar
+        query={listQuery}
+        onQuery={setListQuery}
+        placeholder="Vertrag, Mitarbeiter oder Kunde suchen …"
+        status={listStatus}
+        onStatus={setListStatus}
+        statusOptions={[{ value: 'draft', label: 'Entwurf' }, { value: 'ready', label: 'Prüfbereit' }, { value: 'sent', label: 'Versendet' }, { value: 'signed', label: 'Unterzeichnet' }, { value: 'expired', label: 'Abgelaufen' }, { value: 'cancelled', label: 'Storniert' }]}
+        sort={listSort}
+        onSort={setListSort}
+        sortOptions={[{ value: '-updated_at', label: 'Zuletzt geändert' }, { value: 'ends_on', label: 'Vertragsende zuerst' }, { value: '-created_at', label: 'Neueste zuerst' }]}
+        count={rows.length}
       />
       <div className="panel">
         {rows.map((contract) => (
@@ -2010,21 +2049,29 @@ function Documents({ user }: { user: User }) {
   const [payrollForm, setPayrollForm] = useState<any>({});
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
+  const [listQuery, setListQuery] = useState('');
+  const [listFolder, setListFolder] = useState('');
+  const [listSort, setListSort] = useState('-created_at');
 
   const load = async () => {
-    const [documentData, payrollData] = await Promise.all([api('documents/'), api('payroll/')]);
+    const params = new URLSearchParams();
+    if (listQuery.trim()) params.set('search', listQuery.trim());
+    if (listFolder) params.set('folder', listFolder);
+    params.set('ordering', listSort);
+    const [documentData, payrollData] = await Promise.all([api(`documents/?${params.toString()}`), api('payroll/')]);
     setRows(unpack(documentData));
     setPayroll(unpack(payrollData));
     if (isManager(user)) {
-      const [workerData, clientData] = await Promise.all([api('workers/'), api('clients/')]);
+      const [workerData, clientData] = await Promise.all([api('workers/?ordering=user__last_name'), api('clients/?ordering=name')]);
       setWorkers(unpack(workerData).filter((worker: any) => worker.active));
       setClients(unpack(clientData).filter((client: any) => client.active));
     }
   };
 
   useEffect(() => {
-    void load();
-  }, []);
+    const timer = window.setTimeout(() => void load(), listQuery ? 250 : 0);
+    return () => window.clearTimeout(timer);
+  }, [listQuery, listFolder, listSort]);
 
   async function upload() {
     if (!file) return;
@@ -2104,6 +2151,18 @@ function Documents({ user }: { user: User }) {
         }
       />
 
+      <ListToolbar
+        query={listQuery}
+        onQuery={setListQuery}
+        placeholder="Dokument, Mitarbeiter oder Kunde suchen …"
+        status={listFolder}
+        onStatus={setListFolder}
+        statusOptions={[{ value: 'general', label: 'Allgemein' }, { value: 'contracts', label: 'Verträge' }, { value: 'payroll', label: 'Lohnabrechnungen' }, { value: 'certificates', label: 'Nachweise' }, { value: 'orders', label: 'Aufträge' }]}
+        sort={listSort}
+        onSort={setListSort}
+        sortOptions={[{ value: '-created_at', label: 'Neueste zuerst' }, { value: 'title', label: 'Titel A–Z' }, { value: 'folder', label: 'Nach Ordner' }]}
+        count={rows.length}
+      />
       <div className="columns">
         <div className="panel">
           <h3>Dokumente</h3>
@@ -2297,20 +2356,28 @@ function Orders({ user }: { user: User }) {
   const [form, setForm] = useState<any>({ requested_staff: 1, status: 'new' });
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
+  const [listQuery, setListQuery] = useState('');
+  const [listStatus, setListStatus] = useState('');
+  const [listSort, setListSort] = useState('-starts_at');
 
   const load = async () => {
-    const orderData = await api('orders/');
+    const params = new URLSearchParams();
+    if (listQuery.trim()) params.set('search', listQuery.trim());
+    if (listStatus) params.set('status', listStatus);
+    params.set('ordering', listSort);
+    const orderData = await api(`orders/?${params.toString()}`);
     setRows(unpack(orderData));
     if (isManager(user)) {
-      const [clientData, locationData] = await Promise.all([api('clients/'), api('locations/')]);
+      const [clientData, locationData] = await Promise.all([api('clients/?ordering=name'), api('locations/')]);
       setClients(unpack(clientData).filter((client: any) => client.active));
       setLocations(unpack(locationData).filter((location: any) => location.active));
     }
   };
 
   useEffect(() => {
-    void load();
-  }, []);
+    const timer = window.setTimeout(() => void load(), listQuery ? 250 : 0);
+    return () => window.clearTimeout(timer);
+  }, [listQuery, listStatus, listSort]);
 
   async function create() {
     setBusy(true);
@@ -2367,6 +2434,18 @@ function Orders({ user }: { user: User }) {
             Neuer Auftrag
           </IonButton>
         }
+      />
+      <ListToolbar
+        query={listQuery}
+        onQuery={setListQuery}
+        placeholder="Auftrag, Kunde oder Einsatzort suchen …"
+        status={listStatus}
+        onStatus={setListStatus}
+        statusOptions={[{ value: 'new', label: 'Neu' }, { value: 'planning', label: 'In Planung' }, { value: 'confirmed', label: 'Bestätigt' }, { value: 'done', label: 'Abgeschlossen' }, { value: 'cancelled', label: 'Storniert' }]}
+        sort={listSort}
+        onSort={setListSort}
+        sortOptions={[{ value: '-starts_at', label: 'Neueste Einsätze' }, { value: 'starts_at', label: 'Nächste Einsätze' }, { value: '-created_at', label: 'Zuletzt angelegt' }, { value: '-requested_staff', label: 'Größter Bedarf' }]}
+        count={rows.length}
       />
       <div className="panel">
         {rows.map((order) => (
@@ -2980,7 +3059,7 @@ export default function App() {
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
 
-  let content: React.ReactNode = user.role === 'worker' ? <EmployeeHome user={user} navigate={navigateTo} /> : <Dashboard user={user} navigate={navigateTo} />;
+  let content: React.ReactNode = user.role === 'worker' ? <EmployeeHome user={user} navigate={navigateTo} /> : isManager(user) ? <AdminHomeV4 navigate={navigateTo} /> : <Dashboard user={user} navigate={navigateTo} />;
 
   if (view === 'schedule') content = <ScheduleV2 user={user} />;
   else if (view === 'time') content = <AttendanceV3 user={user} />;
@@ -3054,7 +3133,7 @@ export default function App() {
               </IonButton>
             </aside>
 
-            <main className="app-main">{content}</main>
+            <main className="app-main">{isManager(user) && <GlobalSearch onNavigate={navigateTo} />}{content}</main>
           </div>
         </IonContent>
 
