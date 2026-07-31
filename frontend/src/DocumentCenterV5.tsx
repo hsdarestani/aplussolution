@@ -90,7 +90,8 @@ export default function DocumentCenterV5({ onChanged }: { onChanged?: () => void
         setToast('Dokument wurde versendet.');
       } else {
         sessionStorage.setItem('aplus:focus', JSON.stringify({ view: 'contracts', id: item.id, source: 'document-center' }));
-        setToast('Der Vorgang ist unten in der Vertragsliste markiert.');
+        window.setTimeout(() => document.getElementById(`contract-${item.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 40);
+        setToast('Der Vorgang wurde in der Vertragsliste geöffnet.');
       }
       await load();
       await onChanged?.();

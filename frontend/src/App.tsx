@@ -55,6 +55,7 @@ import PortalAccessPanel from './PortalAccessPanel';
 import AdminHomeV4 from './AdminHomeV4';
 import GlobalSearch from './GlobalSearch';
 import ListToolbar from './ListToolbar';
+import DocumentCenterV5 from './DocumentCenterV5';
 
 type View =
   | 'dashboard'
@@ -1818,6 +1819,18 @@ function Contracts({ user }: { user: User }) {
     }
   }
 
+  async function cancelContract(id: string) {
+    const reason = window.prompt('Warum wird dieser Vertrag storniert?');
+    if (!reason) return;
+    try {
+      await api(`contracts/${id}/cancel/`, { method: 'POST', body: JSON.stringify({ reason }) });
+      await load();
+      setToast('Vertrag wurde storniert und bleibt in der Akte erhalten.');
+    } catch (reason: any) {
+      setToast(reason.message);
+    }
+  }
+
   async function sign() {
     if (!selected) return;
     setBusy(true);
@@ -1852,6 +1865,7 @@ function Contracts({ user }: { user: User }) {
           ) : undefined
         }
       />
+      {isManager(user) && <DocumentCenterV5 onChanged={load} />}
       <ListToolbar
         query={listQuery}
         onQuery={setListQuery}
@@ -1866,7 +1880,7 @@ function Contracts({ user }: { user: User }) {
       />
       <div className="panel">
         {rows.map((contract) => (
-          <div className="row contract-row" key={contract.id}>
+          <div className="row contract-row" id={`contract-${contract.id}`} key={contract.id}>
             <IonIcon icon={documentTextOutline} />
             <div className="grow">
               <b>{contract.title}</b>
@@ -1902,9 +1916,14 @@ function Contracts({ user }: { user: User }) {
                     <IonIcon icon={trashOutline} />
                   </IonButton>
                 )}
+                {['ready', 'sent'].includes(contract.status) && !contract.signatures?.length && (
+                  <IonButton size="small" fill="clear" color="danger" onClick={() => cancelContract(contract.id)}>
+                    Stornieren
+                  </IonButton>
+                )}
               </div>
             )}
-            {(['client', 'worker'].includes(user.role) || isManager(user)) && ['ready', 'sent', 'signed'].includes(contract.status) && !contract.signatures?.some((item: any) => item.role === (isManager(user) ? 'employer' : user.role === 'worker' ? 'employee' : 'client')) && (
+            {(['client', 'worker'].includes(user.role) || isManager(user)) && ['ready', 'sent'].includes(contract.status) && !contract.signatures?.some((item: any) => item.role === (isManager(user) ? 'employer' : user.role === 'worker' ? 'employee' : 'client')) && (
               <IonButton size="small" onClick={() => setSelected(contract)}>
                 {isManager(user) ? 'Als Arbeitgeber unterschreiben' : 'Unterschreiben'}
               </IonButton>
