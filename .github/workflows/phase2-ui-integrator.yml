@@ -1,0 +1,50 @@
+name: One-time employee portal UI integrator
+on:
+  push:
+    branches: [feature/employee-portal-phase2]
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/employee-portal-phase2
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Connect activation, employee home and portal access
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('frontend/src/App.tsx')
+          s=p.read_text(encoding='utf-8')
+          anchor="import ScheduleV2 from './ScheduleV2';"
+          additions="import ActivationPage from './ActivationPage';\nimport EmployeeHome from './EmployeeHome';\nimport PortalAccessPanel from './PortalAccessPanel';"
+          if "import ActivationPage" not in s:
+              s=s.replace(anchor,anchor+'\n'+additions,1)
+          legal="if (location.pathname === '/datenschutz') return <Legal />;"
+          if "location.pathname === '/aktivieren'" not in s:
+              s=s.replace(legal,"if (location.pathname === '/aktivieren') return <IonApp><ActivationPage /></IonApp>;\n  "+legal,1)
+          old="let content: React.ReactNode = <Dashboard user={user} navigate={navigateTo} />;"
+          new="let content: React.ReactNode = user.role === 'worker' ? <EmployeeHome user={user} navigate={navigateTo} /> : <Dashboard user={user} navigate={navigateTo} />;"
+          if old in s:
+              s=s.replace(old,new,1)
+          marker='title="Personal & Kunden"'
+          pos=s.find(marker)
+          if pos < 0: raise SystemExit('People title marker not found')
+          end=s.find('\n      />',pos)
+          if end < 0: raise SystemExit('People Title closing marker not found')
+          insert_at=end+len('\n      />')
+          if '<PortalAccessPanel />' not in s[pos:pos+2500]:
+              s=s[:insert_at]+'\n\n      {isManager(user) && <PortalAccessPanel />}'+s[insert_at:]
+          p.write_text(s,encoding='utf-8')
+          PY
+          rm .github/workflows/phase2-ui-integrator.yml
+      - name: Commit permanent UI integration
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/src/App.tsx .github/workflows/phase2-ui-integrator.yml
+          git commit -m 'Connect employee activation and home experience'
+          git push origin HEAD:feature/employee-portal-phase2
