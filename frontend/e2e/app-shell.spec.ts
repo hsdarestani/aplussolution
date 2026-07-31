@@ -210,6 +210,35 @@ test.describe('Phase 6 mobile QA', () => {
     await expect(moreMenu.getByRole('button', { name: 'Ranking', exact: true })).toBeVisible();
   });
 
+  test('worker deep links survive refresh and browser history while role guards stay enforced', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockApi(page, worker);
+    await page.goto('/?view=schedule');
+
+    await expect(page.getByRole('heading', { name: 'Schichten' })).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
+
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Schichten' })).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
+
+    await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeit' }).click();
+    await expect(page.getByRole('heading', { name: 'Bereit für deinen Einsatz?' })).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('time');
+
+    await page.goBack();
+    await expect(page.getByRole('heading', { name: 'Schichten' })).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
+
+    await page.goForward();
+    await expect(page.getByRole('heading', { name: 'Bereit für deinen Einsatz?' })).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('time');
+
+    await page.goto('/?view=people');
+    await expect(page.getByRole('heading', { name: 'Mina Berger' })).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBeNull();
+  });
+
   test('admin exception center and timer-close reason dialog stay usable on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await mockApi(page, admin);
