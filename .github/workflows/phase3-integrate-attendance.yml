@@ -1,0 +1,60 @@
+name: One-time Phase 3 attendance integration
+on:
+  push:
+    branches: [feature/attendance-phase3]
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/attendance-phase3
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Integrate AttendanceV3 into the app
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          app = Path('frontend/src/App.tsx')
+          text = app.read_text(encoding='utf-8')
+          import_marker = "import ScheduleV2 from './ScheduleV2';\n"
+          import_line = "import AttendanceV3 from './AttendanceV3';\n"
+          if import_line not in text:
+              if import_marker not in text:
+                  raise SystemExit('ScheduleV2 import marker not found')
+              text = text.replace(import_marker, import_marker + import_line, 1)
+          old_route = "else if (view === 'time') content = <Time user={user} />;"
+          new_route = "else if (view === 'time') content = <AttendanceV3 user={user} />;"
+          if new_route not in text:
+              if old_route not in text:
+                  raise SystemExit('Time route marker not found')
+              text = text.replace(old_route, new_route, 1)
+          app.write_text(text, encoding='utf-8')
+
+          attendance = Path('frontend/src/AttendanceV3.tsx')
+          text = attendance.read_text(encoding='utf-8')
+          text = text.replace("  IonInput,\n  IonItem,\n  IonLabel,\n  IonModal,", "  IonInput,\n  IonModal,")
+          attendance.write_text(text, encoding='utf-8')
+
+          views = Path('backend/core/attendance_views.py')
+          text = views.read_text(encoding='utf-8')
+          text = text.replace('from datetime import timedelta', 'from datetime import datetime, timedelta', 1)
+          text = text.replace('timezone.datetime(now.year, now.month, 1)', 'datetime(now.year, now.month, 1)', 1)
+          views.write_text(text, encoding='utf-8')
+          PY
+          rm .github/workflows/phase3-integrate-attendance.yml
+      - name: Validate frontend integration
+        run: |
+          cd frontend
+          npm install --no-audit --no-fund
+          npm run build
+      - name: Commit integration
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/src/App.tsx frontend/src/AttendanceV3.tsx backend/core/attendance_views.py .github/workflows/phase3-integrate-attendance.yml
+          git commit -m 'Integrate attendance phase 3 UI'
+          git push origin HEAD:feature/attendance-phase3
