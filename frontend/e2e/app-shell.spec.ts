@@ -280,7 +280,7 @@ test.describe('Phase 6 mobile QA', () => {
     await expectNoHorizontalPageOverflow(page);
 
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Plan' }).click();
-    await expect(page.getByRole('heading', { name: 'Einsätze' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Einsätze', exact: true })).toBeVisible();
     await expect(page.getByText('Geplante Einsätze und aktueller Besetzungsstatus für Ihre Aufträge.')).toBeVisible();
     await expect(page.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
     await expect(page.locator('ion-segment')).toHaveCount(0);
