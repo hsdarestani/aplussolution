@@ -31,20 +31,43 @@ jobs:
           path: frontend/playwright-report
           retention-days: 7
 
-  production-time-diagnostic:
+  production-final-migration:
     runs-on: ubuntu-latest
     steps:
       - name: Install SSH tooling
         run: sudo apt-get update && sudo apt-get install -y sshpass
-      - name: Diagnose missing WIW time entries without PII
+      - name: Wait for historical-time fix, then run strict final migration
         env:
           SSHPASS: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
         run: |
           set -euo pipefail
           test -n "$HOST" && test -n "$SSHPASS"
+          ready=0
+          for attempt in $(seq 1 90); do
+            if sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          grep -q 'historical_archive_stub' backend/core/wiw_migration.py
+          docker compose exec -T backend python -c "from core.wiw_migration import _ensure_historical_time_workers" </dev/null
+          REMOTE
+            then
+              ready=1
+              break
+            fi
+            sleep 10
+          done
+          test "$ready" = 1
+
           sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
-          docker compose exec -T backend python manage.py shell -c "from collections import Counter; from core.wiw_migration import fetch_complete_wiw_snapshot; from core.wiw import WhenIWorkClient; from core.models import TimeEntry, WorkerProfile; from core.wiw_sync import first, as_id, as_datetime; snap,errs=fetch_complete_wiw_snapshot(WhenIWorkClient()); local=set(TimeEntry.objects.exclude(wiw_time_id__isnull=True).exclude(wiw_time_id='').values_list('wiw_time_id',flat=True)); missing=[i for i in snap['times'] if str(as_id(first(i,'id','time_id')) or '') not in local]; print('remote_times='+str(len(snap['times']))); print('missing_times='+str(len(missing))); print('missing_key_shapes='+str(Counter(tuple(sorted(i.keys())) for i in missing).most_common(10))); print('missing_without_snake_user='+str(sum(1 for i in missing if not as_id(first(i,'user_id','user'))))); print('missing_with_userId='+str(sum(1 for i in missing if i.get('userId') not in (None,'')))); print('missing_without_snake_start='+str(sum(1 for i in missing if not as_datetime(first(i,'start_time','clock_in','start'))))); print('missing_with_startTime='+str(sum(1 for i in missing if i.get('startTime') not in (None,'')))); print('candidate_key_presence='+str({k:sum(1 for i in missing if i.get(k) not in (None,'')) for k in ['user_id','user','userId','userid','employee_id','employeeId','start_time','startTime','clock_in','clockin_time','clock_in_time','start','time_in','end_time','endTime','clock_out','shift_id','shiftId']})); print('sample_value_types='+str([{k:type(v).__name__ for k,v in i.items()} for i in missing[:3]]))" </dev/null
+          docker compose exec -T backend python manage.py check </dev/null
+          docker compose exec -T backend python manage.py migrate_wiw_final --apply --strict --compact </dev/null
+          docker compose exec -T backend python manage.py shell -c "from django.conf import settings; from core.models import IntegrationSyncRun; run=IntegrationSyncRun.objects.filter(provider='wiw', mode='final_full').order_by('-finished_at').first(); print('final_full_status=' + (run.status if run else 'missing')); print('final_full_counts=' + str(run.counts if run else {})); print('final_full_errors=' + str(run.errors if run else [])); assert run and run.status == 'success'; assert settings.WIW_SYNC_ENABLED is False; assert 'wiw-sync-hourly' not in settings.CELERY_BEAT_SCHEDULE" </dev/null
+          docker compose exec -T backend python manage.py shell -c "from core.wiw_migration import build_wiw_migration_report; r=build_wiw_migration_report(apply_full_sync=False); print('cutover_ready=' + str(r['cutover_ready'])); [print(f'{name}: remote={row[\"remote_count\"]} local={row[\"local_count\"]} matched={row[\"matched_count\"]} missing={row[\"missing_local_count\"]} extra={row[\"extra_local_count\"]} error={row[\"error\"]}') for name,row in r['resources'].items()]; assert r['cutover_ready']" </dev/null
+          docker compose exec -T backend python manage.py shell -c "from core.native_cutover import approve_order, sync_working_time; print('native_cutover_runtime=ok')" </dev/null
+          docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ </dev/null >/dev/null
+          curl -fsS https://solution.smarbiz.sbs/health/ >/dev/null
+          echo 'production_final_cutover=ok'
           REMOTE
