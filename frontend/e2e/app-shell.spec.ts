@@ -36,6 +36,13 @@ const availableShift = {
   open_count: 2,
 };
 
+const mineShift = {
+  ...availableShift,
+  id: 'shift-mine-1',
+  filled_count: 4,
+  open_count: 0,
+};
+
 async function fulfill(route: Route, body: unknown, status = 200) {
   await route.fulfill({
     status,
@@ -71,7 +78,7 @@ async function mockApi(page: Page, user: typeof worker | typeof admin) {
     }
 
     if (path.startsWith('shifts/available/')) return fulfill(route, [availableShift]);
-    if (path.startsWith('shifts/mine/')) return fulfill(route, []);
+    if (path.startsWith('shifts/mine/')) return fulfill(route, [mineShift]);
 
     if (path === 'attendance/home/') {
       return fulfill(route, {
@@ -81,6 +88,25 @@ async function mockApi(page: Page, user: typeof worker | typeof admin) {
         pending_corrections: 0,
         history: [],
         corrections: [],
+      });
+    }
+    if (path === 'attendance/exceptions/') {
+      return fulfill(route, {
+        counts: {
+          pending_corrections: 0,
+          unapproved_entries: 0,
+          long_running_entries: 1,
+          total: 1,
+        },
+        pending_corrections: [],
+        unapproved_entries: [],
+        long_running_entries: [
+          {
+            id: 'entry-long-1',
+            worker_name: 'Mina Berger',
+            clock_in: '2026-07-30T18:00:00+02:00',
+          },
+        ],
       });
     }
     if (path === 'time-off/') return fulfill(route, []);
@@ -127,7 +153,7 @@ async function expectNoHorizontalPageOverflow(page: Page) {
 }
 
 test.describe('Phase 6 mobile QA', () => {
-  test('worker can move through the primary mobile flows without layout overflow', async ({ page }) => {
+  test('worker can move through primary flows and gets an app-native release confirmation', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await mockApi(page, worker);
     await page.goto('/');
@@ -144,6 +170,14 @@ test.describe('Phase 6 mobile QA', () => {
     await expect(page.getByText('Main Suites Frankfurt', { exact: true }).first()).toBeVisible();
     await expectNoHorizontalPageOverflow(page);
 
+    await page.locator('ion-segment-button[value="mine"]').click();
+    await expect(page.getByRole('button', { name: 'Freigeben' })).toBeVisible();
+    await page.getByRole('button', { name: 'Freigeben' }).click();
+    await expect(page.getByText('Schicht freigeben?', { exact: true })).toBeVisible();
+    await expect(page.getByText('wird wieder für andere Mitarbeiter verfügbar.', { exact: false })).toBeVisible();
+    await page.getByRole('button', { name: 'Abbrechen' }).click();
+    await expect(page.getByText('Schicht freigeben?', { exact: true })).toBeHidden();
+
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeit' }).click();
     await expect(page.getByRole('heading', { name: 'Bereit für deinen Einsatz?' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Einstempeln' })).toBeEnabled();
@@ -157,7 +191,7 @@ test.describe('Phase 6 mobile QA', () => {
     await expect(moreMenu.getByRole('button', { name: 'Ranking', exact: true })).toBeVisible();
   });
 
-  test('admin exception center remains usable on a narrow viewport', async ({ page }) => {
+  test('admin exception center and timer-close reason dialog stay usable on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await mockApi(page, admin);
     await page.goto('/');
@@ -167,6 +201,15 @@ test.describe('Phase 6 mobile QA', () => {
     await expect(page.getByText('Schicht noch nicht vollständig besetzt')).toBeVisible();
     await expect(page.locator('.mobile-tabbar button')).toHaveCount(5);
     await expectNoHorizontalPageOverflow(page);
+
+    await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeit' }).click();
+    await expect(page.getByRole('heading', { name: 'Ungewöhnlich lange laufende Timer' })).toBeVisible();
+    await page.getByRole('button', { name: 'Timer beenden' }).click();
+    await expect(page.getByText('Laufenden Timer beenden?', { exact: true })).toBeVisible();
+    await expect(page.locator('ion-alert textarea')).toBeVisible();
+    await page.locator('ion-alert textarea').fill('E2E Prüfung');
+    await page.getByRole('button', { name: 'Abbrechen' }).click();
+    await expect(page.getByText('Laufenden Timer beenden?', { exact: true })).toBeHidden();
 
     await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
     const moreMenu = page.locator('.mobile-menu-grid');
