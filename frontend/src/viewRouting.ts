@@ -77,10 +77,27 @@ export function installViewHistory() {
   if (window.location.pathname !== '/') return () => undefined;
 
   let applyingFromHistory: View | null = null;
+  let historySyncReady = false;
   let observedAside: Element | null = null;
   let asideObserver: MutationObserver | null = null;
+  let settleFrame = 0;
+
+  const settleLocationApplication = () => {
+    window.cancelAnimationFrame(settleFrame);
+    settleFrame = window.requestAnimationFrame(() => {
+      if (applyingFromHistory && activeView() === applyingFromHistory) {
+        applyingFromHistory = null;
+      }
+      historySyncReady = true;
+    });
+  };
 
   const syncUrlFromApp = () => {
+    // During the initial React/Ionic shell commit the sidebar briefly reports
+    // dashboard as active. Do not let that transient state overwrite a deep
+    // link before the requested view has been applied.
+    if (!historySyncReady) return;
+
     const active = activeView();
     if (!active) return;
 
@@ -105,6 +122,7 @@ export function installViewHistory() {
   const applyLocationToApp = () => {
     if (window.location.pathname !== '/') return;
 
+    historySyncReady = false;
     const requested = requestedView();
     const desired = requested.raw === null ? 'dashboard' : requested.view;
 
@@ -116,6 +134,7 @@ export function installViewHistory() {
         applyingFromHistory = 'dashboard';
         dashboard.click();
       }
+      settleLocationApplication();
       return;
     }
 
@@ -129,6 +148,7 @@ export function installViewHistory() {
         applyingFromHistory = 'dashboard';
         dashboard.click();
       }
+      settleLocationApplication();
       return;
     }
 
@@ -140,6 +160,7 @@ export function installViewHistory() {
       applyingFromHistory = desired;
       target.click();
     }
+    settleLocationApplication();
   };
 
   const attachToShell = () => {
@@ -168,5 +189,6 @@ export function installViewHistory() {
     window.removeEventListener('popstate', applyLocationToApp);
     shellObserver.disconnect();
     asideObserver?.disconnect();
+    window.cancelAnimationFrame(settleFrame);
   };
 }
