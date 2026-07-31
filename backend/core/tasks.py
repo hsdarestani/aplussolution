@@ -87,14 +87,14 @@ def process_wiw_webhook(self, event_id):
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3})
 def generate_due_client_contracts(self):
-    from .native_workforce import generate_client_contract
+    from .native_cutover import generate_client_contract
     now = timezone.now()
     packages = ShiftImportPackage.objects.filter(
         status=ShiftImportPackage.Status.PENDING,
         first_shift_time__lte=now + timedelta(hours=24),
         first_shift_time__gte=now - timedelta(days=1),
         client__isnull=False,
-    )
+    ).select_related('client', 'contract')
     generated = skipped = 0
     errors = []
     for package in packages:
@@ -109,7 +109,7 @@ def generate_due_client_contracts(self):
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3})
 def sync_working_time_current_year(self):
-    from .native_workforce import sync_working_time
+    from .native_cutover import sync_working_time
     today = timezone.localdate()
     log = sync_working_time(today.replace(month=1, day=1), today)
     return {'id': str(log.id), 'status': log.status, 'records_count': log.records_count}
