@@ -50,35 +50,42 @@ def _exception_center_items(now):
     items = []
 
     # Staffing demand: published/confirmed future shifts with open capacity.
-    staffing = Shift.objects.filter(
-        status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
-        ends_at__gte=now,
-    ).select_related('client', 'location', 'position').annotate(
-        open_count=Count(
-            'slots',
-            filter=Q(slots__status=ShiftSlot.Status.OPEN, slots__worker__isnull=True),
-            distinct=True,
-        ),
-        filled_count=Count(
-            'slots',
-            filter=Q(slots__status=ShiftSlot.Status.CLAIMED, slots__worker__isnull=False),
-            distinct=True,
-        ),
-    ).filter(open_count__gt=0).order_by('starts_at')[:80]
+    staffing = list(
+        Shift.objects.filter(
+            status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
+            ends_at__gte=now,
+        ).select_related('client', 'location', 'position').annotate(
+            slot_open_count=Count(
+                'slots',
+                filter=Q(slots__status=ShiftSlot.Status.OPEN, slots__worker__isnull=True),
+                distinct=True,
+            ),
+            slot_filled_count=Count(
+                'slots',
+                filter=Q(slots__status=ShiftSlot.Status.CLAIMED, slots__worker__isnull=False),
+                distinct=True,
+            ),
+        ).order_by('starts_at')[:120]
+    )
     for shift in staffing:
+        legacy_filled = 1 if shift.worker_id and shift.slot_filled_count == 0 else 0
+        effective_filled = min(shift.required_count, shift.slot_filled_count + legacy_filled)
+        effective_open = max(0, shift.required_count - effective_filled)
+        if not effective_open:
+            continue
         hours_until = (shift.starts_at - now).total_seconds() / 3600
         severity = 'critical' if hours_until <= 24 else 'warning'
         items.append(_exception(
             'staffing',
             severity,
-            f'{shift.open_count} Platz/Plätze noch offen',
+            f'{effective_open} Platz/Plätze noch offen',
             f'{shift.position.name} · {shift.client.name} · {shift.location.name}',
             'schedule',
             shift.id,
             due_at=shift.starts_at,
             meta={
-                'open_count': shift.open_count,
-                'filled_count': shift.filled_count,
+                'open_count': effective_open,
+                'filled_count': effective_filled,
                 'required_count': shift.required_count,
                 'starts_at': shift.starts_at,
             },
@@ -117,6 +124,40 @@ def _exception_center_items(now):
                 'worker_name': slot.worker.user.get_full_name() or slot.worker.user.email,
                 'minutes_late': minutes_late,
                 'location': slot.shift.location.name,
+            },
+        ))
+
+    # Legacy directly-assigned shifts remain visible during the transition even if a claimed slot is missing.
+    late_legacy = Shift.objects.filter(
+        worker__isnull=False,
+        status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
+        starts_at__lte=now - timedelta(minutes=15),
+        ends_at__gte=now - timedelta(hours=12),
+    ).exclude(
+        slots__status=ShiftSlot.Status.CLAIMED,
+        slots__worker__isnull=False,
+    ).select_related('worker__user', 'client', 'location', 'position').distinct().order_by('-starts_at')[:80]
+    legacy_pairs = set(
+        TimeEntry.objects.filter(shift_id__in=[shift.id for shift in late_legacy]).values_list('shift_id', 'worker_id')
+    )
+    for shift in late_legacy:
+        if (shift.id, shift.worker_id) in legacy_pairs:
+            continue
+        minutes_late = max(15, int((now - shift.starts_at).total_seconds() // 60))
+        items.append(_exception(
+            'attendance',
+            'critical' if minutes_late >= 60 else 'warning',
+            'Kein Check-in erfasst',
+            f'{shift.worker.user.get_full_name() or shift.worker.user.email} · {shift.position.name} · seit {minutes_late} Min.',
+            'time',
+            shift.id,
+            due_at=shift.starts_at,
+            meta={
+                'worker_id': str(shift.worker_id),
+                'worker_name': shift.worker.user.get_full_name() or shift.worker.user.email,
+                'minutes_late': minutes_late,
+                'location': shift.location.name,
+                'legacy_assignment': True,
             },
         ))
 
@@ -160,7 +201,6 @@ def _exception_center_items(now):
             status__in=[Contract.Status.READY, Contract.Status.SENT, Contract.Status.SIGNED],
         )
     ).select_related('worker__user', 'client', 'template').order_by('ends_on', 'created_at')[:100]
-    seen_contract_actions = set()
     for contract in contracts:
         subject = (
             contract.worker.user.get_full_name() or contract.worker.user.email
@@ -178,7 +218,6 @@ def _exception_center_items(now):
                 due_at=contract.reminder_date or contract.ends_on,
                 meta={'status': contract.status, 'template': contract.template.name},
             ))
-            seen_contract_actions.add(contract.id)
         if contract.ends_on and today <= contract.ends_on <= due_date:
             days = (contract.ends_on - today).days
             items.append(_exception(
@@ -193,7 +232,7 @@ def _exception_center_items(now):
             ))
 
     # Personnel/document readiness: incomplete digital employee files.
-    workers = WorkerProfile.objects.filter(active=True).select_related('user').order_by('user__last_name')[:250]
+    workers = list(WorkerProfile.objects.filter(active=True).select_related('user').order_by('user__last_name')[:250])
     master_by_worker = {
         row.worker_id: row
         for row in EmployeeMasterData.objects.filter(worker__in=workers)
