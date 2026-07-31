@@ -14,6 +14,7 @@ from .shift_slots import ShiftSlot
 
 
 class StaffingShiftViewSet(viewsets.ModelViewSet):
+    queryset = Shift.objects.all()
     serializer_class = ShiftApiSerializer
     permission_classes = [IsAuthenticated]
     filterset_fields = ['status', 'client', 'location', 'position', 'order']
