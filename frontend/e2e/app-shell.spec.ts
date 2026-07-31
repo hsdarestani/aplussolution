@@ -106,11 +106,11 @@ async function mockApi(page: Page, user: typeof worker | typeof admin) {
       });
     }
 
-    if (path.startsWith('shifts/?')) return fulfill(route, [availableShift]);
-    if (path === 'clients/' || path.startsWith('clients/?')) return fulfill(route, []);
-    if (path === 'locations/' || path.startsWith('locations/?')) return fulfill(route, []);
-    if (path === 'positions/' || path.startsWith('positions/?')) return fulfill(route, []);
-    if (path === 'orders/' || path.startsWith('orders/?')) return fulfill(route, []);
+    if (path === 'shifts/') return fulfill(route, [availableShift]);
+    if (path === 'clients/') return fulfill(route, []);
+    if (path === 'locations/') return fulfill(route, []);
+    if (path === 'positions/') return fulfill(route, []);
+    if (path === 'orders/') return fulfill(route, []);
 
     return fulfill(route, []);
   });
@@ -151,9 +151,10 @@ test.describe('Phase 6 mobile QA', () => {
 
     await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
     await expect(page.getByRole('heading', { name: 'Weitere Bereiche' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Meine Verträge' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Dokumente & Lohn' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Ranking' })).toBeVisible();
+    const moreMenu = page.locator('.mobile-menu-grid');
+    await expect(moreMenu.getByRole('button', { name: 'Meine Verträge', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Dokumente & Lohn', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Ranking', exact: true })).toBeVisible();
   });
 
   test('admin exception center remains usable on a narrow viewport', async ({ page }) => {
@@ -168,9 +169,10 @@ test.describe('Phase 6 mobile QA', () => {
     await expectNoHorizontalPageOverflow(page);
 
     await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
-    await expect(page.getByRole('button', { name: 'Verträge' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Personal & Kunden' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Steuerzentrale' })).toBeVisible();
+    const moreMenu = page.locator('.mobile-menu-grid');
+    await expect(moreMenu.getByRole('button', { name: 'Verträge', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Personal & Kunden', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Steuerzentrale', exact: true })).toBeVisible();
   });
 });
 
