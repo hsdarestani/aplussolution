@@ -1,0 +1,49 @@
+name: Verify final Phase 6 rollout
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  verify-production:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Wait for hardened deploy workflow on production host
+        env:
+          HOST: ${{ secrets.HOST }}
+          SSHPASS: ${{ secrets.PASS }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 80); do
+            if sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" "grep -F -q 'Preflight production configuration' /opt/aplussolution/.github/workflows/deploy.yml && grep -F -q 'Refusing to upload a partial release' /opt/aplussolution/.github/workflows/deploy.yml"; then
+              echo 'Hardened deploy workflow is present on production host.'
+              break
+            fi
+            if [ "$attempt" = 80 ]; then
+              echo 'Latest main deploy workflow did not reach production host.' >&2
+              exit 1
+            fi
+            sleep 10
+          done
+      - name: Verify Phase 6 runtime and integrations
+        env:
+          HOST: ${{ secrets.HOST }}
+          SSHPASS: ${{ secrets.PASS }}
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          grep -F -q "if(user.role==='client')" frontend/src/ScheduleV2.tsx
+          grep -F -q "KUNDENPORTAL" frontend/src/ScheduleV2.tsx
+          grep -F -q "Schicht freigeben?" frontend/src/ScheduleV2.tsx
+          grep -F -q "Laufenden Timer beenden?" frontend/src/AttendanceV3.tsx
+          grep -F -q "Originalvorlage installieren" frontend/src/DocumentCenterV5.tsx
+          docker compose exec -T frontend sh -c "grep -R -F -q 'Geplante Einsätze und aktueller Besetzungsstatus' /usr/share/nginx/html/assets && grep -R -F -q 'Schicht freigeben?' /usr/share/nginx/html/assets"
+          docker compose exec -T backend python manage.py check </dev/null
+          docker compose exec -T backend python manage.py shell -c "from core.wiw import WhenIWorkClient; client=WhenIWorkClient(); client.login(force=True); client.collection('shifts', params={'limit': 1}); client.collection('times', params={'limit': 1}); print('WIW production access OK')" </dev/null
+          curl -kfsS --retry 10 --retry-delay 3 --resolve solution.smarbiz.sbs:443:127.0.0.1 https://solution.smarbiz.sbs/health/ >/dev/null
+          docker compose ps frontend backend caddy
+          REMOTE
+      - name: Verify public HTTPS
+        run: curl -fsS --retry 10 --retry-delay 5 --retry-all-errors https://solution.smarbiz.sbs/health/ >/dev/null
