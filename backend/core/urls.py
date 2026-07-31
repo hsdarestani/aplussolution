@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import advanced_views, automation_views, integration_views, shift_views, time_views, views
+from . import advanced_views, automation_views, integration_views, portal_views, shift_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -35,6 +35,12 @@ urlpatterns = [
     path('auth/account-deletion/', views.request_account_deletion),
     path('auth/oauth/<str:provider>/start/', views.oauth_start),
     path('auth/oauth/<str:provider>/callback/', views.oauth_callback),
+    path('auth/activation/validate/', portal_views.activation_validate),
+    path('auth/activation/complete/', portal_views.activation_complete),
+    path('employee/home/', portal_views.employee_home),
+    path('workers/portal-status/', portal_views.portal_statuses),
+    path('workers/<uuid:pk>/invite/', portal_views.invite_worker),
+    path('workers/bulk-invite/', portal_views.bulk_invite_workers),
     path('setup/demo/', views.setup_demo),
     path('dashboard/', views.dashboard),
     path('integrations/wiw/status/', integration_views.wiw_status),

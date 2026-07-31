@@ -1,0 +1,110 @@
+from datetime import timedelta
+
+import pytest
+from django.utils import timezone
+from rest_framework.test import APIClient
+
+from core.models import ClientCompany, Contract, ContractTemplate, Location, Notification, Position, Shift, TimeEntry, User, WorkerProfile
+from core.portal_models import PortalInvitation
+from core.portal_service import create_portal_invitation
+
+
+@pytest.mark.django_db
+def test_invitation_stores_only_hash_and_activates_once(settings, admin_user, worker_user):
+    settings.APP_URL = 'https://solution.smarbiz.sbs'
+    settings.EMAIL_HOST = ''
+    worker_user.set_unusable_password()
+    worker_user.is_onboarded = False
+    worker_user.save(update_fields=['password', 'is_onboarded'])
+
+    invitation, url, delivered = create_portal_invitation(worker_user.worker_profile, admin_user)
+    raw = url.split('token=', 1)[1]
+    assert delivered is False
+    assert raw not in invitation.token_hash
+    assert len(invitation.token_hash) == 64
+
+    public = APIClient()
+    valid = public.post('/api/auth/activation/validate/', {'token': raw}, format='json')
+    assert valid.status_code == 200
+    complete = public.post('/api/auth/activation/complete/', {
+        'token': raw,
+        'password': 'NewSecurePass123!',
+        'password_confirm': 'NewSecurePass123!',
+    }, format='json')
+    assert complete.status_code == 200
+    assert complete.data['access'] and complete.data['refresh']
+    worker_user.refresh_from_db()
+    assert worker_user.is_onboarded is True
+    assert worker_user.check_password('NewSecurePass123!')
+    reused = public.post('/api/auth/activation/validate/', {'token': raw}, format='json')
+    assert reused.status_code == 400
+
+
+@pytest.mark.django_db
+def test_invitation_rejects_synthetic_wiw_email(settings, admin_user):
+    user = User.objects.create(email='wiw-123@sync.invalid', role='worker', first_name='NoMail', wiw_id='123', is_active=True)
+    user.set_unusable_password(); user.save()
+    worker = WorkerProfile.objects.create(user=user, employee_number='WIW-123', wiw_user_id='123')
+    with pytest.raises(ValueError, match='E-Mail'):
+        create_portal_invitation(worker, admin_user)
+
+
+@pytest.mark.django_db
+def test_expired_activation_token_is_rejected(settings, admin_user, worker_user):
+    settings.EMAIL_HOST = ''
+    worker_user.set_unusable_password(); worker_user.save(update_fields=['password'])
+    invitation, url, _ = create_portal_invitation(worker_user.worker_profile, admin_user)
+    invitation.expires_at = timezone.now() - timedelta(minutes=1)
+    invitation.save(update_fields=['expires_at'])
+    response = APIClient().post('/api/auth/activation/validate/', {'token': url.split('token=', 1)[1]}, format='json')
+    assert response.status_code == 400
+    assert 'abgelaufen' in response.data['detail']
+
+
+@pytest.mark.django_db
+def test_synced_unusable_worker_is_not_marked_onboarded():
+    user = User.objects.create(email='sync@example.com', role='worker', wiw_id='999', is_onboarded=True)
+    user.set_unusable_password(); user.save()
+    user.refresh_from_db()
+    assert user.is_onboarded is False
+
+
+@pytest.mark.django_db
+def test_admin_invite_endpoint_returns_link_when_smtp_missing(settings, auth_admin, worker_user):
+    settings.EMAIL_HOST = ''
+    worker_user.set_unusable_password(); worker_user.is_onboarded = False; worker_user.save(update_fields=['password','is_onboarded'])
+    response = auth_admin.post(f'/api/workers/{worker_user.worker_profile.id}/invite/', {}, format='json')
+    assert response.status_code == 201
+    assert response.data['delivered'] is False
+    assert response.data['activation_url'].startswith(settings.APP_URL)
+    assert PortalInvitation.objects.filter(user=worker_user, used_at__isnull=True).count() == 1
+
+
+@pytest.mark.django_db
+def test_worker_home_uses_claimed_slots_not_legacy_worker(auth_worker, worker_user, company, location, position):
+    now = timezone.now()
+    own = Shift.objects.create(
+        client=company, location=location, position=position,
+        starts_at=now + timedelta(hours=2), ends_at=now + timedelta(hours=6),
+        status='published', is_open=True, required_count=2,
+    )
+    claimed = auth_worker.post(f'/api/shifts/{own.id}/claim/', {}, format='json')
+    assert claimed.status_code == 200
+    own.refresh_from_db()
+    assert own.worker_id is None
+
+    available = Shift.objects.create(
+        client=company, location=location, position=position,
+        starts_at=now + timedelta(days=1), ends_at=now + timedelta(days=1, hours=4),
+        status='published', is_open=True, required_count=1,
+    )
+    TimeEntry.objects.create(worker=worker_user.worker_profile, clock_in=now - timedelta(hours=2), clock_out=now - timedelta(hours=1))
+    Notification.objects.create(user=worker_user, title='Test', body='Hinweis')
+
+    response = auth_worker.get('/api/employee/home/')
+    assert response.status_code == 200
+    assert response.data['next_shift']['id'] == str(own.id)
+    assert response.data['available_count'] >= 1
+    assert any(item['id'] == str(available.id) for item in response.data['available_shifts'])
+    assert response.data['month_worked_minutes'] >= 60
+    assert response.data['unread_notifications'] >= 1
