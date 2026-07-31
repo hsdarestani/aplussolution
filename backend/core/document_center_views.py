@@ -2,6 +2,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from .document_catalog import CATALOG_BY_SLUG
 from .document_center import (
     DocumentCenterError,
     contract_readiness,
@@ -9,6 +10,7 @@ from .document_center import (
     document_center_overview,
     install_template_source,
 )
+from .document_source import InvalidTemplateSource, validate_template_source
 from .models import Contract, User
 from .permissions import IsAdminOrManager
 from .services import audit
@@ -48,9 +50,13 @@ def upload_template_source(request, slug):
     upload = request.FILES.get('file')
     if not upload:
         return Response({'detail': 'Quelldatei fehlt.'}, status=400)
+    catalog = CATALOG_BY_SLUG.get(slug)
+    if not catalog:
+        return Response({'detail': 'Unbekannte Dokumentvorlage.'}, status=404)
     try:
+        validate_template_source(upload, catalog['source_format'])
         state = install_template_source(slug, upload, request.data.get('version'))
-    except DocumentCenterError as exc:
+    except (DocumentCenterError, InvalidTemplateSource) as exc:
         return Response({'detail': str(exc)}, status=400)
     audit(request, 'document_template.source_installed', request.user, {
         'slug': slug,
