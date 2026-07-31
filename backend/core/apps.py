@@ -6,4 +6,4 @@ class CoreConfig(AppConfig):
     name = 'core'
 
     def ready(self):
-        from . import shift_slots  # noqa: F401
+        from . import portal_models, shift_slots  # noqa: F401
