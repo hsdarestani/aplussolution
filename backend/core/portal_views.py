@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
@@ -5,7 +7,6 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from .models import Contract, Notification, Shift, TimeEntry, User, WorkerProfile
-from .permissions import IsAdminOrManager
 from .portal_service import activate_portal, create_portal_invitation, invitation_status, resolve_invitation
 from .serializers import NotificationSerializer, UserSerializer
 from .shift_api import ShiftApiSerializer
@@ -27,30 +28,20 @@ def activation_validate(request):
     except ValueError as exc:
         return Response({'detail': str(exc)}, status=400)
     user = invitation.user
-    return Response({
-        'valid': True,
-        'name': user.get_full_name() or user.email,
-        'email': user.email,
-        'expires_at': invitation.expires_at,
-    })
+    return Response({'valid': True, 'name': user.get_full_name() or user.email, 'email': user.email, 'expires_at': invitation.expires_at})
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def activation_complete(request):
     password = request.data.get('password', '')
-    confirmation = request.data.get('password_confirm', '')
-    if password != confirmation:
+    if password != request.data.get('password_confirm', ''):
         return Response({'detail': 'Die Passwörter stimmen nicht überein.'}, status=400)
     try:
         user, access, refresh = activate_portal(request.data.get('token', ''), password)
     except ValueError as exc:
         return Response({'detail': str(exc)}, status=400)
-    return Response({
-        'access': access,
-        'refresh': refresh,
-        'user': UserSerializer(user, context={'request': request}).data,
-    })
+    return Response({'access': access, 'refresh': refresh, 'user': UserSerializer(user, context={'request': request}).data})
 
 
 @api_view(['GET'])
@@ -60,12 +51,7 @@ def portal_statuses(request):
     workers = WorkerProfile.objects.filter(active=True).select_related('user').order_by('user__first_name', 'user__last_name')
     search = (request.GET.get('search') or '').strip()
     if search:
-        workers = workers.filter(
-            Q(user__first_name__icontains=search)
-            | Q(user__last_name__icontains=search)
-            | Q(user__email__icontains=search)
-            | Q(employee_number__icontains=search)
-        )
+        workers = workers.filter(Q(user__first_name__icontains=search) | Q(user__last_name__icontains=search) | Q(user__email__icontains=search) | Q(employee_number__icontains=search))
     return Response([invitation_status(worker) for worker in workers[:200]])
 
 
@@ -80,11 +66,7 @@ def invite_worker(request, pk):
         invitation, activation_url, delivered = create_portal_invitation(worker, request.user)
     except ValueError as exc:
         return Response({'detail': str(exc)}, status=400)
-    payload = {
-        'status': invitation_status(worker),
-        'delivered': delivered,
-        'expires_at': invitation.expires_at,
-    }
+    payload = {'status': invitation_status(worker), 'delivered': delivered, 'expires_at': invitation.expires_at}
     if not delivered:
         payload['activation_url'] = activation_url
     return Response(payload, status=201)
@@ -94,14 +76,13 @@ def invite_worker(request, pk):
 def bulk_invite_workers(request):
     if request.user.role not in {User.Role.ADMIN, User.Role.MANAGER}:
         return Response({'detail': 'Keine Berechtigung.'}, status=403)
-    ids = request.data.get('worker_ids') or []
     workers = WorkerProfile.objects.filter(active=True, user__is_active=True).select_related('user')
+    ids = request.data.get('worker_ids') or []
     if ids:
         workers = workers.filter(pk__in=ids)
     results = []
     for worker in workers:
-        state = invitation_status(worker)
-        if state['state'] == 'active':
+        if invitation_status(worker)['state'] == 'active':
             continue
         try:
             invitation, activation_url, delivered = create_portal_invitation(worker, request.user)
@@ -121,42 +102,20 @@ def employee_home(request):
     worker = request.user.worker_profile
     now = timezone.now()
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
-    mine = shift_queryset().filter(
-        slots__worker=worker,
-        slots__status=ShiftSlot.Status.CLAIMED,
-        ends_at__gte=now,
-    ).distinct()
-    available = shift_queryset().filter(
-        status=Shift.Status.PUBLISHED,
-        starts_at__gte=now,
-        slots__status=ShiftSlot.Status.OPEN,
-        slots__worker__isnull=True,
-    ).exclude(slots__worker=worker, slots__status=ShiftSlot.Status.CLAIMED).distinct()
-
-    worked_minutes = sum(
-        entry.worked_minutes
-        for entry in TimeEntry.objects.filter(worker=worker, clock_in__gte=month_start)
-    )
+    mine = shift_queryset().filter(slots__worker=worker, slots__status=ShiftSlot.Status.CLAIMED, ends_at__gte=now).distinct()
+    available = shift_queryset().filter(status=Shift.Status.PUBLISHED, starts_at__gte=now, slots__status=ShiftSlot.Status.OPEN, slots__worker__isnull=True).exclude(slots__worker=worker, slots__status=ShiftSlot.Status.CLAIMED).distinct()
+    worked_minutes = sum(entry.worked_minutes for entry in TimeEntry.objects.filter(worker=worker, clock_in__gte=month_start))
     contracts = Contract.objects.filter(worker=worker).exclude(status__in=[Contract.Status.CANCELLED, Contract.Status.EXPIRED])
-    contracts_action = contracts.filter(status__in=[Contract.Status.READY, Contract.Status.SENT]).count()
-    expiring = contracts.filter(ends_on__gte=timezone.localdate(), ends_on__lte=timezone.localdate() + timezone.timedelta(days=30)).count()
     notifications = Notification.objects.filter(user=request.user).order_by('-created_at')[:8]
-
     return Response({
-        'worker': {
-            'id': str(worker.id),
-            'name': request.user.get_full_name() or request.user.email,
-            'employee_number': worker.employee_number,
-            'employment_type': worker.employment_type,
-        },
+        'worker': {'id': str(worker.id), 'name': request.user.get_full_name() or request.user.email, 'employee_number': worker.employee_number, 'employment_type': worker.employment_type},
         'next_shift': ShiftApiSerializer(mine.first(), context={'request': request}).data if mine.exists() else None,
         'upcoming_shifts': ShiftApiSerializer(mine[:5], many=True, context={'request': request}).data,
         'available_shifts': ShiftApiSerializer(available[:5], many=True, context={'request': request}).data,
         'available_count': available.count(),
         'month_worked_minutes': worked_minutes,
-        'contract_actions': contracts_action,
-        'contracts_expiring_30': expiring,
+        'contract_actions': contracts.filter(status__in=[Contract.Status.READY, Contract.Status.SENT]).count(),
+        'contracts_expiring_30': contracts.filter(ends_on__gte=timezone.localdate(), ends_on__lte=timezone.localdate() + timedelta(days=30)).count(),
         'unread_notifications': Notification.objects.filter(user=request.user, read_at__isnull=True).count(),
         'notifications': NotificationSerializer(notifications, many=True).data,
     })
