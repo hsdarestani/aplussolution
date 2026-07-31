@@ -73,9 +73,50 @@ function appShellTransforms(): Plugin {
   };
 }
 
+/**
+ * Operations is another large legacy surface. During the WIW cutover we keep
+ * the source file stable but remove WIW from the visible/admin workflow and
+ * update wording to the native A+ data path. Every replacement is guarded so
+ * source drift fails CI rather than silently restoring the old workflow.
+ */
+function nativeWorkforceCutoverTransforms(): Plugin {
+  const replacements: Array<[string, string]> = [
+    ["    ['When I Work', data.wiw_configured],\n", ''],
+    ['OpenShifts wurden in When I Work erstellt.', 'OpenShifts wurden direkt in A+ Workforce erstellt.'],
+    ['WIW-Schichten wurden in Vertragspakete übernommen.', 'Lokale Schichten wurden in Vertragspakete übernommen.'],
+    ['Deutschen Auftragstext analysieren, OpenShifts in WIW erzeugen und Kundenvertrag vorbereiten.', 'Deutschen Auftragstext analysieren, OpenShifts direkt in A+ Workforce erzeugen und Kundenvertrag vorbereiten.'],
+    ['Aus WIW synchronisieren', 'Aus Zeiterfassung berechnen'],
+    ['Manuelle Auszahlungen und Korrekturen bleiben bei jeder WIW-Synchronisierung erhalten.', 'Manuelle Auszahlungen und Korrekturen bleiben bei jeder Neuberechnung erhalten.'],
+  ];
+  const wiwPanel = /<section className="operations-panel" data-testid="wiw-integration-panel">[\s\S]*?<\/section>\s*(?=<section className="operations-panel" data-testid="document-catalog-panel">)/;
+  const nativePanel = `<section className="operations-panel" data-testid="native-data-source-panel">
+              <div className="operations-head"><div><h3>A+ Workforce Datenbasis</h3><p>Schichten, Besetzungen und Arbeitszeiten werden direkt in dieser App geführt.</p></div><IonBadge color="success">Aktiv</IonBadge></div>
+              <div className="operations-note">When I Work ist kein Bestandteil des laufenden Betriebs mehr. Historische WIW-IDs bleiben nur für Migration und Audit erhalten.</div>
+            </section>
+            `;
+
+  return {
+    name: 'native-workforce-cutover-transforms',
+    enforce: 'pre',
+    transform(code, id) {
+      const normalizedId = id.replace(/\\/g, '/').split('?')[0];
+      if (!normalizedId.endsWith('/src/Operations.tsx')) return null;
+      let next = code;
+      for (const [from, to] of replacements) {
+        if (!next.includes(from)) this.error(`Operations cutover marker changed: ${from}`);
+        next = next.replace(from, to);
+      }
+      if (!wiwPanel.test(next)) this.error('Operations WIW panel marker changed; update cutover transform.');
+      next = next.replace(wiwPanel, nativePanel);
+      return { code: next, map: null };
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     appShellTransforms(),
+    nativeWorkforceCutoverTransforms(),
     react(),
     VitePWA({
       registerType: 'autoUpdate',
