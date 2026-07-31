@@ -1,0 +1,85 @@
+name: Verify Phase 2 employee portal production
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Verify deployed employee portal
+        env:
+          HOST: ${{ secrets.HOST }}
+          SSHPASS: ${{ secrets.PASS }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" "test -f /opt/aplussolution/backend/core/portal_models.py && grep -q 'ActivationPage' /opt/aplussolution/frontend/src/App.tsx"; then
+              break
+            fi
+            test "$attempt" != 30
+            sleep 10
+          done
+          sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          if ! docker compose exec -T backend python -c "import core.portal_models" </dev/null 2>/dev/null; then
+            docker compose build backend celery celery-beat frontend </dev/null
+            docker compose up -d --force-recreate backend celery celery-beat frontend caddy </dev/null
+          fi
+          docker compose exec -T backend python manage.py migrate --noinput </dev/null
+          docker compose exec -T backend python manage.py check </dev/null
+          docker compose exec -T backend python manage.py showmigrations core </dev/null | grep -q '\[X\] 0004_portalinvitation'
+          docker compose exec -T frontend sh -c "grep -R -q 'Zugang aktivieren' /usr/share/nginx/html/assets" </dev/null
+          cat >/root/phase2-smoke.py <<'PY'
+          from datetime import timedelta
+          from django.db import transaction
+          from django.utils import timezone
+          from rest_framework.test import APIClient
+          from core.models import ClientCompany, Location, Position, Shift, User, WorkerProfile
+          from core.portal_models import PortalInvitation
+          from core.portal_service import _token_hash
+
+          host='solution.smarbiz.sbs'
+          with transaction.atomic():
+              user=User.objects.create(email='verify.phase2@example.invalid', username='verify.phase2@example.invalid', first_name='Verify', last_name='Portal', role=User.Role.WORKER, is_active=True, is_onboarded=False)
+              user.set_unusable_password(); user.save(update_fields=['password'])
+              worker=WorkerProfile.objects.create(user=user, employee_number='VERIFY-PHASE2')
+              raw='phase2-transactional-smoke-token'
+              invite=PortalInvitation.objects.create(user=user, token_hash=_token_hash(raw), expires_at=timezone.now()+timedelta(hours=1))
+
+              public=APIClient()
+              validated=public.post('/api/auth/activation/validate/', {'token': raw}, format='json', HTTP_HOST=host)
+              assert validated.status_code == 200, getattr(validated, 'data', validated.content)
+              completed=public.post('/api/auth/activation/complete/', {'token': raw, 'password': 'Phase2-Smoke-Password-2026!', 'password_confirm': 'Phase2-Smoke-Password-2026!'}, format='json', HTTP_HOST=host)
+              assert completed.status_code == 200, getattr(completed, 'data', completed.content)
+              access=completed.data['access']
+              user.refresh_from_db(); invite.refresh_from_db()
+              assert user.has_usable_password() and user.is_onboarded and invite.used_at is not None
+
+              company=ClientCompany.objects.create(name='VERIFY PHASE2 CLIENT', customer_number='VERIFY-PHASE2-CLIENT')
+              location=Location.objects.create(client=company, name='VERIFY PHASE2 LOCATION', address='Frankfurt')
+              position=Position.objects.create(name='VERIFY PHASE2 POSITION')
+              start=timezone.now()+timedelta(days=1)
+              shift=Shift.objects.create(client=company, location=location, position=position, starts_at=start, ends_at=start+timedelta(hours=4), status=Shift.Status.PUBLISHED, is_open=True, required_count=1)
+
+              employee=APIClient(); employee.credentials(HTTP_AUTHORIZATION=f'Bearer {access}')
+              claimed=employee.post(f'/api/shifts/{shift.id}/claim/', {}, format='json', HTTP_HOST=host)
+              assert claimed.status_code == 200, getattr(claimed, 'data', claimed.content)
+              home=employee.get('/api/employee/home/', HTTP_HOST=host)
+              assert home.status_code == 200, getattr(home, 'data', home.content)
+              assert home.data['worker']['id'] == str(worker.id)
+              assert home.data['next_shift']['id'] == str(shift.id)
+              assert user.email not in str(home.data.get('notifications', []))
+              transaction.set_rollback(True)
+          print('PHASE2_TRANSACTIONAL_SMOKE_OK')
+          PY
+          docker compose exec -T backend python manage.py shell < /root/phase2-smoke.py
+          rm -f /root/phase2-smoke.py
+          curl -kfsS --resolve solution.smarbiz.sbs:443:127.0.0.1 https://solution.smarbiz.sbs/health/ >/dev/null
+          REMOTE
+      - name: Verify public HTTPS and activation route
+        run: |
+          curl -fsS --retry 10 --retry-delay 10 --retry-all-errors https://solution.smarbiz.sbs/health/ >/dev/null
+          curl -fsS --retry 10 --retry-delay 10 --retry-all-errors https://solution.smarbiz.sbs/aktivieren >/dev/null
