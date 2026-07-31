@@ -1,0 +1,191 @@
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index e398f86..0000000 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -1,4 +1,4 @@
+-import React, { useEffect, useMemo, useState } from 'react';
++import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+ import {
+   IonApp,
+   IonBadge,
+@@ -42,16 +42,18 @@ import {
+   trashOutline,
+ } from 'ionicons/icons';
+ import { api, consumeOAuth, login, logout, me, socialUrl, User } from './api';
+-import Operations from './Operations';
+-import ScheduleV2 from './ScheduleV2';
+-import AttendanceV3 from './AttendanceV3';
+ import ActivationPage from './ActivationPage';
+-import EmployeeHome from './EmployeeHome';
+-import PortalAccessPanel from './PortalAccessPanel';
+-import AdminHomeV4 from './AdminHomeV4';
+-import GlobalSearch from './GlobalSearch';
+ import ListToolbar from './ListToolbar';
+-import DocumentCenterV5 from './DocumentCenterV5';
++
++const Operations = lazy(() => import('./Operations'));
++const ScheduleV2 = lazy(() => import('./ScheduleV2'));
++const AttendanceV3 = lazy(() => import('./AttendanceV3'));
++const EmployeeHome = lazy(() => import('./EmployeeHome'));
++const PortalAccessPanel = lazy(() => import('./PortalAccessPanel'));
++const AdminHomeV4 = lazy(() => import('./AdminHomeV4'));
++const GlobalSearch = lazy(() => import('./GlobalSearch'));
++const DocumentCenterV5 = lazy(() => import('./DocumentCenterV5'));
+@@ -127,6 +129,24 @@ const nav: Record<string, [View, string][]> = {
+   ],
+ };
+ 
++const viewFromLocation = (role: string): View => {
++  if (window.location.pathname !== '/') return 'dashboard';
++  const requested = new URLSearchParams(window.location.search).get('view');
++  if (!requested) return 'dashboard';
++  if (requested === 'profile') return 'profile';
++  return (nav[role] || nav.worker).some(([key]) => key === requested)
++    ? (requested as View)
++    : 'dashboard';
++};
++
++const urlForView = (view: View) => {
++  const url = new URL(window.location.href);
++  if (view === 'dashboard') url.searchParams.delete('view');
++  else url.searchParams.set('view', view);
++  return `${url.pathname}${url.search}${url.hash}`;
++};
++
+ const unpack = (data: any): any[] => data?.results || data || [];
+ const value = (event: any) => event.detail.value ?? '';
+ const isManager = (user: User) => ['admin', 'manager'].includes(user.role);
+@@ -3034,6 +3054,24 @@ export default function App() {
+     return () => window.removeEventListener('auth-lost', lost);
+   }, []);
+ 
++  useEffect(() => {
++    if (!user || window.location.pathname !== '/') return;
++    const syncFromLocation = () => {
++      const next = viewFromLocation(user.role);
++      const requested = new URLSearchParams(window.location.search).get('view');
++      setView(next);
++      setMobileMenuOpen(false);
++      if (requested && (requested !== next || next === 'dashboard')) {
++        window.history.replaceState({ view: next }, '', urlForView(next));
++      }
++      window.requestAnimationFrame(() => window.scrollTo({ top: 0 }));
++    };
++    syncFromLocation();
++    window.addEventListener('popstate', syncFromLocation);
++    return () => window.removeEventListener('popstate', syncFromLocation);
++  }, [user]);
++
+   if (location.pathname === '/aktivieren') return <IonApp><ActivationPage /></IonApp>;
+   if (location.pathname === '/datenschutz') return <Legal />;
+   if (location.pathname === '/konto-loeschen') return <Legal deletePage />;
+@@ -3075,8 +3113,12 @@ export default function App() {
+     messages: 'Chat',
+   };
+   const navigateTo = (next: View) => {
+-    setView(next);
++    const safe = next === 'profile' || items.some(([key]) => key === next) ? next : 'dashboard';
++    if (safe !== view) {
++      window.history.pushState({ view: safe }, '', urlForView(safe));
++    }
++    setView(safe);
+     setMobileMenuOpen(false);
+     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
+   };
+@@ -3148,7 +3190,12 @@ export default function App() {
+               </IonButton>
+             </aside>
+ 
+-            <main className="app-main">{isManager(user) && <GlobalSearch onNavigate={navigateTo} />}{content}</main>
++            <main className="app-main">
++              <Suspense fallback={<Loader />}>
++                {isManager(user) && <GlobalSearch onNavigate={navigateTo} />}
++                {content}
++              </Suspense>
++            </main>
+           </div>
+         </IonContent>
+ 
+diff --git a/frontend/e2e/app-shell.spec.ts b/frontend/e2e/app-shell.spec.ts
+index 27bc2c5..0000000 100644
+--- a/frontend/e2e/app-shell.spec.ts
++++ b/frontend/e2e/app-shell.spec.ts
+@@ -217,6 +217,34 @@ test.describe('Phase 6 mobile QA', () => {
+     await expect(moreMenu.getByRole('button', { name: 'Ranking', exact: true })).toBeVisible();
+   });
+ 
++  test('worker deep links survive refresh and browser history while role guards stay enforced', async ({ page }) => {
++    await page.setViewportSize({ width: 390, height: 844 });
++    await mockApi(page, worker);
++    await page.goto('/?view=schedule');
++
++    await expect(page.getByRole('heading', { name: 'Schichten' })).toBeVisible();
++    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
++
++    await page.reload();
++    await expect(page.getByRole('heading', { name: 'Schichten' })).toBeVisible();
++    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
++
++    await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeit' }).click();
++    await expect(page.getByRole('heading', { name: 'Bereit für deinen Einsatz?' })).toBeVisible();
++    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('time');
++
++    await page.goBack();
++    await expect(page.getByRole('heading', { name: 'Schichten' })).toBeVisible();
++    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
++
++    await page.goForward();
++    await expect(page.getByRole('heading', { name: 'Bereit für deinen Einsatz?' })).toBeVisible();
++    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('time');
++
++    await page.goto('/?view=people');
++    await expect(page.getByRole('heading', { name: 'Mina Berger' })).toBeVisible();
++    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBeNull();
++  });
++
+   test('admin exception center and timer-close reason dialog stay usable on mobile', async ({ page }) => {
+     await page.setViewportSize({ width: 390, height: 844 });
+     await mockApi(page, admin);
+diff --git a/frontend/vite.config.ts b/frontend/vite.config.ts
+index ebe77c7..0000000 100644
+--- a/frontend/vite.config.ts
++++ b/frontend/vite.config.ts
+@@ -1 +1,31 @@
+-import {defineConfig} from 'vite';import react from '@vitejs/plugin-react';import {VitePWA} from 'vite-plugin-pwa';export default defineConfig({plugins:[react(),VitePWA({registerType:'autoUpdate',includeAssets:['favicon.svg'],manifest:{name:'A+ Solution Workforce',short_name:'A+ Solution',description:'Personal, Einsätze, Zeiten und Verträge.',theme_color:'#0b1f4d',background_color:'#f4f7fb',display:'standalone',lang:'de',icons:[{src:'/icon-192.png',sizes:'192x192',type:'image/png'},{src:'/icon-512.png',sizes:'512x512',type:'image/png'}]}})],server:{port:8080}});
++import { defineConfig } from 'vite';
++import react from '@vitejs/plugin-react';
++import { VitePWA } from 'vite-plugin-pwa';
++
++export default defineConfig({
++  plugins: [
++    react(),
++    VitePWA({
++      registerType: 'autoUpdate',
++      includeAssets: ['favicon.svg'],
++      manifest: {
++        name: 'A+ Solution Workforce',
++        short_name: 'A+ Solution',
++        description: 'Personal, Einsätze, Zeiten und Verträge.',
++        theme_color: '#0b1f4d',
++        background_color: '#f4f7fb',
++        display: 'standalone',
++        lang: 'de',
++        icons: [
++          { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
++          { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
++        ],
++      },
++    }),
++  ],
++  build: {
++    rollupOptions: {
++      output: {
++        manualChunks: {
++          'react-vendor': ['react', 'react-dom'],
++          'ionic-vendor': ['@ionic/react'],
++        },
++      },
++    },
++  },
++  server: { port: 8080 },
++});
