@@ -3,8 +3,6 @@ import {
   IonBadge,
   IonButton,
   IonInput,
-  IonItem,
-  IonLabel,
   IonModal,
   IonSpinner,
   IonTextarea,

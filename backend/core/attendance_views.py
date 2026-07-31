@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.db.models import Q
 from django.utils import timezone
@@ -58,7 +58,7 @@ def employee_attendance_home(request):
     worker = request.user.worker_profile
     now = timezone.now()
     month_start = timezone.make_aware(
-        timezone.datetime(now.year, now.month, 1),
+        datetime(now.year, now.month, 1),
         timezone.get_current_timezone(),
     )
 
