@@ -14,18 +14,35 @@ const lazyAppFeatures = new Set([
 ]);
 
 /**
- * App.tsx is still a large legacy shell. Intercept only its feature imports and
- * replace them with tiny Suspense wrappers so Rollup can emit true route/role
- * chunks without rewriting the monolith in one risky change.
+ * App.tsx is still a large legacy shell. Keep the source stable while making
+ * two surgical build/dev transforms:
+ * 1) wire its existing view state to the isolated browser-history hook;
+ * 2) replace only heavy feature imports with lazy Suspense wrappers.
  */
-function lazyAppFeatureChunks(): Plugin {
+function appShellTransforms(): Plugin {
   const prefix = '\0lazy-app-feature:';
+  const viewStateMarker = "const [view, setView] = useState<View>('dashboard');";
 
   return {
-    name: 'lazy-app-feature-chunks',
+    name: 'app-shell-transforms',
     enforce: 'pre',
+    transform(code, id) {
+      const normalizedId = id.replace(/\\/g, '/').split('?')[0];
+      if (!normalizedId.endsWith('/src/App.tsx')) return null;
+      if (!code.includes(viewStateMarker)) {
+        this.error('App view-state marker changed; update app-shell-transforms before building.');
+      }
+
+      return {
+        code: `import { useViewRouting } from './viewRouting';\n${code.replace(
+          viewStateMarker,
+          'const [view, setView] = useViewRouting(user?.role);',
+        )}`,
+        map: null,
+      };
+    },
     resolveId(source, importer) {
-      const normalizedImporter = importer?.replace(/\\/g, '/');
+      const normalizedImporter = importer?.replace(/\\/g, '/').split('?')[0];
       if (!normalizedImporter?.endsWith('/src/App.tsx') || !source.startsWith('./')) return null;
 
       const feature = source.slice(2);
@@ -58,7 +75,7 @@ function lazyAppFeatureChunks(): Plugin {
 
 export default defineConfig({
   plugins: [
-    lazyAppFeatureChunks(),
+    appShellTransforms(),
     react(),
     VitePWA({
       registerType: 'autoUpdate',
