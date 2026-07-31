@@ -19,8 +19,8 @@ def ensure_document_catalog():
                     'source_name': item.get('source_name', ''),
                 },
                 'source_format': item['source_format'],
-                'requires_signature': item['requires_signature'],
-                'required_document': item['required_document'],
+                'requires_signature': item.get('requires_signature', True),
+                'required_document': item.get('required_document', True),
                 'active': True,
             },
         )
