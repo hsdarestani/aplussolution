@@ -8,10 +8,8 @@ import '@ionic/react/css/typography.css';
 import '@ionic/react/css/padding.css';
 import './theme.css';
 import App from './App';
-import { installViewHistory } from './viewRouting';
 
 setupIonicReact({ mode: 'md' });
-installViewHistory();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
