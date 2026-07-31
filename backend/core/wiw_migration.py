@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Callable
+from datetime import timezone as datetime_timezone
 
-from .models import Availability, Location, Position, Shift, TimeEntry, TimeOffRequest, User, WorkerProfile
+from .models import Availability, Location, Position, Shift, TimeEntry, TimeOffRequest, User
 from .wiw import WhenIWorkClient, WhenIWorkError
 from .wiw_sync import WhenIWorkSynchronizer, as_date, as_datetime, as_id, first
 
@@ -16,13 +16,17 @@ def _id_set(items, *keys):
     return values
 
 
+def _utc_iso(value):
+    return value.astimezone(datetime_timezone.utc).isoformat()
+
+
 def _availability_remote_key(item):
     worker = as_id(first(item, 'user_id', 'user'))
     start = as_datetime(first(item, 'start_time', 'start', 'starts_at'))
     end = as_datetime(first(item, 'end_time', 'end', 'ends_at'))
     if not worker or not start or not end:
         return None
-    return f'{worker}|{start.isoformat()}|{end.isoformat()}'
+    return f'{worker}|{_utc_iso(start)}|{_utc_iso(end)}'
 
 
 def _request_remote_key(item):
@@ -36,7 +40,7 @@ def _request_remote_key(item):
 
 def _availability_local_keys():
     rows = Availability.objects.exclude(worker__wiw_user_id__isnull=True).exclude(worker__wiw_user_id='').select_related('worker')
-    return {f'{row.worker.wiw_user_id}|{row.starts_at.isoformat()}|{row.ends_at.isoformat()}' for row in rows}
+    return {f'{row.worker.wiw_user_id}|{_utc_iso(row.starts_at)}|{_utc_iso(row.ends_at)}' for row in rows}
 
 
 def _request_local_keys():
