@@ -35,6 +35,8 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
                 status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
             ).select_related('location').distinct().order_by('starts_at').first()
 
+        if not shift:
+            return Response({'detail': 'Aktuell gibt es keine passende bestätigte Schicht zum Einstempeln.'}, status=400)
         error = geofence_error(shift, request.data.get('lat'), request.data.get('lng'))
         if error:
             return Response({'detail': error}, status=400)
