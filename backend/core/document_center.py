@@ -28,13 +28,49 @@ def _catalog_item(template):
     return CATALOG_BY_SLUG.get(template.slug or '')
 
 
+def _schema_parts(template):
+    schema = template.schema if isinstance(template.schema, dict) else {}
+    raw_fields = schema.get('fields') or []
+    fields = []
+    invalid = not isinstance(template.schema, dict)
+
+    if not isinstance(raw_fields, list):
+        raw_fields = []
+        invalid = True
+    for item in raw_fields:
+        if isinstance(item, dict) and item.get('name'):
+            fields.append(item)
+        else:
+            invalid = True
+
+    raw_roles = schema.get('signature_roles') or []
+    if isinstance(raw_roles, list):
+        roles = [role for role in raw_roles if isinstance(role, str) and role]
+        if len(roles) != len(raw_roles):
+            invalid = True
+    elif isinstance(raw_roles, str) and raw_roles.strip():
+        roles = [raw_roles.strip()]
+        invalid = True
+    else:
+        roles = []
+        if raw_roles:
+            invalid = True
+
+    return fields, roles, invalid
+
+
 def template_readiness(template):
     catalog = _catalog_item(template)
-    fields = list((template.schema or {}).get('fields') or [])
+    fields, signature_roles, schema_invalid = _schema_parts(template)
     required_fields = [item for item in fields if item.get('required')]
     source_required = template.source_format != ContractTemplate.SourceFormat.HTML
     source_installed = _source_ready(template)
     issues = []
+    if schema_invalid:
+        issues.append({
+            'code': 'schema_invalid',
+            'label': 'Vorlagenschema enthält veraltete oder ungültige Felddefinitionen.',
+        })
     if not template.active:
         issues.append({'code': 'inactive', 'label': 'Vorlage ist deaktiviert.'})
     if source_required and not source_installed:
@@ -56,7 +92,7 @@ def template_readiness(template):
         'source_checksum': template.source_checksum,
         'expected_source_name': catalog.get('source_name') if catalog else None,
         'requires_signature': template.requires_signature,
-        'signature_roles': list((template.schema or {}).get('signature_roles') or []),
+        'signature_roles': signature_roles,
         'field_count': len(fields),
         'required_field_count': len(required_fields),
         'active': template.active,
@@ -80,9 +116,10 @@ def _subject(contract):
 
 def contract_readiness(contract):
     template_state = template_readiness(contract.template)
-    data = contract_data(contract)
+    fields, signature_roles, schema_invalid = _schema_parts(contract.template)
+    data = {} if schema_invalid else contract_data(contract)
     missing = []
-    for field in (contract.template.schema or {}).get('fields', []):
+    for field in fields:
         if field.get('required') and data.get(field.get('name')) in (None, '', [], {}):
             missing.append({
                 'field': field.get('name'),
@@ -90,12 +127,12 @@ def contract_readiness(contract):
                 'source': field.get('source'),
             })
 
-    required_roles = list(required_signature_roles(contract))
+    required_roles = signature_roles if schema_invalid else list(required_signature_roles(contract))
     completed_roles = list(contract.signatures.values_list('role', flat=True))
     pending_roles = [role for role in required_roles if role not in completed_roles]
     generated = bool(contract.pdf and contract.generated_at)
-    current_snapshot = _formatted_snapshot(data)
-    document_current = bool(generated and contract.data_snapshot == current_snapshot)
+    current_snapshot = _formatted_snapshot(data) if not schema_invalid else {}
+    document_current = bool(not schema_invalid and generated and contract.data_snapshot == current_snapshot)
     locked = contract.status in {Contract.Status.SENT, Contract.Status.SIGNED} or bool(completed_roles)
 
     blockers = list(template_state['issues'])
