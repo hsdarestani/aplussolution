@@ -1,12 +1,9 @@
 name: Agent apply routing and bundle split patch
 
 on:
-  push:
-    branches:
-      - agent/routing-code-splitting
   pull_request:
     branches:
-      - main
+      - agent/routing-code-splitting
 
 permissions:
   contents: write
@@ -16,22 +13,22 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     env:
-      TARGET_BRANCH: ${{ github.head_ref || github.ref_name }}
+      TARGET_BRANCH: ${{ github.head_ref }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.head_ref || github.ref_name }}
+          ref: ${{ github.head_ref }}
 
-      - name: Apply scoped patch
+      - name: Apply scoped App patch
         run: |
           git apply --check .agent/routing-code-splitting.patch
           git apply .agent/routing-code-splitting.patch
 
-      - name: Commit patched frontend
+      - name: Commit patched App
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add frontend/src/App.tsx frontend/e2e/app-shell.spec.ts frontend/vite.config.ts
-          git commit -m "Add URL routing and split frontend bundles"
+          git add frontend/src/App.tsx
+          git commit -m "Add URL routing and lazy feature loading"
           git push origin HEAD:${TARGET_BRANCH}
