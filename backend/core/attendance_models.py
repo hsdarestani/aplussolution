@@ -23,7 +23,3 @@ class TimeEntryCorrection(TimestampedModel):
     class Meta:
         app_label = 'core'
         ordering = ['-created_at']
-        indexes = [
-            models.Index(fields=['status', 'created_at']),
-            models.Index(fields=['requested_by', 'status']),
-        ]
