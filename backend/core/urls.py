@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import advanced_views, attendance_views, automation_views, integration_views, portal_views, shift_views, time_views, views
+from . import advanced_views, attendance_actions, attendance_views, automation_views, integration_views, portal_views, shift_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -40,6 +40,7 @@ urlpatterns = [
     path('employee/home/', portal_views.employee_home),
     path('attendance/home/', attendance_views.employee_attendance_home),
     path('attendance/entries/<uuid:entry_id>/correction/', attendance_views.request_time_correction),
+    path('attendance/entries/<uuid:pk>/close/', attendance_actions.close_running_entry),
     path('attendance/corrections/<uuid:pk>/cancel/', attendance_views.cancel_time_correction),
     path('attendance/corrections/<uuid:pk>/decide/', attendance_views.decide_time_correction),
     path('attendance/exceptions/', attendance_views.attendance_exceptions),
