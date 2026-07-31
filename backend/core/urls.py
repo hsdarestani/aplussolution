@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_center_views, integration_views, portal_views, searchable_views, shift_views, time_views, views
+from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, integration_views, portal_views, searchable_views, shift_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -61,7 +61,7 @@ urlpatterns = [
     path('integrations/wiw/webhook/', integration_views.wiw_webhook),
     path('workers/<uuid:pk>/master-data/', integration_views.worker_master_data),
     path('workers/<uuid:pk>/master-data/verify/', integration_views.verify_worker_master_data),
-    path('document-catalog/', integration_views.document_catalog),
+    path('document-catalog/', document_catalog_views.document_catalog),
     path('document-catalog/seed/', integration_views.seed_catalog),
     path('document-catalog/import-bundle/', integration_views.import_bundle),
     path('operations/', advanced_views.operations_overview),
