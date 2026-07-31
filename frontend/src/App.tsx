@@ -48,6 +48,9 @@ import {
 import { api, consumeOAuth, login, logout, me, socialUrl, User } from './api';
 import Operations from './Operations';
 import ScheduleV2 from './ScheduleV2';
+import ActivationPage from './ActivationPage';
+import EmployeeHome from './EmployeeHome';
+import PortalAccessPanel from './PortalAccessPanel';
 
 type View =
   | 'dashboard'
@@ -619,6 +622,8 @@ function People({ user }: { user: User }) {
           ) : undefined
         }
       />
+
+      {isManager(user) && <PortalAccessPanel />}
 
       <div className="columns">
         <div className="panel">
@@ -2940,6 +2945,7 @@ export default function App() {
     return () => window.removeEventListener('auth-lost', lost);
   }, []);
 
+  if (location.pathname === '/aktivieren') return <IonApp><ActivationPage /></IonApp>;
   if (location.pathname === '/datenschutz') return <Legal />;
   if (location.pathname === '/konto-loeschen') return <Legal deletePage />;
   if (!ready)
@@ -2973,7 +2979,7 @@ export default function App() {
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
 
-  let content: React.ReactNode = <Dashboard user={user} navigate={navigateTo} />;
+  let content: React.ReactNode = user.role === 'worker' ? <EmployeeHome user={user} navigate={navigateTo} /> : <Dashboard user={user} navigate={navigateTo} />;
 
   if (view === 'schedule') content = <ScheduleV2 user={user} />;
   else if (view === 'time') content = <Time user={user} />;
