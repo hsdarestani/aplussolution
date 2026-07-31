@@ -37,41 +37,53 @@ jobs:
     steps:
       - name: Install SSH tooling
         run: sudo apt-get update && sudo apt-get install -y sshpass
-      - name: Wait for current main source and split bundle
+      - name: Diagnose current production rollout
         env:
           SSHPASS: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
         run: |
           set -euo pipefail
           test -n "$HOST" && test -n "$SSHPASS"
-          ready=0
-          for attempt in $(seq 1 60); do
-            if sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
+          sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
-          grep -q 'export function useViewRouting' frontend/src/viewRouting.ts
-          grep -q 'app-shell-transforms' frontend/vite.config.ts
-          docker compose exec -T frontend sh -lc '
-            set -eu
-            set -- /usr/share/nginx/html/assets/ScheduleV2-*.js; test -f "$1"
-            set -- /usr/share/nginx/html/assets/AttendanceV3-*.js; test -f "$1"
-            set -- /usr/share/nginx/html/assets/Operations-*.js; test -f "$1"
-            main="$(ls /usr/share/nginx/html/assets/index-*.js | head -n1)"
-            test -n "$main"
-            size="$(wc -c < "$main")"
-            echo "production_main_bundle_bytes=$size"
-            test "$size" -lt 100000
-          '
+          routing_source=no
+          split_source=no
+          schedule_chunk=no
+          attendance_chunk=no
+          operations_chunk=no
+          main_size=0
+          grep -q 'export function useViewRouting' frontend/src/viewRouting.ts && routing_source=yes || true
+          grep -q 'app-shell-transforms' frontend/vite.config.ts && split_source=yes || true
+          if docker compose ps --status running frontend --quiet | grep -q .; then
+            docker compose exec -T frontend sh -lc '
+              set -eu
+              set -- /usr/share/nginx/html/assets/ScheduleV2-*.js; test -f "$1" && echo schedule_chunk=yes || echo schedule_chunk=no
+              set -- /usr/share/nginx/html/assets/AttendanceV3-*.js; test -f "$1" && echo attendance_chunk=yes || echo attendance_chunk=no
+              set -- /usr/share/nginx/html/assets/Operations-*.js; test -f "$1" && echo operations_chunk=yes || echo operations_chunk=no
+              main="$(ls /usr/share/nginx/html/assets/index-*.js 2>/dev/null | head -n1 || true)"
+              if [ -n "$main" ]; then echo "main_size=$(wc -c < "$main")"; else echo main_size=0; fi
+            ' > /tmp/frontend-rollout-status
+            cat /tmp/frontend-rollout-status
+            grep -q '^schedule_chunk=yes$' /tmp/frontend-rollout-status && schedule_chunk=yes || true
+            grep -q '^attendance_chunk=yes$' /tmp/frontend-rollout-status && attendance_chunk=yes || true
+            grep -q '^operations_chunk=yes$' /tmp/frontend-rollout-status && operations_chunk=yes || true
+            main_size="$(sed -n 's/^main_size=//p' /tmp/frontend-rollout-status | tail -n1)"
+          fi
+          echo "routing_source=$routing_source"
+          echo "split_source=$split_source"
+          echo "schedule_chunk=$schedule_chunk"
+          echo "attendance_chunk=$attendance_chunk"
+          echo "operations_chunk=$operations_chunk"
+          echo "production_main_bundle_bytes=$main_size"
+          test "$routing_source" = yes
+          test "$split_source" = yes
+          test "$schedule_chunk" = yes
+          test "$attendance_chunk" = yes
+          test "$operations_chunk" = yes
+          test "$main_size" -gt 0
+          test "$main_size" -lt 100000
           REMOTE
-            then
-              ready=1
-              echo "Current routing source and split frontend bundle are live."
-              break
-            fi
-            echo "Production is not on the merged bundle yet (attempt $attempt)."
-            sleep 10
-          done
-          test "$ready" -eq 1
       - name: Verify production runtime and integrations
         env:
           SSHPASS: ${{ secrets.PASS }}
