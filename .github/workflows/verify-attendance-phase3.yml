@@ -1,0 +1,98 @@
+name: Verify Phase 3 attendance production
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Verify deployed attendance flow
+        env:
+          HOST: ${{ secrets.HOST }}
+          SSHPASS: ${{ secrets.PASS }}
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          if ! docker compose exec -T backend python -c "import core.attendance_models, core.attendance_views" </dev/null 2>/dev/null; then
+            docker compose build backend celery celery-beat frontend </dev/null
+            docker compose up -d --force-recreate backend celery celery-beat frontend caddy </dev/null
+          fi
+          docker compose exec -T backend python manage.py migrate --noinput </dev/null
+          docker compose exec -T backend python manage.py check </dev/null
+          cat >/root/phase3-smoke.py <<'PY'
+          from datetime import timedelta
+          from django.db import transaction
+          from django.utils import timezone
+          from rest_framework.test import APIClient
+          from core.attendance_models import TimeEntryCorrection
+          from core.models import ClientCompany, Location, Position, Shift, TimeEntry, User, WorkerProfile
+
+          host='solution.smarbiz.sbs'
+          with transaction.atomic():
+              manager=User.objects.create(email='verify.phase3.manager@example.invalid', username='verify.phase3.manager@example.invalid', role=User.Role.MANAGER, first_name='VerifyManager', is_active=True)
+              manager.set_unusable_password(); manager.save(update_fields=['password'])
+
+              no_shift_user=User.objects.create(email='verify.phase3.no-shift@example.invalid', username='verify.phase3.no-shift@example.invalid', role=User.Role.WORKER, first_name='NoShift', is_active=True, is_onboarded=True)
+              no_shift_user.set_unusable_password(); no_shift_user.save(update_fields=['password'])
+              WorkerProfile.objects.create(user=no_shift_user, employee_number='VERIFY-PHASE3-NO-SHIFT')
+              no_shift=APIClient(); no_shift.force_authenticate(no_shift_user)
+              denied=no_shift.post('/api/time-entries/clock_in/', {}, format='json', HTTP_HOST=host)
+              assert denied.status_code == 400, getattr(denied, 'data', denied.content)
+
+              worker_user=User.objects.create(email='verify.phase3.worker@example.invalid', username='verify.phase3.worker@example.invalid', role=User.Role.WORKER, first_name='VerifyWorker', is_active=True, is_onboarded=True)
+              worker_user.set_unusable_password(); worker_user.save(update_fields=['password'])
+              worker=WorkerProfile.objects.create(user=worker_user, employee_number='VERIFY-PHASE3-WORKER')
+              client=ClientCompany.objects.create(name='VERIFY PHASE3 CLIENT', customer_number='VERIFY-PHASE3-CLIENT')
+              location=Location.objects.create(client=client, name='VERIFY PHASE3 LOCATION', address='Frankfurt', latitude=50.1101, longitude=8.6801, geofence_radius_m=250)
+              position=Position.objects.create(name='VERIFY PHASE3 POSITION')
+              start=timezone.now()-timedelta(minutes=5)
+              shift=Shift.objects.create(client=client, location=location, position=position, starts_at=start, ends_at=start+timedelta(hours=4), status=Shift.Status.PUBLISHED, is_open=True, required_count=1)
+
+              employee=APIClient(); employee.force_authenticate(worker_user)
+              claimed=employee.post(f'/api/shifts/{shift.id}/claim/', {}, format='json', HTTP_HOST=host)
+              assert claimed.status_code == 200, getattr(claimed, 'data', claimed.content)
+              clocked=employee.post('/api/time-entries/clock_in/', {'shift': str(shift.id), 'lat': 50.1101, 'lng': 8.6801}, format='json', HTTP_HOST=host)
+              assert clocked.status_code == 201, getattr(clocked, 'data', clocked.content)
+              entry_id=clocked.data['id']
+              home=employee.get('/api/attendance/home/', HTTP_HOST=host)
+              assert home.status_code == 200 and home.data['active_entry']['id'] == entry_id
+              clocked_out=employee.post('/api/time-entries/clock_out/', {'lat': 50.1101, 'lng': 8.6801}, format='json', HTTP_HOST=host)
+              assert clocked_out.status_code == 200, getattr(clocked_out, 'data', clocked_out.content)
+
+              entry=TimeEntry.objects.get(pk=entry_id)
+              requested_in=entry.clock_in-timedelta(minutes=10)
+              correction=employee.post(f'/api/attendance/entries/{entry.id}/correction/', {'clock_in': requested_in.isoformat(), 'clock_out': entry.clock_out.isoformat(), 'reason': 'Produktions-Smoke: tatsächlicher Beginn früher.'}, format='json', HTTP_HOST=host)
+              assert correction.status_code == 201, getattr(correction, 'data', correction.content)
+              correction_id=correction.data['id']
+
+              admin=APIClient(); admin.force_authenticate(manager)
+              inbox=admin.get('/api/attendance/exceptions/', HTTP_HOST=host)
+              assert inbox.status_code == 200
+              assert any(item['id'] == correction_id for item in inbox.data['pending_corrections'])
+              approved=admin.post(f'/api/attendance/corrections/{correction_id}/decide/', {'status':'approved','note':'Smoke geprüft.'}, format='json', HTTP_HOST=host)
+              assert approved.status_code == 200, getattr(approved, 'data', approved.content)
+              entry.refresh_from_db()
+              assert entry.approved is True and entry.approved_by_id == manager.id and entry.clock_in == requested_in
+              assert TimeEntryCorrection.objects.get(pk=correction_id).status == TimeEntryCorrection.Status.APPROVED
+
+              stuck=TimeEntry.objects.create(worker=worker, shift=shift, clock_in=timezone.now()-timedelta(hours=13), clock_out=None, approved=False)
+              inbox=admin.get('/api/attendance/exceptions/', HTTP_HOST=host)
+              assert any(str(item['id']) == str(stuck.id) for item in inbox.data['long_running_entries'])
+              closed=admin.post(f'/api/attendance/entries/{stuck.id}/close/', {'reason':'Produktions-Smoke: vergessener Timer.'}, format='json', HTTP_HOST=host)
+              assert closed.status_code == 200, getattr(closed, 'data', closed.content)
+              stuck.refresh_from_db()
+              assert stuck.clock_out is not None and stuck.approved is False and 'vergessener Timer' in stuck.edit_reason
+
+              transaction.set_rollback(True)
+          print('PHASE3_TRANSACTIONAL_SMOKE_OK')
+          PY
+          docker compose exec -T backend python manage.py shell < /root/phase3-smoke.py
+          rm -f /root/phase3-smoke.py
+          curl -kfsS --resolve solution.smarbiz.sbs:443:127.0.0.1 https://solution.smarbiz.sbs/health/ >/dev/null
+          REMOTE
+      - name: Verify public HTTPS
+        run: curl -fsS --retry 10 --retry-delay 10 --retry-all-errors https://solution.smarbiz.sbs/health/ >/dev/null
