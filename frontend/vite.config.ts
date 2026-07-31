@@ -26,9 +26,13 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom'],
-          'ionic-vendor': ['@ionic/react'],
+        manualChunks(id) {
+          if (id.includes('/node_modules/react/') || id.includes('/node_modules/react-dom/')) {
+            return 'react-vendor';
+          }
+          if (id.includes('/node_modules/@ionic/')) return 'ionic-vendor';
+          if (id.includes('/node_modules/ionicons/')) return 'icons-vendor';
+          return undefined;
         },
       },
     },
