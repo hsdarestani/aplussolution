@@ -5,78 +5,14 @@ from django.conf import settings
 from django.core.mail import send_mail
 from django.utils import timezone
 
-from .models import Contract, Notification, Shift, User
-
-
-def contract_recipients(contract):
-    recipients = list(User.objects.filter(role__in=['admin', 'manager'], is_active=True))
-    if contract.worker_id and contract.worker.user.is_active:
-        recipients.append(contract.worker.user)
-    if contract.client_id:
-        recipients.extend(contract.client.contacts.filter(is_active=True))
-    unique = {}
-    for user in recipients:
-        unique[user.pk] = user
-    return list(unique.values())
-
-
-def create_contract_notice(contract, kind, title):
-    count = 0
-    email_recipients = []
-    for user in contract_recipients(contract):
-        _, created = Notification.objects.get_or_create(
-            user=user,
-            kind=f'{kind}-{contract.id}',
-            defaults={
-                'action_url': '/contracts',
-                'title': title,
-                'body': contract.title,
-            },
-        )
-        count += int(created)
-        if user.email:
-            email_recipients.append(user.email)
-    if email_recipients:
-        send_mail(
-            f'A+ Solution: {title}',
-            f'{contract.title}\n\nBitte im A+ Solution Portal prüfen.',
-            settings.DEFAULT_FROM_EMAIL,
-            sorted(set(email_recipients)),
-            fail_silently=True,
-        )
-    return count
+from .document_center import dispatch_contract_reminders
+from .models import Notification, Shift
 
 
 @shared_task
 def send_contract_reminders():
-    today = timezone.localdate()
-    sent = 0
-    for days in (30, 7):
-        contracts = Contract.objects.filter(
-            ends_on=today + timedelta(days=days),
-            status__in=['ready', 'sent', 'signed'],
-        ).select_related('worker__user', 'client').prefetch_related('client__contacts')
-        for contract in contracts:
-            sent += create_contract_notice(
-                contract,
-                f'contract-{days}',
-                f'Vertrag endet in {days} Tagen',
-            )
-    contracts = Contract.objects.filter(
-        reminder_date=today,
-        status__in=['draft', 'ready', 'sent', 'signed'],
-    ).select_related('worker__user', 'client').prefetch_related('client__contacts')
-    for contract in contracts:
-        sent += create_contract_notice(contract, 'contract-reminder', 'Vertragserinnerung')
-    if sent:
-        send_mail(
-            f'A+ Solution: {sent} Portal-Benachrichtigungen',
-            f'Im Portal wurden {sent} Vertragserinnerungen an die zuständigen Personen verteilt.',
-            settings.DEFAULT_FROM_EMAIL,
-            [settings.ADMIN_NOTIFICATION_EMAIL],
-            fail_silently=True,
-        )
-    return sent
+    """Dispatch contract reminders while preserving the historical integer task result."""
+    return dispatch_contract_reminders()['notifications']
 
 
 @shared_task
