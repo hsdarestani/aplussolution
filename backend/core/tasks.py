@@ -11,8 +11,8 @@ from .models import Notification, Shift
 
 @shared_task
 def send_contract_reminders():
-    """Dispatch contract deadline/signature reminders through the shared document-center engine."""
-    return dispatch_contract_reminders()
+    """Dispatch contract reminders while preserving the historical integer task result."""
+    return dispatch_contract_reminders()['notifications']
 
 
 @shared_task
