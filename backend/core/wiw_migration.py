@@ -5,9 +5,9 @@ from datetime import date, datetime, timedelta, timezone as datetime_timezone
 from django.db import transaction
 from django.utils import timezone
 
-from .models import Availability, IntegrationSyncRun, Location, Position, Shift, TimeEntry, TimeOffRequest, User
+from .models import Availability, IntegrationSyncRun, Location, Position, Shift, TimeEntry, TimeOffRequest, User, WorkerProfile
 from .wiw import WhenIWorkClient, WhenIWorkError
-from .wiw_sync import WhenIWorkSynchronizer, as_date, as_datetime, as_id, first
+from .wiw_sync import WhenIWorkSynchronizer, as_date, as_datetime, as_id, first, synthetic_email
 
 
 DYNAMIC_RESOURCES = {'shifts', 'times', 'availabilities', 'requests'}
@@ -117,6 +117,70 @@ def fetch_complete_wiw_snapshot(client):
     return snapshot, errors
 
 
+def _ensure_historical_time_workers(snapshot, synchronizer):
+    """Create inactive archival workers for time rows whose users are no longer returned by WIW /users."""
+    time_user_ids = {
+        user_id
+        for item in snapshot.get('times', [])
+        if (user_id := as_id(first(item, 'user_id', 'user')))
+    }
+    known = set(synchronizer.workers)
+    known.update(
+        str(value)
+        for value in WorkerProfile.objects.exclude(wiw_user_id__isnull=True)
+        .exclude(wiw_user_id='')
+        .values_list('wiw_user_id', flat=True)
+    )
+    missing = sorted(time_user_ids - known)
+    for wiw_user_id in missing:
+        worker = WorkerProfile.objects.filter(wiw_user_id=wiw_user_id).select_related('user').first()
+        if worker:
+            synchronizer.workers[wiw_user_id] = worker
+            continue
+
+        email = synthetic_email(wiw_user_id)
+        user = User.objects.filter(wiw_id=wiw_user_id).first() or User.objects.filter(email=email).first()
+        user_created = not bool(user)
+        if not user:
+            user = User(
+                email=email,
+                username=email,
+                role=User.Role.WORKER,
+                is_active=False,
+                is_onboarded=False,
+            )
+            user.set_unusable_password()
+        user.wiw_id = wiw_user_id
+        user.wiw_payload = {
+            **(user.wiw_payload or {}),
+            'historical_archive_stub': True,
+            'source': 'wiw_times',
+        }
+        user.wiw_synced_at = timezone.now()
+        if user_created:
+            user.is_active = False
+            user.is_onboarded = False
+        user.save()
+
+        worker, worker_created = WorkerProfile.objects.get_or_create(
+            user=user,
+            defaults={
+                'employee_number': f'WIW-HIST-{wiw_user_id}'[:50],
+                'active': False,
+                'wiw_user_id': wiw_user_id,
+                'wiw_payload': {'historical_archive_stub': True, 'source': 'wiw_times'},
+                'wiw_synced_at': timezone.now(),
+            },
+        )
+        if not worker.wiw_user_id:
+            worker.wiw_user_id = wiw_user_id
+            worker.save(update_fields=['wiw_user_id', 'updated_at'])
+        synchronizer.workers[wiw_user_id] = worker
+        synchronizer.counts['historical_users_created' if user_created else 'historical_users_reused'] += 1
+        synchronizer.counts['historical_workers_created' if worker_created else 'historical_workers_reused'] += 1
+    return len(missing)
+
+
 def _run_final_import(snapshot, *, client, actor=None):
     """Import the already-fetched complete snapshot without relying on the legacy range-less sync."""
     synchronizer = WhenIWorkSynchronizer(client=client, triggered_by=actor)
@@ -128,6 +192,7 @@ def _run_final_import(snapshot, *, client, actor=None):
             triggered_by=actor,
         )
         synchronizer.sync_users(snapshot['users'])
+        _ensure_historical_time_workers(snapshot, synchronizer)
         synchronizer.sync_positions(snapshot['positions'])
         synchronizer.sync_locations(snapshot['locations'])
         synchronizer.sync_sites(snapshot['sites'])
