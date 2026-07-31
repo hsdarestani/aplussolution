@@ -8,6 +8,28 @@ jobs:
     steps:
       - name: Install SSH helper
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Inspect production rollout state
+        env:
+          HOST: ${{ secrets.HOST }}
+          SSHPASS: ${{ secrets.PASS }}
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -qT -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
+          set +e
+          cd /opt/aplussolution || exit 1
+          check_file() {
+            label="$1"; pattern="$2"; file="$3"
+            if grep -F -q "$pattern" "$file" 2>/dev/null; then echo "$label=yes"; else echo "$label=no"; fi
+          }
+          check_file source_client_scope "if(user.role==='client')" frontend/src/ScheduleV2.tsx
+          check_file source_client_copy "KUNDENPORTAL" frontend/src/ScheduleV2.tsx
+          check_file source_shift_alert "Schicht freigeben?" frontend/src/ScheduleV2.tsx
+          check_file source_timer_alert "Laufenden Timer beenden?" frontend/src/AttendanceV3.tsx
+          check_file source_document_alert "Originalvorlage installieren" frontend/src/DocumentCenterV5.tsx
+          if docker compose exec -T frontend sh -c "grep -R -F -q 'Geplante Einsätze und aktueller Besetzungsstatus' /usr/share/nginx/html/assets"; then echo "bundle_client_copy=yes"; else echo "bundle_client_copy=no"; fi
+          if docker compose exec -T frontend sh -c "grep -R -F -q 'Schicht freigeben?' /usr/share/nginx/html/assets"; then echo "bundle_shift_alert=yes"; else echo "bundle_shift_alert=no"; fi
+          docker compose ps frontend backend caddy || true
+          REMOTE
       - name: Wait for Phase 6 production markers
         env:
           HOST: ${{ secrets.HOST }}
