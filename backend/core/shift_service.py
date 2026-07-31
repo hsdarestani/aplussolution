@@ -65,6 +65,7 @@ def claim_shift(shift_id, worker: WorkerProfile) -> ShiftSlot:
     shift = Shift.objects.select_for_update().select_related('location').get(pk=shift_id)
     if shift.status != Shift.Status.PUBLISHED:
         raise ValidationError('Diese Schicht ist nicht zur Übernahme veröffentlicht.')
+    ensure_slots(shift)
     if ShiftSlot.objects.filter(shift=shift, worker=worker, status=ShiftSlot.Status.CLAIMED).exists():
         raise ValidationError('Du hast diese Schicht bereits übernommen.')
     ensure_worker_can_claim(worker, shift)
