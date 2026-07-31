@@ -47,6 +47,7 @@ import {
 } from 'ionicons/icons';
 import { api, consumeOAuth, login, logout, me, socialUrl, User } from './api';
 import Operations from './Operations';
+import ScheduleV2 from './ScheduleV2';
 
 type View =
   | 'dashboard'
@@ -2974,7 +2975,7 @@ export default function App() {
 
   let content: React.ReactNode = <Dashboard user={user} navigate={navigateTo} />;
 
-  if (view === 'schedule') content = <Schedule user={user} />;
+  if (view === 'schedule') content = <ScheduleV2 user={user} />;
   else if (view === 'time') content = <Time user={user} />;
   else if (view === 'contracts') content = <Contracts user={user} />;
   else if (view === 'documents') content = <Documents user={user} />;

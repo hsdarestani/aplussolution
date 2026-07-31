@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import advanced_views, automation_views, integration_views, views
+from . import advanced_views, automation_views, integration_views, shift_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -12,8 +12,8 @@ for prefix, view in [
     ('positions', views.PositionViewSet),
     ('orders', views.OrderViewSet),
     ('availabilities', views.AvailabilityViewSet),
-    ('shifts', views.ShiftViewSet),
-    ('time-entries', views.TimeEntryViewSet),
+    ('shifts', shift_views.StaffingShiftViewSet),
+    ('time-entries', time_views.TimeEntryViewSet),
     ('time-off', views.TimeOffViewSet),
     ('shift-swaps', views.ShiftSwapViewSet),
     ('contract-templates', views.ContractTemplateViewSet),
@@ -58,7 +58,6 @@ urlpatterns = [
     path('operations/folders/', advanced_views.folder_summary),
     path('operations/readiness/', advanced_views.readiness),
     path('operations/templates/import/', advanced_views.import_contract_templates),
-
     path('automation/orders/parse/', automation_views.order_parse),
     path('automation/orders/approve/', automation_views.order_approve),
     path('automation/orders/packages/', automation_views.order_packages),
