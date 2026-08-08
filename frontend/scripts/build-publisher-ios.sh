@@ -20,29 +20,33 @@ npx cap add ios
 npx cap sync ios
 node scripts/prepare-native.mjs ios
 
-# Always regenerate the native iOS AppIcon from the user-approved source icon.
-# The iOS project is recreated on every Publisher build, so changing only a web
-# icon under public/ would otherwise be lost and App Store Connect would keep
-# showing Capacitor's/default native icon.
+# Force the exact user-approved icon into the native Xcode AppIcon set.
+# Do this directly instead of relying on a generator, because the iOS project is
+# recreated by Capacitor on every Publisher build.
 ICON_SOURCE="$FRONTEND/public/sicon.png"
-ICON_ASSET_DIR="$FRONTEND/resources"
-test -f "$ICON_SOURCE"
-rm -rf "$ICON_ASSET_DIR"
-mkdir -p "$ICON_ASSET_DIR"
-cp "$ICON_SOURCE" "$ICON_ASSET_DIR/icon.png"
-
-# Use the official Capacitor asset generator to crop/resize the source and write
-# the real Xcode AppIcon.appiconset. Pin the version so future builds are stable.
-npx --yes @capacitor/assets@3.0.5 generate \
-  --ios \
-  --assetPath "$ICON_ASSET_DIR" \
-  --iconBackgroundColor '#00142f' \
-  --iconBackgroundColorDark '#00142f'
-
 APP_ICON_SET="$FRONTEND/ios/App/App/Assets.xcassets/AppIcon.appiconset"
+test -f "$ICON_SOURCE"
 test -d "$APP_ICON_SET"
 test -f "$APP_ICON_SET/Contents.json"
-echo "Generated native iOS AppIcon from public/sicon.png."
+
+ICON_COUNT=0
+while IFS= read -r -d '' ICON_FILE; do
+  WIDTH="$(sips -g pixelWidth "$ICON_FILE" | awk '/pixelWidth:/ {print $2}')"
+  HEIGHT="$(sips -g pixelHeight "$ICON_FILE" | awk '/pixelHeight:/ {print $2}')"
+  test -n "$WIDTH"
+  test -n "$HEIGHT"
+  sips -z "$HEIGHT" "$WIDTH" "$ICON_SOURCE" --out "$ICON_FILE" >/dev/null
+  ICON_COUNT=$((ICON_COUNT + 1))
+done < <(find "$APP_ICON_SET" -type f -name '*.png' -print0)
+
+if [ "$ICON_COUNT" -lt 1 ]; then
+  echo "No native AppIcon PNG files were found to replace." >&2
+  exit 1
+fi
+
+echo "Replaced $ICON_COUNT native AppIcon PNG file(s) from public/sicon.png."
+echo "Source icon SHA256: $(shasum -a 256 "$ICON_SOURCE" | awk '{print $1}')"
+find "$APP_ICON_SET" -type f -name '*.png' -maxdepth 1 -print -exec shasum -a 256 {} \;
 
 # Configure signing only on the generated App target. Passing the provisioning
 # profile as an xcodebuild command-line build setting makes it inherit into all
@@ -65,6 +69,13 @@ xcodebuild \
   -destination 'generic/platform=iOS' \
   -archivePath "$ARCHIVE_PATH" \
   archive
+
+# Verify that the archived app actually contains an app icon before export.
+ARCHIVED_APP="$ARCHIVE_PATH/Products/Applications/App.app"
+test -d "$ARCHIVED_APP"
+ARCHIVED_ICON_COUNT="$(find "$ARCHIVED_APP" -maxdepth 1 -type f \( -name 'AppIcon*.png' -o -name 'Icon*.png' \) | wc -l | tr -d ' ')"
+echo "Archived app icon file count: $ARCHIVED_ICON_COUNT"
+find "$ARCHIVED_APP" -maxdepth 1 -type f \( -name 'AppIcon*.png' -o -name 'Icon*.png' \) -print || true
 
 cat > "$EXPORT_OPTIONS" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
