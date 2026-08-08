@@ -37,10 +37,15 @@ def set_setting(body: str, key: str, value: str, indent: str) -> str:
 
 
 text = project.read_text()
+
+# Match every buildSettings dictionary regardless of Xcode's generated IDs,
+# whitespace or configuration header formatting. The App target's Debug/Release
+# dictionaries are uniquely identified by PRODUCT_BUNDLE_IDENTIFIER. Pods are
+# stored in Pods.xcodeproj and are therefore never touched by this patch.
 block_pattern = re.compile(
-    r"(?P<head>[A-F0-9]+ /\* (?:Debug|Release) \*/ = \{\n\s*isa = XCBuildConfiguration;\n\s*buildSettings = \{\n)"
+    r"(?P<head>buildSettings\s*=\s*\{\s*\n?)"
     r"(?P<body>.*?)"
-    r"(?P<tail>\s*\};\n\s*name = (?:Debug|Release);\n\s*\};)",
+    r"(?P<tail>\n?\s*\};)",
     re.S,
 )
 
@@ -50,8 +55,6 @@ patched = 0
 def patch_block(match: re.Match) -> str:
     global patched
     body = match.group("body")
-    # Only the application target's build configurations carry the product bundle ID.
-    # CocoaPods targets live in Pods.xcodeproj and must never receive an app provisioning profile.
     if "PRODUCT_BUNDLE_IDENTIFIER" not in body:
         return match.group(0)
 
@@ -77,7 +80,10 @@ def patch_block(match: re.Match) -> str:
 
 text = block_pattern.sub(patch_block, text)
 if patched < 2:
-    raise SystemExit(f"Expected to patch App Debug/Release configurations, patched {patched}.")
+    raise SystemExit(
+        f"Expected to patch at least App Debug/Release configurations, patched {patched}. "
+        f"Found PRODUCT_BUNDLE_IDENTIFIER occurrences: {text.count('PRODUCT_BUNDLE_IDENTIFIER')}"
+    )
 
 project.write_text(text)
 print(f"Scoped manual App Store signing to the App target in {patched} Xcode configurations.")
