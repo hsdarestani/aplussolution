@@ -1,7 +1,7 @@
 # A+ Solution — Store Submission & Privacy Map (2026)
 
 Canonical release checklist for `de.aplussolution.workforce`.
-Store declarations must describe the shipped production build, even when a private distribution method exempts a questionnaire.
+Store declarations must describe the shipped production build.
 
 ## 1. Product classification
 
@@ -15,46 +15,41 @@ Store declarations must describe the shipped production build, even when a priva
 - Account/data deletion: `https://solution.smarbiz.sbs/konto-loeschen`
 - Support: `https://solution.smarbiz.sbs/support`
 - Imprint: `https://solution.smarbiz.sbs/impressum`
-- Audience: A+ Solution employees, dispatch and management; not a consumer service.
+- Audience: A+ Solution employees, dispatch and management; not a consumer account service.
+- Distribution: **public Google Play production listing + public Apple App Store distribution**.
 - Public self-registration: **No**.
 - Store build login: **company-provisioned email/password only**.
 - Ads: **No**.
 - Advertising/cross-app tracking: **No**.
 - Background location: **No**.
-- Precise location: **Yes, foreground only when a worker deliberately clocks in/out for a geofenced worksite.**
+- Foreground location: **Yes, only when a worker deliberately clocks in/out for a geofenced worksite.**
 
 ## 2. Distribution choice
 
-### Employee-owned or otherwise unmanaged phones — practical default
+The current release goal is visibility under the A+ Solution developer profiles on both stores.
 
-- **Google Play:** normal Play production distribution, but all app functionality remains behind a company-provisioned account. Complete the full Data Safety and App Content declarations below.
-- **Apple:** submit through normal App Review and request **Unlisted App** distribution. The app is then absent from search/categories and is installed using the direct App Store link; the app login still prevents unauthorized use.
+- **Google Play:** public production distribution. Do not configure the package as a Managed Google Play private app.
+- **Apple App Store:** **Public Distribution**. Do not use Private Custom App distribution and do not request Unlisted distribution for this release.
+- The public store listing does not create or grant an A+ Solution account. Operational access remains restricted to company-provisioned users.
 
-### Company-managed devices / work profiles
-
-- **Android:** Managed Google Play **Private App**, restricted to the A+ Solution organization/EMM.
-- **Apple:** Apple Business Manager **Private Custom App**, restricted to the A+ Solution Organization ID.
-
-Choose Apple public/unlisted vs private before first approval. Switching an approved Apple app between public and private requires a new app record; public can later be changed to unlisted.
-
-## 3. Access model and reviewer account
+## 3. Access model and reviewer accounts
 
 There is no user registration. Accounts are created by A+ Solution administration or activated by a personal invitation. The store build exposes only the organization email/password login.
 
-Create one dedicated reviewer user with synthetic/sample data only. Never give a store reviewer access to real employee, payroll, bank, tax, health, client-confidential or production-sensitive records.
+Create dedicated reusable reviewer users with synthetic/sample data only. Never give a store reviewer access to real employee, payroll, bank, tax, health, client-confidential or production-sensitive records. Reviewer credentials must not require OTP/2FA and should work regardless of reviewer location.
 
 Suggested Review Notes:
 
 ```text
-A+ Solution is an internal workforce-management app used by employees and management of A+ Solution GmbH. There is no public registration and no public account creation.
+A+ Solution is the official workforce application of A+ Solution GmbH. The application is publicly distributed on the App Store and Google Play, while operational access is restricted to employees and management whose accounts are provisioned by A+ Solution GmbH. There is no public self-registration.
 
 Reviewer access:
-Email: [REVIEW_EMAIL]
-Password: [REVIEW_PASSWORD]
+Manager: [REVIEW_MANAGER_EMAIL] / [REVIEW_MANAGER_PASSWORD]
+Worker: [REVIEW_WORKER_EMAIL] / [REVIEW_WORKER_PASSWORD]
 
-The supplied reviewer account contains synthetic sample data only.
+Both reviewer accounts are reusable, do not require OTP/2FA, work regardless of reviewer location, and contain synthetic data only.
 
-Location permission is requested only when the reviewer actively uses clock-in/clock-out for a worksite that requires geofence validation. The current precise foreground location is stored with that time entry. The app does not use background location, advertising tracking, or ads.
+Location permission is requested only when the reviewer actively uses clock-in/clock-out for a worksite that requires location validation. The app does not use background location, advertising tracking, or ads.
 
 Privacy: https://solution.smarbiz.sbs/datenschutz
 Support: https://solution.smarbiz.sbs/support
@@ -63,13 +58,11 @@ Deletion: https://solution.smarbiz.sbs/konto-loeschen
 
 ## 4. Google Play — App Content
 
-Use these answers for a normal Play listing. Managed Google Play private apps may be exempt from the Data Safety form, but keep this mapping current.
-
 ### App access
 
 - All functionality available without special access: **No**
 - Restriction: **Organization/company account required**
-- Provide the synthetic reviewer credentials and the instructions above.
+- Provide the reusable synthetic reviewer credentials and the instructions above.
 
 ### Ads
 
@@ -78,7 +71,7 @@ Use these answers for a normal Play listing. Managed Google Play private apps ma
 ### Target audience
 
 - Employment/workforce/business app; not designed for children.
-- Select only age groups that reflect the actual workforce. If intended users are adults only, choose **18 and over**.
+- If the intended workforce is adults only, choose **18 and over**.
 - Do not opt into Families/children features.
 
 ### Account creation/deletion
@@ -89,6 +82,8 @@ Use these answers for a normal Play listing. Managed Google Play private apps ma
 
 ### Data Safety — conservative production map
 
+Because Android requests both `ACCESS_COARSE_LOCATION` and `ACCESS_FINE_LOCATION`, declare both Google location data types when completing Data Safety.
+
 | Google data category | Collected | Shared | Purpose / note |
 | --- | --- | --- | --- |
 | Personal info — Name | Yes | Normally no | Employee identity / app functionality |
@@ -96,6 +91,7 @@ Use these answers for a normal Play listing. Managed Google Play private apps ma
 | Personal info — Phone number | When stored | Normally no | Workforce administration |
 | Personal info — Address | When stored | Normally no | Workforce/contract administration |
 | User IDs | Yes | No | Authentication / authorization |
+| Approximate location | Yes | No | Foreground clock-in/out location validation only; possible when Android grants coarse location |
 | Precise location | Yes | No | Foreground clock-in/out geofence validation only |
 | Financial info | When applicable | No | Payroll/workforce administration; e.g. pay/bank-related master data |
 | Health and fitness — Health info | When sickness absence is used | No | Sickness/absence status for workforce administration; no diagnosis is required |
@@ -121,7 +117,7 @@ Declare the data intentionally collected by the shipped build as **linked to the
 | Contact Info — Phone Number | When stored | Yes | No | App Functionality |
 | Contact Info — Physical Address | When stored | Yes | No | Workforce administration |
 | Financial Info — Other Financial Info | When applicable | Yes | No | Payroll/workforce administration |
-| Location — Precise Location | Yes | Yes | No | Foreground clock-in/out geofence validation |
+| Location — Precise Location | Yes | Yes | No | Foreground clock-in/out location validation |
 | Identifiers — User ID | Yes | Yes | No | Authentication / authorization |
 | Health & Fitness — Health | When sickness absence is used | Yes | No | Absence/workforce administration; not HealthKit |
 | User Content — Emails or Text Messages | Yes | Yes | No | Internal messaging |
@@ -133,7 +129,7 @@ Do not declare advertising, third-party advertising, cross-app tracking or backg
 
 If any analytics/crash SDK, push provider, advertising SDK, camera/microphone feature, contacts access, background location, payment SDK or new AI processor is added later, review the privacy labels before shipping that build.
 
-## 6. Native permissions
+## 6. Native permissions and platform build requirements
 
 After each `cap sync`, the store build runs:
 
@@ -146,7 +142,10 @@ Approved native permissions/declarations:
 
 - Android `ACCESS_COARSE_LOCATION`
 - Android `ACCESS_FINE_LOCATION`
+- Android `compileSdkVersion = 36`
+- Android `targetSdkVersion = 36`
 - iOS `NSLocationWhenInUseUsageDescription`
+- iOS `ITSAppUsesNonExemptEncryption = false`
 
 Intentionally not added:
 
@@ -161,7 +160,7 @@ A new permission may only be added together with the corresponding product need,
 
 - Process employee data only for the required employment/workforce purpose and applicable legal obligations.
 - Do not treat OS permission consent as the default legal basis for employment processing; assess employee processing under the applicable employment/GDPR rules.
-- Collect precise location only on the deliberate clock-in/out action; never continuously in the background.
+- Collect location only on the deliberate clock-in/out action; never continuously in the background.
 - A sickness request does not require a medical diagnosis. Do not ask workers to enter diagnosis details.
 - Never send payroll files, employee files, sickness details, identity documents, bank/tax/social-security data to the optional AI order parser.
 - Account/data-deletion requests must be processed; records subject to mandatory employment, tax, commercial, social-security or legal retention may remain only for the applicable purpose and period.
@@ -178,23 +177,25 @@ Interne Dienstplanung, Zeiterfassung und Dokumente für A+ Solution.
 ### Full German description
 
 ```text
-A+ Solution ist die interne Workforce-App der A+ Solution GmbH für freigeschaltete Mitarbeiter, Disposition und Management.
+A+ Solution ist die offizielle Workforce-App der A+ Solution GmbH für freigeschaltete Mitarbeiter, Disposition und Management.
 
 Die App bündelt Dienstplanung, Arbeitszeiterfassung, Verfügbarkeiten, Verträge, Dokumente, Lohnunterlagen, interne Nachrichten und weitere betriebliche Abläufe in einem geschützten Zugang.
 
-Wichtig: Es gibt keine öffentliche Registrierung. Ein Zugang wird ausschließlich von der A+ Solution GmbH bereitgestellt oder über eine persönliche Einladung aktiviert.
+Die App ist öffentlich im Store verfügbar. Für die Nutzung der betrieblichen Funktionen ist jedoch ein von der A+ Solution GmbH bereitgestelltes Konto erforderlich. Es gibt keine öffentliche Registrierung.
 
 Bei standortgebundenen Einsätzen kann die App beim aktiven Ein- und Ausstempeln den aktuellen Standort zur Prüfung des vorgesehenen Einsatzortes verwenden. Es findet keine Hintergrundortung statt.
 ```
 
 Keywords/positioning: `Dienstplanung, Zeiterfassung, Workforce, Mitarbeiter, Schichten, Dokumente, A+ Solution`.
-Do not describe the app as a public staffing marketplace or consumer service.
+Do not describe the app as a public staffing marketplace or imply that downloading it creates an employee account.
 
 ## 9. Publisher build configuration
 
 The exact self-hosted Publisher configuration is documented in `docs/PUBLISHER_BUILD_CONFIG.md`.
 
-For the first-ever Google Play upload, use the Publisher-generated Android upload key and back it up immediately. Do not establish the Play package using a different signing/upload key first.
+For the first-ever Google Play upload, use the Publisher-generated Android upload key. Do not establish the Play package using a different signing/upload key first.
+
+Publisher release metadata must drive Android `versionName`/`versionCode` and iOS `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION`, so every Store upload gets a unique build number.
 
 ## 10. Pre-submit gate
 
@@ -202,13 +203,15 @@ Before Submit:
 
 - Privacy, support, deletion and imprint routes are public without login.
 - No placeholder legal text remains.
-- Reviewer user is active and contains synthetic data only.
+- Reviewer users are active and contain synthetic data only.
+- Reviewer accounts work without OTP/2FA and without dependence on a specific reviewer location.
 - Reviewer can log in with company credentials; there is no public signup/social-login surface in the store build.
 - Location text matches foreground-only behavior.
-- App remains usable when location is denied except for a geofenced clock action that actually requires it.
+- App remains usable when location is denied except for a clock action that actually requires location validation.
 - Screenshots contain no real employee, payroll, bank, tax, health or client-confidential data.
 - Store declarations match this document and the exact production build.
 - Android/iOS identifiers remain `de.aplussolution.workforce`.
+- Google Play distribution is public production and Apple distribution method is Public.
 
 ## 11. Change-control rule
 
