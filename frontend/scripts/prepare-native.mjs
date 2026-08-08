@@ -29,7 +29,23 @@ function patchAndroid() {
   // The app deliberately does not request ACCESS_BACKGROUND_LOCATION.
   xml = xml.replace(/\s*<uses-permission android:name="android\.permission\.ACCESS_BACKGROUND_LOCATION"\s*\/>\s*/g, '\n');
   fs.writeFileSync(manifestPath, xml);
-  console.log('Prepared Android foreground-location permissions.');
+
+  // Public Google Play submissions must target Android 16 / API 36 from 31 Aug 2026.
+  // Enforce it now so the first public build is already future-proof.
+  const variablesPath = path.join(cwd, 'android', 'variables.gradle');
+  if (!fs.existsSync(variablesPath)) {
+    throw new Error(`variables.gradle not found: ${variablesPath}`);
+  }
+  let variables = fs.readFileSync(variablesPath, 'utf8');
+  variables = variables
+    .replace(/compileSdkVersion\s*=\s*\d+/, 'compileSdkVersion = 36')
+    .replace(/targetSdkVersion\s*=\s*\d+/, 'targetSdkVersion = 36');
+  if (!/compileSdkVersion\s*=\s*36/.test(variables) || !/targetSdkVersion\s*=\s*36/.test(variables)) {
+    throw new Error('Could not enforce Android compileSdkVersion/targetSdkVersion 36.');
+  }
+  fs.writeFileSync(variablesPath, variables);
+
+  console.log('Prepared Android API 36 and foreground-location permissions.');
 }
 
 function ensurePlistKey(plist, key, value) {
