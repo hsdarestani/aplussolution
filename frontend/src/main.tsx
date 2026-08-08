@@ -8,11 +8,22 @@ import '@ionic/react/css/typography.css';
 import '@ionic/react/css/padding.css';
 import './theme.css';
 import App from './App';
+import StoreComplianceLinks from './StoreComplianceLinks';
+import StoreLegalPage, { legalPageFromPath } from './StoreLegalPages';
 
 setupIonicReact({ mode: 'md' });
 
+const legalPage = legalPageFromPath(window.location.pathname);
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    {legalPage ? (
+      <StoreLegalPage page={legalPage} />
+    ) : (
+      <>
+        <App />
+        <StoreComplianceLinks />
+      </>
+    )}
   </React.StrictMode>,
 );
