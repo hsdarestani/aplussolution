@@ -56,6 +56,14 @@ function ensurePlistKey(plist, key, value) {
   );
 }
 
+function ensurePlistBooleanKey(plist, key, value) {
+  if (plist.includes(`<key>${key}</key>`)) return plist;
+  return plist.replace(
+    /<\/dict>\s*<\/plist>/,
+    `\t<key>${key}</key>\n\t<${value ? 'true' : 'false'}/>\n</dict>\n</plist>`,
+  );
+}
+
 function patchIos() {
   const plistPath = path.join(cwd, 'ios', 'App', 'App', 'Info.plist');
   if (!fs.existsSync(plistPath)) {
@@ -69,10 +77,13 @@ function patchIos() {
     'NSLocationWhenInUseUsageDescription',
     'Der Standort wird nur beim Ein- und Ausstempeln erfasst, um den vorgesehenen Einsatzort zu prüfen. Es findet keine Hintergrundortung statt.',
   );
+  // The app relies on standard encryption provided by Apple OS networking APIs and
+  // does not ship proprietary/non-exempt cryptography.
+  plist = ensurePlistBooleanKey(plist, 'ITSAppUsesNonExemptEncryption', false);
 
   // No camera, photo-library, advertising tracking or background-location permission is added here.
   fs.writeFileSync(plistPath, plist);
-  console.log('Prepared iOS foreground-location usage description.');
+  console.log('Prepared iOS foreground-location and export-compliance declarations.');
 }
 
 if (target === 'android' || target === 'all') patchAndroid();
