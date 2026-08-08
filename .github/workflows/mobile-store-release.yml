@@ -40,6 +40,7 @@ jobs:
           npm run build
           npx cap add android
           npx cap sync android
+          node scripts/prepare-native.mjs android
           cp /tmp/aplus-release.jks android/app/aplus-release.jks
       - name: Configure Gradle release signing
         run: |
@@ -102,6 +103,7 @@ jobs:
           npm run build
           npx cap add ios
           npx cap sync ios
+          node scripts/prepare-native.mjs ios
       - name: Install signing identity and profile
         id: signing
         run: |
