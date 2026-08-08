@@ -1,9 +1,11 @@
 import { expect, test } from '@playwright/test';
 
-test('login clearly identifies the app as internal and exposes legal links', async ({ page }) => {
+test('login is organization-only and exposes legal links', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByText('Interner Unternehmenszugang')).toBeVisible();
   await expect(page.getByText(/Keine öffentliche Registrierung/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Mit Google anmelden' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Mit Apple anmelden' })).toBeHidden();
   await expect(page.getByRole('link', { name: 'Datenschutz' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Kontolöschung' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Support' })).toBeVisible();
