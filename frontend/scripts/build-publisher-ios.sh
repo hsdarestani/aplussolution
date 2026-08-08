@@ -20,6 +20,30 @@ npx cap add ios
 npx cap sync ios
 node scripts/prepare-native.mjs ios
 
+# Always regenerate the native iOS AppIcon from the user-approved source icon.
+# The iOS project is recreated on every Publisher build, so changing only a web
+# icon under public/ would otherwise be lost and App Store Connect would keep
+# showing Capacitor's/default native icon.
+ICON_SOURCE="$FRONTEND/public/sicon.png"
+ICON_ASSET_DIR="$FRONTEND/resources"
+test -f "$ICON_SOURCE"
+rm -rf "$ICON_ASSET_DIR"
+mkdir -p "$ICON_ASSET_DIR"
+cp "$ICON_SOURCE" "$ICON_ASSET_DIR/icon.png"
+
+# Use the official Capacitor asset generator to crop/resize the source and write
+# the real Xcode AppIcon.appiconset. Pin the version so future builds are stable.
+npx --yes @capacitor/assets@3.0.5 generate \
+  --ios \
+  --assetPath "$ICON_ASSET_DIR" \
+  --iconBackgroundColor '#00142f' \
+  --iconBackgroundColorDark '#00142f'
+
+APP_ICON_SET="$FRONTEND/ios/App/App/Assets.xcassets/AppIcon.appiconset"
+test -d "$APP_ICON_SET"
+test -f "$APP_ICON_SET/Contents.json"
+echo "Generated native iOS AppIcon from public/sicon.png."
+
 # Configure signing only on the generated App target. Passing the provisioning
 # profile as an xcodebuild command-line build setting makes it inherit into all
 # CocoaPods targets, which do not support provisioning profiles and causes
