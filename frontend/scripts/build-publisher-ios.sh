@@ -20,30 +20,26 @@ npx cap add ios
 npx cap sync ios
 node scripts/prepare-native.mjs ios
 
+# Configure signing only on the generated App target. Passing the provisioning
+# profile as an xcodebuild command-line build setting makes it inherit into all
+# CocoaPods targets, which do not support provisioning profiles and causes
+# ARCHIVE FAILED / exit code 65.
+python3 scripts/patch-ios-project-signing.py
+
 ARCHIVE_PATH="$FRONTEND/ios/build/APlusWorkforce.xcarchive"
 EXPORT_PATH="$FRONTEND/ios/build/export"
 EXPORT_OPTIONS="$FRONTEND/ios/ExportOptions.plist"
 mkdir -p "$EXPORT_PATH"
 
-# Publisher installs a short-lived Apple Distribution certificate/private key
-# in an ephemeral keychain and installs the matching App Store provisioning
-# profile before invoking this script. Use those exact assets instead of
-# Automatic signing, which otherwise asks Apple for a Development profile and
-# registered test device even though this is an App Store archive.
+# The App target now contains the Publisher's manual App Store signing settings.
+# Do not repeat app-only signing values on the xcodebuild command line because
+# command-line settings propagate to Pods.xcodeproj as well.
 xcodebuild \
   -workspace ios/App/App.xcworkspace \
   -scheme App \
   -configuration Release \
   -destination 'generic/platform=iOS' \
   -archivePath "$ARCHIVE_PATH" \
-  DEVELOPMENT_TEAM="$IOS_TEAM_ID" \
-  PRODUCT_BUNDLE_IDENTIFIER="$IOS_BUNDLE_ID" \
-  CODE_SIGN_STYLE=Manual \
-  CODE_SIGN_IDENTITY="$IOS_CODE_SIGN_IDENTITY" \
-  PROVISIONING_PROFILE_SPECIFIER="$IOS_PROVISIONING_PROFILE_SPECIFIER" \
-  OTHER_CODE_SIGN_FLAGS="--keychain $IOS_SIGNING_KEYCHAIN" \
-  MARKETING_VERSION="$APP_VERSION_NAME" \
-  CURRENT_PROJECT_VERSION="$APP_BUILD_NUMBER" \
   archive
 
 cat > "$EXPORT_OPTIONS" <<PLIST
