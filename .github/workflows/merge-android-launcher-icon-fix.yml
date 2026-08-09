@@ -1,0 +1,101 @@
+name: Validate and merge Android launcher icon fix
+
+on:
+  push:
+    branches:
+      - fix/android-launcher-icon
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  validate-and-merge:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/android-launcher-icon
+          fetch-depth: 0
+
+      - name: Wait for generated icon commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            git fetch origin fix/android-launcher-icon
+            git reset --hard origin/fix/android-launcher-icon
+            if git log -20 --pretty=%s | grep -Fq 'fix(android): use Play Store artwork for launcher icon'; then
+              echo 'Generated icon commit found.'
+              exit 0
+            fi
+            echo "Waiting for icon generator ($i/30)..."
+            sleep 10
+          done
+          echo 'Timed out waiting for generated icon commit.' >&2
+          exit 1
+
+      - name: Validate Android launcher resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          root = Path('.')
+          required = [
+              'android/app/src/main/res/mipmap-mdpi/ic_launcher.png',
+              'android/app/src/main/res/mipmap-hdpi/ic_launcher.png',
+              'android/app/src/main/res/mipmap-xhdpi/ic_launcher.png',
+              'android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png',
+              'android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png',
+              'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml',
+              'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml',
+              'android/app/src/main/res/values/ic_launcher_background.xml',
+          ]
+          missing = [p for p in required if not (root/p).exists()]
+          if missing:
+              raise SystemExit('Missing launcher resources: ' + ', '.join(missing))
+          ET.parse(root/'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml')
+          ET.parse(root/'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml')
+          ET.parse(root/'android/app/src/main/res/values/ic_launcher_background.xml')
+          manifest = (root/'android/app/src/main/AndroidManifest.xml').read_text(encoding='utf-8')
+          if 'android:icon="@mipmap/ic_launcher"' not in manifest:
+              raise SystemExit('Manifest does not point to @mipmap/ic_launcher')
+          if 'android:roundIcon="@mipmap/ic_launcher_round"' not in manifest:
+              raise SystemExit('Manifest does not point to @mipmap/ic_launcher_round')
+          if (root/'.github/workflows/fix-android-launcher-icon.yml').exists():
+              raise SystemExit('Temporary generator workflow should have removed itself')
+          print('Launcher resource validation passed.')
+          PY
+
+      - name: Remove temporary merge workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/merge-android-launcher-icon-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: remove temporary launcher icon workflow"
+          git push origin HEAD:fix/android-launcher-icon
+
+      - name: Merge pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 12); do
+            PR=$(gh pr list --repo "$GITHUB_REPOSITORY" --head fix/android-launcher-icon --state open --json number --jq '.[0].number // empty')
+            if [ -n "$PR" ]; then
+              echo "Merging PR #$PR"
+              gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --squash --delete-branch
+              exit 0
+            fi
+            echo "Waiting for PR to appear ($i/12)..."
+            sleep 10
+          done
+          echo 'No open PR found for fix/android-launcher-icon' >&2
+          exit 1
