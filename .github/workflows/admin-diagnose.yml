@@ -11,7 +11,7 @@ jobs:
     steps:
       - name: Install sshpass
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
-      - name: Check production admin
+      - name: Recheck production admin
         env:
           SSHPASS: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
