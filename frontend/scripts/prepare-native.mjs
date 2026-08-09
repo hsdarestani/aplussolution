@@ -11,14 +11,13 @@ function generateAndroidLauncherAssets() {
     throw new Error(`Official Android icon source not found: ${source}`);
   }
 
-  // Keep the source of truth in public/sicon.png (the same finished artwork used
-  // for the store) and materialize a clean Capacitor asset set only for the build.
-  // Using icon-only.png makes @capacitor/assets create legacy + adaptive launcher
-  // resources with a safe zone instead of shipping Capacitor's default icon.
+  // Use an isolated Easy Mode asset directory so the exact dark navy/gold
+  // store artwork becomes the Android launcher source instead of Capacitor's
+  // generated/default icon set.
   const assetDir = path.join(cwd, '.native-assets-android');
   fs.rmSync(assetDir, { recursive: true, force: true });
   fs.mkdirSync(assetDir, { recursive: true });
-  fs.copyFileSync(source, path.join(assetDir, 'icon-only.png'));
+  fs.copyFileSync(source, path.join(assetDir, 'logo.png'));
 
   const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
   try {
@@ -28,7 +27,7 @@ function generateAndroidLauncherAssets() {
         '@capacitor/assets',
         'generate',
         '--android',
-        '--asset-path',
+        '--assetPath',
         assetDir,
         '--iconBackgroundColor',
         '#07172F',
