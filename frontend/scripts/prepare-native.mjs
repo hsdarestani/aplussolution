@@ -1,8 +1,54 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const target = process.argv[2] || 'all';
 const cwd = process.cwd();
+
+function generateAndroidLauncherAssets() {
+  const source = path.join(cwd, 'public', 'sicon.png');
+  if (!fs.existsSync(source)) {
+    throw new Error(`Official Android icon source not found: ${source}`);
+  }
+
+  // Keep the source of truth in public/sicon.png (the same finished artwork used
+  // for the store) and materialize a clean Capacitor asset set only for the build.
+  // Using icon-only.png makes @capacitor/assets create legacy + adaptive launcher
+  // resources with a safe zone instead of shipping Capacitor's default icon.
+  const assetDir = path.join(cwd, '.native-assets-android');
+  fs.rmSync(assetDir, { recursive: true, force: true });
+  fs.mkdirSync(assetDir, { recursive: true });
+  fs.copyFileSync(source, path.join(assetDir, 'icon-only.png'));
+
+  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+  try {
+    execFileSync(
+      npx,
+      [
+        '@capacitor/assets',
+        'generate',
+        '--android',
+        '--assetPath',
+        assetDir,
+        '--iconBackgroundColor',
+        '#07172F',
+        '--iconBackgroundColorDark',
+        '#07172F',
+        '--splashBackgroundColor',
+        '#07172F',
+        '--splashBackgroundColorDark',
+        '#07172F',
+        '--logoSplashScale',
+        '0.34',
+      ],
+      { cwd, stdio: 'inherit' },
+    );
+  } finally {
+    fs.rmSync(assetDir, { recursive: true, force: true });
+  }
+
+  console.log('Generated A+ Solution Android legacy/adaptive launcher icons from public/sicon.png.');
+}
 
 function patchAndroid() {
   const manifestPath = path.join(cwd, 'android', 'app', 'src', 'main', 'AndroidManifest.xml');
@@ -45,7 +91,8 @@ function patchAndroid() {
   }
   fs.writeFileSync(variablesPath, variables);
 
-  console.log('Prepared Android API 36 and foreground-location permissions.');
+  generateAndroidLauncherAssets();
+  console.log('Prepared Android API 36, foreground-location permissions and official launcher assets.');
 }
 
 function ensurePlistKey(plist, key, value) {
