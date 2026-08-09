@@ -1,0 +1,198 @@
+name: Fix Android launcher icon
+
+on:
+  push:
+    branches:
+      - fix/android-launcher-icon
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate-launcher-icon:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/android-launcher-icon
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install image tooling
+        run: python -m pip install --disable-pip-version-check pillow requests beautifulsoup4
+
+      - name: Download current Google Play icon and build Android launcher resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+          import io, re, statistics
+          import requests
+          from bs4 import BeautifulSoup
+          from PIL import Image, ImageStat
+
+          root = Path('.')
+          gradle_candidates = [
+              root / 'android/app/build.gradle.kts',
+              root / 'android/app/build.gradle',
+          ]
+          gradle = next((p for p in gradle_candidates if p.exists()), None)
+          if not gradle:
+              raise SystemExit('Android app Gradle file not found')
+          txt = gradle.read_text(encoding='utf-8', errors='ignore')
+          patterns = [
+              r'applicationId\s*=\s*["\']([^"\']+)["\']',
+              r'applicationId\s+["\']([^"\']+)["\']',
+          ]
+          app_id = None
+          for pat in patterns:
+              m = re.search(pat, txt)
+              if m:
+                  app_id = m.group(1)
+                  break
+          if not app_id:
+              raise SystemExit('Could not determine Android applicationId')
+          print('applicationId:', app_id)
+
+          url = f'https://play.google.com/store/apps/details?id={app_id}&hl=en&gl=DE'
+          headers = {
+              'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/125 Safari/537.36',
+              'Accept-Language': 'en-US,en;q=0.9',
+          }
+          r = requests.get(url, headers=headers, timeout=30)
+          r.raise_for_status()
+          soup = BeautifulSoup(r.text, 'html.parser')
+          meta = soup.find('meta', attrs={'property': 'og:image'})
+          if not meta or not meta.get('content'):
+              raise SystemExit('Google Play og:image was not found')
+          icon_url = meta['content'].replace('=w240-h480-rw', '=s1024-rw')
+          print('Google Play artwork:', icon_url)
+          ir = requests.get(icon_url, headers=headers, timeout=30)
+          ir.raise_for_status()
+          src = Image.open(io.BytesIO(ir.content)).convert('RGBA')
+          if min(src.size) < 128:
+              raise SystemExit(f'Play icon unexpectedly small: {src.size}')
+          side = min(src.size)
+          left = (src.width - side)//2
+          top = (src.height - side)//2
+          src = src.crop((left, top, left+side, top+side))
+
+          res = root / 'android/app/src/main/res'
+          res.mkdir(parents=True, exist_ok=True)
+
+          legacy = {
+              'mipmap-mdpi': 48,
+              'mipmap-hdpi': 72,
+              'mipmap-xhdpi': 96,
+              'mipmap-xxhdpi': 144,
+              'mipmap-xxxhdpi': 192,
+          }
+          for folder, size in legacy.items():
+              d = res / folder
+              d.mkdir(parents=True, exist_ok=True)
+              out = src.resize((size, size), Image.Resampling.LANCZOS)
+              out.save(d / 'ic_launcher.png', optimize=True)
+              out.save(d / 'ic_launcher_round.png', optimize=True)
+
+          # Adaptive icons: keep the complete Play artwork comfortably inside OEM masks.
+          adaptive = {
+              'drawable-mdpi': 108,
+              'drawable-hdpi': 162,
+              'drawable-xhdpi': 216,
+              'drawable-xxhdpi': 324,
+              'drawable-xxxhdpi': 432,
+          }
+          inset_ratio = 0.10
+          for folder, size in adaptive.items():
+              d = res / folder
+              d.mkdir(parents=True, exist_ok=True)
+              canvas = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+              inner = round(size * (1 - 2*inset_ratio))
+              art = src.resize((inner, inner), Image.Resampling.LANCZOS)
+              off = (size-inner)//2
+              canvas.alpha_composite(art, (off, off))
+              canvas.save(d / 'ic_launcher_foreground.png', optimize=True)
+
+          # Use the average of corner pixels as adaptive background so OEM masks blend naturally.
+          rgba = src.resize((64, 64), Image.Resampling.LANCZOS)
+          pts = []
+          band = 8
+          pix = rgba.load()
+          for y0, y1, x0, x1 in [(0,band,0,band),(0,band,64-band,64),(64-band,64,0,band),(64-band,64,64-band,64)]:
+              for y in range(y0,y1):
+                  for x in range(x0,x1):
+                      rr,gg,bb,aa = pix[x,y]
+                      if aa > 32:
+                          pts.append((rr,gg,bb))
+          if pts:
+              bg = tuple(round(statistics.median(c[i] for c in pts)) for i in range(3))
+          else:
+              bg = (255,255,255)
+          hex_bg = '#%02X%02X%02X' % bg
+          values = res / 'values'
+          values.mkdir(parents=True, exist_ok=True)
+          (values / 'ic_launcher_background.xml').write_text(
+              '<?xml version="1.0" encoding="utf-8"?>\n'
+              '<resources>\n'
+              f'    <color name="ic_launcher_background">{hex_bg}</color>\n'
+              '</resources>\n', encoding='utf-8')
+
+          anydpi = res / 'mipmap-anydpi-v26'
+          anydpi.mkdir(parents=True, exist_ok=True)
+          xml = '''<?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/ic_launcher_background" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          '''
+          (anydpi / 'ic_launcher.xml').write_text(xml, encoding='utf-8')
+          (anydpi / 'ic_launcher_round.xml').write_text(xml, encoding='utf-8')
+
+          # Ensure the manifest points at the launcher resources we just generated.
+          manifest = root / 'android/app/src/main/AndroidManifest.xml'
+          if not manifest.exists():
+              raise SystemExit('AndroidManifest.xml not found')
+          mtxt = manifest.read_text(encoding='utf-8')
+          if 'android:icon=' in mtxt:
+              mtxt = re.sub(r'android:icon="[^"]+"', 'android:icon="@mipmap/ic_launcher"', mtxt, count=1)
+          else:
+              mtxt = mtxt.replace('<application', '<application\n        android:icon="@mipmap/ic_launcher"', 1)
+          if 'android:roundIcon=' in mtxt:
+              mtxt = re.sub(r'android:roundIcon="[^"]+"', 'android:roundIcon="@mipmap/ic_launcher_round"', mtxt, count=1)
+          else:
+              mtxt = mtxt.replace('android:icon="@mipmap/ic_launcher"', 'android:icon="@mipmap/ic_launcher"\n        android:roundIcon="@mipmap/ic_launcher_round"', 1)
+          manifest.write_text(mtxt, encoding='utf-8')
+
+          # Bump Flutter build number when using the standard pubspec version field.
+          pubspec = root / 'pubspec.yaml'
+          if pubspec.exists():
+              ptxt = pubspec.read_text(encoding='utf-8')
+              m = re.search(r'(?m)^(version:\s*[^+\s]+)\+(\d+)\s*$', ptxt)
+              if m:
+                  nxt = int(m.group(2)) + 1
+                  ptxt = ptxt[:m.start()] + f'{m.group(1)}+{nxt}' + ptxt[m.end():]
+                  pubspec.write_text(ptxt, encoding='utf-8')
+                  print('Bumped Flutter build number to', nxt)
+
+          print('Adaptive background:', hex_bg)
+          PY
+
+      - name: Commit generated launcher resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/fix-android-launcher-icon.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No launcher icon changes were produced"
+            exit 1
+          fi
+          git commit -m "fix(android): use Play Store artwork for launcher icon"
+          git push origin HEAD:fix/android-launcher-icon
