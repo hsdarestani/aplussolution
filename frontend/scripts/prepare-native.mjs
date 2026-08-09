@@ -28,7 +28,7 @@ function generateAndroidLauncherAssets() {
         '@capacitor/assets',
         'generate',
         '--android',
-        '--assetPath',
+        '--asset-path',
         assetDir,
         '--iconBackgroundColor',
         '#07172F',
