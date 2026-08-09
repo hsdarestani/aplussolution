@@ -1,52 +1,50 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 
 const target = process.argv[2] || 'all';
 const cwd = process.cwd();
 
-function generateAndroidLauncherAssets() {
+function installAndroidLauncherArtwork(manifestPath) {
   const source = path.join(cwd, 'public', 'sicon.png');
   if (!fs.existsSync(source)) {
     throw new Error(`Official Android icon source not found: ${source}`);
   }
 
-  // Use an isolated Easy Mode asset directory so the exact dark navy/gold
-  // store artwork becomes the Android launcher source instead of Capacitor's
-  // generated/default icon set.
-  const assetDir = path.join(cwd, '.native-assets-android');
-  fs.rmSync(assetDir, { recursive: true, force: true });
-  fs.mkdirSync(assetDir, { recursive: true });
-  fs.copyFileSync(source, path.join(assetDir, 'logo.png'));
+  // Native projects are recreated during Publisher/CI builds, so install the
+  // exact public Play Store artwork after Capacitor generates Android. Point the
+  // manifest directly at this drawable to prevent OEM launchers from falling
+  // back to Capacitor's generated/default blue icon resources.
+  const launcherDir = path.join(cwd, 'android', 'app', 'src', 'main', 'res', 'drawable-nodpi');
+  const launcherPath = path.join(launcherDir, 'launcher_icon.png');
+  fs.mkdirSync(launcherDir, { recursive: true });
+  fs.copyFileSync(source, launcherPath);
 
-  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  try {
-    execFileSync(
-      npx,
-      [
-        '@capacitor/assets',
-        'generate',
-        '--android',
-        '--assetPath',
-        assetDir,
-        '--iconBackgroundColor',
-        '#07172F',
-        '--iconBackgroundColorDark',
-        '#07172F',
-        '--splashBackgroundColor',
-        '#07172F',
-        '--splashBackgroundColorDark',
-        '#07172F',
-        '--logoSplashScale',
-        '0.34',
-      ],
-      { cwd, stdio: 'inherit' },
-    );
-  } finally {
-    fs.rmSync(assetDir, { recursive: true, force: true });
+  let xml = fs.readFileSync(manifestPath, 'utf8');
+  if (!/<application\b/.test(xml)) {
+    throw new Error('AndroidManifest.xml has no <application> element.');
   }
 
-  console.log('Generated A+ Solution Android legacy/adaptive launcher icons from public/sicon.png.');
+  if (/android:icon="[^"]+"/.test(xml)) {
+    xml = xml.replace(/android:icon="[^"]+"/, 'android:icon="@drawable/launcher_icon"');
+  } else {
+    xml = xml.replace(/<application\b/, '<application android:icon="@drawable/launcher_icon"');
+  }
+
+  if (/android:roundIcon="[^"]+"/.test(xml)) {
+    xml = xml.replace(/android:roundIcon="[^"]+"/, 'android:roundIcon="@drawable/launcher_icon"');
+  } else {
+    xml = xml.replace(/<application\b/, '<application android:roundIcon="@drawable/launcher_icon"');
+  }
+
+  if (!xml.includes('android:icon="@drawable/launcher_icon"')) {
+    throw new Error('Failed to set android:icon to branded launcher artwork.');
+  }
+  if (!xml.includes('android:roundIcon="@drawable/launcher_icon"')) {
+    throw new Error('Failed to set android:roundIcon to branded launcher artwork.');
+  }
+
+  fs.writeFileSync(manifestPath, xml);
+  console.log('Installed exact A+ Solution Play Store artwork as Android launcher icon.');
 }
 
 function patchAndroid() {
@@ -90,8 +88,8 @@ function patchAndroid() {
   }
   fs.writeFileSync(variablesPath, variables);
 
-  generateAndroidLauncherAssets();
-  console.log('Prepared Android API 36, foreground-location permissions and official launcher assets.');
+  installAndroidLauncherArtwork(manifestPath);
+  console.log('Prepared Android API 36, foreground-location permissions and branded launcher resources.');
 }
 
 function ensurePlistKey(plist, key, value) {
