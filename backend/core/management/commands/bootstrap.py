@@ -39,7 +39,7 @@ class Command(BaseCommand):
                         changed_fields.append(field)
 
                 password_repaired = False
-                if configured_password and not user.check_password(configured_password):
+                if not user.has_usable_password() and configured_password:
                     user.set_password(configured_password)
                     changed_fields.append('password')
                     password_repaired = True
