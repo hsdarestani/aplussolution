@@ -8,17 +8,19 @@ const addDays=(d:Date,n:number)=>{const x=new Date(d);x.setDate(x.getDate()+n);r
 const weekStart=(d:Date)=>{const x=startDay(d);x.setDate(x.getDate()-((x.getDay()+6)%7));return x};
 function daysFor(mode:CalendarMode,anchor:Date){if(mode==='day')return[startDay(anchor)];if(mode==='week'||mode==='twoWeeks'){const start=weekStart(anchor);return Array.from({length:mode==='week'?7:14},(_,i)=>addDays(start,i))}const first=new Date(anchor.getFullYear(),anchor.getMonth(),1);const start=weekStart(first);const last=new Date(anchor.getFullYear(),anchor.getMonth()+1,0);const finish=addDays(weekStart(last),7);const count=Math.min(42,Math.max(35,Math.round((finish.getTime()-start.getTime())/86400000)));return Array.from({length:count},(_,i)=>addDays(start,i))}
 const time=(v:string)=>new Date(v).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
+type SchedulerGroup={id:string;name:string;rows:any[]};
+const newGroup=(id:string,name:string):SchedulerGroup=>({id,name,rows:[]});
 
 export default function SchedulerGroupedGrid({rows,mode,anchor,groupBy,onMove,onInspect,selected,onToggleSelect}:{rows:any[];mode:CalendarMode;anchor:Date;groupBy:'users'|'positions';onMove:(shift:any,targetDay:Date)=>Promise<void>|void;onInspect:(shift:any)=>void;selected:Set<string>;onToggleSelect:(id:string)=>void}){
   const days=useMemo(()=>daysFor(mode,anchor),[mode,anchor.getTime()]);
   const groups=useMemo(()=>{
-    const map=new Map<string,{id:string;name:string;rows:any[]}>();
+    const map=new Map<string,SchedulerGroup>();
     if(groupBy==='positions'){
-      for(const shift of rows){const id=String(shift.position);const group=map.get(id)||{id,name:shift.position_name||'Position',rows:[]};group.rows.push(shift);map.set(id,group)}
+      for(const shift of rows){const id=String(shift.position);const group=map.get(id)||newGroup(id,shift.position_name||'Position');group.rows.push(shift);map.set(id,group)}
     }else{
       for(const shift of rows){
-        for(const assignment of shift.assignments||[]){const id=String(assignment.worker);const group=map.get(id)||{id,name:assignment.worker_name||'Mitarbeiter',rows:[]};group.rows.push(shift);map.set(id,group)}
-        if(Number(shift.open_count||0)>0){const group=map.get('__open__')||{id:'__open__',name:'Offene Schichten',rows:[]};group.rows.push(shift);map.set('__open__',group)}
+        for(const assignment of shift.assignments||[]){const id=String(assignment.worker);const group=map.get(id)||newGroup(id,assignment.worker_name||'Mitarbeiter');group.rows.push(shift);map.set(id,group)}
+        if(Number(shift.open_count||0)>0){const group=map.get('__open__')||newGroup('__open__','Offene Schichten');group.rows.push(shift);map.set('__open__',group)}
       }
     }
     return [...map.values()].sort((a,b)=>a.id==='__open__'?1:b.id==='__open__'?-1:a.name.localeCompare(b.name,'de'));
