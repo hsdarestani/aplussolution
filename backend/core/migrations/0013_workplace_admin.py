@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 import django.db.models.deletion
 from django.conf import settings
@@ -33,9 +34,7 @@ def seed_roles(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-    dependencies = [
-        ('core', '0012_pay_period_timesheets'),
-    ]
+    dependencies = [('core', '0012_pay_period_timesheets')]
 
     operations = [
         migrations.CreateModel(
@@ -49,10 +48,10 @@ class Migration(migrations.Migration):
                 ('week_starts_on', models.PositiveSmallIntegerField(default=0, help_text='0=Montag, 6=Sonntag')),
                 ('time_format', models.CharField(choices=[('24h', '24 Stunden'), ('12h', '12 Stunden')], default='24h', max_length=8)),
                 ('currency', models.CharField(default='EUR', max_length=3)),
-                ('overtime_daily_hours', models.DecimalField(decimal_places=2, default='8.00', max_digits=5)),
-                ('overtime_weekly_hours', models.DecimalField(decimal_places=2, default='40.00', max_digits=6)),
+                ('overtime_daily_hours', models.DecimalField(decimal_places=2, default=Decimal('8.00'), max_digits=5)),
+                ('overtime_weekly_hours', models.DecimalField(decimal_places=2, default=Decimal('40.00'), max_digits=6)),
                 ('overtime_mode', models.CharField(choices=[('off', 'Aus'), ('warn', 'Warnen'), ('block', 'Blockieren')], default='warn', max_length=10)),
-                ('overtime_multiplier', models.DecimalField(decimal_places=2, default='1.25', max_digits=4)),
+                ('overtime_multiplier', models.DecimalField(decimal_places=2, default=Decimal('1.25'), max_digits=4)),
                 ('labor_sharing_enabled', models.BooleanField(default=True)),
                 ('manager_can_manage_roles', models.BooleanField(default=False)),
             ],
