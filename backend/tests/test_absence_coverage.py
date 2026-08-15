@@ -64,7 +64,7 @@ def test_worker_reports_short_notice_callout_and_duplicate_is_blocked(auth_worke
 def test_worker_cannot_report_another_workers_assignment(auth_worker, worker_user, second_worker, company, location, position):
     shift, slot = assigned_shift(company, location, position, second_worker)
     response = auth_worker.post('/api/operations/callouts/report/', {'shift': str(shift.id), 'slot': str(slot.id), 'kind': 'personal'}, format='json')
-    assert response.status_code == 400
+    assert response.status_code == 403
     assert ShiftAbsenceCase.objects.count() == 0
 
 
