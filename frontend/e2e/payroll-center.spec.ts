@@ -36,7 +36,7 @@ test('manager reviews a timesheet and closes the pay period', async ({page})=>{
     return json(r,{count:1,next:null,previous:null,results:[sheet(sheetStatus,review)]});
   });
   await page.goto('/?view=time');
-  await page.getByRole('radio',{name:'Abrechnung'}).click();
+  await page.getByTestId('time-tab-payroll').click();
   await expect(page.getByRole('heading',{name:'Abrechnung kontrolliert abschließen'})).toBeVisible();
   await expect(page.getByText('Mina Berger',{exact:true}).first()).toBeVisible();
   await expect(page.getByText('Zeiteintrag nicht freigegeben',{exact:true})).toBeVisible();
@@ -60,7 +60,7 @@ test('worker can inspect and submit own payroll timesheet', async ({page})=>{
     return json(r,{count:1,next:null,previous:null,results:[sheet(status,'approved')]});
   });
   await page.goto('/?view=time');
-  await page.getByRole('radio',{name:'Abrechnung'}).click();
+  await page.getByTestId('time-tab-payroll').click();
   await expect(page.getByRole('heading',{name:'Arbeitszeiten für die Abrechnung'})).toBeVisible();
   await expect(page.getByText('August 2026',{exact:true}).first()).toBeVisible();
   await expect(page.getByText('8,00 Netto-Stunden')).toBeVisible();

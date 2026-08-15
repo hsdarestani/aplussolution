@@ -21,9 +21,12 @@ def assert_period_editable(period):
 
 
 def assert_time_entry_editable(entry):
-    try:
-        snapshot = entry.timesheet_snapshot
-    except TimesheetEntry.DoesNotExist:
+    snapshot = (
+        TimesheetEntry.objects.select_related('timesheet__pay_period')
+        .filter(time_entry=entry)
+        .first()
+    )
+    if not snapshot:
         return
     if snapshot.timesheet.pay_period.status in {PayPeriod.Status.CLOSED, PayPeriod.Status.LOCKED}:
         raise ValidationError('Dieser Zeiteintrag gehört zu einem geschlossenen Abrechnungszeitraum.')
@@ -271,6 +274,11 @@ def approve_all_entries(sheet, user):
 @transaction.atomic
 def submit_timesheet(sheet):
     assert_period_editable(sheet.pay_period)
+    if sheet.status not in {WorkerTimesheet.Status.OPEN, WorkerTimesheet.Status.REOPENED}:
+        raise ValidationError('Nur offene Timesheets können eingereicht werden.')
+    _refresh_sheet_totals(sheet)
+    if sheet.blocking_exception_count:
+        raise ValidationError('Blockierende Timesheet-Ausnahmen müssen vor dem Einreichen gelöst werden.')
     sheet.status = WorkerTimesheet.Status.SUBMITTED
     sheet.submitted_at = timezone.now()
     sheet.save(update_fields=['status', 'submitted_at', 'updated_at'])
