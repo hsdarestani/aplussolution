@@ -178,49 +178,110 @@ test.describe('Phase 6 mobile QA', () => {
     await page.goto('/');
 
     await expect(page.getByRole('heading', { name: 'Mina Berger' })).toBeVisible();
-    await expect(page.getByText('MA-2048')).toBeVisible();
+    await expect(page.locator('.mobile-tabbar')).toBeVisible();
+    await expect(page.locator('.mobile-tabbar button')).toHaveCount(5);
+    await expect(page.locator('aside')).toBeHidden();
     await expectNoHorizontalPageOverflow(page);
 
-    await page.getByRole('button', { name: 'Dienstplan', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Mein Dienstplan' })).toBeVisible();
-    await expect(page.getByText('Main Suites Frankfurt').first()).toBeVisible();
-
-    const releaseButtons = page.getByRole('button', { name: 'Freigeben' });
-    if (await releaseButtons.count()) {
-      page.once('dialog', (dialog) => dialog.accept());
-      await releaseButtons.first().click();
-    }
-
-    await page.getByRole('button', { name: 'Arbeitszeit', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Arbeitszeit' })).toBeVisible();
+    await page.locator('.mobile-tabbar button').filter({ hasText: 'Plan' }).click();
+    await expect(page.getByRole('heading', { name: 'Schichten' })).toBeVisible();
+    await expect(page.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('Main Suites Frankfurt', { exact: true }).first()).toBeVisible();
     await expectNoHorizontalPageOverflow(page);
+
+    await page.locator('ion-segment-button[value="mine"]').click();
+    await expect(page.getByRole('button', { name: 'Freigeben' })).toBeVisible();
+    await page.getByRole('button', { name: 'Freigeben' }).click();
+    await expect(page.getByText('Schicht freigeben?', { exact: true })).toBeVisible();
+    await expect(page.getByText('wird wieder für andere Mitarbeiter verfügbar.', { exact: false })).toBeVisible();
+    await page.getByRole('button', { name: 'Abbrechen' }).click();
+    await expect(page.getByText('Schicht freigeben?', { exact: true })).toBeHidden();
+
+    await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeit' }).click();
+    await expect(page.getByRole('heading', { name: 'Bereit für deinen Einsatz?' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Einstempeln' })).toBeEnabled();
+    await expectNoHorizontalPageOverflow(page);
+
+    await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
+    await expect(page.getByRole('heading', { name: 'Weitere Bereiche' })).toBeVisible();
+    const moreMenu = page.locator('.mobile-menu-grid');
+    await expect(moreMenu.getByRole('button', { name: 'Meine Verträge', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Dokumente & Lohn', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Ranking', exact: true })).toBeVisible();
   });
 
   test('worker deep links survive refresh and browser history while role guards stay enforced', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await mockApi(page, worker);
-    await page.goto('/schedule');
-    await expect(page.getByRole('heading', { name: 'Mein Dienstplan' })).toBeVisible();
+    await page.goto('/?view=schedule');
+
+    await expect(page.getByRole('heading', { name: 'Schichten' })).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
+
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Mein Dienstplan' })).toBeVisible();
-    await page.goto('/people');
-    await expect(page).not.toHaveURL(/\/people$/);
+    await expect(page.getByRole('heading', { name: 'Schichten' })).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
+
+    await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeit' }).click();
+    await expect(page.getByRole('heading', { name: 'Bereit für deinen Einsatz?' })).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('time');
+
+    await page.goBack();
+    await expect(page.getByRole('heading', { name: 'Schichten' })).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
+
+    await page.goForward();
+    await expect(page.getByRole('heading', { name: 'Bereit für deinen Einsatz?' })).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('time');
+
+    await page.goto('/?view=people');
+    await expect(page.getByRole('heading', { name: 'Mina Berger' })).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBeNull();
   });
 
   test('admin exception center and timer-close reason dialog stay usable on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await mockApi(page, admin);
     await page.goto('/');
+
     await expect(page.getByTestId('admin-exception-center')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Nur das, was heute Aufmerksamkeit braucht.' })).toBeVisible();
+    await expect(page.getByText('Schicht noch nicht vollständig besetzt')).toBeVisible();
+    await expect(page.locator('.mobile-tabbar button')).toHaveCount(5);
     await expectNoHorizontalPageOverflow(page);
+
+    await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeit' }).click();
+    await expect(page.getByRole('heading', { name: 'Ungewöhnlich lange laufende Timer' })).toBeVisible();
+    await page.getByRole('button', { name: 'Timer beenden' }).click();
+    await expect(page.getByText('Laufenden Timer beenden?', { exact: true })).toBeVisible();
+    await expect(page.locator('ion-alert textarea')).toBeVisible();
+    await page.locator('ion-alert textarea').fill('E2E Prüfung');
+    await page.getByRole('button', { name: 'Abbrechen' }).click();
+    await expect(page.getByText('Laufenden Timer beenden?', { exact: true })).toBeHidden();
+
+    await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
+    const moreMenu = page.locator('.mobile-menu-grid');
+    await expect(moreMenu.getByRole('button', { name: 'Verträge', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Personal & Kunden', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Steuerzentrale', exact: true })).toBeVisible();
   });
 
   test('client sees a client-scoped schedule without manager controls or manager API fan-out', async ({ page }) => {
     const seenPaths: string[] = [];
     await page.setViewportSize({ width: 390, height: 844 });
     await mockApi(page, client, seenPaths);
-    await page.goto('/schedule');
+    await page.goto('/');
 
+    await expect(page.getByRole('heading', { name: 'Guten Tag, Lara' })).toBeVisible();
+    await expect(page.getByText('Personal genau dann, wenn du es brauchst.')).toBeVisible();
+    await expect(page.getByText('Aktive Aufträge')).toBeVisible();
+    await expect(page.getByText('Zu unterzeichnen')).toBeVisible();
+    await expect(page.locator('.mobile-tabbar button')).toHaveCount(4);
+    await expectNoHorizontalPageOverflow(page);
+
+    await page.locator('.mobile-tabbar button').filter({ hasText: 'Plan' }).click();
+    await expect(page.getByRole('heading', { name: 'Einsätze', exact: true })).toBeVisible();
+    await expect(page.getByText('Geplante Einsätze und aktueller Besetzungsstatus für Ihre Aufträge.')).toBeVisible();
     await expect(page.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
     await expect(page.locator('ion-segment')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Personalbedarf/i })).toHaveCount(0);
@@ -248,11 +309,9 @@ test.describe('Phase 6 desktop smoke', () => {
 
     await expect(page.locator('aside')).toBeVisible();
     await expect(page.locator('.mobile-tabbar')).toBeHidden();
-    const exceptionCenter = page.getByTestId('admin-exception-center');
-    await expect(exceptionCenter).toBeVisible();
+    await expect(page.getByTestId('admin-exception-center')).toBeVisible();
 
-    const staffingCase = exceptionCenter.locator('.attention-item').filter({ hasText: 'Schicht noch nicht vollständig besetzt' });
-    await staffingCase.getByRole('button', { name: 'Öffnen', exact: true }).click();
+    await page.getByRole('button', { name: 'Öffnen' }).first().click();
     await expect(page.getByRole('heading', { name: 'Personalbedarf & Schichten' })).toBeVisible();
     await page.getByRole('button', { name: 'Liste', exact: true }).click();
     await expect(page.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
