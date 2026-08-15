@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views
+from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -16,6 +16,8 @@ for prefix, view in [
     ('time-entries', time_views.TimeEntryViewSet),
     ('time-off', views.TimeOffViewSet),
     ('shift-swaps', views.ShiftSwapViewSet),
+    ('absence-cases', absence_views.AbsenceCaseViewSet),
+    ('coverage-offers', absence_views.CoverageOfferViewSet),
     ('contract-templates', views.ContractTemplateViewSet),
     ('contracts', contract_views.ContractViewSet),
     ('documents', searchable_views.DocumentViewSet),
@@ -81,6 +83,7 @@ urlpatterns = [
     path('operations/availability/<uuid:pk>/', advanced_views.availability_delete),
     path('operations/swaps/', scheduling_views.swap_create),
     path('operations/swaps/<uuid:pk>/decide/', scheduling_views.swap_decide),
+    path('operations/callouts/report/', absence_views.report_callout),
     path('operations/copy-week/', scheduler_actions.copy_week),
     path('operations/bulk-publish/', advanced_views.bulk_publish),
     path('operations/notifications/read-all/', advanced_views.notifications_read_all),
