@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import viewsets
@@ -37,7 +38,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
         return qs.filter(client__contacts=user).distinct()
 
     def get_permissions(self):
-        if self.action in {'create','update','partial_update','destroy','publish'}:
+        if self.action in {'create','update','partial_update','destroy','publish','unpublish'}:
             return [IsAdminOrManager()]
         return [IsAuthenticated()]
 
@@ -51,13 +52,18 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
         audit(self.request,'staffing_demand.created',obj,{'required_count':obj.required_count})
 
     def perform_update(self, serializer):
-        obj = serializer.save(worker=None)
-        ensure_slots(obj)
-        if obj.status == Shift.Status.PUBLISHED and not obj.published_at:
-            obj.published_at = timezone.now()
-            obj.save(update_fields=['published_at','updated_at'])
-        refresh_shift_state(obj)
-        audit(self.request,'staffing_demand.updated',obj,{'required_count':obj.required_count})
+        from .scheduling_rules import ensure_worker_eligible
+
+        with transaction.atomic():
+            obj = serializer.save(worker=None)
+            ensure_slots(obj)
+            for slot in obj.slots.filter(status=ShiftSlot.Status.CLAIMED, worker__isnull=False).select_related('worker__user'):
+                ensure_worker_eligible(slot.worker, obj)
+            if obj.status == Shift.Status.PUBLISHED and not obj.published_at:
+                obj.published_at = timezone.now()
+                obj.save(update_fields=['published_at','updated_at'])
+            refresh_shift_state(obj)
+            audit(self.request,'staffing_demand.updated',obj,{'required_count':obj.required_count})
 
     def _list_response(self, qs):
         page = self.paginate_queryset(qs)
@@ -83,6 +89,17 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
         shift = self.get_object(); ensure_slots(shift)
         shift.status=Shift.Status.PUBLISHED; shift.published_at=timezone.now(); shift.save(update_fields=['status','published_at','updated_at']); refresh_shift_state(shift)
         audit(request,'staffing_demand.published',shift)
+        return Response(self.get_serializer(self.base_queryset().get(pk=shift.pk)).data)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
+    def unpublish(self, request, pk=None):
+        shift = self.get_object()
+        if shift.slots.filter(status=ShiftSlot.Status.CLAIMED, worker__isnull=False).exists():
+            return Response({'detail':'Belegte Schichten können nicht zurück in den Entwurf gesetzt werden.'},status=409)
+        if shift.status in {Shift.Status.CANCELLED, Shift.Status.COMPLETED}:
+            return Response({'detail':'Abgeschlossene oder stornierte Schichten können nicht zurückgezogen werden.'},status=409)
+        shift.status=Shift.Status.DRAFT; shift.is_open=False; shift.save(update_fields=['status','is_open','updated_at'])
+        audit(request,'staffing_demand.unpublished',shift)
         return Response(self.get_serializer(self.base_queryset().get(pk=shift.pk)).data)
 
     @action(detail=True, methods=['post'])
