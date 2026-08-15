@@ -20,6 +20,7 @@ from .scheduling_models import (
     WorkerSkillTag,
 )
 from .shift_slots import ShiftSlot
+from .workplace_models import WorkplaceSettings
 
 
 DEFAULT_POLICY = SimpleNamespace(
@@ -47,10 +48,11 @@ def _local_date(value):
     return timezone.localtime(value).date()
 
 
-def _week_bounds(value):
+def _week_bounds(value, week_starts_on=0):
     local = timezone.localtime(value)
-    monday = (local - timedelta(days=local.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-    return monday, monday + timedelta(days=7)
+    offset = (local.weekday() - int(week_starts_on or 0)) % 7
+    start = (local - timedelta(days=offset)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return start, start + timedelta(days=7)
 
 
 def _worked_minutes(shift):
@@ -246,8 +248,50 @@ def _rest_issues(worker, shift, policy):
     return issues
 
 
+def _workplace_overtime_issues(shift, week_shifts, candidate_minutes, projected_minutes, workplace):
+    mode = workplace.overtime_mode
+    if mode == WorkplaceSettings.OvertimeMode.OFF:
+        return [], 0
+    candidate_day = _local_date(shift.starts_at)
+    existing_day_minutes = sum(_worked_minutes(item) for item in week_shifts if _local_date(item.starts_at) == candidate_day)
+    projected_day_minutes = existing_day_minutes + candidate_minutes
+    issues = []
+
+    if workplace.overtime_daily_hours:
+        daily_limit = int(Decimal(workplace.overtime_daily_hours) * 60)
+        if projected_day_minutes > daily_limit:
+            issue = _issue(
+                mode,
+                'daily_overtime_threshold',
+                f'Tägliche Überstundenschwelle von {workplace.overtime_daily_hours} Std. wird überschritten.',
+                projected_minutes=projected_day_minutes,
+                threshold_minutes=daily_limit,
+                overtime_minutes=projected_day_minutes - daily_limit,
+                multiplier=str(workplace.overtime_multiplier),
+            )
+            if issue:
+                issues.append(issue)
+
+    if workplace.overtime_weekly_hours:
+        weekly_limit = int(Decimal(workplace.overtime_weekly_hours) * 60)
+        if projected_minutes > weekly_limit:
+            issue = _issue(
+                mode,
+                'weekly_overtime_threshold',
+                f'Wöchentliche Überstundenschwelle von {workplace.overtime_weekly_hours} Std. wird überschritten.',
+                projected_minutes=projected_minutes,
+                threshold_minutes=weekly_limit,
+                overtime_minutes=projected_minutes - weekly_limit,
+                multiplier=str(workplace.overtime_multiplier),
+            )
+            if issue:
+                issues.append(issue)
+    return issues, projected_day_minutes
+
+
 def _weekly_issues(worker, shift, policy):
-    week_start, week_end = _week_bounds(shift.starts_at)
+    workplace = WorkplaceSettings.load()
+    week_start, week_end = _week_bounds(shift.starts_at, workplace.week_starts_on)
     week_shifts = list(_assignment_queryset(worker, week_start, week_end, shift.id))
     candidate_minutes = _worked_minutes(shift)
     existing_minutes = sum(_worked_minutes(item) for item in week_shifts)
@@ -266,6 +310,11 @@ def _weekly_issues(worker, shift, policy):
             )
             if issue:
                 issues.append(issue)
+
+    overtime_issues, projected_day_minutes = _workplace_overtime_issues(
+        shift, week_shifts, candidate_minutes, projected_minutes, workplace
+    )
+    issues.extend(overtime_issues)
 
     candidate_day = _local_date(shift.starts_at)
     days = {_local_date(item.starts_at) for item in week_shifts}
@@ -304,7 +353,7 @@ def _weekly_issues(worker, shift, policy):
             if issue:
                 issues.append(issue)
 
-    return issues, projected_minutes
+    return issues, projected_minutes, projected_day_minutes, workplace
 
 
 def evaluate_worker_for_shift(worker: WorkerProfile, shift: Shift):
@@ -324,7 +373,7 @@ def evaluate_worker_for_shift(worker: WorkerProfile, shift: Shift):
             issues.append(single)
     issues.extend(_tag_issues(worker, shift, policy))
     issues.extend(_rest_issues(worker, shift, policy))
-    weekly_issues, projected_minutes = _weekly_issues(worker, shift, policy)
+    weekly_issues, projected_minutes, projected_day_minutes, workplace = _weekly_issues(worker, shift, policy)
     issues.extend(weekly_issues)
 
     blockers = [item for item in issues if item['severity'] == 'block']
@@ -336,6 +385,14 @@ def evaluate_worker_for_shift(worker: WorkerProfile, shift: Shift):
         'eligible': not blockers,
         'score': score,
         'projected_week_minutes': projected_minutes,
+        'projected_day_minutes': projected_day_minutes,
+        'overtime': {
+            'mode': workplace.overtime_mode,
+            'daily_hours': str(workplace.overtime_daily_hours),
+            'weekly_hours': str(workplace.overtime_weekly_hours),
+            'multiplier': str(workplace.overtime_multiplier),
+            'week_starts_on': workplace.week_starts_on,
+        },
         'policy': {'id': str(policy.id) if policy.id else None, 'name': policy.name},
         'blockers': blockers,
         'warnings': warnings,
@@ -423,11 +480,12 @@ def auto_assign_shift(shift_id, worker_ids=None):
 
 
 def apply_schedule_template(template: ScheduleTemplate, target_week_start, *, publish=False):
-    monday = target_week_start - timedelta(days=target_week_start.weekday())
+    workplace = WorkplaceSettings.load()
+    target_week_start = target_week_start - timedelta(days=(target_week_start.weekday() - workplace.week_starts_on) % 7)
     created = []
     skipped = []
     for item in template.items.select_related('client', 'location', 'position').all():
-        day = monday + timedelta(days=int(item.weekday))
+        day = target_week_start + timedelta(days=int(item.weekday))
         starts_at = timezone.make_aware(datetime.combine(day, item.start_time), timezone.get_current_timezone())
         end_day = day if item.end_time > item.start_time else day + timedelta(days=1)
         ends_at = timezone.make_aware(datetime.combine(end_day, item.end_time), timezone.get_current_timezone())
@@ -455,4 +513,4 @@ def apply_schedule_template(template: ScheduleTemplate, target_week_start, *, pu
             is_open=bool(publish),
         )
         created.append(str(shift.id))
-    return {'created': created, 'skipped': skipped, 'week_start': monday.isoformat()}
+    return {'created': created, 'skipped': skipped, 'week_start': target_week_start.isoformat()}
