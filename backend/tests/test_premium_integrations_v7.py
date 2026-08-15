@@ -18,6 +18,7 @@ from signxml import XMLSigner, methods
 from core.integration_v7_models import PayrollConnector, SamlIdentityProvider, WebhookDelivery, WebhookSubscription
 from core.integration_v7_service import deliver_webhook, encrypt_secret, validate_outbound_url
 from core.payroll_models import PayPeriod, WorkerTimesheet
+from core.saml_v7 import _signed_xml
 
 
 @pytest.mark.django_db
@@ -208,13 +209,18 @@ def test_saml_signed_assertion_logs_in_and_tampering_is_rejected():
     conditions = etree.SubElement(assertion, '{urn:oasis:names:tc:SAML:2.0:assertion}Conditions', NotBefore=(now - timedelta(minutes=1)).strftime('%Y-%m-%dT%H:%M:%SZ'), NotOnOrAfter=(now + timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%SZ'))
     restriction = etree.SubElement(conditions, '{urn:oasis:names:tc:SAML:2.0:assertion}AudienceRestriction')
     etree.SubElement(restriction, '{urn:oasis:names:tc:SAML:2.0:assertion}Audience').text = provider.sp_entity_id
-    signed = XMLSigner(method=methods.enveloped, signature_algorithm='rsa-sha256', digest_algorithm='sha256').sign(assertion, key=key_pem, cert=cert_pem, reference_uri=assertion_id)
+    signed = XMLSigner(
+        method=methods.enveloped,
+        signature_algorithm='rsa-sha256',
+        digest_algorithm='sha256',
+        c14n_algorithm='http://www.w3.org/2001/10/xml-exc-c14n#',
+    ).sign(assertion, key=key_pem, cert=cert_pem, reference_uri=assertion_id)
     response_xml = etree.Element('{urn:oasis:names:tc:SAML:2.0:protocol}Response', nsmap={'samlp': 'urn:oasis:names:tc:SAML:2.0:protocol'})
     response_xml.append(signed)
     encoded = base64.b64encode(etree.tostring(response_xml)).decode()
 
     accepted = client.post('/api/auth/saml/acs/', {'SAMLResponse': encoded, 'RelayState': relay_state}, format='multipart')
-    assert accepted.status_code == 200
+    assert accepted.status_code == 200, accepted.data
     assert accepted.data['user']['email'] == 'sso.user@example.com'
     assert accepted.data['target'] == '/schedule'
     assert accepted.data['provisioned'] is True
@@ -222,5 +228,7 @@ def test_saml_signed_assertion_logs_in_and_tampering_is_rejected():
     tampered_xml = etree.fromstring(base64.b64decode(encoded))
     tampered_xml.xpath('.//*[local-name()="NameID"]')[0].text = 'attacker@example.com'
     tampered = base64.b64encode(etree.tostring(tampered_xml)).decode()
+    with pytest.raises(Exception):
+        _signed_xml(provider, tampered)
     rejected = client.post('/api/auth/saml/acs/', {'SAMLResponse': tampered, 'RelayState': relay_state}, format='multipart')
     assert rejected.status_code == 400
