@@ -87,7 +87,7 @@ class Migration(migrations.Migration):
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
-                ('event_id', models.UUIDField()),
+                ('event_id', models.UUIDField(default=uuid.uuid4)),
                 ('event_type', models.CharField(max_length=120)),
                 ('payload', models.JSONField(default=dict)),
                 ('status', models.CharField(choices=[('pending', 'Ausstehend'), ('retry', 'Wiederholung'), ('delivered', 'Zugestellt'), ('dead', 'Dead Letter')], default='pending', max_length=20)),
