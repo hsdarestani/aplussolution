@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_v4_views, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, payroll_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views, workplace_scoped_actions, workplace_scoped_core, workplace_scoped_forecast, workplace_scoped_scheduling, workplace_scoped_views, workplace_views
+from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_v4_views, attendance_views, automation_views, communications_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, payroll_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views, workplace_scoped_actions, workplace_scoped_core, workplace_scoped_forecast, workplace_scoped_scheduling, workplace_scoped_views, workplace_views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -30,7 +30,7 @@ for prefix, view in [
     ('documents', searchable_views.DocumentViewSet),
     ('payroll', workplace_scoped_core.ScopedPayrollViewSet),
     ('ratings', views.RatingViewSet),
-    ('conversations', views.ConversationViewSet),
+    ('conversations', communications_views.WorkChatChannelViewSet),
     ('schedule-groups', workplace_scoped_scheduling.ScopedScheduleGroupViewSet),
     ('schedule-memberships', workplace_scoped_scheduling.ScopedScheduleMembershipViewSet),
     ('position-qualifications', workplace_scoped_scheduling.ScopedWorkerPositionQualificationViewSet),
@@ -44,9 +44,11 @@ for prefix, view in [
     ('forecast-unit-days', workplace_scoped_forecast.ScopedForecastUnitDayViewSet),
     ('access-roles', workplace_views.AccessRoleViewSet),
     ('access-assignments', workplace_views.AccessAssignmentViewSet),
+    ('notification-preferences', communications_views.NotificationPreferenceViewSet),
+    ('push-devices', communications_views.DeviceRegistrationViewSet),
 ]:
     router.register(prefix, view)
-router.register('notifications', views.NotificationViewSet, basename='notification')
+router.register('notifications', communications_views.NotificationCenterViewSet, basename='notification')
 
 urlpatterns = [
     path('', include(router.urls)),
@@ -100,7 +102,7 @@ urlpatterns = [
     path('operations/callouts/report/', workplace_scoped_views.report_callout),
     path('operations/copy-week/', scheduler_actions.copy_week),
     path('operations/bulk-publish/', workplace_scoped_views.bulk_publish),
-    path('operations/notifications/read-all/', advanced_views.notifications_read_all),
+    path('operations/notifications/read-all/', communications_views.notifications_read_all),
     path('operations/folders/', workplace_scoped_views.folder_summary),
     path('operations/readiness/', workplace_scoped_views.readiness),
     path('operations/templates/import/', workplace_scoped_views.import_contract_templates),
@@ -119,6 +121,10 @@ urlpatterns = [
     path('scheduling/forecast/import/apply/', workplace_scoped_forecast.forecast_import_apply),
     path('workplace/settings/', workplace_views.workplace_settings),
     path('workplace/snapshot/', workplace_views.workplace_snapshot),
+    path('communications/settings/', communications_views.communication_settings),
+    path('communications/snapshot/', communications_views.communications_snapshot),
+    path('communications/candidates/', communications_views.communication_candidates),
+    path('workchat/messages/<uuid:pk>/delete/', communications_views.delete_chat_message),
     path('automation/orders/parse/', automation_views.order_parse),
     path('automation/orders/approve/', automation_views.order_approve),
     path('automation/orders/packages/', automation_views.order_packages),
