@@ -8,6 +8,7 @@ from rest_framework.response import Response
 
 from .attendance_models import TimeEntryCorrection
 from .models import Notification, Shift, TimeEntry, User
+from .payroll_service import assert_time_entry_editable
 from .serializers import TimeEntrySerializer
 from .services import audit
 from .shift_api import ShiftApiSerializer
@@ -50,6 +51,17 @@ def _manager_only(request):
     return request.user.role in {User.Role.ADMIN, User.Role.MANAGER}
 
 
+def _locked_response(entry):
+    try:
+        assert_time_entry_editable(entry)
+    except Exception as exc:
+        detail = getattr(exc, 'detail', exc)
+        if isinstance(detail, list) and detail:
+            detail = detail[0]
+        return Response({'detail': str(detail)}, status=getattr(exc, 'status_code', 400))
+    return None
+
+
 @api_view(['GET'])
 def employee_attendance_home(request):
     if request.user.role != User.Role.WORKER:
@@ -57,25 +69,11 @@ def employee_attendance_home(request):
 
     worker = request.user.worker_profile
     now = timezone.now()
-    month_start = timezone.make_aware(
-        datetime(now.year, now.month, 1),
-        timezone.get_current_timezone(),
-    )
+    month_start = timezone.make_aware(datetime(now.year, now.month, 1), timezone.get_current_timezone())
 
-    active = TimeEntry.objects.select_related('shift__position', 'worker__user').filter(
-        worker=worker,
-        clock_out__isnull=True,
-    ).order_by('-clock_in').first()
-
-    history_qs = TimeEntry.objects.select_related('shift__position', 'worker__user').filter(
-        worker=worker,
-        clock_out__isnull=False,
-    ).order_by('-clock_in')[:30]
-
-    month_entries = TimeEntry.objects.select_related('shift').filter(
-        worker=worker,
-        clock_in__gte=month_start,
-    )
+    active = TimeEntry.objects.select_related('shift__position', 'worker__user').filter(worker=worker, clock_out__isnull=True).order_by('-clock_in').first()
+    history_qs = TimeEntry.objects.select_related('shift__position', 'worker__user').filter(worker=worker, clock_out__isnull=False).order_by('-clock_in')[:30]
+    month_entries = TimeEntry.objects.select_related('shift').filter(worker=worker, clock_in__gte=month_start)
     month_worked_minutes = sum(entry.worked_minutes for entry in month_entries)
 
     ownership = Q(slots__worker=worker, slots__status='claimed') | Q(worker=worker)
@@ -86,10 +84,7 @@ def employee_attendance_home(request):
         status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
     ).select_related('order', 'client', 'location', 'position').distinct().order_by('starts_at').first()
 
-    corrections = TimeEntryCorrection.objects.select_related(
-        'entry', 'requested_by__user'
-    ).filter(requested_by=worker).order_by('-created_at')[:20]
-
+    corrections = TimeEntryCorrection.objects.select_related('entry', 'requested_by__user').filter(requested_by=worker).order_by('-created_at')[:20]
     return Response({
         'active_entry': TimeEntrySerializer(active, context={'request': request}).data if active else None,
         'eligible_shift': ShiftApiSerializer(eligible_shift, context={'request': request}).data if eligible_shift else None,
@@ -108,6 +103,9 @@ def request_time_correction(request, entry_id):
     entry = TimeEntry.objects.select_related('worker__user').filter(pk=entry_id, worker=worker).first()
     if not entry:
         return Response({'detail': 'Zeiteintrag wurde nicht gefunden.'}, status=404)
+    locked = _locked_response(entry)
+    if locked:
+        return locked
     if entry.clock_out is None:
         return Response({'detail': 'Eine laufende Zeiterfassung kann noch nicht korrigiert werden.'}, status=400)
     if TimeEntryCorrection.objects.filter(entry=entry, status=TimeEntryCorrection.Status.PENDING).exists():
@@ -173,10 +171,7 @@ def cancel_time_correction(request, pk):
 def decide_time_correction(request, pk):
     if not _manager_only(request):
         return Response({'detail': 'Keine Berechtigung.'}, status=403)
-    correction = TimeEntryCorrection.objects.select_related('entry', 'requested_by__user').filter(
-        pk=pk,
-        status=TimeEntryCorrection.Status.PENDING,
-    ).first()
+    correction = TimeEntryCorrection.objects.select_related('entry', 'requested_by__user').filter(pk=pk, status=TimeEntryCorrection.Status.PENDING).first()
     if not correction:
         return Response({'detail': 'Offene Korrekturanfrage wurde nicht gefunden.'}, status=404)
 
@@ -185,6 +180,9 @@ def decide_time_correction(request, pk):
         return Response({'detail': 'Ungültige Entscheidung.'}, status=400)
 
     entry = correction.entry
+    locked = _locked_response(entry)
+    if locked:
+        return locked
     if decision == TimeEntryCorrection.Status.APPROVED:
         if correction.requested_clock_in is not None:
             entry.clock_in = correction.requested_clock_in
@@ -220,17 +218,9 @@ def attendance_exceptions(request):
         return Response({'detail': 'Keine Berechtigung.'}, status=403)
 
     now = timezone.now()
-    unapproved = TimeEntry.objects.select_related('worker__user', 'shift__position').filter(
-        clock_out__isnull=False,
-        approved=False,
-    ).order_by('-clock_in')[:100]
-    long_running = TimeEntry.objects.select_related('worker__user', 'shift__position').filter(
-        clock_out__isnull=True,
-        clock_in__lte=now - timedelta(hours=12),
-    ).order_by('clock_in')[:100]
-    corrections = TimeEntryCorrection.objects.select_related(
-        'entry', 'requested_by__user'
-    ).filter(status=TimeEntryCorrection.Status.PENDING).order_by('created_at')[:100]
+    unapproved = TimeEntry.objects.select_related('worker__user', 'shift__position').filter(clock_out__isnull=False, approved=False).order_by('-clock_in')[:100]
+    long_running = TimeEntry.objects.select_related('worker__user', 'shift__position').filter(clock_out__isnull=True, clock_in__lte=now - timedelta(hours=12)).order_by('clock_in')[:100]
+    corrections = TimeEntryCorrection.objects.select_related('entry', 'requested_by__user').filter(status=TimeEntryCorrection.Status.PENDING).order_by('created_at')[:100]
 
     return Response({
         'counts': {
