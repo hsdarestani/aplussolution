@@ -9,6 +9,7 @@ import '@ionic/react/css/padding.css';
 import './theme.css';
 import './forecast-tools.css';
 import App from './App';
+import CommunicationsDock from './CommunicationsDock';
 import StoreComplianceLinks from './StoreComplianceLinks';
 import StoreLegalPage, { legalPageFromPath } from './StoreLegalPages';
 import TimeClockTerminal from './TimeClockTerminal';
@@ -27,6 +28,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     ) : (
       <>
         <App />
+        <CommunicationsDock />
         <StoreComplianceLinks />
       </>
     )}
