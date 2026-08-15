@@ -3,14 +3,29 @@ from rest_framework.response import Response
 
 from .attendance_v4_models import AttendanceClockEvent
 from .attendance_v4_service import clock_in_worker, clock_out_worker
+from .models import TimeEntry
 from .payroll_service import assert_time_entry_editable
 from .permissions import IsAdminOrManager
 from .services import audit
 from .views import TimeEntryViewSet as LegacyTimeEntryViewSet
+from .workplace_access import has_capability, visible_workers
 
 
 class TimeEntryViewSet(LegacyTimeEntryViewSet):
     """A+ Attendance source of truth for self-service clock-in and clock-out."""
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = TimeEntry.objects.select_related('worker__user', 'shift').all()
+        if user.role == 'admin':
+            return qs
+        if user.role == 'manager':
+            if not has_capability(user, 'attendance.view'):
+                return qs.none()
+            return qs.filter(worker__in=visible_workers(user)).distinct()
+        if user.role == 'worker':
+            return qs.filter(worker__user=user)
+        return qs.none()
 
     def perform_update(self, serializer):
         assert_time_entry_editable(serializer.instance)
