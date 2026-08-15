@@ -6,7 +6,17 @@ from .models import Location, User, WorkerProfile
 from .permissions import IsAdminOrManager
 from .scheduling_models import ScheduleGroup
 from .services import audit
-from .workplace_access import CAPABILITIES, capabilities_for_user, has_capability, scope_snapshot, seed_system_roles
+from .workplace_access import (
+    CAPABILITIES,
+    assignment_for,
+    capabilities_for_user,
+    has_capability,
+    scope_snapshot,
+    seed_system_roles,
+    visible_locations,
+    visible_schedule_groups,
+    visible_workers,
+)
 from .workplace_models import AccessRole, UserAccessAssignment, WorkplaceSettings
 
 
@@ -158,21 +168,36 @@ def workplace_settings(request):
 
 @api_view(['GET'])
 def workplace_snapshot(request):
-    if not has_capability(request.user, 'workplace.view') and not has_capability(request.user, 'roles.view'):
+    can_view_workplace = has_capability(request.user, 'workplace.view')
+    can_view_roles = has_capability(request.user, 'roles.view')
+    if not can_view_workplace and not can_view_roles:
         return Response({'detail': 'Nicht berechtigt.'}, status=status.HTTP_403_FORBIDDEN)
     seed_system_roles()
     settings = WorkplaceSettings.load()
-    roles = AccessRole.objects.all()
-    assignments = UserAccessAssignment.objects.select_related('user', 'access_role').prefetch_related('schedule_groups', 'locations', 'workers__user').all()
-    managers = User.objects.filter(role__in=[User.Role.ADMIN, User.Role.MANAGER], is_active=True).order_by('first_name', 'last_name', 'email')
+    own_assignment = assignment_for(request.user)
+
+    if can_view_roles:
+        roles = AccessRole.objects.all()
+        assignments = UserAccessAssignment.objects.select_related('user', 'access_role').prefetch_related('schedule_groups', 'locations', 'workers__user').all()
+        managers = User.objects.filter(role__in=[User.Role.ADMIN, User.Role.MANAGER], is_active=True).order_by('first_name', 'last_name', 'email')
+    else:
+        roles = AccessRole.objects.filter(pk=own_assignment.access_role_id) if own_assignment else AccessRole.objects.none()
+        assignments = UserAccessAssignment.objects.filter(pk=own_assignment.pk).select_related('user', 'access_role').prefetch_related('schedule_groups', 'locations', 'workers__user') if own_assignment else UserAccessAssignment.objects.none()
+        managers = User.objects.filter(pk=request.user.pk)
+
     workers = WorkerProfile.objects.filter(active=True, user__is_active=True).select_related('user').order_by('employee_number')
     schedules = ScheduleGroup.objects.filter(active=True).order_by('name')
     locations = Location.objects.filter(active=True).order_by('name')
+    if request.user.role == User.Role.MANAGER and not can_view_roles:
+        workers = visible_workers(request.user, workers)
+        schedules = visible_schedule_groups(request.user, schedules)
+        locations = visible_locations(request.user, locations)
+
     return Response({
         'settings': WorkplaceSettingsSerializer(settings).data,
         'roles': AccessRoleSerializer(roles, many=True).data,
         'assignments': UserAccessAssignmentSerializer(assignments, many=True).data,
-        'capability_catalog': sorted(CAPABILITIES),
+        'capability_catalog': sorted(CAPABILITIES) if can_view_roles else capabilities_for_user(request.user),
         'current_user': {
             'capabilities': capabilities_for_user(request.user),
             'scope': scope_snapshot(request.user),
@@ -187,4 +212,6 @@ def workplace_snapshot(request):
         ],
         'schedules': [{'id': str(item.id), 'name': item.name} for item in schedules],
         'locations': [{'id': str(item.id), 'name': item.name} for item in locations],
+        'can_manage_settings': has_capability(request.user, 'workplace.manage'),
+        'can_manage_roles': has_capability(request.user, 'roles.manage'),
     })
