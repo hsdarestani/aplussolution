@@ -30,9 +30,7 @@ class Migration(migrations.Migration):
                 ('created_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='pay_periods_created', to=settings.AUTH_USER_MODEL)),
                 ('locked_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='pay_periods_locked', to=settings.AUTH_USER_MODEL)),
             ],
-            options={
-                'ordering': ['-starts_on', '-created_at'],
-            },
+            options={'ordering': ['-starts_on', '-created_at']},
         ),
         migrations.AddConstraint(
             model_name='payperiod',
@@ -114,7 +112,7 @@ class Migration(migrations.Migration):
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
-                ('exception_type', models.CharField(choices=[('missing_entry', 'Zeiteintrag fehlt'), ('running_entry', 'Timer läuft'), ('unapproved_entry', 'Zeiteintrag nicht freigegeben'), ('rejected_entry', 'Zeiteintrag abgelehnt'), ('attendance_notice', 'Attendance-Hinweis offen')], max_length=30)),
+                ('exception_type', models.CharField(choices=[('missing_entry', 'Zeiteintrag fehlt'), ('running_entry', 'Timer läuft'), ('unapproved_entry', 'Zeiteintrag nicht freigegeben'), ('rejected_entry', 'Zeiteintrag abgelehnt'), ('pending_correction', 'Korrekturanfrage offen'), ('attendance_notice', 'Attendance-Hinweis offen')], max_length=30)),
                 ('severity', models.CharField(choices=[('info', 'Hinweis'), ('warning', 'Warnung'), ('blocking', 'Blockierend')], default='warning', max_length=20)),
                 ('status', models.CharField(choices=[('open', 'Offen'), ('resolved', 'Erledigt'), ('dismissed', 'Verworfen')], default='open', max_length=20)),
                 ('dedupe_key', models.CharField(max_length=220, unique=True)),
