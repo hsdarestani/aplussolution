@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { IonAlert, IonBadge, IonButton, IonIcon, IonInput, IonLabel, IonModal, IonSearchbar, IonSegment, IonSegmentButton, IonSelect, IonSelectOption, IonSpinner, IonTextarea, IonToast, IonToggle } from '@ionic/react';
-import { addOutline, checkmarkCircleOutline, chevronBackOutline, chevronForwardOutline, downloadOutline, locationOutline, optionsOutline, peopleOutline, printOutline, refreshOutline, timeOutline } from 'ionicons/icons';
+import { addOutline, analyticsOutline, checkmarkCircleOutline, chevronBackOutline, chevronForwardOutline, downloadOutline, locationOutline, optionsOutline, peopleOutline, printOutline, refreshOutline, timeOutline } from 'ionicons/icons';
 import { api, apiAll, apiDownload, User } from './api';
+import ForecastToolsPanel from './ForecastToolsPanel';
 import SchedulerAdminPanel from './SchedulerAdminPanel';
 import SchedulerCalendar, { CalendarMode, moveAnchor, rangeLabel } from './SchedulerCalendar';
 import './schedule-v2.css';
@@ -29,7 +30,7 @@ export default function ScheduleV2({user}:{user:User}) {
   const [rows,setRows]=useState<any[]>([]), [workers,setWorkers]=useState<any[]>([]), [clients,setClients]=useState<any[]>([]), [locations,setLocations]=useState<any[]>([]), [positions,setPositions]=useState<any[]>([]), [orders,setOrders]=useState<any[]>([]);
   const [tab,setTab]=useState(user.role==='worker'?'available':'open'), [search,setSearch]=useState(''), [modal,setModal]=useState(false), [editing,setEditing]=useState<string>(), [busy,setBusy]=useState(false), [toast,setToast]=useState('');
   const [form,setForm]=useState<any>({required_count:1,break_minutes:0,publish_now:true});
-  const [releaseTarget,setReleaseTarget]=useState<any>(), [adminOpen,setAdminOpen]=useState(false), [eligibility,setEligibility]=useState<any>(), [eligibilityTarget,setEligibilityTarget]=useState<any>();
+  const [releaseTarget,setReleaseTarget]=useState<any>(), [adminOpen,setAdminOpen]=useState(false), [forecastOpen,setForecastOpen]=useState(false), [eligibility,setEligibility]=useState<any>(), [eligibilityTarget,setEligibilityTarget]=useState<any>();
   const [displayMode,setDisplayMode]=useState<DisplayMode>('list'), [anchor,setAnchor]=useState(new Date()), [selected,setSelected]=useState<Set<string>>(new Set());
 
   async function load() {
@@ -84,7 +85,7 @@ export default function ScheduleV2({user}:{user:User}) {
   const calendarMode=displayMode==='list'?'week':displayMode;
 
   return <div className="sv2">
-    <div className="sv2-title"><div><small>{eyebrow}</small><h1>{title}</h1><p>{intro}</p></div>{isManager(user)&&<div className="sv2-title-actions"><IonButton fill="outline" onClick={()=>setAdminOpen(true)}><IonIcon slot="start" icon={optionsOutline}/>Regeln & Qualifikationen</IonButton><IonButton onClick={create}><IonIcon slot="start" icon={addOutline}/>Personalbedarf</IonButton></div>}</div>
+    <div className="sv2-title"><div><small>{eyebrow}</small><h1>{title}</h1><p>{intro}</p></div>{isManager(user)&&<div className="sv2-title-actions"><IonButton fill="outline" onClick={()=>setForecastOpen(true)}><IonIcon slot="start" icon={analyticsOutline}/>Forecast Tools</IonButton><IonButton fill="outline" onClick={()=>setAdminOpen(true)}><IonIcon slot="start" icon={optionsOutline}/>Regeln & Qualifikationen</IonButton><IonButton onClick={create}><IonIcon slot="start" icon={addOutline}/>Personalbedarf</IonButton></div>}</div>
     <div className="sv2-search"><IonSearchbar value={search} debounce={350} placeholder={searchPlaceholder} onIonInput={e=>setSearch(String(val(e)))} onIonChange={()=>void load()}/><IonButton fill="outline" onClick={()=>void load()}><IonIcon slot="icon-only" icon={refreshOutline}/></IonButton></div>
     {workerView?<IonSegment scrollable value={tab} onIonChange={e=>setTab(String(val(e)))}><IonSegmentButton value="available"><IonLabel>Verfügbare Schichten</IonLabel></IonSegmentButton><IonSegmentButton value="mine"><IonLabel>Meine Schichten</IonLabel></IonSegmentButton></IonSegment>:isManager(user)?<IonSegment scrollable value={tab} onIonChange={e=>setTab(String(val(e)))}><IonSegmentButton value="open"><IonLabel>Offen</IonLabel></IonSegmentButton><IonSegmentButton value="filled"><IonLabel>Voll besetzt</IonLabel></IonSegmentButton><IonSegmentButton value="draft"><IonLabel>Entwürfe</IonLabel></IonSegmentButton><IonSegmentButton value="all"><IonLabel>Alle</IonLabel></IonSegmentButton></IonSegment>:null}
 
@@ -123,7 +124,7 @@ export default function ScheduleV2({user}:{user:User}) {
       {!eligibility?<div className="eligibility-loading"><IonSpinner/><p>Qualifikationen und Planungsregeln werden geprüft …</p></div>:<><div className="eligibility-summary"><span>Regelwerk <b>{eligibility.policy?.name}</b></span><span><b>{eligibility.eligible_count}</b> Mitarbeiter einplanbar</span>{Number(eligibilityTarget?.open_count||0)>0&&<IonButton disabled={busy} onClick={()=>void autoAssign(eligibilityTarget)}>Offene Plätze automatisch besetzen</IonButton>}</div><div className="eligibility-list">{eligibility.workers?.map((row:any)=><article key={row.worker} className={row.eligible?'eligible':'blocked'}><div><b>{row.worker_name}</b><small>Score {row.score} · projiziert {Math.round((row.projected_week_minutes||0)/60*10)/10} Std./Woche</small></div><IonBadge color={row.eligible?'success':'danger'}>{row.eligible?'Einplanbar':'Blockiert'}</IonBadge><div className="eligibility-issues">{row.blockers?.map((issue:any)=><p className="block" key={issue.code+issue.message}>● {issue.message}</p>)}{row.warnings?.map((issue:any)=><p className="warn" key={issue.code+issue.message}>△ {issue.message}</p>)}</div>{row.eligible&&Number(eligibilityTarget?.open_count||0)>0&&<IonButton size="small" fill="outline" disabled={busy} onClick={()=>void assignWorker(row.worker)}>Manuell einplanen</IonButton>}</article>)}</div></>}
     </div></IonModal>
 
-    {isManager(user)&&<SchedulerAdminPanel open={adminOpen} onClose={()=>setAdminOpen(false)} workers={workers} clients={clients} locations={locations} positions={positions}/>}    
+    {isManager(user)&&<><ForecastToolsPanel open={forecastOpen} onClose={()=>setForecastOpen(false)} positions={positions}/><SchedulerAdminPanel open={adminOpen} onClose={()=>setAdminOpen(false)} workers={workers} clients={clients} locations={locations} positions={positions}/></>}
     <IonAlert isOpen={!!releaseTarget} onDidDismiss={()=>setReleaseTarget(undefined)} header="Schicht freigeben?" message={releaseTarget?`${releaseTarget.position_name || 'Diese Schicht'} wird wieder für andere Mitarbeiter verfügbar.`:''} buttons={[{text:'Abbrechen',role:'cancel'},{text:'Freigeben',role:'destructive',handler:confirmRelease}]}/>
     <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={()=>setToast('')}/>
   </div>;
