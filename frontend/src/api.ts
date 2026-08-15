@@ -80,6 +80,31 @@ export async function api<T = any>(path: string, options: RequestInit = {}, retr
   return response.status === 204 ? ({} as T) : response.json();
 }
 
+export async function apiDownload(path: string, fallbackFilename = 'download') {
+  const normalizedPath = path.replace(/^\//, '');
+  async function request(token?: string) {
+    return fetch(`${API}/${normalizedPath}`, { headers: headers({}, token) });
+  }
+  let response = await request();
+  if (response.status === 401) {
+    const token = await refreshAccessToken();
+    if (token) response = await request(token);
+  }
+  if (!response.ok) throw new Error(await parseError(response));
+  const blob = await response.blob();
+  const disposition = response.headers.get('Content-Disposition') || '';
+  const match = disposition.match(/filename="?([^";]+)"?/i);
+  const filename = match?.[1] || fallbackFilename;
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 export async function login(email: string, password: string) {
   const data: any = await api('auth/login/', { method: 'POST', body: JSON.stringify({ email, password }) });
   localStorage.setItem('access', data.access);
