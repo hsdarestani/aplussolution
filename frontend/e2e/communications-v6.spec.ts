@@ -45,7 +45,7 @@ test('worker uses WorkChat, notification center and per-category alert preferenc
   await expect(page.getByTestId('communications-dock')).toBeVisible();
   await page.getByRole('button',{name:'WorkChat öffnen'}).click();
   await expect(page.getByRole('heading',{name:'WorkChat & Benachrichtigungen'})).toBeVisible();
-  await expect(page.getByText('A+ Solution GmbH')).toBeVisible();
+  await expect(page.getByRole('heading',{name:'A+ Solution GmbH',exact:true})).toBeVisible();
   await expect(page.getByText('Morgen bitte 10 Minuten früher da sein.')).toBeVisible();
   await expect(page.getByPlaceholder('Dieser Kanal ist nur für Ankündigungen.')).toBeDisabled();
 
@@ -70,7 +70,7 @@ test('admin creates a scoped group channel and manages WorkChat global rules',as
   await page.getByPlaceholder('Gruppenname (optional)').fill('Messe Team');
   await page.locator('.comms-candidates label').filter({hasText:'Lukas Schmidt'}).locator('input').check();
   await page.getByRole('button',{name:'Kanal erstellen'}).click();
-  await expect(page.getByText('Messe Team')).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Messe Team',exact:true})).toBeVisible();
 
   await page.getByRole('button',{name:'Einstellungen'}).click();
   await page.getByRole('button',{name:'WorkChat Regeln'}).click();
