@@ -23,7 +23,9 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
     search_fields = ['client__name', 'location__name', 'location__address', 'position__name', 'order__title', 'notes']
 
     def base_queryset(self):
-        return Shift.objects.select_related('order','client','location','position').annotate(
+        return Shift.objects.select_related('order','client','location','position').prefetch_related(
+            'slots__worker__user', 'position__required_tag_links__tag'
+        ).annotate(
             filled_count=Count('slots', filter=Q(slots__status=ShiftSlot.Status.CLAIMED, slots__worker__isnull=False), distinct=True),
             open_count=Count('slots', filter=Q(slots__status=ShiftSlot.Status.OPEN, slots__worker__isnull=True), distinct=True),
         ).order_by('starts_at')
