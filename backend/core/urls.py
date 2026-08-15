@@ -26,7 +26,7 @@ for prefix, view in [
     ('timesheet-entries', payroll_views.TimesheetEntryViewSet),
     ('timesheet-exceptions', payroll_views.TimesheetExceptionViewSet),
     ('contract-templates', views.ContractTemplateViewSet),
-    ('contracts', searchable_views.ContractViewSet),
+    ('contracts', contract_views.ContractViewSet),
     ('documents', searchable_views.DocumentViewSet),
     ('payroll', workplace_scoped_core.ScopedPayrollViewSet),
     ('ratings', views.RatingViewSet),
