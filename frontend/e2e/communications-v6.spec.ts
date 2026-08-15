@@ -43,7 +43,7 @@ async function mock(page:Page,user:any){
 test('worker uses WorkChat, notification center and per-category alert preferences',async({page})=>{
   await mock(page,worker);await page.goto('/');
   await expect(page.getByTestId('communications-dock')).toBeVisible();
-  await page.getByRole('button',{name:'WorkChat öffnen'}).click();
+  await page.getByRole('button',{name:'WorkChat anzeigen'}).click();
   await expect(page.getByRole('heading',{name:'WorkChat & Benachrichtigungen'})).toBeVisible();
   await expect(page.getByRole('heading',{name:'A+ Solution GmbH',exact:true})).toBeVisible();
   await expect(page.getByText('Morgen bitte 10 Minuten früher da sein.')).toBeVisible();
@@ -58,13 +58,13 @@ test('worker uses WorkChat, notification center and per-category alert preferenc
   const workchatRow=page.locator('.comms-pref-grid article').filter({hasText:'WorkChat'});
   const email=workchatRow.getByText('E-Mail').locator('input');
   await expect(email).not.toBeChecked();
-  await email.check();
+  await email.click();
   await expect(email).toBeChecked();
 });
 
 test('admin creates a scoped group channel and manages WorkChat global rules',async({page})=>{
   await mock(page,admin);await page.goto('/');
-  await page.getByRole('button',{name:'WorkChat öffnen'}).click();
+  await page.getByRole('button',{name:'WorkChat anzeigen'}).click();
   await page.locator('.comms-aside-head button').click();
   await expect(page.getByRole('heading',{name:'Neuer WorkChat-Kanal'})).toBeVisible();
   await page.getByPlaceholder('Gruppenname (optional)').fill('Messe Team');
@@ -77,6 +77,6 @@ test('admin creates a scoped group channel and manages WorkChat global rules',as
   const rules=page.locator('.comms-settings-card');
   await expect(rules).toBeVisible();
   const employeePost=rules.getByText('Mitarbeiter dürfen posten').locator('input');
-  await employeePost.check();
+  await employeePost.click();
   await expect(employeePost).toBeChecked();
 });
