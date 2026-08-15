@@ -5,6 +5,7 @@ from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
+from .attendance_models import TimeEntryCorrection
 from .attendance_v4_models import AttendanceNotice
 from .models import TimeEntry, WorkerProfile
 from .payroll_models import PayPeriod, TimesheetEntry, TimesheetException, WorkerTimesheet
@@ -39,7 +40,6 @@ def _entry_break_totals(entry):
         else:
             unpaid += item.deductible_minutes
     if not breaks and entry.shift_id and not entry.clock_events.exists():
-        # Historical entries created before Attendance V4 keep their legacy scheduled deduction.
         unpaid = int(entry.shift.break_minutes or 0)
     return paid, unpaid
 
@@ -118,7 +118,18 @@ def sync_period(period):
             shift__ends_at__lte=now,
         ).select_related('worker__user', 'shift')
     )
-    worker_ids = {item.worker_id for item in entries} | {item.worker_id for item in claimed_slots}
+    pending_corrections = list(
+        TimeEntryCorrection.objects.filter(
+            status=TimeEntryCorrection.Status.PENDING,
+            entry__clock_in__date__gte=period.starts_on,
+            entry__clock_in__date__lte=period.ends_on,
+        ).select_related('entry', 'requested_by__user')
+    )
+    worker_ids = (
+        {item.worker_id for item in entries}
+        | {item.worker_id for item in claimed_slots}
+        | {item.requested_by_id for item in pending_corrections}
+    )
     workers = WorkerProfile.objects.filter(id__in=worker_ids).select_related('user').order_by('employee_number')
     result = []
 
@@ -155,6 +166,18 @@ def sync_period(period):
                 key = f'{sheet.id}:unapproved:{entry.id}'
                 active_keys.add(key)
                 _exception(sheet, key, TimesheetException.Type.UNAPPROVED_ENTRY, TimesheetException.Severity.WARNING, time_entry=entry)
+
+        for correction in [item for item in pending_corrections if item.requested_by_id == worker.id]:
+            key = f'{sheet.id}:correction:{correction.id}'
+            active_keys.add(key)
+            _exception(
+                sheet,
+                key,
+                TimesheetException.Type.PENDING_CORRECTION,
+                TimesheetException.Severity.BLOCKING,
+                time_entry=correction.entry,
+                details={'correction_id': str(correction.id), 'reason': correction.reason},
+            )
 
         for slot in [item for item in claimed_slots if item.worker_id == worker.id]:
             if not TimeEntry.objects.filter(worker=worker, shift=slot.shift).exists():
