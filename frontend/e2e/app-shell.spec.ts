@@ -313,6 +313,7 @@ test.describe('Phase 6 desktop smoke', () => {
 
     await page.getByRole('button', { name: 'Öffnen' }).first().click();
     await expect(page.getByRole('heading', { name: 'Personalbedarf & Schichten' })).toBeVisible();
+    await page.getByRole('button', { name: 'Liste', exact: true }).click();
     await expect(page.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
     await expectNoHorizontalPageOverflow(page);
   });
