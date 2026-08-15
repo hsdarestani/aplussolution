@@ -30,7 +30,6 @@ for prefix, view in [
     ('documents', searchable_views.DocumentViewSet),
     ('payroll', workplace_scoped_core.ScopedPayrollViewSet),
     ('ratings', views.RatingViewSet),
-    ('conversations', communications_views.WorkChatChannelViewSet),
     ('schedule-groups', workplace_scoped_scheduling.ScopedScheduleGroupViewSet),
     ('schedule-memberships', workplace_scoped_scheduling.ScopedScheduleMembershipViewSet),
     ('position-qualifications', workplace_scoped_scheduling.ScopedWorkerPositionQualificationViewSet),
@@ -44,10 +43,12 @@ for prefix, view in [
     ('forecast-unit-days', workplace_scoped_forecast.ScopedForecastUnitDayViewSet),
     ('access-roles', workplace_views.AccessRoleViewSet),
     ('access-assignments', workplace_views.AccessAssignmentViewSet),
-    ('notification-preferences', communications_views.NotificationPreferenceViewSet),
-    ('push-devices', communications_views.DeviceRegistrationViewSet),
 ]:
     router.register(prefix, view)
+
+router.register('conversations', communications_views.WorkChatChannelViewSet, basename='conversation')
+router.register('notification-preferences', communications_views.NotificationPreferenceViewSet, basename='notification-preference')
+router.register('push-devices', communications_views.DeviceRegistrationViewSet, basename='push-device')
 router.register('notifications', communications_views.NotificationCenterViewSet, basename='notification')
 
 urlpatterns = [
