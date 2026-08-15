@@ -213,7 +213,12 @@ def send_targeted_offers(case_id, actor, worker_ids=None, *, expires_in_hours=12
     eligible = [row for row in rows if row['eligible']]
     if not eligible:
         raise ValidationError('Es wurde kein geeigneter Ersatzmitarbeiter gefunden.')
-    expiry = min(case.shift.starts_at, timezone.now() + timedelta(hours=max(1, min(int(expires_in_hours or 12), 72))))
+    now = timezone.now()
+    requested_expiry = now + timedelta(hours=max(1, min(int(expires_in_hours or 12), 72)))
+    shift_limit = case.shift.starts_at if case.shift.starts_at > now else case.shift.ends_at
+    expiry = min(shift_limit, requested_expiry)
+    if expiry <= now:
+        raise ValidationError('Für diese bereits beendete Schicht können keine Ersatzanfragen mehr versendet werden.')
     offers = []
     for row in eligible:
         worker = WorkerProfile.objects.select_related('user').get(pk=row['worker'])
@@ -223,7 +228,7 @@ def send_targeted_offers(case_id, actor, worker_ids=None, *, expires_in_hours=12
             defaults={
                 'status': CoverageOffer.Status.PENDING,
                 'offered_by': actor,
-                'offered_at': timezone.now(),
+                'offered_at': now,
                 'expires_at': expiry,
                 'responded_at': None,
                 'eligibility_snapshot': row,
@@ -233,7 +238,7 @@ def send_targeted_offers(case_id, actor, worker_ids=None, *, expires_in_hours=12
         offers.append(offer)
         Notification.objects.create(
             user=worker.user,
-            kind=f'coverage-offer-{offer.id}-{int(timezone.now().timestamp())}',
+            kind=f'coverage-offer-{offer.id}-{int(now.timestamp())}',
             title='Kurzfristige Schicht verfügbar',
             body=f'{case.shift.position.name} · {timezone.localtime(case.shift.starts_at):%d.%m.%Y %H:%M}',
             action_url='/operations',
@@ -282,12 +287,26 @@ def respond_to_offer(offer_id, worker, decision):
 def resolve_uncovered(case_id, actor, note=''):
     case = _lock_case(case_id)
     _ensure_case_open(case)
+    slot = ShiftSlot.objects.select_for_update().filter(pk=case.slot_id, shift=case.shift).first()
+    if slot and slot.status == ShiftSlot.Status.CLAIMED and slot.worker_id == case.absent_worker_id:
+        slot.worker = None
+        slot.status = ShiftSlot.Status.OPEN
+        slot.source = 'absence_uncovered'
+        slot.released_at = timezone.now()
+        slot.save(update_fields=['worker', 'status', 'source', 'released_at', 'updated_at'])
+    elif slot and slot.status == ShiftSlot.Status.CLAIMED and slot.worker_id not in {None, case.absent_worker_id}:
+        raise CoverageConflict('Der Personalplatz wurde bereits durch einen Ersatz besetzt.')
     case.status = ShiftAbsenceCase.Status.RESOLVED_UNCOVERED
     case.manager_note = str(note or '').strip()
     case.resolved_by = actor
     case.resolved_at = timezone.now()
     case.save(update_fields=['status', 'manager_note', 'resolved_by', 'resolved_at', 'updated_at'])
     _cancel_pending_offers(case)
+    if case.shift.status not in {Shift.Status.CANCELLED, Shift.Status.COMPLETED}:
+        case.shift.status = Shift.Status.PUBLISHED
+        case.shift.published_at = case.shift.published_at or timezone.now()
+        case.shift.save(update_fields=['status', 'published_at', 'updated_at'])
+    refresh_shift_state(case.shift)
     return case
 
 
