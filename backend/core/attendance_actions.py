@@ -4,6 +4,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from .models import Notification, TimeEntry, User
+from .payroll_service import assert_time_entry_editable
 from .serializers import TimeEntrySerializer
 from .services import audit
 
@@ -26,6 +27,10 @@ def close_running_entry(request, pk):
     entry = TimeEntry.objects.select_related('worker__user', 'shift').filter(pk=pk, clock_out__isnull=True).first()
     if not entry:
         return Response({'detail': 'Laufende Zeiterfassung wurde nicht gefunden.'}, status=404)
+    try:
+        assert_time_entry_editable(entry)
+    except Exception as exc:
+        return Response({'detail': str(getattr(exc, 'detail', exc))}, status=getattr(exc, 'status_code', 400))
     reason = str(request.data.get('reason') or '').strip()
     if len(reason) < 5:
         return Response({'detail': 'Bitte dokumentiere kurz, warum der laufende Eintrag beendet wird.'}, status=400)
