@@ -82,6 +82,18 @@ class SamlIdentityProvider(TimestampedModel):
         ordering = ['name']
 
 
+class SamlLoginRequest(TimestampedModel):
+    provider = models.ForeignKey(SamlIdentityProvider, on_delete=models.CASCADE, related_name='login_requests')
+    request_id = models.CharField(max_length=80, unique=True, db_index=True)
+    target = models.CharField(max_length=500, default='/')
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['provider', 'expires_at', 'used_at'], name='saml_login_request_idx')]
+
+
 class PayrollConnector(TimestampedModel):
     class Provider(models.TextChoices):
         DATEV_CSV = 'datev_csv', 'DATEV CSV'
