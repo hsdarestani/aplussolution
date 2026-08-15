@@ -1,6 +1,6 @@
 from . import views
 from .permissions import IsAdminOrManager
-from .workplace_access import has_capability, visible_locations, visible_workers
+from .workplace_access import assignment_for, visible_locations, visible_workers
 
 
 class ScopedManagerReadMixin:
@@ -21,8 +21,10 @@ class ClientCompanyViewSet(ScopedManagerReadMixin, views.ClientCompanyViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         if self.request.user.role == 'manager':
-            location_clients = visible_locations(self.request.user).exclude(client__isnull=True).values_list('client_id', flat=True)
-            return qs.filter(id__in=location_clients).distinct() if self.request.user.access_assignment.scope_mode == 'scoped' else qs
+            assignment = assignment_for(self.request.user)
+            if assignment and assignment.scope_mode == 'scoped':
+                location_clients = visible_locations(self.request.user).exclude(client__isnull=True).values_list('client_id', flat=True)
+                return qs.filter(id__in=location_clients).distinct()
         return qs
 
 
@@ -46,7 +48,9 @@ class OrderViewSet(ScopedManagerReadMixin, views.OrderViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         if self.request.user.role == 'manager':
-            return qs.filter(location__in=visible_locations(self.request.user)).distinct()
+            assignment = assignment_for(self.request.user)
+            if assignment and assignment.scope_mode == 'scoped':
+                return qs.filter(location__in=visible_locations(self.request.user)).distinct()
         return qs
 
 
