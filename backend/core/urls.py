@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_views, integration_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views
+from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -95,6 +95,8 @@ urlpatterns = [
     path('scheduling/bulk-action/', scheduler_actions.bulk_action),
     path('scheduling/clear-range/', scheduler_actions.clear_range),
     path('scheduling/forecast/', forecast_views.forecast_summary),
+    path('scheduling/forecast/budget/', forecast_actions.budget_upsert),
+    path('scheduling/forecast/unit-day/', forecast_actions.unit_day_upsert),
     path('scheduling/forecast/import/preview/', forecast_views.forecast_import_preview),
     path('scheduling/forecast/import/apply/', forecast_views.forecast_import_apply),
     path('automation/orders/parse/', automation_views.order_parse),
