@@ -3,16 +3,18 @@ import csv
 import hashlib
 import hmac
 import io
+import ipaddress
 import json
 import secrets
+import socket
 import uuid
 from datetime import timedelta
+from urllib.parse import urlparse
 
 import requests
 from cryptography.fernet import Fernet
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
-from django.db import transaction
 from django.utils import timezone
 
 from .integration_v7_models import (
@@ -32,6 +34,26 @@ API_KEY_SCOPES = {
     'payroll.export',
     'webhooks.write',
 }
+
+
+def validate_outbound_url(url):
+    parsed = urlparse(str(url or '').strip())
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError('Outbound integration URLs must use HTTPS and may not contain embedded credentials.')
+    host = parsed.hostname.lower().rstrip('.')
+    if host in {'localhost', 'localhost.localdomain'} or host.endswith('.local') or host.endswith('.internal'):
+        raise ValueError('Private or local integration hosts are not allowed.')
+    try:
+        addresses = {item[4][0] for item in socket.getaddrinfo(host, parsed.port or 443, type=socket.SOCK_STREAM)}
+    except socket.gaierror as exc:
+        raise ValueError('Integration host could not be resolved.') from exc
+    if not addresses:
+        raise ValueError('Integration host could not be resolved.')
+    for value in addresses:
+        ip = ipaddress.ip_address(value)
+        if not ip.is_global:
+            raise ValueError('Integration host resolves to a non-public IP address.')
+    return parsed.geturl()
 
 
 def _fernet():
@@ -146,7 +168,8 @@ def deliver_webhook(delivery):
     }
     delivery.attempts += 1
     try:
-        response = requests.post(subscription.url, data=body, headers=headers, timeout=subscription.timeout_seconds)
+        safe_url = validate_outbound_url(subscription.url)
+        response = requests.post(safe_url, data=body, headers=headers, timeout=subscription.timeout_seconds)
         delivery.last_http_status = response.status_code
         if 200 <= response.status_code < 300:
             delivery.status = WebhookDelivery.Status.DELIVERED
@@ -254,11 +277,12 @@ def export_payroll(connector, pay_period, created_by=None):
             url = connector.configuration.get('url')
             if not url:
                 raise ValueError('Generic JSON connector requires configuration.url.')
+            safe_url = validate_outbound_url(url)
             credentials = decrypt_secret(connector.credentials_encrypted)
             headers = {'Content-Type': 'application/json'}
             if credentials.get('bearer_token'):
                 headers['Authorization'] = f"Bearer {credentials['bearer_token']}"
-            response = requests.post(url, json=snapshot, headers=headers, timeout=int(connector.configuration.get('timeout_seconds', 20)))
+            response = requests.post(safe_url, json=snapshot, headers=headers, timeout=int(connector.configuration.get('timeout_seconds', 20)))
             if not 200 <= response.status_code < 300:
                 raise RuntimeError(f'Payroll provider returned HTTP {response.status_code}')
             result = {'mode': 'remote', 'http_status': response.status_code}
