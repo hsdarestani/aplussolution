@@ -70,7 +70,7 @@ class NotificationState(TimestampedModel):
     class Meta:
         indexes = [
             models.Index(fields=['category', 'read_at'], name='notif_state_category_read_idx'),
-            models.Index(fields=['deleted_at', 'created_at'], name='notif_state_deleted_created_idx'),
+            models.Index(fields=['deleted_at', 'created_at'], name='notif_state_del_created_idx'),
         ]
 
 
