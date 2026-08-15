@@ -1,21 +1,21 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_v4_views, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, payroll_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views, workplace_scoped_actions, workplace_scoped_views, workplace_views
+from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_v4_views, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, payroll_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views, workplace_scoped_actions, workplace_scoped_core, workplace_scoped_views, workplace_views
 
 router = DefaultRouter()
 for prefix, view in [
-    ('users', views.UserViewSet),
+    ('users', workplace_scoped_core.ScopedUserViewSet),
     ('clients', searchable_views.ClientCompanyViewSet),
     ('workers', searchable_views.WorkerViewSet),
-    ('locations', views.LocationViewSet),
-    ('positions', views.PositionViewSet),
+    ('locations', workplace_scoped_core.ScopedLocationViewSet),
+    ('positions', workplace_scoped_core.ScopedPositionViewSet),
     ('orders', searchable_views.OrderViewSet),
-    ('availabilities', views.AvailabilityViewSet),
+    ('availabilities', workplace_scoped_core.ScopedAvailabilityViewSet),
     ('shifts', shift_views.StaffingShiftViewSet),
     ('time-entries', time_views.TimeEntryViewSet),
-    ('time-off', views.TimeOffViewSet),
-    ('shift-swaps', views.ShiftSwapViewSet),
+    ('time-off', workplace_scoped_core.ScopedTimeOffViewSet),
+    ('shift-swaps', workplace_scoped_core.ScopedShiftSwapViewSet),
     ('absence-cases', workplace_scoped_views.ScopedAbsenceCaseViewSet),
     ('coverage-offers', workplace_scoped_views.ScopedCoverageOfferViewSet),
     ('attendance-policies', workplace_scoped_views.ScopedAttendancePolicyViewSet),
@@ -26,9 +26,9 @@ for prefix, view in [
     ('timesheet-entries', payroll_views.TimesheetEntryViewSet),
     ('timesheet-exceptions', payroll_views.TimesheetExceptionViewSet),
     ('contract-templates', views.ContractTemplateViewSet),
-    ('contracts', contract_views.ContractViewSet),
+    ('contracts', searchable_views.ContractViewSet),
     ('documents', searchable_views.DocumentViewSet),
-    ('payroll', views.PayrollViewSet),
+    ('payroll', workplace_scoped_core.ScopedPayrollViewSet),
     ('ratings', views.RatingViewSet),
     ('conversations', views.ConversationViewSet),
     ('schedule-groups', scheduling_views.ScheduleGroupViewSet),
