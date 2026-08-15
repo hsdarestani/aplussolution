@@ -6,4 +6,13 @@ class CoreConfig(AppConfig):
     name = 'core'
 
     def ready(self):
-        from . import absence_models, attendance_models, forecast_models, portal_models, scheduling_models, shift_slots  # noqa: F401
+        from . import (  # noqa: F401
+            absence_models,
+            attendance_models,
+            attendance_v4_models,
+            attendance_v4_tasks,
+            forecast_models,
+            portal_models,
+            scheduling_models,
+            shift_slots,
+        )
