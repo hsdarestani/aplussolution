@@ -1,6 +1,5 @@
-from django.db.models import Q
-
-from .models import User, WorkerProfile
+from .models import Location, User, WorkerProfile
+from .scheduling_models import ScheduleGroup
 from .workplace_models import AccessRole, UserAccessAssignment, WorkplaceSettings
 
 
@@ -97,9 +96,7 @@ def capabilities_for_user(user):
 
 
 def has_capability(user, capability, *, worker=None, location=None):
-    if capability not in CAPABILITIES:
-        return False
-    if capability not in capabilities_for_user(user):
+    if capability not in CAPABILITIES or capability not in capabilities_for_user(user):
         return False
     if user.role == User.Role.ADMIN or user.is_superuser:
         return True
@@ -110,6 +107,36 @@ def has_capability(user, capability, *, worker=None, location=None):
         if location is not None and not location_in_scope(user, location):
             return False
     return True
+
+
+def visible_schedule_groups(user, queryset=None):
+    qs = queryset if queryset is not None else ScheduleGroup.objects.all()
+    if user.role == User.Role.ADMIN or user.is_superuser:
+        return qs
+    assignment = assignment_for(user)
+    if user.role != User.Role.MANAGER:
+        return qs.none()
+    if not assignment or assignment.scope_mode == UserAccessAssignment.ScopeMode.ALL:
+        return qs
+    explicit_ids = list(assignment.schedule_groups.values_list('id', flat=True))
+    location_ids = list(assignment.locations.values_list('id', flat=True))
+    return qs.filter(id__in=explicit_ids).union(qs.filter(locations__id__in=location_ids)).distinct() if location_ids else qs.filter(id__in=explicit_ids)
+
+
+def visible_locations(user, queryset=None):
+    qs = queryset if queryset is not None else Location.objects.all()
+    if user.role == User.Role.ADMIN or user.is_superuser:
+        return qs
+    assignment = assignment_for(user)
+    if user.role != User.Role.MANAGER:
+        return qs.none()
+    if not assignment or assignment.scope_mode == UserAccessAssignment.ScopeMode.ALL:
+        return qs
+    location_ids = set(assignment.locations.values_list('id', flat=True))
+    location_ids.update(
+        Location.objects.filter(schedule_groups__in=assignment.schedule_groups.all()).values_list('id', flat=True)
+    )
+    return qs.filter(id__in=location_ids).distinct()
 
 
 def worker_in_scope(user, worker):
@@ -127,27 +154,22 @@ def worker_in_scope(user, worker):
     schedule_ids = assignment.schedule_groups.values_list('id', flat=True)
     if worker.schedule_memberships.filter(active=True, schedule_id__in=schedule_ids).exists():
         return True
-    location_ids = list(assignment.locations.values_list('id', flat=True))
-    if location_ids:
-        if worker.shifts.filter(location_id__in=location_ids).exists():
-            return True
-        from .shift_slots import ShiftSlot
-        if ShiftSlot.objects.filter(worker=worker, shift__location_id__in=location_ids).exists():
-            return True
-    return False
+    location_ids = visible_locations(user).values_list('id', flat=True)
+    if worker.shifts.filter(location_id__in=location_ids).exists():
+        return True
+    from .shift_slots import ShiftSlot
+    return ShiftSlot.objects.filter(worker=worker, shift__location_id__in=location_ids).exists()
 
 
 def location_in_scope(user, location):
     if user.role == User.Role.ADMIN or user.is_superuser:
         return True
-    assignment = assignment_for(user)
     if user.role != User.Role.MANAGER:
         return False
+    assignment = assignment_for(user)
     if not assignment or assignment.scope_mode == UserAccessAssignment.ScopeMode.ALL:
         return True
-    if assignment.locations.filter(pk=location.pk).exists():
-        return True
-    return assignment.schedule_groups.filter(locations=location).exists()
+    return visible_locations(user).filter(pk=location.pk).exists()
 
 
 def visible_workers(user, queryset=None):
@@ -168,7 +190,7 @@ def visible_workers(user, queryset=None):
             schedule_memberships__schedule__in=assignment.schedule_groups.all(),
         ).values_list('id', flat=True)
     )
-    location_ids = list(assignment.locations.values_list('id', flat=True))
+    location_ids = list(visible_locations(user).values_list('id', flat=True))
     if location_ids:
         worker_ids.update(qs.filter(shifts__location_id__in=location_ids).values_list('id', flat=True))
         from .shift_slots import ShiftSlot
