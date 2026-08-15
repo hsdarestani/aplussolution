@@ -39,7 +39,7 @@ async function baseMock(page: Page, user: any, onCallout?: (body: any) => void) 
       return json(route, { id: 'case-1', shift: shift.id, slot: 'slot-absence-1', kind: body.kind, status: 'coverage_pending', short_notice: true }, 201);
     }
     if (path.startsWith('admin/exceptions/')) return json(route, { summary: { critical: 0, warning: 0, by_category: {} }, results: [] });
-    if (path.startsWith('absence-cases/')) return json(route, user.role === 'admin' ? [{ id: 'case-dashboard-1', status: 'coverage_pending', short_notice: true, shift_title: 'Servicekraft', shift_starts_at: shift.starts_at }] : []);
+    if (path.startsWith('absence-cases/')) return json(route, user.role === 'admin' ? [{ id: 'case-dashboard-1', status: 'coverage_pending', short_notice: true, shift_title: 'Servicekraft', shift_starts_at: shift.starts_at, shift_ends_at: shift.ends_at }] : []);
     if (path === 'shifts/' || path.startsWith('shifts/?')) return json(route, [shift]);
     if (path === 'workers/') return json(route, []);
     if (path === 'clients/') return json(route, []);
@@ -73,6 +73,6 @@ test('admin dashboard surfaces urgent coverage cases', async ({ page }) => {
   const card = page.getByTestId('absence-dashboard-card');
   await expect(card).toBeVisible();
   await expect(card.getByText('1 offene Ausfälle')).toBeVisible();
-  await expect(card.getByText('1 kurzfristig')).toBeVisible();
+  await expect(card.getByText('1 ≤ 24h')).toBeVisible();
   await expect(card.getByRole('button', { name: 'Bearbeiten' })).toBeVisible();
 });
