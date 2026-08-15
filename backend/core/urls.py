@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, integration_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views
+from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_views, integration_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -30,6 +30,9 @@ for prefix, view in [
     ('position-skill-tags', scheduling_views.PositionSkillTagViewSet),
     ('scheduling-policies', scheduling_views.SchedulingPolicyViewSet),
     ('schedule-templates', scheduling_views.ScheduleTemplateViewSet),
+    ('forecast-days', forecast_views.ForecastDayBudgetViewSet),
+    ('forecast-units', forecast_views.ForecastUnitDefinitionViewSet),
+    ('forecast-unit-days', forecast_views.ForecastUnitDayViewSet),
 ]:
     router.register(prefix, view)
 router.register('notifications', views.NotificationViewSet, basename='notification')
@@ -91,6 +94,9 @@ urlpatterns = [
     path('scheduling/readiness/', scheduling_views.scheduler_readiness),
     path('scheduling/bulk-action/', scheduler_actions.bulk_action),
     path('scheduling/clear-range/', scheduler_actions.clear_range),
+    path('scheduling/forecast/', forecast_views.forecast_summary),
+    path('scheduling/forecast/import/preview/', forecast_views.forecast_import_preview),
+    path('scheduling/forecast/import/apply/', forecast_views.forecast_import_apply),
     path('automation/orders/parse/', automation_views.order_parse),
     path('automation/orders/approve/', automation_views.order_approve),
     path('automation/orders/packages/', automation_views.order_packages),
