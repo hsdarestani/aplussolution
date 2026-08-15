@@ -57,7 +57,7 @@ test('admin edits workplace rules and creates a scoped assignment',async({page})
   await roleAlert.getByRole('button',{name:'OK',exact:true}).click();
   await expect(roleAlert).toBeHidden();
 
-  await assignmentModal.locator('.workplace-modal-actions').getByRole('button',{name:'Speichern'}).click();
+  await assignmentModal.locator('.workplace-modal-actions ion-button').filter({hasText:'Speichern'}).click();
   await expect.poll(()=>assigned?.scope_mode).toBe('scoped');
   await expect.poll(()=>assigned?.user).toBe(supervisor.id);
 });
