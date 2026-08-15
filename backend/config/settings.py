@@ -21,13 +21,26 @@ CORS_ALLOW_CREDENTIALS=True; SECURE_PROXY_SSL_HEADER=('HTTP_X_FORWARDED_PROTO','
 REST_FRAMEWORK={'DEFAULT_AUTHENTICATION_CLASSES':('rest_framework_simplejwt.authentication.JWTAuthentication',),'DEFAULT_PERMISSION_CLASSES':('rest_framework.permissions.IsAuthenticated',),'DEFAULT_FILTER_BACKENDS':('django_filters.rest_framework.DjangoFilterBackend','rest_framework.filters.SearchFilter','rest_framework.filters.OrderingFilter'),'DEFAULT_PAGINATION_CLASS':'rest_framework.pagination.PageNumberPagination','PAGE_SIZE':50,'DEFAULT_RENDERER_CLASSES':('rest_framework.renderers.JSONRenderer',) if not DEBUG else ('rest_framework.renderers.JSONRenderer','rest_framework.renderers.BrowsableAPIRenderer')}
 SIMPLE_JWT={'ACCESS_TOKEN_LIFETIME':timedelta(minutes=30),'REFRESH_TOKEN_LIFETIME':timedelta(days=30),'ROTATE_REFRESH_TOKENS':True,'BLACKLIST_AFTER_ROTATION':False}
 CELERY_BROKER_URL=os.getenv('REDIS_URL','redis://localhost:6379/0'); CELERY_RESULT_BACKEND=CELERY_BROKER_URL
-CELERY_BEAT_SCHEDULE={'contract-reminders-daily':{'task':'core.tasks.send_contract_reminders','schedule':86400},'shift-reminders-hourly':{'task':'core.tasks.send_shift_reminders','schedule':3600},'coverage-offers-expiry':{'task':'core.tasks.expire_coverage_offers','schedule':300},'attendance-v4-notices':{'task':'core.attendance_v4_tasks.scan_attendance_v4_notices','schedule':900},'client-contract-generation-hourly':{'task':'core.tasks.generate_due_client_contracts','schedule':3600},'working-time-sync-daily':{'task':'core.tasks.sync_working_time_current_year','schedule':86400},'working-time-backup-weekly':{'task':'core.tasks.backup_working_time','schedule':604800}}
+CELERY_BEAT_SCHEDULE={'contract-reminders-daily':{'task':'core.tasks.send_contract_reminders','schedule':86400},'shift-reminders-configured':{'task':'core.communications_tasks.send_configured_shift_reminders','schedule':900},'communications-delivery':{'task':'core.communications_tasks.dispatch_pending_notifications','schedule':60},'coverage-offers-expiry':{'task':'core.tasks.expire_coverage_offers','schedule':300},'attendance-v4-notices':{'task':'core.attendance_v4_tasks.scan_attendance_v4_notices','schedule':900},'client-contract-generation-hourly':{'task':'core.tasks.generate_due_client_contracts','schedule':3600},'working-time-sync-daily':{'task':'core.tasks.sync_working_time_current_year','schedule':86400},'working-time-backup-weekly':{'task':'core.tasks.backup_working_time','schedule':604800}}
 EMAIL_BACKEND='django.core.mail.backends.smtp.EmailBackend' if os.getenv('EMAIL_HOST') else 'django.core.mail.backends.console.EmailBackend'
 EMAIL_HOST=os.getenv('EMAIL_HOST',''); EMAIL_PORT=int(os.getenv('EMAIL_PORT','587')); EMAIL_HOST_USER=os.getenv('EMAIL_HOST_USER',''); EMAIL_HOST_PASSWORD=os.getenv('EMAIL_HOST_PASSWORD',''); EMAIL_USE_TLS=os.getenv('EMAIL_USE_TLS','1')=='1'
 DEFAULT_FROM_EMAIL=os.getenv('DEFAULT_FROM_EMAIL','A+ Solution <noreply@aplus-solution.de>'); ADMIN_NOTIFICATION_EMAIL=os.getenv('ADMIN_NOTIFICATION_EMAIL','info@aplus-solution.de'); APP_URL=os.getenv('APP_URL','http://localhost:8080')
 GOOGLE_OAUTH_CLIENT_ID=os.getenv('GOOGLE_OAUTH_CLIENT_ID',''); GOOGLE_OAUTH_CLIENT_SECRET=os.getenv('GOOGLE_OAUTH_CLIENT_SECRET',''); GOOGLE_OAUTH_REDIRECT_URI=os.getenv('GOOGLE_OAUTH_REDIRECT_URI','')
 APPLE_SERVICE_ID=os.getenv('APPLE_SERVICE_ID',''); APPLE_TEAM_ID=os.getenv('APPLE_TEAM_ID',''); APPLE_KEY_ID=os.getenv('APPLE_KEY_ID',''); APPLE_PRIVATE_KEY=os.getenv('APPLE_PRIVATE_KEY','').replace('\\n','\n'); APPLE_PRIVATE_KEY_PATH=os.getenv('APPLE_PRIVATE_KEY_PATH',''); APPLE_OAUTH_REDIRECT_URI=os.getenv('APPLE_OAUTH_REDIRECT_URI','')
 COMPANY_NAME=os.getenv('COMPANY_NAME','A+ Solution GmbH'); COMPANY_ADDRESS=os.getenv('COMPANY_ADDRESS',''); AUEG_LICENSE_AUTHORITY=os.getenv('AUEG_LICENSE_AUTHORITY',''); AUEG_LICENSE_DATE=os.getenv('AUEG_LICENSE_DATE','')
+
+# Native notification delivery. Android uses FCM HTTP v1; iOS uses APNs token auth.
+FCM_PROJECT_ID=os.getenv('FCM_PROJECT_ID','')
+FCM_SERVICE_ACCOUNT_JSON=os.getenv('FCM_SERVICE_ACCOUNT_JSON','')
+FCM_SERVICE_ACCOUNT_FILE=os.getenv('FCM_SERVICE_ACCOUNT_FILE','')
+APNS_TEAM_ID=os.getenv('APNS_TEAM_ID',APPLE_TEAM_ID)
+APNS_KEY_ID=os.getenv('APNS_KEY_ID','')
+APNS_BUNDLE_ID=os.getenv('APNS_BUNDLE_ID','')
+APNS_PRIVATE_KEY=os.getenv('APNS_PRIVATE_KEY','').replace('\\n','\n')
+APNS_USE_SANDBOX=os.getenv('APNS_USE_SANDBOX','0')=='1'
+TWILIO_ACCOUNT_SID=os.getenv('TWILIO_ACCOUNT_SID','')
+TWILIO_AUTH_TOKEN=os.getenv('TWILIO_AUTH_TOKEN','')
+TWILIO_FROM_NUMBER=os.getenv('TWILIO_FROM_NUMBER','')
 
 # A+ Workforce is the operational source of truth. WIW settings are retained only for the one-time migration/audit path.
 OPENAI_API_KEY=os.getenv('OPENAI_API_KEY',os.getenv('WIW_OPENAI_KEY',''))
