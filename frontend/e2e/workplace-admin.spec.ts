@@ -41,21 +41,23 @@ test('admin edits workplace rules and creates a scoped assignment',async({page})
   await expect.poll(()=>saved?.currency).toBe('CHF');
   await page.getByRole('button',{name:'Zuweisen'}).click();
 
-  await page.locator('ion-select').filter({hasText:'Benutzer'}).click();
+  const assignmentModal=page.locator('ion-modal.show-modal').filter({hasText:'Neue Zuweisung'}).last();
+  await expect(assignmentModal).toBeVisible();
+  await assignmentModal.locator('ion-select').filter({hasText:'Benutzer'}).click();
   const userAlert=page.locator('ion-alert').last();
   await expect(userAlert).toBeVisible();
   await userAlert.getByRole('radio',{name:/^Sina Supervisor/}).click();
   await userAlert.getByRole('button',{name:'OK',exact:true}).click();
   await expect(userAlert).toBeHidden();
 
-  await page.locator('ion-select').filter({hasText:'Rolle'}).click();
+  await assignmentModal.locator('ion-select').filter({hasText:'Rolle'}).click();
   const roleAlert=page.locator('ion-alert').last();
   await expect(roleAlert).toBeVisible();
   await roleAlert.getByRole('radio',{name:'Supervisor',exact:true}).click();
   await roleAlert.getByRole('button',{name:'OK',exact:true}).click();
   await expect(roleAlert).toBeHidden();
 
-  await page.locator('.workplace-modal-actions').getByRole('button',{name:'Speichern'}).click();
+  await assignmentModal.locator('.workplace-modal-actions').getByRole('button',{name:'Speichern'}).click();
   await expect.poll(()=>assigned?.scope_mode).toBe('scoped');
   await expect.poll(()=>assigned?.user).toBe(supervisor.id);
 });
