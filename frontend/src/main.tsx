@@ -11,14 +11,18 @@ import './forecast-tools.css';
 import App from './App';
 import StoreComplianceLinks from './StoreComplianceLinks';
 import StoreLegalPage, { legalPageFromPath } from './StoreLegalPages';
+import TimeClockTerminal from './TimeClockTerminal';
 
 setupIonicReact({ mode: 'md' });
 
 const legalPage = legalPageFromPath(window.location.pathname);
+const terminalPage = /^\/terminal\/[^/]+\/?$/.test(window.location.pathname);
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    {legalPage ? (
+    {terminalPage ? (
+      <TimeClockTerminal />
+    ) : legalPage ? (
       <StoreLegalPage page={legalPage} />
     ) : (
       <>
