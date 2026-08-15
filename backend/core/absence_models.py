@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
@@ -73,6 +75,12 @@ class ShiftAbsenceCase(TimestampedModel):
             self.Status.OFFERED,
             self.Status.MOVED_TO_OPEN,
         }
+
+    @property
+    def urgent_now(self):
+        """Live dispatcher urgency; short_notice remains the historical reporting KPI."""
+        now = timezone.now()
+        return self.is_active and self.shift.ends_at >= now and self.shift.starts_at <= now + timedelta(hours=24)
 
 
 class CoverageOffer(TimestampedModel):
