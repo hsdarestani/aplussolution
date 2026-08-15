@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, integration_views, portal_views, searchable_views, shift_views, time_views, views
+from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, integration_views, portal_views, scheduling_views, searchable_views, shift_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -22,6 +22,14 @@ for prefix, view in [
     ('payroll', views.PayrollViewSet),
     ('ratings', views.RatingViewSet),
     ('conversations', views.ConversationViewSet),
+    ('schedule-groups', scheduling_views.ScheduleGroupViewSet),
+    ('schedule-memberships', scheduling_views.ScheduleMembershipViewSet),
+    ('position-qualifications', scheduling_views.WorkerPositionQualificationViewSet),
+    ('skill-tags', scheduling_views.SkillTagViewSet),
+    ('worker-skill-tags', scheduling_views.WorkerSkillTagViewSet),
+    ('position-skill-tags', scheduling_views.PositionSkillTagViewSet),
+    ('scheduling-policies', scheduling_views.SchedulingPolicyViewSet),
+    ('schedule-templates', scheduling_views.ScheduleTemplateViewSet),
 ]:
     router.register(prefix, view)
 router.register('notifications', views.NotificationViewSet, basename='notification')
@@ -68,14 +76,19 @@ urlpatterns = [
     path('operations/schedule-quality/', advanced_views.schedule_quality),
     path('operations/availability/', advanced_views.availability_create),
     path('operations/availability/<uuid:pk>/', advanced_views.availability_delete),
-    path('operations/swaps/', advanced_views.swap_create),
-    path('operations/swaps/<uuid:pk>/decide/', advanced_views.swap_decide),
+    path('operations/swaps/', scheduling_views.swap_create),
+    path('operations/swaps/<uuid:pk>/decide/', scheduling_views.swap_decide),
     path('operations/copy-week/', advanced_views.copy_week),
     path('operations/bulk-publish/', advanced_views.bulk_publish),
     path('operations/notifications/read-all/', advanced_views.notifications_read_all),
     path('operations/folders/', advanced_views.folder_summary),
     path('operations/readiness/', advanced_views.readiness),
     path('operations/templates/import/', advanced_views.import_contract_templates),
+    path('scheduling/eligibility/', scheduling_views.eligibility),
+    path('scheduling/assign/', scheduling_views.assign),
+    path('scheduling/auto-assign/', scheduling_views.auto_assign),
+    path('scheduling/templates/<uuid:pk>/apply/', scheduling_views.template_apply),
+    path('scheduling/readiness/', scheduling_views.scheduler_readiness),
     path('automation/orders/parse/', automation_views.order_parse),
     path('automation/orders/approve/', automation_views.order_approve),
     path('automation/orders/packages/', automation_views.order_packages),
