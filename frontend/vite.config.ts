@@ -121,27 +121,37 @@ function nativeWorkforceCutoverTransforms(): Plugin {
 }
 
 /**
- * Keep the Scheduler source focused while surfacing the same absence workflow
- * next to a concrete staffing assignment. The guarded marker makes source
- * drift fail the build instead of silently removing the operational action.
+ * Surface the same absence workflow wherever dispatchers operate: next to an
+ * assignment in Scheduler and as an urgent card on the admin dashboard.
  */
-function schedulerAbsenceTransforms(): Plugin {
-  const importMarker = "import SchedulerGroupedGrid from './SchedulerGroupedGrid';";
+function absenceSurfaceTransforms(): Plugin {
+  const schedulerImportMarker = "import SchedulerGroupedGrid from './SchedulerGroupedGrid';";
   const releaseMarker = `{workerView && mine && <IonButton fill="outline" color="medium" disabled={busy} onClick={() => setReleaseTarget(row)}>Freigeben</IonButton>}`;
+  const dashboardImportMarker = "import './admin-home-v4.css';";
+  const dashboardSummaryMarker = '      <div className="attention-summary">';
   return {
-    name: 'scheduler-absence-transforms',
+    name: 'absence-surface-transforms',
     enforce: 'pre',
     transform(code, id) {
       const normalizedId = id.replace(/\\/g, '/').split('?')[0];
-      if (!normalizedId.endsWith('/src/ScheduleV3.tsx')) return null;
-      if (!code.includes(importMarker)) this.error('Scheduler absence import marker changed.');
-      if (!code.includes(releaseMarker)) this.error('Scheduler absence action marker changed.');
-      let next = code.replace(importMarker, `${importMarker}\nimport SchedulerAbsenceActions from './SchedulerAbsenceActions';`);
-      next = next.replace(
-        releaseMarker,
-        `${releaseMarker}\n            {((workerView && mine) || (manager && row.assignments?.length > 0)) && <SchedulerAbsenceActions user={user} shift={row} onChanged={load}/>} `,
-      );
-      return { code: next, map: null };
+      if (normalizedId.endsWith('/src/ScheduleV3.tsx')) {
+        if (!code.includes(schedulerImportMarker)) this.error('Scheduler absence import marker changed.');
+        if (!code.includes(releaseMarker)) this.error('Scheduler absence action marker changed.');
+        let next = code.replace(schedulerImportMarker, `${schedulerImportMarker}\nimport SchedulerAbsenceActions from './SchedulerAbsenceActions';`);
+        next = next.replace(
+          releaseMarker,
+          `${releaseMarker}\n            {((workerView && mine) || (manager && row.assignments?.length > 0)) && <SchedulerAbsenceActions user={user} shift={row} onChanged={load}/>} `,
+        );
+        return { code: next, map: null };
+      }
+      if (normalizedId.endsWith('/src/AdminHomeV4.tsx')) {
+        if (!code.includes(dashboardImportMarker)) this.error('Admin dashboard absence import marker changed.');
+        if (!code.includes(dashboardSummaryMarker)) this.error('Admin dashboard absence card marker changed.');
+        let next = code.replace(dashboardImportMarker, `${dashboardImportMarker}\nimport AbsenceDashboardCard from './AbsenceDashboardCard';`);
+        next = next.replace(dashboardSummaryMarker, `      <AbsenceDashboardCard navigate={navigate} />\n\n${dashboardSummaryMarker}`);
+        return { code: next, map: null };
+      }
+      return null;
     },
   };
 }
@@ -150,7 +160,7 @@ export default defineConfig({
   plugins: [
     appShellTransforms(),
     nativeWorkforceCutoverTransforms(),
-    schedulerAbsenceTransforms(),
+    absenceSurfaceTransforms(),
     react(),
     VitePWA({
       registerType: 'autoUpdate',
