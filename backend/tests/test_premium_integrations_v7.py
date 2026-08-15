@@ -106,10 +106,10 @@ def test_webhook_retries_then_dead_letters(monkeypatch, admin_user):
 
 
 @pytest.mark.django_db
-def test_domain_shift_creates_matching_webhook_delivery(auth_admin, shift, django_capture_on_commit_callbacks):
+def test_domain_shift_creates_matching_webhook_delivery(admin_user, shift, django_capture_on_commit_callbacks):
     subscription = WebhookSubscription.objects.create(
         name='Ops', url='https://example.test/hooks', event_types=['shift.updated'],
-        secret_encrypted=encrypt_secret({'secret': 'secret'}), created_by=auth_admin.handler._force_user,
+        secret_encrypted=encrypt_secret({'secret': 'secret'}), created_by=admin_user,
     )
     with django_capture_on_commit_callbacks(execute=True):
         shift.notes = 'updated'
@@ -118,16 +118,16 @@ def test_domain_shift_creates_matching_webhook_delivery(auth_admin, shift, djang
 
 
 @pytest.mark.django_db
-def test_payroll_export_requires_closed_period_and_uses_snapshot(auth_admin, worker_user):
+def test_payroll_export_requires_closed_period_and_uses_snapshot(auth_admin, admin_user, worker_user):
     period = PayPeriod.objects.create(
         name='August 2026', starts_on=timezone.localdate().replace(day=1), ends_on=timezone.localdate(),
-        status=PayPeriod.Status.OPEN, created_by=auth_admin.handler._force_user,
+        status=PayPeriod.Status.OPEN, created_by=admin_user,
     )
     WorkerTimesheet.objects.create(
         pay_period=period, worker=worker_user.worker_profile, status=WorkerTimesheet.Status.APPROVED,
         gross_minutes=480, net_minutes=450, gross_estimate='108.75', entry_count=1,
     )
-    connector = PayrollConnector.objects.create(name='DATEV', provider=PayrollConnector.Provider.DATEV_CSV, created_by=auth_admin.handler._force_user)
+    connector = PayrollConnector.objects.create(name='DATEV', provider=PayrollConnector.Provider.DATEV_CSV, created_by=admin_user)
 
     blocked = auth_admin.post(f'/api/integrations/payroll/connectors/{connector.id}/export/{period.id}/')
     assert blocked.status_code == 400
@@ -143,10 +143,10 @@ def test_payroll_export_requires_closed_period_and_uses_snapshot(auth_admin, wor
 
 
 @pytest.mark.django_db
-def test_external_timesheets_never_expose_wages(auth_admin, worker_user):
+def test_external_timesheets_never_expose_wages(auth_admin, admin_user, worker_user):
     period = PayPeriod.objects.create(
         name='Locked', starts_on=timezone.localdate() - timedelta(days=7), ends_on=timezone.localdate(),
-        status=PayPeriod.Status.LOCKED, created_by=auth_admin.handler._force_user,
+        status=PayPeriod.Status.LOCKED, created_by=admin_user,
     )
     WorkerTimesheet.objects.create(pay_period=period, worker=worker_user.worker_profile, net_minutes=300, gross_estimate='999.99')
     key = auth_admin.post('/api/integrations/api-keys/', {'name': 'Timesheets', 'scopes': ['timesheets.read']}, format='json').data['token']
@@ -173,7 +173,7 @@ def _certificate():
 
 
 @pytest.mark.django_db
-def test_saml_signed_assertion_logs_in_and_tampering_is_rejected(auth_admin):
+def test_saml_signed_assertion_logs_in_and_tampering_is_rejected():
     key_pem, cert_pem = _certificate()
     provider = SamlIdentityProvider.objects.create(
         name='Test SSO', enabled=True, idp_entity_id='https://idp.example.test/entity',
