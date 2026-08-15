@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_v4_views, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, payroll_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views
+from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_v4_views, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, payroll_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views, workplace_views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -42,6 +42,8 @@ for prefix, view in [
     ('forecast-days', forecast_views.ForecastDayBudgetViewSet),
     ('forecast-units', forecast_views.ForecastUnitDefinitionViewSet),
     ('forecast-unit-days', forecast_views.ForecastUnitDayViewSet),
+    ('access-roles', workplace_views.AccessRoleViewSet),
+    ('access-assignments', workplace_views.AccessAssignmentViewSet),
 ]:
     router.register(prefix, view)
 router.register('notifications', views.NotificationViewSet, basename='notification')
@@ -115,6 +117,8 @@ urlpatterns = [
     path('scheduling/forecast/unit-day/', forecast_actions.unit_day_upsert),
     path('scheduling/forecast/import/preview/', forecast_views.forecast_import_preview),
     path('scheduling/forecast/import/apply/', forecast_views.forecast_import_apply),
+    path('workplace/settings/', workplace_views.workplace_settings),
+    path('workplace/snapshot/', workplace_views.workplace_snapshot),
     path('automation/orders/parse/', automation_views.order_parse),
     path('automation/orders/approve/', automation_views.order_approve),
     path('automation/orders/packages/', automation_views.order_packages),
