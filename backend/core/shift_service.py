@@ -71,6 +71,12 @@ def claim_shift(shift_id, worker: WorkerProfile) -> ShiftSlot:
     slot.released_at = None
     slot.save(update_fields=['worker', 'status', 'source', 'claimed_at', 'released_at', 'updated_at'])
     refresh_shift_state(shift)
+    try:
+        from .absence_service import resolve_open_case_after_claim
+
+        resolve_open_case_after_claim(slot, worker)
+    except ImportError:
+        pass
     return slot
 
 
