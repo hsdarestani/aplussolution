@@ -4,7 +4,6 @@ import json
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_CEILING
 
-from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import serializers, viewsets
@@ -12,7 +11,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from .forecast_models import ForecastDayBudget, ForecastPositionRequirement, ForecastUnitDay, ForecastUnitDefinition
-from .models import Shift, User
+from .models import Shift
 from .permissions import IsAdminOrManager
 from .services import audit
 from .shift_slots import ShiftSlot
@@ -104,13 +103,26 @@ def _aware(day):
     return timezone.make_aware(datetime.combine(day, datetime.min.time()), timezone.get_current_timezone())
 
 
-def _shift_minutes(shift):
+def _shift_net_minutes(shift):
     return max(0, int((shift.ends_at - shift.starts_at).total_seconds() // 60) - int(shift.break_minutes or 0))
+
+
+def _overlap_net_minutes(shift, window_start, window_end):
+    """Allocate an overnight shift and its break proportionally to the actual day overlap."""
+    overlap_start = max(shift.starts_at, window_start)
+    overlap_end = min(shift.ends_at, window_end)
+    if overlap_end <= overlap_start:
+        return 0
+    gross_total = max(1, int((shift.ends_at - shift.starts_at).total_seconds() // 60))
+    gross_overlap = max(0, int((overlap_end - overlap_start).total_seconds() // 60))
+    break_minutes = int(shift.break_minutes or 0)
+    allocated_break = int(round(Decimal(break_minutes) * Decimal(gross_overlap) / Decimal(gross_total)))
+    return max(0, gross_overlap - allocated_break)
 
 
 def _schedule_shifts(schedule, start, end):
     locations = list(schedule.locations.values_list('id', flat=True))
-    qs = Shift.objects.filter(starts_at__lt=_aware(end), ends_at__gte=_aware(start)).exclude(status=Shift.Status.CANCELLED)
+    qs = Shift.objects.filter(starts_at__lt=_aware(end), ends_at__gt=_aware(start)).exclude(status=Shift.Status.CANCELLED)
     if locations:
         qs = qs.filter(location_id__in=locations)
     return qs.select_related('position', 'location').prefetch_related('slots__worker')
@@ -141,18 +153,22 @@ def forecast_summary(request):
     cursor = start
     while cursor < end:
         day_start, day_end = _aware(cursor), _aware(cursor + timedelta(days=1))
-        day_shifts = [s for s in shifts if s.starts_at < day_end and s.ends_at >= day_start]
-        combined_minutes = sum(_shift_minutes(s) * max(1, int(s.required_count or 1)) for s in day_shifts)
+        day_shifts = [s for s in shifts if s.starts_at < day_end and s.ends_at > day_start]
+        combined_minutes = 0
         assigned_minutes = 0
         labor_cost = Decimal('0')
         position_stats = {}
         for shift in day_shifts:
-            minutes = _shift_minutes(shift)
+            minutes = _overlap_net_minutes(shift, day_start, day_end)
+            if not minutes:
+                continue
+            demand = max(1, int(shift.required_count or 1))
+            combined_minutes += minutes * demand
             claimed = [slot for slot in shift.slots.all() if slot.status == ShiftSlot.Status.CLAIMED and slot.worker_id]
             assigned_minutes += minutes * len(claimed)
             stat = position_stats.setdefault(str(shift.position_id), {'position': str(shift.position_id), 'position_name': shift.position.name, 'scheduled_shifts': 0, 'scheduled_hours': Decimal('0')})
-            stat['scheduled_shifts'] += max(1, int(shift.required_count or 1))
-            stat['scheduled_hours'] += (Decimal(minutes) / Decimal(60)) * max(1, int(shift.required_count or 1))
+            stat['scheduled_shifts'] += demand
+            stat['scheduled_hours'] += (Decimal(minutes) / Decimal(60)) * demand
             for slot in claimed:
                 rate = Decimal(slot.worker.tariff_hourly_rate or 0) + Decimal(slot.worker.extra_allowance or 0)
                 labor_cost += (Decimal(minutes) / Decimal(60)) * rate
@@ -213,10 +229,7 @@ def _read_upload(upload):
         sheet = workbook.active
         rows = list(sheet.iter_rows(values_only=True))
     elif name.endswith('.xls'):
-        try:
-            import xlrd
-        except ImportError as exc:
-            raise ValueError('XLS-Unterstützung ist nicht installiert.') from exc
+        import xlrd
         book = xlrd.open_workbook(file_contents=upload.read())
         sheet = book.sheet_by_index(0)
         rows = [[sheet.cell_value(r, c) for c in range(sheet.ncols)] for r in range(sheet.nrows)]
@@ -236,7 +249,7 @@ def forecast_import_preview(request):
         return Response({'detail': 'Forecast-Datei fehlt.'}, status=400)
     try:
         rows = _read_upload(upload)
-    except ValueError as exc:
+    except (ValueError, UnicodeDecodeError, csv.Error) as exc:
         return Response({'detail': str(exc)}, status=400)
     headers = list(rows[0].keys()) if rows else []
     return Response({'headers': headers, 'preview': rows[:10], 'row_count': len(rows)})
@@ -245,11 +258,14 @@ def forecast_import_preview(request):
 def _decimal(value):
     if value in (None, ''):
         return Decimal(0)
-    cleaned = str(value).strip().replace('€', '').replace('$', '').replace(' ', '')
-    if ',' in cleaned and '.' not in cleaned:
+    cleaned = str(value).strip().replace('€', '').replace('$', '').replace(' ', '').replace("'", '')
+    if ',' in cleaned and '.' in cleaned:
+        if cleaned.rfind(',') > cleaned.rfind('.'):
+            cleaned = cleaned.replace('.', '').replace(',', '.')
+        else:
+            cleaned = cleaned.replace(',', '')
+    elif ',' in cleaned:
         cleaned = cleaned.replace(',', '.')
-    elif ',' in cleaned and '.' in cleaned:
-        cleaned = cleaned.replace(',', '')
     return Decimal(cleaned)
 
 
@@ -265,7 +281,7 @@ def forecast_import_apply(request):
     try:
         mapping = json.loads(request.data.get('mapping') or '{}') if isinstance(request.data.get('mapping'), str) else (request.data.get('mapping') or {})
         rows = _read_upload(upload)
-    except (ValueError, json.JSONDecodeError) as exc:
+    except (ValueError, UnicodeDecodeError, csv.Error, json.JSONDecodeError) as exc:
         return Response({'detail': str(exc)}, status=400)
     date_column = mapping.get('date')
     if not date_column:
@@ -284,7 +300,8 @@ def forecast_import_apply(request):
                 if not day:
                     for fmt in ('%d.%m.%Y', '%m/%d/%Y', '%d/%m/%Y'):
                         try:
-                            day = datetime.strptime(str(raw_date).strip(), fmt).date(); break
+                            day = datetime.strptime(str(raw_date).strip(), fmt).date()
+                            break
                         except ValueError:
                             continue
             if not day:
@@ -298,7 +315,8 @@ def forecast_import_apply(request):
                 value = row.get(mapping['actual_sales'])
                 defaults['actual_sales'] = _decimal(value) if value not in (None, '') else None
             _, was_created = ForecastDayBudget.objects.update_or_create(schedule=schedule, date=day, defaults=defaults)
-            created += int(was_created); updated += int(not was_created)
+            created += int(was_created)
+            updated += int(not was_created)
             for definition_id, source_column in unit_targets.items():
                 definition = definitions.get(definition_id)
                 if definition:
