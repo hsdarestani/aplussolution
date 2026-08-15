@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_v4_views, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, payroll_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views, workplace_scoped_views, workplace_views
+from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_v4_views, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, payroll_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views, workplace_scoped_actions, workplace_scoped_views, workplace_views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -71,9 +71,9 @@ urlpatterns = [
     path('attendance/breaks/end/', attendance_v4_views.break_end),
     path('attendance/entries/<uuid:entry_id>/attestation/', attendance_v4_views.attestation_submit),
     path('attendance/entries/<uuid:entry_id>/correction/', attendance_views.request_time_correction),
-    path('attendance/entries/<uuid:pk>/close/', attendance_actions.close_running_entry),
+    path('attendance/entries/<uuid:pk>/close/', workplace_scoped_actions.close_running_entry),
     path('attendance/corrections/<uuid:pk>/cancel/', attendance_views.cancel_time_correction),
-    path('attendance/corrections/<uuid:pk>/decide/', attendance_views.decide_time_correction),
+    path('attendance/corrections/<uuid:pk>/decide/', workplace_scoped_actions.decide_time_correction),
     path('attendance/exceptions/', workplace_scoped_views.attendance_exceptions),
     path('attendance/notices/scan/', workplace_scoped_views.attendance_scan),
     path('attendance/terminal/<uuid:public_id>/clock/', attendance_v4_views.terminal_clock),
