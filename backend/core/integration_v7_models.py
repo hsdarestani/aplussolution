@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 from django.utils import timezone
 
@@ -48,7 +50,7 @@ class WebhookDelivery(TimestampedModel):
         DEAD = 'dead', 'Dead Letter'
 
     subscription = models.ForeignKey(WebhookSubscription, on_delete=models.CASCADE, related_name='deliveries')
-    event_id = models.UUIDField()
+    event_id = models.UUIDField(default=uuid.uuid4)
     event_type = models.CharField(max_length=120)
     payload = models.JSONField(default=dict)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
