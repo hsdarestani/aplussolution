@@ -77,9 +77,9 @@ function nativeWorkforceCutoverTransforms(): Plugin {
       if (!wiwPanel.test(next)) this.error('Operations WIW panel marker changed; update cutover transform.');
       next = next.replace(wiwPanel, nativePanel);
       if (!next.includes(coverageMarker)) this.error('Operations parity mount marker changed.');
-      next = `import WorkplaceAdminPanel from './WorkplaceAdminPanel';\nimport AbsenceCoveragePanel from './AbsenceCoveragePanel';\n${next.replace(
+      next = `import PremiumIntegrationsPanel from './PremiumIntegrationsPanel';\nimport WorkplaceAdminPanel from './WorkplaceAdminPanel';\nimport AbsenceCoveragePanel from './AbsenceCoveragePanel';\n${next.replace(
         coverageMarker,
-        `      <AbsenceCoveragePanel user={user} onChanged={load} />\n      <WorkplaceAdminPanel user={user} />\n\n${coverageMarker}`,
+        `      <AbsenceCoveragePanel user={user} onChanged={load} />\n      <WorkplaceAdminPanel user={user} />\n      <PremiumIntegrationsPanel user={user} />\n\n${coverageMarker}`,
       )}`;
       return { code: next, map: null };
     },
