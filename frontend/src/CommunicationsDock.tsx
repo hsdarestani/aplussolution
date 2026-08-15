@@ -99,8 +99,8 @@ export default function CommunicationsDock() {
   if(!user)return null;
   return <>
     <div className="comms-dock-launchers" data-testid="communications-dock">
-      <button onClick={()=>{setTab('chat');setOpen(true)}} aria-label="WorkChat öffnen"><span>💬</span>{(snapshot?.unread_chat||0)>0&&<b>{snapshot!.unread_chat}</b>}</button>
-      <button onClick={()=>{setTab('notifications');setOpen(true)}} aria-label="Benachrichtigungen öffnen"><span>🔔</span>{(snapshot?.unread_notifications||0)>0&&<b>{snapshot!.unread_notifications}</b>}</button>
+      <button onClick={()=>{setTab('chat');setOpen(true)}} aria-label="WorkChat anzeigen"><span>💬</span>{(snapshot?.unread_chat||0)>0&&<b>{snapshot!.unread_chat}</b>}</button>
+      <button onClick={()=>{setTab('notifications');setOpen(true)}} aria-label="Benachrichtigungen anzeigen"><span>🔔</span>{(snapshot?.unread_notifications||0)>0&&<b>{snapshot!.unread_notifications}</b>}</button>
       {totalUnread>0&&<i>{totalUnread}</i>}
     </div>
     {open&&<div className="comms-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setOpen(false)}}>
