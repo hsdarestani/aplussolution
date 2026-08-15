@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_v4_views, attendance_views, automation_views, communications_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, payroll_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views, workplace_scoped_actions, workplace_scoped_core, workplace_scoped_forecast, workplace_scoped_scheduling, workplace_scoped_views, workplace_views
+from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_v4_views, attendance_views, automation_views, communications_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_v7_views, integration_views, payroll_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views, workplace_scoped_actions, workplace_scoped_core, workplace_scoped_forecast, workplace_scoped_scheduling, workplace_scoped_views, workplace_views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -60,6 +60,9 @@ urlpatterns = [
     path('auth/account-deletion/', views.request_account_deletion),
     path('auth/oauth/<str:provider>/start/', views.oauth_start),
     path('auth/oauth/<str:provider>/callback/', views.oauth_callback),
+    path('auth/saml/metadata/', integration_v7_views.saml_metadata),
+    path('auth/saml/<uuid:pk>/login/', integration_v7_views.saml_login),
+    path('auth/saml/acs/', integration_v7_views.saml_acs),
     path('auth/activation/validate/', portal_views.activation_validate),
     path('auth/activation/complete/', portal_views.activation_complete),
     path('employee/home/', portal_views.employee_home),
@@ -89,6 +92,22 @@ urlpatterns = [
     path('integrations/wiw/discover/', integration_views.wiw_discover),
     path('integrations/wiw/sync/', integration_views.wiw_sync),
     path('integrations/wiw/webhook/', integration_views.wiw_webhook),
+    path('integrations/api-keys/', integration_v7_views.api_keys),
+    path('integrations/api-keys/<uuid:pk>/revoke/', integration_v7_views.api_key_revoke),
+    path('integrations/webhooks/', integration_v7_views.webhook_subscriptions),
+    path('integrations/webhooks/<uuid:pk>/', integration_v7_views.webhook_subscription_detail),
+    path('integrations/webhooks/<uuid:pk>/rotate-secret/', integration_v7_views.webhook_rotate),
+    path('integrations/webhooks/<uuid:pk>/test/', integration_v7_views.webhook_test),
+    path('integrations/webhook-deliveries/', integration_v7_views.webhook_deliveries),
+    path('integrations/saml/providers/', integration_v7_views.saml_providers),
+    path('integrations/saml/providers/<uuid:pk>/', integration_v7_views.saml_provider_detail),
+    path('integrations/payroll/connectors/', integration_v7_views.payroll_connectors),
+    path('integrations/payroll/connectors/<uuid:pk>/', integration_v7_views.payroll_connector_detail),
+    path('integrations/payroll/connectors/<uuid:pk>/export/<uuid:period_id>/', integration_v7_views.payroll_export),
+    path('integrations/payroll/exports/', integration_v7_views.payroll_export_runs),
+    path('external/v1/workers/', integration_v7_views.external_workers),
+    path('external/v1/shifts/', integration_v7_views.external_shifts),
+    path('external/v1/timesheets/', integration_v7_views.external_timesheets),
     path('workers/<uuid:pk>/master-data/', integration_views.worker_master_data),
     path('workers/<uuid:pk>/master-data/verify/', integration_views.verify_worker_master_data),
     path('document-catalog/', document_catalog_views.document_catalog),
