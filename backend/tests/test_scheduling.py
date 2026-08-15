@@ -5,6 +5,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from core.models import Availability, Notification, Shift, ShiftSwapRequest, TimeEntry, User, WorkerProfile
+from core.shift_slots import ShiftSlot
 
 
 def published_shift(company, location, position, start, required_count=1):
@@ -133,6 +134,13 @@ def test_copy_week_and_bulk_publish(auth_admin, shift):
 
 @pytest.mark.django_db
 def test_shift_swap_requires_target_and_transfers_shift(auth_admin, worker_user, second_worker, shift):
+    slot = shift.slots.filter(status=ShiftSlot.Status.OPEN).first()
+    slot.worker = worker_user.worker_profile
+    slot.status = ShiftSlot.Status.CLAIMED
+    slot.source = 'test'
+    slot.claimed_at = timezone.now()
+    slot.save(update_fields=['worker', 'status', 'source', 'claimed_at', 'updated_at'])
+
     client = APIClient(); client.force_authenticate(worker_user)
     request = client.post('/api/operations/swaps/', {'shift': str(shift.id), 'note': 'Bitte übernehmen'}, format='json')
     assert request.status_code == 201
