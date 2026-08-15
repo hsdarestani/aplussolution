@@ -13,6 +13,7 @@ class CoreConfig(AppConfig):
             attendance_v4_tasks,
             communications_models,
             forecast_models,
+            integration_v7_models,
             payroll_models,
             portal_models,
             scheduling_models,
@@ -20,5 +21,7 @@ class CoreConfig(AppConfig):
             communications_signals,
             communications_compat_signals,
             communications_tasks,
+            integration_v7_signals,
+            integration_v7_tasks,
             workplace_models,
         )
