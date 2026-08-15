@@ -35,9 +35,9 @@ class Migration(migrations.Migration):
             ],
             options={'ordering': ['-reported_at']},
         ),
-        migrations.AddIndex(model_name='shiftabsencecase', index=models.Index(fields=['status', 'reported_at'], name='core_shifta_status_14be6e_idx')),
-        migrations.AddIndex(model_name='shiftabsencecase', index=models.Index(fields=['shift', 'absent_worker'], name='core_shifta_shift_i_0e98d5_idx')),
-        migrations.AddIndex(model_name='shiftabsencecase', index=models.Index(fields=['short_notice', 'status'], name='core_shifta_short_n_c1d960_idx')),
+        migrations.AddIndex(model_name='shiftabsencecase', index=models.Index(fields=['status', 'reported_at'], name='core_shifta_status_5650de_idx')),
+        migrations.AddIndex(model_name='shiftabsencecase', index=models.Index(fields=['shift', 'absent_worker'], name='core_shifta_shift_i_2ceace_idx')),
+        migrations.AddIndex(model_name='shiftabsencecase', index=models.Index(fields=['short_notice', 'status'], name='core_shifta_short_n_462c5e_idx')),
         migrations.CreateModel(
             name='CoverageOffer',
             fields=[
@@ -56,5 +56,5 @@ class Migration(migrations.Migration):
             ],
             options={'ordering': ['-offered_at'], 'unique_together': {('case', 'worker')}},
         ),
-        migrations.AddIndex(model_name='coverageoffer', index=models.Index(fields=['worker', 'status', 'expires_at'], name='core_covera_worker__fb45fa_idx')),
+        migrations.AddIndex(model_name='coverageoffer', index=models.Index(fields=['worker', 'status', 'expires_at'], name='core_covera_worker__4c1bc8_idx')),
     ]
