@@ -3,12 +3,22 @@ from rest_framework.response import Response
 
 from .attendance_v4_models import AttendanceClockEvent
 from .attendance_v4_service import clock_in_worker, clock_out_worker
+from .payroll_service import assert_time_entry_editable
+from .permissions import IsAdminOrManager
 from .services import audit
 from .views import TimeEntryViewSet as LegacyTimeEntryViewSet
 
 
 class TimeEntryViewSet(LegacyTimeEntryViewSet):
     """A+ Attendance source of truth for self-service clock-in and clock-out."""
+
+    def perform_update(self, serializer):
+        assert_time_entry_editable(serializer.instance)
+        return super().perform_update(serializer)
+
+    def perform_destroy(self, instance):
+        assert_time_entry_editable(instance)
+        return super().perform_destroy(instance)
 
     @action(detail=False, methods=['post'])
     def clock_in(self, request):
@@ -58,3 +68,13 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
             'end_of_shift': bool(policy.end_of_shift_attestation_required),
         }
         return Response(data)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
+    def approve(self, request, pk=None):
+        entry = self.get_object()
+        assert_time_entry_editable(entry)
+        entry.approved = True
+        entry.approved_by = request.user
+        entry.save(update_fields=['approved', 'approved_by', 'updated_at'])
+        audit(request, 'time.approved', entry)
+        return Response(self.get_serializer(entry).data)
