@@ -101,6 +101,7 @@ class TimesheetException(TimestampedModel):
         RUNNING_ENTRY = 'running_entry', 'Timer läuft'
         UNAPPROVED_ENTRY = 'unapproved_entry', 'Zeiteintrag nicht freigegeben'
         REJECTED_ENTRY = 'rejected_entry', 'Zeiteintrag abgelehnt'
+        PENDING_CORRECTION = 'pending_correction', 'Korrekturanfrage offen'
         ATTENDANCE_NOTICE = 'attendance_notice', 'Attendance-Hinweis offen'
 
     class Severity(models.TextChoices):
