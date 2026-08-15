@@ -16,4 +16,5 @@ class CoreConfig(AppConfig):
             portal_models,
             scheduling_models,
             shift_slots,
+            workplace_models,
         )
