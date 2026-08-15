@@ -128,3 +128,29 @@ class ScopedShiftSwapViewSet(views.ShiftSwapViewSet):
             self.required_capability = 'schedule.edit'
             return [IsAdminOrManager()]
         return [IsAuthenticated()]
+
+
+class ScopedPayrollViewSet(views.PayrollViewSet):
+    def get_queryset(self):
+        user = self.request.user
+        if _admin(user):
+            return self.queryset
+        if user.role == User.Role.MANAGER:
+            _require(user, 'payroll.view')
+            _require(user, 'wage.view')
+            return self.queryset.filter(worker__in=visible_workers(user)).distinct()
+        return super().get_queryset()
+
+    def get_permissions(self):
+        if getattr(self, 'action', None) in {'create', 'update', 'partial_update', 'destroy'}:
+            self.required_capability = 'payroll.review'
+            return [IsAdminOrManager()]
+        return [IsAuthenticated()]
+
+    def perform_create(self, serializer):
+        if self.request.user.role == User.Role.MANAGER:
+            _require(self.request.user, 'wage.view')
+            worker = serializer.validated_data.get('worker')
+            if not worker or not worker_in_scope(self.request.user, worker):
+                raise PermissionDenied('Mitarbeiter liegt außerhalb deines Verantwortungsbereichs.')
+        return super().perform_create(serializer)
