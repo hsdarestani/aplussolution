@@ -162,7 +162,11 @@ def workplace_settings(request):
         serializer = WorkplaceSettingsSerializer(settings, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         settings = serializer.save()
-        audit(request, 'workplace.settings.updated', settings, serializer.validated_data)
+        audit_payload = {
+            key: str(value) if key in {'overtime_daily_hours', 'overtime_weekly_hours', 'overtime_multiplier'} else value
+            for key, value in serializer.validated_data.items()
+        }
+        audit(request, 'workplace.settings.updated', settings, audit_payload)
     return Response(WorkplaceSettingsSerializer(settings).data)
 
 
