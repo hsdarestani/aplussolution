@@ -16,7 +16,7 @@ from rest_framework.test import APIClient
 from signxml import XMLSigner, methods
 
 from core.integration_v7_models import PayrollConnector, SamlIdentityProvider, WebhookDelivery, WebhookSubscription
-from core.integration_v7_service import deliver_webhook, encrypt_secret
+from core.integration_v7_service import deliver_webhook, encrypt_secret, validate_outbound_url
 from core.payroll_models import PayPeriod, WorkerTimesheet
 
 
@@ -53,11 +53,19 @@ def test_manager_without_workplace_manage_cannot_manage_integrations(api_client,
     assert response.status_code == 403
 
 
+def test_outbound_url_rejects_private_targets(monkeypatch):
+    monkeypatch.setattr('core.integration_v7_service.socket.getaddrinfo', lambda *args, **kwargs: [(2, 1, 6, '', ('127.0.0.1', 443))])
+    with pytest.raises(ValueError, match='non-public'):
+        validate_outbound_url('https://hooks.example.com/receive')
+    with pytest.raises(ValueError):
+        validate_outbound_url('http://8.8.8.8/hook')
+
+
 @pytest.mark.django_db
 def test_webhook_hmac_signature_and_success(monkeypatch, admin_user):
     secret = 'webhook-secret-value'
     subscription = WebhookSubscription.objects.create(
-        name='ERP', url='https://example.test/hooks', event_types=['shift.updated'],
+        name='ERP', url='https://8.8.8.8/hooks', event_types=['shift.updated'],
         secret_encrypted=encrypt_secret({'secret': secret}), created_by=admin_user,
     )
     delivery = WebhookDelivery.objects.create(
@@ -85,7 +93,7 @@ def test_webhook_hmac_signature_and_success(monkeypatch, admin_user):
 @pytest.mark.django_db
 def test_webhook_retries_then_dead_letters(monkeypatch, admin_user):
     subscription = WebhookSubscription.objects.create(
-        name='Broken ERP', url='https://example.test/hooks', event_types=['*'], max_attempts=2,
+        name='Broken ERP', url='https://8.8.8.8/hooks', event_types=['*'], max_attempts=2,
         secret_encrypted=encrypt_secret({'secret': 'secret'}), created_by=admin_user,
     )
     delivery = WebhookDelivery.objects.create(subscription=subscription, event_type='shift.updated', payload={'id': 'x'})
@@ -108,7 +116,7 @@ def test_webhook_retries_then_dead_letters(monkeypatch, admin_user):
 @pytest.mark.django_db
 def test_domain_shift_creates_matching_webhook_delivery(admin_user, shift, django_capture_on_commit_callbacks):
     subscription = WebhookSubscription.objects.create(
-        name='Ops', url='https://example.test/hooks', event_types=['shift.updated'],
+        name='Ops', url='https://8.8.8.8/hooks', event_types=['shift.updated'],
         secret_encrypted=encrypt_secret({'secret': 'secret'}), created_by=admin_user,
     )
     with django_capture_on_commit_callbacks(execute=True):
