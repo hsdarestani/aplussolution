@@ -73,6 +73,16 @@ class ShiftAbsenceCaseSerializer(serializers.ModelSerializer):
     def get_open_offer_count(self, obj):
         return obj.offers.filter(status=CoverageOffer.Status.PENDING).count()
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if not user or not _manager(user):
+            data['manager_note'] = ''
+            data['offers'] = []
+            data['open_offer_count'] = 0
+        return data
+
 
 class AbsenceCaseViewSet(viewsets.ReadOnlyModelViewSet):
     # Declared for DRF router basename discovery; role scoping still happens in get_queryset().
