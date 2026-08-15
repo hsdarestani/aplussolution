@@ -1,6 +1,10 @@
+from django.db.models import Q
+from rest_framework.exceptions import PermissionDenied
+
 from . import views
+from .models import ClientCompany
 from .permissions import IsAdminOrManager
-from .workplace_access import assignment_for, visible_locations, visible_workers
+from .workplace_access import assignment_for, visible_locations, visible_workers, worker_in_scope
 
 
 class ScopedManagerReadMixin:
@@ -55,15 +59,51 @@ class OrderViewSet(ScopedManagerReadMixin, views.OrderViewSet):
 
 
 class ContractViewSet(ScopedManagerReadMixin, views.ContractViewSet):
-    read_capability = 'manager.access'
+    read_capability = 'documents.manage'
     search_fields = [
         'title', 'template__name', 'template__slug', 'worker__user__first_name',
         'worker__user__last_name', 'worker__user__email', 'client__name', 'client__customer_number',
     ]
     ordering_fields = ['created_at', 'updated_at', 'starts_on', 'ends_on', 'reminder_date', 'status']
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.request.user.role == 'manager':
+            worker_scope = visible_workers(self.request.user)
+            client_ids = visible_locations(self.request.user).values_list('client_id', flat=True)
+            return qs.filter(Q(worker__in=worker_scope) | Q(client_id__in=client_ids)).distinct()
+        return qs
+
+    def perform_create(self, serializer):
+        if self.request.user.role == 'manager':
+            worker = serializer.validated_data.get('worker')
+            client = serializer.validated_data.get('client')
+            if worker and not worker_in_scope(self.request.user, worker):
+                raise PermissionDenied('Mitarbeiter liegt außerhalb deines Verantwortungsbereichs.')
+            if client and not visible_locations(self.request.user).filter(client=client).exists():
+                raise PermissionDenied('Kunde liegt außerhalb deines Verantwortungsbereichs.')
+        return super().perform_create(serializer)
+
 
 class DocumentViewSet(ScopedManagerReadMixin, views.DocumentViewSet):
-    read_capability = 'manager.access'
+    read_capability = 'documents.manage'
     search_fields = ['title', 'folder', 'worker__user__first_name', 'worker__user__last_name', 'worker__user__email', 'client__name']
     ordering_fields = ['created_at', 'updated_at', 'title', 'folder']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.request.user.role == 'manager':
+            worker_scope = visible_workers(self.request.user)
+            client_ids = visible_locations(self.request.user).values_list('client_id', flat=True)
+            return qs.filter(Q(worker__in=worker_scope) | Q(client_id__in=client_ids)).distinct()
+        return qs
+
+    def perform_create(self, serializer):
+        if self.request.user.role == 'manager':
+            worker = serializer.validated_data.get('worker')
+            client = serializer.validated_data.get('client')
+            if worker and not worker_in_scope(self.request.user, worker):
+                raise PermissionDenied('Mitarbeiter liegt außerhalb deines Verantwortungsbereichs.')
+            if client and not visible_locations(self.request.user).filter(client=client).exists():
+                raise PermissionDenied('Kunde liegt außerhalb deines Verantwortungsbereichs.')
+        return super().perform_create(serializer)
