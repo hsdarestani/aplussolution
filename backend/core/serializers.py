@@ -1,28 +1,42 @@
 from rest_framework import serializers
 from .models import *
+from .workplace_access import can_view_wage, capabilities_for_user, scope_snapshot
 
 
 class UserSerializer(serializers.ModelSerializer):
     name = serializers.SerializerMethodField()
+    capabilities = serializers.SerializerMethodField()
+    access_scope = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ['id', 'email', 'first_name', 'last_name', 'name', 'phone', 'role', 'avatar', 'is_onboarded']
-        read_only_fields = ['role']
+        fields = ['id', 'email', 'first_name', 'last_name', 'name', 'phone', 'role', 'avatar', 'is_onboarded', 'capabilities', 'access_scope']
+        read_only_fields = ['role', 'capabilities', 'access_scope']
 
     def get_name(self, obj):
         return obj.get_full_name() or obj.email
+
+    def get_capabilities(self, obj):
+        return capabilities_for_user(obj)
+
+    def get_access_scope(self, obj):
+        return scope_snapshot(obj)
 
 
 class UserAdminSerializer(serializers.ModelSerializer):
     name = serializers.SerializerMethodField()
+    capabilities = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ['id', 'email', 'first_name', 'last_name', 'name', 'phone', 'role', 'is_active']
+        fields = ['id', 'email', 'first_name', 'last_name', 'name', 'phone', 'role', 'is_active', 'capabilities']
+        read_only_fields = ['capabilities']
 
     def get_name(self, obj):
         return obj.get_full_name() or obj.email
+
+    def get_capabilities(self, obj):
+        return capabilities_for_user(obj)
 
 
 class ClientCompanySerializer(serializers.ModelSerializer):
@@ -35,10 +49,25 @@ class ClientCompanySerializer(serializers.ModelSerializer):
 
 class WorkerProfileSerializer(serializers.ModelSerializer):
     user_detail = UserSerializer(source='user', read_only=True)
+    wage_hidden = serializers.SerializerMethodField()
 
     class Meta:
         model = WorkerProfile
         fields = '__all__'
+
+    def _wage_visible(self, obj):
+        request = self.context.get('request')
+        return bool(request and can_view_wage(request.user, obj))
+
+    def get_wage_hidden(self, obj):
+        return not self._wage_visible(obj)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if not self._wage_visible(instance):
+            data['tariff_hourly_rate'] = None
+            data['extra_allowance'] = None
+        return data
 
 
 class LocationSerializer(serializers.ModelSerializer):
