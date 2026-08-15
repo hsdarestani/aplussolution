@@ -60,9 +60,8 @@ def test_early_clock_in_can_be_blocked(worker_user, shift, location):
     too_early = shift.starts_at - timedelta(minutes=45)
     with pytest.raises(ValidationError):
         clock_in_worker(worker=worker_user.worker_profile, shift_id=shift.id, now=too_early)
-    notice = AttendanceNotice.objects.get(notice_type=AttendanceNotice.Type.EARLY_CLOCK_IN)
-    assert notice.worker_id == worker_user.worker_profile.id
-    assert notice.value_minutes >= 45
+    assert not TimeEntry.objects.filter(worker=worker_user.worker_profile).exists()
+    assert not AttendanceNotice.objects.filter(notice_type=AttendanceNotice.Type.EARLY_CLOCK_IN).exists()
 
 
 def test_late_clock_in_creates_notice(worker_user, shift, location):
