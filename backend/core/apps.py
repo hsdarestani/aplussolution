@@ -18,6 +18,7 @@ class CoreConfig(AppConfig):
             scheduling_models,
             shift_slots,
             communications_signals,
+            communications_compat_signals,
             communications_tasks,
             workplace_models,
         )
