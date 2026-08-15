@@ -52,7 +52,8 @@ test('admin manages premium integrations and receives secrets only on create',as
   await samlCard.locator('ion-input').filter({hasText:'SSO URL'}).locator('input').fill('https://idp.example.test/sso');
   await samlCard.locator('ion-textarea').locator('textarea').fill('-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----');
   await samlCard.getByRole('button',{name:'SSO Provider speichern'}).click();
-  await expect(panel.getByText('https://idp.example.test/entity',{exact:true})).toBeVisible();
+  const samlRow=panel.locator('.pi-list article').filter({hasText:'Test SSO'});
+  await expect(samlRow).toContainText('https://idp.example.test/entity');
 
   await panel.locator('ion-segment-button[value="payroll"]').click();
   await panel.getByRole('button',{name:'Connector erstellen'}).click();
