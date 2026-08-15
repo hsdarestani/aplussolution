@@ -14,9 +14,10 @@ CAPABILITIES = {
     'payroll.view', 'payroll.review', 'payroll.export',
     'wage.view', 'labor.share',
     'reports.view', 'documents.manage',
+    'integrations.view', 'integrations.manage',
 }
 
-MANAGER_LEGACY_CAPABILITIES = CAPABILITIES - {'roles.manage', 'workplace.manage'}
+MANAGER_LEGACY_CAPABILITIES = CAPABILITIES - {'roles.manage', 'workplace.manage', 'integrations.view', 'integrations.manage'}
 
 SYSTEM_ROLES = {
     'dispatcher': {
