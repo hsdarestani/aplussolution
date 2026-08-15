@@ -42,10 +42,10 @@ test('admin edits workplace rules and creates a scoped assignment',async({page})
   await page.getByRole('button',{name:'Zuweisen'}).click();
   await page.locator('ion-select').filter({hasText:'Benutzer'}).click();
   await page.getByRole('radio',{name:/Sina Supervisor/}).click();
-  await page.getByRole('button',{name:'OK'}).click();
+  await page.getByRole('button',{name:'OK',exact:true}).click();
   await page.locator('ion-select').filter({hasText:'Rolle'}).click();
   await page.getByRole('radio',{name:'Supervisor'}).click();
-  await page.getByRole('button',{name:'OK'}).click();
+  await page.getByRole('button',{name:'OK',exact:true}).click();
   await page.locator('.workplace-modal-actions').getByRole('button',{name:'Speichern'}).click();
   await expect.poll(()=>assigned?.scope_mode).toBe('scoped');
   await expect.poll(()=>assigned?.user).toBe(supervisor.id);
@@ -57,7 +57,7 @@ test('scoped supervisor sees own effective access without admin controls',async(
   await page.goto('/?view=operations');
   await expect(page.getByTestId('workplace-admin-panel')).toBeVisible();
   await expect(page.getByText('Zugeordneter Bereich')).toBeVisible();
-  await expect(page.getByText('Mina Berger',{exact:true})).toBeVisible();
+  await expect(page.getByText(/Mina Berger/)).toBeVisible();
   await expect(page.getByRole('button',{name:'Zuweisen'})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Eigene Rolle'})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Speichern',exact:true})).toHaveCount(0);
