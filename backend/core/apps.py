@@ -12,6 +12,7 @@ class CoreConfig(AppConfig):
             attendance_v4_models,
             attendance_v4_tasks,
             forecast_models,
+            payroll_models,
             portal_models,
             scheduling_models,
             shift_slots,
