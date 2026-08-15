@@ -1,303 +1,70 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  IonBadge,
-  IonButton,
-  IonInput,
-  IonLabel,
-  IonModal,
-  IonSegment,
-  IonSegmentButton,
-  IonSelect,
-  IonSelectOption,
-  IonSpinner,
-  IonTextarea,
-  IonToast,
-  IonToggle,
-} from '@ionic/react';
-import { api } from './api';
+import { IonBadge, IonButton, IonInput, IonLabel, IonModal, IonSegment, IonSegmentButton, IonSelect, IonSelectOption, IonSpinner, IonTextarea, IonToast, IonToggle } from '@ionic/react';
+import { api, apiAll } from './api';
 
-const unpack = (data: any): any[] => (Array.isArray(data) ? data : data?.results || []);
-const val = (event: any) => event.detail.value ?? '';
-const modes = [
-  ['off', 'Aus'],
-  ['warn', 'Warnen'],
-  ['block', 'Blockieren'],
-];
+const val=(e:any)=>e.detail.value??'';
+const modes=[['off','Aus'],['warn','Warnen'],['block','Blockieren']];
+const weekdays=['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'];
+const defaultPolicy=()=>({name:'Neues Regelwerk',active:true,min_rest_hours:11,max_days_per_week:6,max_consecutive_days:6,max_weekly_hours:48,qualification_mode:'warn',schedule_membership_mode:'off',skill_tag_mode:'warn',availability_mode:'block',time_off_mode:'block',rest_mode:'warn',hours_mode:'warn',days_mode:'warn'});
+const defaultItem=()=>({weekday:0,start_time:'08:00',end_time:'16:00',required_count:1,break_minutes:0,notes:''});
+const writableItem=(item:any)=>({weekday:Number(item.weekday),start_time:item.start_time?.slice(0,5),end_time:item.end_time?.slice(0,5),client:item.client,location:item.location,position:item.position,required_count:Number(item.required_count||1),break_minutes:Number(item.break_minutes||0),notes:item.notes||''});
 
-export default function SchedulerAdminPanel({
-  open,
-  onClose,
-  workers,
-  clients,
-  locations,
-  positions,
-}: {
-  open: boolean;
-  onClose: () => void;
-  workers: any[];
-  clients: any[];
-  locations: any[];
-  positions: any[];
-}) {
-  const [tab, setTab] = useState('rules');
-  const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState('');
-  const [policies, setPolicies] = useState<any[]>([]);
-  const [schedules, setSchedules] = useState<any[]>([]);
-  const [memberships, setMemberships] = useState<any[]>([]);
-  const [qualifications, setQualifications] = useState<any[]>([]);
-  const [tags, setTags] = useState<any[]>([]);
-  const [workerTags, setWorkerTags] = useState<any[]>([]);
-  const [positionTags, setPositionTags] = useState<any[]>([]);
-  const [templates, setTemplates] = useState<any[]>([]);
-  const [readiness, setReadiness] = useState<any>();
-  const [policy, setPolicy] = useState<any>();
-  const [qualification, setQualification] = useState<any>({ level: 'qualified' });
-  const [tagForm, setTagForm] = useState<any>({ color: '#155eef' });
-  const [workerTagForm, setWorkerTagForm] = useState<any>({ verified: true });
-  const [positionTagForm, setPositionTagForm] = useState<any>({ required: true });
-  const [scheduleForm, setScheduleForm] = useState<any>({ timezone: 'Europe/Berlin', locations: [] });
-  const [membershipForm, setMembershipForm] = useState<any>({ active: true });
-  const [templateForm, setTemplateForm] = useState<any>({});
+export default function SchedulerAdminPanel({open,onClose,workers,clients,locations,positions}:{open:boolean;onClose:()=>void;workers:any[];clients:any[];locations:any[];positions:any[]}){
+  const [tab,setTab]=useState('rules'),[busy,setBusy]=useState(false),[toast,setToast]=useState('');
+  const [policies,setPolicies]=useState<any[]>([]),[schedules,setSchedules]=useState<any[]>([]),[memberships,setMemberships]=useState<any[]>([]),[qualifications,setQualifications]=useState<any[]>([]),[tags,setTags]=useState<any[]>([]),[workerTags,setWorkerTags]=useState<any[]>([]),[positionTags,setPositionTags]=useState<any[]>([]),[templates,setTemplates]=useState<any[]>([]),[readiness,setReadiness]=useState<any>();
+  const [policy,setPolicy]=useState<any>(),[qualification,setQualification]=useState<any>({level:'qualified'}),[tagForm,setTagForm]=useState<any>({color:'#155eef'}),[workerTagForm,setWorkerTagForm]=useState<any>({verified:true}),[positionTagForm,setPositionTagForm]=useState<any>({required:true}),[scheduleForm,setScheduleForm]=useState<any>({timezone:'Europe/Berlin',locations:[]}),[membershipForm,setMembershipForm]=useState<any>({active:true});
+  const [selectedTemplate,setSelectedTemplate]=useState<string>(''),[templateMeta,setTemplateMeta]=useState<any>({name:'',schedule:null,notes:''}),[templateItem,setTemplateItem]=useState<any>(defaultItem()),[applyForm,setApplyForm]=useState<any>({target_week_start:'',publish:false});
 
-  async function load() {
-    if (!open) return;
-    const [p, s, m, q, t, wt, pt, st, ready] = await Promise.all([
-      api('scheduling-policies/'),
-      api('schedule-groups/'),
-      api('schedule-memberships/'),
-      api('position-qualifications/'),
-      api('skill-tags/'),
-      api('worker-skill-tags/'),
-      api('position-skill-tags/'),
-      api('schedule-templates/'),
-      api('scheduling/readiness/'),
-    ]);
-    const pRows = unpack(p);
-    setPolicies(pRows);
-    setPolicy(pRows[0] || undefined);
-    setSchedules(unpack(s));
-    setMemberships(unpack(m));
-    setQualifications(unpack(q));
-    setTags(unpack(t));
-    setWorkerTags(unpack(wt));
-    setPositionTags(unpack(pt));
-    setTemplates(unpack(st));
-    setReadiness(ready);
-  }
+  async function load(preferredTemplate?:string){if(!open)return;const [p,s,m,q,t,wt,pt,st,ready]=await Promise.all([apiAll('scheduling-policies/'),apiAll('schedule-groups/'),apiAll('schedule-memberships/'),apiAll('position-qualifications/'),apiAll('skill-tags/'),apiAll('worker-skill-tags/'),apiAll('position-skill-tags/'),apiAll('schedule-templates/'),api('scheduling/readiness/')]);setPolicies(p);setPolicy(current=>current?.id?p.find((x:any)=>x.id===current.id)||p[0]||defaultPolicy():p[0]||defaultPolicy());setSchedules(s);setMemberships(m);setQualifications(q);setTags(t);setWorkerTags(wt);setPositionTags(pt);setTemplates(st);setReadiness(ready);const wanted=preferredTemplate||selectedTemplate||st[0]?.id||'';setSelectedTemplate(wanted);const tpl=st.find((x:any)=>x.id===wanted);if(tpl)setTemplateMeta({name:tpl.name,schedule:tpl.schedule||null,notes:tpl.notes||''});}
+  useEffect(()=>{void load();},[open]);
 
-  useEffect(() => {
-    void load();
-  }, [open]);
+  async function mutate(path:string,method:string,body?:any,message?:string){setBusy(true);try{const result:any=await api(path,{method,body:body===undefined?undefined:JSON.stringify(body)});if(message)setToast(message);return result;}catch(error:any){setToast(error.message);return undefined;}finally{setBusy(false);}}
+  async function create(path:string,body:any,message:string,reset?:()=>void){const result=await mutate(path,'POST',body,message);if(result){reset?.();await load();}return result;}
+  async function remove(path:string,id:string){if(!window.confirm('Eintrag wirklich entfernen?'))return;const result=await mutate(`${path}/${id}/`,'DELETE',undefined,'Eintrag entfernt.');if(result!==undefined)await load();}
 
-  async function post(path: string, body: any, message: string) {
-    setBusy(true);
-    try {
-      await api(path, { method: 'POST', body: JSON.stringify(body) });
-      setToast(message);
-      await load();
-      return true;
-    } catch (error: any) {
-      setToast(error.message);
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }
+  async function savePolicy(){const payload={...policy,schedule:policy.schedule||null,location:policy.location||null,position:policy.position||null};const result=await mutate(policy.id?`scheduling-policies/${policy.id}/`:'scheduling-policies/',policy.id?'PATCH':'POST',payload,'Planungsregeln gespeichert.');if(result){await load();setPolicy(result);}}
+  async function saveTemplateMeta(){if(!templateMeta.name.trim()){setToast('Vorlagenname fehlt.');return;}const current=templates.find(x=>x.id===selectedTemplate);const payload={name:templateMeta.name.trim(),schedule:templateMeta.schedule||null,notes:templateMeta.notes||'',active:true,items:(current?.items||[]).map(writableItem)};const result=await mutate(current?`schedule-templates/${current.id}/`:'schedule-templates/',current?'PATCH':'POST',payload,'Vorlage gespeichert.');if(result){setSelectedTemplate(result.id);await load(result.id);}}
+  async function replaceTemplateItems(items:any[],message:string){const current=templates.find(x=>x.id===selectedTemplate);if(!current)return;const payload={name:current.name,schedule:current.schedule||null,notes:current.notes||'',active:current.active!==false,items:items.map(writableItem)};const result=await mutate(`schedule-templates/${current.id}/`,'PATCH',payload,message);if(result)await load(current.id);}
+  async function addTemplateItem(){if(!selectedTemplate){setToast('Zuerst eine Vorlage anlegen oder auswählen.');return;}if(!templateItem.client||!templateItem.location||!templateItem.position){setToast('Kunde, Einsatzort und Position sind erforderlich.');return;}const current=templates.find(x=>x.id===selectedTemplate);await replaceTemplateItems([...(current?.items||[]),templateItem],'Schichtbaustein hinzugefügt.');setTemplateItem(defaultItem());}
+  async function deleteTemplateItem(id:string){const current=templates.find(x=>x.id===selectedTemplate);await replaceTemplateItems((current?.items||[]).filter((x:any)=>x.id!==id),'Schichtbaustein entfernt.');}
+  async function applyTemplate(){if(!selectedTemplate||!applyForm.target_week_start){setToast('Zielwoche auswählen.');return;}const result=await mutate(`scheduling/templates/${selectedTemplate}/apply/`,'POST',applyForm,'Vorlage auf Zielwoche angewendet.');if(result)setToast(`${result.created?.length||0} Schichten erstellt, ${result.skipped?.length||0} vorhandene übersprungen.`);}
 
-  async function remove(path: string, id: string) {
-    setBusy(true);
-    try {
-      await api(`${path}/${id}/`, { method: 'DELETE' });
-      await load();
-    } catch (error: any) {
-      setToast(error.message);
-    } finally {
-      setBusy(false);
-    }
-  }
+  const activeWorkers=useMemo(()=>workers.filter(w=>w.active!==false),[workers]),activePositions=useMemo(()=>positions.filter(p=>p.active!==false),[positions]);
+  const currentTemplate=templates.find(x=>x.id===selectedTemplate);
 
-  async function savePolicy() {
-    if (!policy) return;
-    setBusy(true);
-    try {
-      await api(`scheduling-policies/${policy.id}/`, { method: 'PATCH', body: JSON.stringify(policy) });
-      setToast('Planungsregeln gespeichert.');
-      await load();
-    } catch (error: any) {
-      setToast(error.message);
-    } finally {
-      setBusy(false);
-    }
-  }
+  return <IonModal isOpen={open} onDidDismiss={onClose} className="scheduler-admin-modal"><div className="scheduler-admin">
+    <header className="scheduler-admin-head"><div><small>WIW PARITY · PLANUNGSLOGIK</small><h2>Scheduler konfigurieren</h2><p>Regeln, Qualifikationen, Tags, Dienstpläne und Wochenvorlagen zentral verwalten.</p></div><IonButton fill="clear" onClick={onClose}>Schließen</IonButton></header>
+    <IonSegment scrollable value={tab} onIonChange={e=>setTab(String(val(e)))}>{[['rules','Regeln'],['qualifications','Positionen'],['tags','Tags'],['schedules','Dienstpläne'],['templates','Vorlagen'],['readiness','Readiness']].map(([id,label])=><IonSegmentButton key={id} value={id}><IonLabel>{label}</IonLabel></IonSegmentButton>)}</IonSegment>
+    <div className="scheduler-admin-body">
+      {tab==='rules'&&<section className="scheduler-admin-card"><div className="scheduler-card-head"><h3>Scheduling Rules</h3><p>Ein gemeinsames Regelwerk für Assign, Claim, Swap, Drag & Drop und Auto-Assign.</p></div><div className="scheduler-form-grid">
+        <IonSelect fill="outline" label="Regelwerk auswählen" labelPlacement="floating" value={policy?.id||''} onIonChange={e=>{const found=policies.find(x=>x.id===val(e));if(found)setPolicy(found)}}><IonSelectOption value="">Neues Regelwerk</IonSelectOption>{policies.map(x=><IonSelectOption key={x.id} value={x.id}>{x.name}</IonSelectOption>)}</IonSelect><IonButton fill="outline" onClick={()=>setPolicy(defaultPolicy())}>Neues Regelwerk</IonButton>
+        <IonInput fill="outline" label="Name" labelPlacement="floating" value={policy?.name||''} onIonInput={e=>setPolicy({...policy,name:val(e)})}/>
+        <IonSelect fill="outline" label="Dienstplan-Scope" labelPlacement="floating" value={policy?.schedule||''} onIonChange={e=>setPolicy({...policy,schedule:val(e)||null})}><IonSelectOption value="">Global</IonSelectOption>{schedules.map(x=><IonSelectOption key={x.id} value={x.id}>{x.name}</IonSelectOption>)}</IonSelect>
+        <IonSelect fill="outline" label="Einsatzort-Scope" labelPlacement="floating" value={policy?.location||''} onIonChange={e=>setPolicy({...policy,location:val(e)||null})}><IonSelectOption value="">Alle Orte</IonSelectOption>{locations.map(x=><IonSelectOption key={x.id} value={x.id}>{x.name}</IonSelectOption>)}</IonSelect>
+        <IonSelect fill="outline" label="Position-Scope" labelPlacement="floating" value={policy?.position||''} onIonChange={e=>setPolicy({...policy,position:val(e)||null})}><IonSelectOption value="">Alle Positionen</IonSelectOption>{activePositions.map(x=><IonSelectOption key={x.id} value={x.id}>{x.name}</IonSelectOption>)}</IonSelect>
+        {[['min_rest_hours','Mindestruhezeit (Std.)'],['max_days_per_week','Max. Tage / Woche'],['max_consecutive_days','Max. Tage am Stück'],['max_weekly_hours','Max. Wochenstunden']].map(([field,label])=><IonInput key={field} fill="outline" type="number" label={label} labelPlacement="floating" value={policy?.[field]} onIonInput={e=>setPolicy({...policy,[field]:val(e)})}/>)}
+        {[['qualification_mode','Positionsqualifikation'],['schedule_membership_mode','Dienstplan-Zuordnung'],['skill_tag_mode','Erforderliche Tags'],['availability_mode','Nicht verfügbar'],['time_off_mode','Genehmigte Abwesenheit'],['rest_mode','Ruhezeit'],['hours_mode','Wochenstunden'],['days_mode','Arbeitstage']].map(([field,label])=><IonSelect key={field} fill="outline" label={label} labelPlacement="floating" value={policy?.[field]} onIonChange={e=>setPolicy({...policy,[field]:val(e)})}>{modes.map(([mode,text])=><IonSelectOption key={mode} value={mode}>{text}</IonSelectOption>)}</IonSelect>)}
+        <div className="scheduler-full scheduler-actions">{policy?.id&&policies.length>1&&<IonButton fill="clear" color="danger" onClick={()=>void remove('scheduling-policies',policy.id)}>Löschen</IonButton>}<IonButton disabled={busy||!policy?.name} onClick={()=>void savePolicy()}>Regelwerk speichern</IonButton></div>
+      </div></section>}
 
-  const activeWorkers = useMemo(() => workers.filter((worker) => worker.active !== false), [workers]);
-  const activePositions = useMemo(() => positions.filter((position) => position.active !== false), [positions]);
+      {tab==='qualifications'&&<section className="scheduler-admin-card"><h3>Mitarbeiter ↔ Positionen</h3><p>Qualifikationen sind first-class Daten und können ein Ablaufdatum besitzen.</p><div className="scheduler-form-grid">
+        <IonSelect fill="outline" label="Mitarbeiter" labelPlacement="floating" value={qualification.worker} onIonChange={e=>setQualification({...qualification,worker:val(e)})}>{activeWorkers.map(w=><IonSelectOption key={w.id} value={w.id}>{w.user_detail?.name||w.user_detail?.email}</IonSelectOption>)}</IonSelect><IonSelect fill="outline" label="Position" labelPlacement="floating" value={qualification.position} onIonChange={e=>setQualification({...qualification,position:val(e)})}>{activePositions.map(p=><IonSelectOption key={p.id} value={p.id}>{p.name}</IonSelectOption>)}</IonSelect><IonSelect fill="outline" label="Stufe" labelPlacement="floating" value={qualification.level} onIonChange={e=>setQualification({...qualification,level:val(e)})}><IonSelectOption value="trainee">In Einarbeitung</IonSelectOption><IonSelectOption value="qualified">Qualifiziert</IonSelectOption><IonSelectOption value="lead">Leitung</IonSelectOption></IonSelect><IonInput fill="outline" type="date" label="Gültig bis" labelPlacement="floating" value={qualification.expires_on} onIonInput={e=>setQualification({...qualification,expires_on:val(e)||null})}/><IonInput fill="outline" label="Notiz" labelPlacement="floating" value={qualification.note} onIonInput={e=>setQualification({...qualification,note:val(e)})}/><IonButton disabled={busy||!qualification.worker||!qualification.position} onClick={()=>void create('position-qualifications/',qualification,'Qualifikation gespeichert.',()=>setQualification({level:'qualified'}))}>Hinzufügen</IonButton>
+      </div><div className="scheduler-list">{qualifications.map(x=><div key={x.id}><span><b>{x.worker_name||x.worker}</b><small>{x.position_name||x.position} · {x.level}{x.expires_on?` · bis ${x.expires_on}`:''}</small></span><IonButton size="small" fill="clear" color="danger" onClick={()=>void remove('position-qualifications',x.id)}>Entfernen</IonButton></div>)}</div></section>}
 
-  return (
-    <IonModal isOpen={open} onDidDismiss={onClose} className="scheduler-admin-modal">
-      <div className="scheduler-admin">
-        <header className="scheduler-admin-head">
-          <div>
-            <small>WIW PARITY · PLANUNGSLOGIK</small>
-            <h2>Scheduler konfigurieren</h2>
-            <p>Qualifikationen, Regeln, Tags, Dienstpläne und Vorlagen zentral verwalten.</p>
-          </div>
-          <IonButton fill="clear" onClick={onClose}>Schließen</IonButton>
-        </header>
+      {tab==='tags'&&<section className="scheduler-admin-card"><h3>Skills, Zertifikate & Tags</h3><div className="scheduler-form-grid"><IonInput fill="outline" label="Neuer Tag" labelPlacement="floating" value={tagForm.name} onIonInput={e=>setTagForm({...tagForm,name:val(e)})}/><IonInput fill="outline" {...({type:'color'} as any)} label="Farbe" labelPlacement="floating" value={tagForm.color} onIonInput={e=>setTagForm({...tagForm,color:val(e)})}/><IonButton disabled={!tagForm.name||busy} onClick={()=>void create('skill-tags/',tagForm,'Tag angelegt.',()=>setTagForm({color:'#155eef'}))}>Tag anlegen</IonButton></div><div className="scheduler-tag-strip">{tags.map(t=><IonBadge key={t.id}>{t.name}</IonBadge>)}</div><hr/>
+        <div className="scheduler-form-grid"><IonSelect fill="outline" label="Mitarbeiter" labelPlacement="floating" value={workerTagForm.worker} onIonChange={e=>setWorkerTagForm({...workerTagForm,worker:val(e)})}>{activeWorkers.map(w=><IonSelectOption key={w.id} value={w.id}>{w.user_detail?.name||w.user_detail?.email}</IonSelectOption>)}</IonSelect><IonSelect fill="outline" label="Tag / Zertifikat" labelPlacement="floating" value={workerTagForm.tag} onIonChange={e=>setWorkerTagForm({...workerTagForm,tag:val(e)})}>{tags.map(t=><IonSelectOption key={t.id} value={t.id}>{t.name}</IonSelectOption>)}</IonSelect><IonInput fill="outline" type="date" label="Gültig bis" labelPlacement="floating" value={workerTagForm.expires_on} onIonInput={e=>setWorkerTagForm({...workerTagForm,expires_on:val(e)||null})}/><label className="scheduler-toggle">Verifiziert <IonToggle checked={workerTagForm.verified!==false} onIonChange={e=>setWorkerTagForm({...workerTagForm,verified:e.detail.checked})}/></label><IonButton disabled={busy||!workerTagForm.worker||!workerTagForm.tag} onClick={()=>void create('worker-skill-tags/',workerTagForm,'Mitarbeiter-Tag gespeichert.',()=>setWorkerTagForm({verified:true}))}>Zuordnen</IonButton></div><div className="scheduler-list">{workerTags.map(x=><div key={x.id}><span><b>{x.worker_name}</b><small>{x.tag_name}{x.expires_on?` · bis ${x.expires_on}`:''}</small></span><IonButton size="small" fill="clear" color="danger" onClick={()=>void remove('worker-skill-tags',x.id)}>Entfernen</IonButton></div>)}</div><hr/>
+        <div className="scheduler-form-grid"><IonSelect fill="outline" label="Position" labelPlacement="floating" value={positionTagForm.position} onIonChange={e=>setPositionTagForm({...positionTagForm,position:val(e)})}>{activePositions.map(p=><IonSelectOption key={p.id} value={p.id}>{p.name}</IonSelectOption>)}</IonSelect><IonSelect fill="outline" label="Erforderlicher Tag" labelPlacement="floating" value={positionTagForm.tag} onIonChange={e=>setPositionTagForm({...positionTagForm,tag:val(e)})}>{tags.map(t=><IonSelectOption key={t.id} value={t.id}>{t.name}</IonSelectOption>)}</IonSelect><IonButton disabled={busy||!positionTagForm.position||!positionTagForm.tag} onClick={()=>void create('position-skill-tags/',positionTagForm,'Pflicht-Tag gespeichert.',()=>setPositionTagForm({required:true}))}>Als Pflicht setzen</IonButton></div><div className="scheduler-list">{positionTags.map(x=><div key={x.id}><span><b>{x.position_name}</b><small>{x.tag_name}</small></span><IonButton size="small" fill="clear" color="danger" onClick={()=>void remove('position-skill-tags',x.id)}>Entfernen</IonButton></div>)}</div>
+      </section>}
 
-        <IonSegment scrollable value={tab} onIonChange={(event) => setTab(String(val(event)))}>
-          <IonSegmentButton value="rules"><IonLabel>Regeln</IonLabel></IonSegmentButton>
-          <IonSegmentButton value="qualifications"><IonLabel>Positionen</IonLabel></IonSegmentButton>
-          <IonSegmentButton value="tags"><IonLabel>Tags</IonLabel></IonSegmentButton>
-          <IonSegmentButton value="schedules"><IonLabel>Dienstpläne</IonLabel></IonSegmentButton>
-          <IonSegmentButton value="templates"><IonLabel>Vorlagen</IonLabel></IonSegmentButton>
-          <IonSegmentButton value="readiness"><IonLabel>Readiness</IonLabel></IonSegmentButton>
-        </IonSegment>
+      {tab==='schedules'&&<section className="scheduler-admin-card"><h3>Dienstpläne & Memberships</h3><div className="scheduler-form-grid"><IonInput fill="outline" label="Dienstplanname" labelPlacement="floating" value={scheduleForm.name} onIonInput={e=>setScheduleForm({...scheduleForm,name:val(e)})}/><IonInput fill="outline" label="Zeitzone" labelPlacement="floating" value={scheduleForm.timezone} onIonInput={e=>setScheduleForm({...scheduleForm,timezone:val(e)})}/><IonSelect multiple fill="outline" label="Einsatzorte" labelPlacement="floating" value={scheduleForm.locations||[]} onIonChange={e=>setScheduleForm({...scheduleForm,locations:val(e)})}>{locations.map(l=><IonSelectOption key={l.id} value={l.id}>{l.name}</IonSelectOption>)}</IonSelect><IonButton disabled={busy||!scheduleForm.name} onClick={()=>void create('schedule-groups/',scheduleForm,'Dienstplan angelegt.',()=>setScheduleForm({timezone:'Europe/Berlin',locations:[]}))}>Dienstplan anlegen</IonButton></div><div className="scheduler-list">{schedules.map(s=><div key={s.id}><span><b>{s.name}</b><small>{s.timezone} · {s.location_names?.join(', ')||'Keine Orte'}</small></span><IonButton size="small" fill="clear" color="danger" onClick={()=>void remove('schedule-groups',s.id)}>Entfernen</IonButton></div>)}</div><hr/>
+        <div className="scheduler-form-grid"><IonSelect fill="outline" label="Dienstplan" labelPlacement="floating" value={membershipForm.schedule} onIonChange={e=>setMembershipForm({...membershipForm,schedule:val(e)})}>{schedules.map(s=><IonSelectOption key={s.id} value={s.id}>{s.name}</IonSelectOption>)}</IonSelect><IonSelect fill="outline" label="Mitarbeiter" labelPlacement="floating" value={membershipForm.worker} onIonChange={e=>setMembershipForm({...membershipForm,worker:val(e)})}>{activeWorkers.map(w=><IonSelectOption key={w.id} value={w.id}>{w.user_detail?.name||w.user_detail?.email}</IonSelectOption>)}</IonSelect><label className="scheduler-toggle">Primärer Dienstplan <IonToggle checked={!!membershipForm.primary} onIonChange={e=>setMembershipForm({...membershipForm,primary:e.detail.checked})}/></label><IonButton disabled={busy||!membershipForm.schedule||!membershipForm.worker} onClick={()=>void create('schedule-memberships/',membershipForm,'Dienstplan-Zuordnung gespeichert.',()=>setMembershipForm({active:true}))}>Zuordnen</IonButton></div><div className="scheduler-list">{memberships.map(x=><div key={x.id}><span><b>{x.worker_name}</b><small>{x.schedule_name}{x.primary?' · Primär':''}</small></span><IonButton size="small" fill="clear" color="danger" onClick={()=>void remove('schedule-memberships',x.id)}>Entfernen</IonButton></div>)}</div>
+      </section>}
 
-        <div className="scheduler-admin-body">
-          {tab === 'rules' && (
-            <section className="scheduler-admin-card">
-              <div className="scheduler-card-head"><div><h3>Scheduling Rules</h3><p>Warnen oder hart blockieren – dieselben Regeln gelten für Claim, Assign, Swap und Auto-Assign.</p></div></div>
-              {!policy ? <IonSpinner /> : (
-                <div className="scheduler-form-grid">
-                  <IonInput fill="outline" label="Regelwerk" labelPlacement="floating" value={policy.name} onIonInput={(e) => setPolicy({ ...policy, name: val(e) })} />
-                  <IonInput fill="outline" type="number" label="Mindestruhezeit (Std.)" labelPlacement="floating" value={policy.min_rest_hours} onIonInput={(e) => setPolicy({ ...policy, min_rest_hours: val(e) })} />
-                  <IonInput fill="outline" type="number" label="Max. Tage / Woche" labelPlacement="floating" value={policy.max_days_per_week} onIonInput={(e) => setPolicy({ ...policy, max_days_per_week: val(e) })} />
-                  <IonInput fill="outline" type="number" label="Max. Tage am Stück" labelPlacement="floating" value={policy.max_consecutive_days} onIonInput={(e) => setPolicy({ ...policy, max_consecutive_days: val(e) })} />
-                  <IonInput fill="outline" type="number" label="Max. Wochenstunden" labelPlacement="floating" value={policy.max_weekly_hours} onIonInput={(e) => setPolicy({ ...policy, max_weekly_hours: val(e) })} />
-                  {[
-                    ['qualification_mode', 'Positionsqualifikation'],
-                    ['schedule_membership_mode', 'Dienstplan-Zuordnung'],
-                    ['skill_tag_mode', 'Erforderliche Tags'],
-                    ['availability_mode', 'Nicht verfügbar'],
-                    ['time_off_mode', 'Genehmigte Abwesenheit'],
-                    ['rest_mode', 'Ruhezeit'],
-                    ['hours_mode', 'Wochenstunden'],
-                    ['days_mode', 'Arbeitstage'],
-                  ].map(([field, label]) => (
-                    <IonSelect key={field} fill="outline" label={label} labelPlacement="floating" value={policy[field]} onIonChange={(e) => setPolicy({ ...policy, [field]: val(e) })}>
-                      {modes.map(([mode, text]) => <IonSelectOption key={mode} value={mode}>{text}</IonSelectOption>)}
-                    </IonSelect>
-                  ))}
-                  <div className="scheduler-full scheduler-actions"><IonButton disabled={busy} onClick={savePolicy}>Regeln speichern</IonButton></div>
-                </div>
-              )}
-            </section>
-          )}
+      {tab==='templates'&&<section className="scheduler-admin-card"><h3>Wochenvorlagen</h3><p>Wiederverwendbare Schichtbausteine wie in WIW: erstellen, bearbeiten und auf jede Zielwoche anwenden.</p><div className="scheduler-form-grid"><IonSelect fill="outline" label="Vorlage" labelPlacement="floating" value={selectedTemplate} onIonChange={e=>{const id=String(val(e)||'');setSelectedTemplate(id);const tpl=templates.find(x=>x.id===id);setTemplateMeta(tpl?{name:tpl.name,schedule:tpl.schedule||null,notes:tpl.notes||''}:{name:'',schedule:null,notes:''})}}><IonSelectOption value="">Neue Vorlage</IonSelectOption>{templates.map(t=><IonSelectOption key={t.id} value={t.id}>{t.name}</IonSelectOption>)}</IonSelect><IonButton fill="outline" onClick={()=>{setSelectedTemplate('');setTemplateMeta({name:'',schedule:null,notes:''});setTemplateItem(defaultItem())}}>Neue Vorlage</IonButton><IonInput fill="outline" label="Vorlagenname" labelPlacement="floating" value={templateMeta.name} onIonInput={e=>setTemplateMeta({...templateMeta,name:val(e)})}/><IonSelect fill="outline" label="Dienstplan (optional)" labelPlacement="floating" value={templateMeta.schedule||''} onIonChange={e=>setTemplateMeta({...templateMeta,schedule:val(e)||null})}><IonSelectOption value="">Global</IonSelectOption>{schedules.map(s=><IonSelectOption key={s.id} value={s.id}>{s.name}</IonSelectOption>)}</IonSelect><IonTextarea className="scheduler-full" fill="outline" label="Notiz" labelPlacement="floating" value={templateMeta.notes} onIonInput={e=>setTemplateMeta({...templateMeta,notes:val(e)})}/><div className="scheduler-full scheduler-actions">{selectedTemplate&&<IonButton fill="clear" color="danger" onClick={()=>void remove('schedule-templates',selectedTemplate)}>Vorlage löschen</IonButton>}<IonButton disabled={busy||!templateMeta.name} onClick={()=>void saveTemplateMeta()}>Vorlage speichern</IonButton></div></div>
+        {selectedTemplate&&<><hr/><h3>Schichtbausteine</h3><div className="scheduler-template-items">{currentTemplate?.items?.map((item:any)=><div key={item.id}><span><b>{weekdays[item.weekday]} · {item.start_time?.slice(0,5)}–{item.end_time?.slice(0,5)}</b><small>{item.client_name} · {item.location_name} · {item.position_name} · {item.required_count} MA · {item.break_minutes} Min. Pause</small></span><IonButton size="small" fill="clear" color="danger" onClick={()=>void deleteTemplateItem(item.id)}>Entfernen</IonButton></div>)||null}{!currentTemplate?.items?.length&&<p>Noch keine Schichtbausteine.</p>}</div><div className="scheduler-form-grid template-item-form"><IonSelect fill="outline" label="Wochentag" labelPlacement="floating" value={templateItem.weekday} onIonChange={e=>setTemplateItem({...templateItem,weekday:Number(val(e))})}>{weekdays.map((d,i)=><IonSelectOption key={d} value={i}>{d}</IonSelectOption>)}</IonSelect><IonInput fill="outline" type="time" label="Beginn" labelPlacement="floating" value={templateItem.start_time} onIonInput={e=>setTemplateItem({...templateItem,start_time:val(e)})}/><IonInput fill="outline" type="time" label="Ende" labelPlacement="floating" value={templateItem.end_time} onIonInput={e=>setTemplateItem({...templateItem,end_time:val(e)})}/><IonSelect fill="outline" label="Kunde" labelPlacement="floating" value={templateItem.client} onIonChange={e=>setTemplateItem({...templateItem,client:val(e)})}>{clients.map(c=><IonSelectOption key={c.id} value={c.id}>{c.name}</IonSelectOption>)}</IonSelect><IonSelect fill="outline" label="Einsatzort" labelPlacement="floating" value={templateItem.location} onIonChange={e=>setTemplateItem({...templateItem,location:val(e)})}>{locations.filter(l=>!templateItem.client||!l.client||l.client===templateItem.client).map(l=><IonSelectOption key={l.id} value={l.id}>{l.name}</IonSelectOption>)}</IonSelect><IonSelect fill="outline" label="Position" labelPlacement="floating" value={templateItem.position} onIonChange={e=>setTemplateItem({...templateItem,position:val(e)})}>{activePositions.map(p=><IonSelectOption key={p.id} value={p.id}>{p.name}</IonSelectOption>)}</IonSelect><IonInput fill="outline" type="number" min="1" label="Benötigte Mitarbeiter" labelPlacement="floating" value={templateItem.required_count} onIonInput={e=>setTemplateItem({...templateItem,required_count:Number(val(e)||1)})}/><IonInput fill="outline" type="number" min="0" label="Pause (Min.)" labelPlacement="floating" value={templateItem.break_minutes} onIonInput={e=>setTemplateItem({...templateItem,break_minutes:Number(val(e)||0)})}/><IonTextarea className="scheduler-full" fill="outline" label="Hinweise" labelPlacement="floating" value={templateItem.notes} onIonInput={e=>setTemplateItem({...templateItem,notes:val(e)})}/><IonButton className="scheduler-full" disabled={busy} onClick={()=>void addTemplateItem()}>Schichtbaustein hinzufügen</IonButton></div><hr/><h3>Auf Woche anwenden</h3><div className="scheduler-form-grid"><IonInput fill="outline" type="date" label="Zielwoche" labelPlacement="floating" value={applyForm.target_week_start} onIonInput={e=>setApplyForm({...applyForm,target_week_start:val(e)})}/><label className="scheduler-toggle">Direkt veröffentlichen <IonToggle checked={!!applyForm.publish} onIonChange={e=>setApplyForm({...applyForm,publish:e.detail.checked})}/></label><IonButton disabled={busy||!applyForm.target_week_start} onClick={()=>void applyTemplate()}>Vorlage anwenden</IonButton></div></>}
+      </section>}
 
-          {tab === 'qualifications' && (
-            <section className="scheduler-admin-card">
-              <h3>Mitarbeiter ↔ Positionen</h3>
-              <p>Nur qualifizierte Mitarbeiter können bei hartem Regelwerk eingeplant werden.</p>
-              <div className="scheduler-form-grid">
-                <IonSelect fill="outline" label="Mitarbeiter" labelPlacement="floating" value={qualification.worker} onIonChange={(e) => setQualification({ ...qualification, worker: val(e) })}>
-                  {activeWorkers.map((worker) => <IonSelectOption key={worker.id} value={worker.id}>{worker.user_detail?.name || worker.user_detail?.email}</IonSelectOption>)}
-                </IonSelect>
-                <IonSelect fill="outline" label="Position" labelPlacement="floating" value={qualification.position} onIonChange={(e) => setQualification({ ...qualification, position: val(e) })}>
-                  {activePositions.map((position) => <IonSelectOption key={position.id} value={position.id}>{position.name}</IonSelectOption>)}
-                </IonSelect>
-                <IonSelect fill="outline" label="Stufe" labelPlacement="floating" value={qualification.level} onIonChange={(e) => setQualification({ ...qualification, level: val(e) })}>
-                  <IonSelectOption value="trainee">In Einarbeitung</IonSelectOption>
-                  <IonSelectOption value="qualified">Qualifiziert</IonSelectOption>
-                  <IonSelectOption value="lead">Leitung</IonSelectOption>
-                </IonSelect>
-                <IonInput fill="outline" type="date" label="Gültig bis" labelPlacement="floating" value={qualification.expires_on} onIonInput={(e) => setQualification({ ...qualification, expires_on: val(e) || null })} />
-                <IonButton disabled={busy || !qualification.worker || !qualification.position} onClick={async () => {
-                  if (await post('position-qualifications/', qualification, 'Qualifikation gespeichert.')) setQualification({ level: 'qualified' });
-                }}>Qualifikation hinzufügen</IonButton>
-              </div>
-              <div className="scheduler-list">
-                {qualifications.map((item) => <div key={item.id}><span><b>{item.worker_name || item.worker}</b><small>{item.position_name || item.position} · {item.level}</small></span><IonButton size="small" fill="clear" color="danger" onClick={() => void remove('position-qualifications', item.id)}>Entfernen</IonButton></div>)}
-              </div>
-            </section>
-          )}
-
-          {tab === 'tags' && (
-            <section className="scheduler-admin-card">
-              <h3>Skills, Zertifikate & Tags</h3>
-              <div className="scheduler-form-grid">
-                <IonInput fill="outline" label="Neuer Tag" labelPlacement="floating" value={tagForm.name} onIonInput={(e) => setTagForm({ ...tagForm, name: val(e) })} />
-                <IonInput fill="outline" {...({ type: 'color' } as any)} label="Farbe" labelPlacement="floating" value={tagForm.color} onIonInput={(e) => setTagForm({ ...tagForm, color: val(e) })} />
-                <IonButton disabled={!tagForm.name || busy} onClick={async () => { if (await post('skill-tags/', tagForm, 'Tag angelegt.')) setTagForm({ color: '#155eef' }); }}>Tag anlegen</IonButton>
-              </div>
-              <div className="scheduler-tag-strip">{tags.map((tag) => <IonBadge key={tag.id}>{tag.name}</IonBadge>)}</div>
-              <hr />
-              <div className="scheduler-form-grid">
-                <IonSelect fill="outline" label="Mitarbeiter" labelPlacement="floating" value={workerTagForm.worker} onIonChange={(e) => setWorkerTagForm({ ...workerTagForm, worker: val(e) })}>{activeWorkers.map((worker) => <IonSelectOption key={worker.id} value={worker.id}>{worker.user_detail?.name || worker.user_detail?.email}</IonSelectOption>)}</IonSelect>
-                <IonSelect fill="outline" label="Tag / Zertifikat" labelPlacement="floating" value={workerTagForm.tag} onIonChange={(e) => setWorkerTagForm({ ...workerTagForm, tag: val(e) })}>{tags.map((tag) => <IonSelectOption key={tag.id} value={tag.id}>{tag.name}</IonSelectOption>)}</IonSelect>
-                <IonInput fill="outline" type="date" label="Gültig bis" labelPlacement="floating" value={workerTagForm.expires_on} onIonInput={(e) => setWorkerTagForm({ ...workerTagForm, expires_on: val(e) || null })} />
-                <label className="scheduler-toggle">Verifiziert <IonToggle checked={workerTagForm.verified !== false} onIonChange={(e) => setWorkerTagForm({ ...workerTagForm, verified: e.detail.checked })} /></label>
-                <IonButton disabled={busy || !workerTagForm.worker || !workerTagForm.tag} onClick={async () => { if (await post('worker-skill-tags/', workerTagForm, 'Mitarbeiter-Tag gespeichert.')) setWorkerTagForm({ verified: true }); }}>Mitarbeiter zuordnen</IonButton>
-              </div>
-              <div className="scheduler-list">{workerTags.map((item) => <div key={item.id}><span><b>{item.worker_name}</b><small>{item.tag_name}{item.expires_on ? ` · bis ${item.expires_on}` : ''}</small></span><IonButton size="small" fill="clear" color="danger" onClick={() => void remove('worker-skill-tags', item.id)}>Entfernen</IonButton></div>)}</div>
-              <hr />
-              <div className="scheduler-form-grid">
-                <IonSelect fill="outline" label="Position" labelPlacement="floating" value={positionTagForm.position} onIonChange={(e) => setPositionTagForm({ ...positionTagForm, position: val(e) })}>{activePositions.map((position) => <IonSelectOption key={position.id} value={position.id}>{position.name}</IonSelectOption>)}</IonSelect>
-                <IonSelect fill="outline" label="Erforderlicher Tag" labelPlacement="floating" value={positionTagForm.tag} onIonChange={(e) => setPositionTagForm({ ...positionTagForm, tag: val(e) })}>{tags.map((tag) => <IonSelectOption key={tag.id} value={tag.id}>{tag.name}</IonSelectOption>)}</IonSelect>
-                <IonButton disabled={busy || !positionTagForm.position || !positionTagForm.tag} onClick={async () => { if (await post('position-skill-tags/', positionTagForm, 'Pflicht-Tag gespeichert.')) setPositionTagForm({ required: true }); }}>Als Pflicht setzen</IonButton>
-              </div>
-              <div className="scheduler-list">{positionTags.map((item) => <div key={item.id}><span><b>{item.position_name}</b><small>{item.tag_name}</small></span><IonButton size="small" fill="clear" color="danger" onClick={() => void remove('position-skill-tags', item.id)}>Entfernen</IonButton></div>)}</div>
-            </section>
-          )}
-
-          {tab === 'schedules' && (
-            <section className="scheduler-admin-card">
-              <h3>Dienstpläne & Memberships</h3>
-              <div className="scheduler-form-grid">
-                <IonInput fill="outline" label="Dienstplanname" labelPlacement="floating" value={scheduleForm.name} onIonInput={(e) => setScheduleForm({ ...scheduleForm, name: val(e) })} />
-                <IonInput fill="outline" label="Zeitzone" labelPlacement="floating" value={scheduleForm.timezone} onIonInput={(e) => setScheduleForm({ ...scheduleForm, timezone: val(e) })} />
-                <IonSelect multiple fill="outline" label="Einsatzorte" labelPlacement="floating" value={scheduleForm.locations || []} onIonChange={(e) => setScheduleForm({ ...scheduleForm, locations: val(e) })}>{locations.map((location) => <IonSelectOption key={location.id} value={location.id}>{location.name}</IonSelectOption>)}</IonSelect>
-                <IonButton disabled={busy || !scheduleForm.name} onClick={async () => { if (await post('schedule-groups/', scheduleForm, 'Dienstplan angelegt.')) setScheduleForm({ timezone: 'Europe/Berlin', locations: [] }); }}>Dienstplan anlegen</IonButton>
-              </div>
-              <div className="scheduler-list">{schedules.map((item) => <div key={item.id}><span><b>{item.name}</b><small>{item.location_names?.join(', ') || 'Keine Orte'}</small></span></div>)}</div>
-              <hr />
-              <div className="scheduler-form-grid">
-                <IonSelect fill="outline" label="Dienstplan" labelPlacement="floating" value={membershipForm.schedule} onIonChange={(e) => setMembershipForm({ ...membershipForm, schedule: val(e) })}>{schedules.map((item) => <IonSelectOption key={item.id} value={item.id}>{item.name}</IonSelectOption>)}</IonSelect>
-                <IonSelect fill="outline" label="Mitarbeiter" labelPlacement="floating" value={membershipForm.worker} onIonChange={(e) => setMembershipForm({ ...membershipForm, worker: val(e) })}>{activeWorkers.map((worker) => <IonSelectOption key={worker.id} value={worker.id}>{worker.user_detail?.name || worker.user_detail?.email}</IonSelectOption>)}</IonSelect>
-                <IonButton disabled={busy || !membershipForm.schedule || !membershipForm.worker} onClick={async () => { if (await post('schedule-memberships/', membershipForm, 'Dienstplan-Zuordnung gespeichert.')) setMembershipForm({ active: true }); }}>Zuordnen</IonButton>
-              </div>
-              <div className="scheduler-list">{memberships.map((item) => <div key={item.id}><span><b>{item.worker_name}</b><small>{item.schedule_name}</small></span><IonButton size="small" fill="clear" color="danger" onClick={() => void remove('schedule-memberships', item.id)}>Entfernen</IonButton></div>)}</div>
-            </section>
-          )}
-
-          {tab === 'templates' && (
-            <section className="scheduler-admin-card">
-              <h3>Wochenvorlagen</h3>
-              <p>Vorlagen können später direkt auf eine Zielwoche angewendet werden. Jede Vorlage kann beliebig viele Schichtbausteine enthalten.</p>
-              <div className="scheduler-form-grid">
-                <IonInput fill="outline" label="Vorlagenname" labelPlacement="floating" value={templateForm.name} onIonInput={(e) => setTemplateForm({ ...templateForm, name: val(e) })} />
-                <IonSelect fill="outline" label="Dienstplan (optional)" labelPlacement="floating" value={templateForm.schedule} onIonChange={(e) => setTemplateForm({ ...templateForm, schedule: val(e) || null })}><IonSelectOption value="">Ohne feste Zuordnung</IonSelectOption>{schedules.map((item) => <IonSelectOption key={item.id} value={item.id}>{item.name}</IonSelectOption>)}</IonSelect>
-                <IonTextarea fill="outline" label="Notiz" labelPlacement="floating" value={templateForm.notes} onIonInput={(e) => setTemplateForm({ ...templateForm, notes: val(e) })} />
-                <IonButton disabled={busy || !templateForm.name} onClick={async () => { if (await post('schedule-templates/', { ...templateForm, items: [] }, 'Vorlage angelegt.')) setTemplateForm({}); }}>Vorlage anlegen</IonButton>
-              </div>
-              <div className="scheduler-list">{templates.map((item) => <div key={item.id}><span><b>{item.name}</b><small>{item.schedule_name || 'Global'} · {item.items?.length || 0} Bausteine</small></span></div>)}</div>
-              <div className="scheduler-note">Schichtbausteine können über dieselbe API als <code>items</code> gepflegt werden; der nächste Scheduler-Schritt ergänzt dafür den visuellen Wocheneditor.</div>
-            </section>
-          )}
-
-          {tab === 'readiness' && (
-            <section className="scheduler-admin-card">
-              <h3>WIW Replacement Readiness · Scheduler</h3>
-              {!readiness ? <IonSpinner /> : (
-                <>
-                  <div className="scheduler-readiness-grid">
-                    <div><small>Qualifikationsabdeckung</small><strong>{readiness.qualification_coverage_percent}%</strong></div>
-                    <div><small>Aktive Regelwerke</small><strong>{readiness.policies}</strong></div>
-                    <div><small>Dienstpläne</small><strong>{readiness.schedules}</strong></div>
-                    <div><small>Vorlagen</small><strong>{readiness.templates}</strong></div>
-                  </div>
-                  <div className={`scheduler-readiness-state ${readiness.replacement_ready ? 'ready' : 'pending'}`}>
-                    <b>{readiness.replacement_ready ? 'Scheduler ist hart abgesichert.' : 'Noch nicht bereit für harten WIW-Cutover.'}</b>
-                    <p>Vor dem Cutover müssen alle aktiven Mitarbeiter Positionsqualifikationen besitzen und die kritischen Regeln auf „Blockieren“ stehen.</p>
-                  </div>
-                </>
-              )}
-            </section>
-          )}
-        </div>
-        <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={() => setToast('')} />
-      </div>
-    </IonModal>
-  );
+      {tab==='readiness'&&<section className="scheduler-admin-card"><h3>WIW Replacement Readiness · Scheduler</h3>{!readiness?<IonSpinner/>:<><div className="scheduler-readiness-grid"><div><small>Qualifikationsabdeckung</small><strong>{readiness.qualification_coverage_percent}%</strong></div><div><small>Regelwerke</small><strong>{readiness.policies}</strong></div><div><small>Dienstpläne</small><strong>{readiness.schedules}</strong></div><div><small>Vorlagen</small><strong>{readiness.templates}</strong></div></div><div className={`scheduler-readiness-state ${readiness.replacement_ready?'ready':'pending'}`}><b>{readiness.replacement_ready?'Scheduler ist hart abgesichert.':'Noch nicht bereit für harten WIW-Cutover.'}</b><p>Vor Cutover: 100% Positionsqualifikation und kritische Regeln auf „Blockieren“.</p></div></>}</section>}
+    </div><IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={()=>setToast('')}/>
+  </div></IonModal>;
 }
