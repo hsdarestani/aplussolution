@@ -120,10 +120,37 @@ function nativeWorkforceCutoverTransforms(): Plugin {
   };
 }
 
+/**
+ * Keep the Scheduler source focused while surfacing the same absence workflow
+ * next to a concrete staffing assignment. The guarded marker makes source
+ * drift fail the build instead of silently removing the operational action.
+ */
+function schedulerAbsenceTransforms(): Plugin {
+  const importMarker = "import SchedulerGroupedGrid from './SchedulerGroupedGrid';";
+  const releaseMarker = `{workerView && mine && <IonButton fill="outline" color="medium" disabled={busy} onClick={() => setReleaseTarget(row)}>Freigeben</IonButton>}`;
+  return {
+    name: 'scheduler-absence-transforms',
+    enforce: 'pre',
+    transform(code, id) {
+      const normalizedId = id.replace(/\\/g, '/').split('?')[0];
+      if (!normalizedId.endsWith('/src/ScheduleV3.tsx')) return null;
+      if (!code.includes(importMarker)) this.error('Scheduler absence import marker changed.');
+      if (!code.includes(releaseMarker)) this.error('Scheduler absence action marker changed.');
+      let next = code.replace(importMarker, `${importMarker}\nimport SchedulerAbsenceActions from './SchedulerAbsenceActions';`);
+      next = next.replace(
+        releaseMarker,
+        `${releaseMarker}\n            {((workerView && mine) || (manager && row.assignments?.length > 0)) && <SchedulerAbsenceActions user={user} shift={row} onChanged={load}/>} `,
+      );
+      return { code: next, map: null };
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     appShellTransforms(),
     nativeWorkforceCutoverTransforms(),
+    schedulerAbsenceTransforms(),
     react(),
     VitePWA({
       registerType: 'autoUpdate',
