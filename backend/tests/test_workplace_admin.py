@@ -4,9 +4,9 @@ import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from core.models import ClientCompany, Location, Position, Shift, User, WorkerProfile
+from core.models import ClientCompany, Location, Shift
 from core.scheduling_rules import evaluate_worker_for_shift
-from core.workplace_access import seed_system_roles
+from core.workplace_access import capabilities_for_user, seed_system_roles
 from core.workplace_models import AccessRole, UserAccessAssignment, WorkplaceSettings
 
 
@@ -69,13 +69,31 @@ def test_scheduler_role_cannot_open_payroll(manager_user):
     assert client.get('/api/workplace/settings/').status_code == 403
 
 
+def test_manager_role_admin_is_gated_by_workplace_setting(manager_user):
+    seed_system_roles()
+    custom = AccessRole.objects.create(
+        code='people-admin', name='People Admin', permissions=['manager.access', 'roles.view', 'roles.manage'], wage_visibility='none'
+    )
+    UserAccessAssignment.objects.create(user=manager_user, access_role=custom, scope_mode='all')
+    settings = WorkplaceSettings.load()
+    settings.manager_can_manage_roles = False
+    settings.save(update_fields=['manager_can_manage_roles', 'updated_at'])
+    assert 'roles.manage' not in capabilities_for_user(manager_user)
+    assert manager_client(manager_user).post('/api/access-roles/', {'code': 'denied', 'name': 'Denied', 'permissions': []}, format='json').status_code == 403
+
+    settings.manager_can_manage_roles = True
+    settings.save(update_fields=['manager_can_manage_roles', 'updated_at'])
+    assert 'roles.manage' in capabilities_for_user(manager_user)
+    assert manager_client(manager_user).post('/api/access-roles/', {'code': 'allowed', 'name': 'Allowed', 'permissions': []}, format='json').status_code == 201
+
+
 def test_scoped_supervisor_only_sees_scoped_workers_and_shifts(manager_user, worker_user, second_worker, company, location, position):
     other_company = ClientCompany.objects.create(name='Andere GmbH', customer_number='KD-099')
     other_location = Location.objects.create(client=other_company, name='Berlin', address='Berlin')
     now = timezone.now() + timedelta(days=2)
     scoped_shift = Shift.objects.create(client=company, location=location, position=position, starts_at=now, ends_at=now + timedelta(hours=5), status=Shift.Status.PUBLISHED)
     Shift.objects.create(client=other_company, location=other_location, position=position, starts_at=now, ends_at=now + timedelta(hours=5), status=Shift.Status.PUBLISHED)
-    assignment = assign_role(manager_user, 'supervisor', scope='scoped', locations=[location], workers=[worker_user.worker_profile])
+    assign_role(manager_user, 'supervisor', scope='scoped', locations=[location], workers=[worker_user.worker_profile])
     client = manager_client(manager_user)
 
     workers = unpack(client.get('/api/workers/'))
@@ -87,7 +105,7 @@ def test_scoped_supervisor_only_sees_scoped_workers_and_shifts(manager_user, wor
     assert snapshot.status_code == 200
     assert snapshot.json()['current_user']['scope']['mode'] == 'scoped'
     assert {item['id'] for item in snapshot.json()['workers']} == {str(worker_user.worker_profile.id)}
-    assert snapshot.json()['assignments'][0]['user'] == str(manager_user.id)
+    assert snapshot.json()['assignments'][0]['user'] == manager_user.id
 
 
 def test_wage_fields_are_redacted_for_role_without_wage_access(manager_user, worker_user):
