@@ -30,7 +30,6 @@ const statusLabels: Record<string, string> = {
 };
 
 export default function AbsenceCoveragePanel({ user, onChanged }: { user: User; onChanged?: () => void | Promise<void> }) {
-  if (user.role === 'client') return null;
   const manager = isManager(user);
   const [cases, setCases] = useState<any[]>([]);
   const [offers, setOffers] = useState<any[]>([]);
@@ -41,13 +40,15 @@ export default function AbsenceCoveragePanel({ user, onChanged }: { user: User; 
   const [report, setReport] = useState<any>({ kind: manager ? 'no_show' : 'sick' });
   const [candidateCase, setCandidateCase] = useState<any>();
   const [candidates, setCandidates] = useState<any[]>([]);
+  const [candidatesLoaded, setCandidatesLoaded] = useState(false);
   const [selectedCandidates, setSelectedCandidates] = useState<Set<string>>(new Set());
   const [offerHours, setOfferHours] = useState(12);
 
   async function load() {
+    if (user.role === 'client') return;
     try {
       const [caseRows, shiftRows, offerRows] = await Promise.all([
-        apiAll(manager ? 'absence-cases/?ordering=-reported_at' : 'absence-cases/?ordering=-reported_at'),
+        apiAll('absence-cases/?ordering=-reported_at'),
         apiAll(manager ? 'shifts/?ordering=starts_at' : 'shifts/mine/?ordering=starts_at'),
         manager ? Promise.resolve([]) : apiAll('coverage-offers/?ordering=-offered_at'),
       ]);
@@ -59,7 +60,7 @@ export default function AbsenceCoveragePanel({ user, onChanged }: { user: User; 
     }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); }, [user.role]);
 
   async function mutate(path: string, payload: any, success: string) {
     setBusy(true);
@@ -83,7 +84,7 @@ export default function AbsenceCoveragePanel({ user, onChanged }: { user: User; 
       key: `${shift.id}`,
       shift: shift.id,
       worker: undefined,
-      slot: shift.assignments?.find((item: any) => item.mine)?.slot || shift.assignments?.[0]?.slot,
+      slot: shift.assignments?.[0]?.slot,
       label: `${dateTime(shift.starts_at)} · ${shift.position_name} · ${shift.location_name}`,
     }));
     return shifts.flatMap((shift) => (shift.assignments || []).map((assignment: any) => ({
@@ -92,7 +93,7 @@ export default function AbsenceCoveragePanel({ user, onChanged }: { user: User; 
       worker: assignment.worker,
       slot: assignment.slot,
       label: `${dateTime(shift.starts_at)} · ${assignment.worker_name} · ${shift.position_name}`,
-    }))).filter((item) => item.worker);
+    }))).filter((item) => item.worker && new Date(shifts.find((shift) => shift.id === item.shift)?.ends_at || 0).getTime() >= now);
   }, [shifts, manager]);
 
   async function submitReport() {
@@ -111,11 +112,13 @@ export default function AbsenceCoveragePanel({ user, onChanged }: { user: User; 
   async function openCandidates(item: any) {
     setCandidateCase(item);
     setCandidates([]);
+    setCandidatesLoaded(false);
     setSelectedCandidates(new Set());
     try {
       const result: any = await api(`absence-cases/${item.id}/candidates/`);
       setCandidates(result.workers || []);
     } catch (error: any) { setToast(error.message); }
+    finally { setCandidatesLoaded(true); }
   }
 
   async function sendOffers() {
@@ -135,6 +138,7 @@ export default function AbsenceCoveragePanel({ user, onChanged }: { user: User; 
   const activeCases = cases.filter((item) => activeStatuses.has(item.status));
   const shortNotice = activeCases.filter((item) => item.short_notice).length;
   const pendingOffers = offers.filter((item) => item.status === 'pending');
+  if (user.role === 'client') return null;
 
   return <section className="absence-workspace" data-testid="absence-coverage-panel">
     <div className="absence-head">
@@ -177,7 +181,7 @@ export default function AbsenceCoveragePanel({ user, onChanged }: { user: User; 
 
     <IonModal isOpen={!!candidateCase} onDidDismiss={() => setCandidateCase(undefined)} className="absence-modal candidate-modal">
       <div className="absence-modal-body"><div className="absence-modal-head"><div><small>FIND REPLACEMENT</small><h2>Geeignete Ersatzkräfte</h2><p>{candidateCase && `${candidateCase.shift_title} · ${dateTime(candidateCase.shift_starts_at)}`}</p></div><IonButton fill="clear" onClick={() => setCandidateCase(undefined)}>Schließen</IonButton></div>
-        {!candidates.length ? <div className="absence-loading"><IonSpinner/><span>Eligibility wird geprüft …</span></div> : <div className="candidate-list">{candidates.map((candidate) => <article key={candidate.worker} className={candidate.eligible ? 'eligible' : 'blocked'}><IonCheckbox disabled={!candidate.eligible} checked={selectedCandidates.has(candidate.worker)} onIonChange={(e) => setSelectedCandidates((current) => { const next = new Set(current); e.detail.checked ? next.add(candidate.worker) : next.delete(candidate.worker); return next; })}/><div><b>{candidate.worker_name}</b><small>{candidate.eligible ? `Geeignet · Score ${candidate.score}` : candidate.blockers?.[0]?.message || 'Nicht geeignet'}</small>{candidate.warnings?.map((warning: any) => <em key={warning.code}>{warning.message}</em>)}</div>{candidate.eligible && <IonButton size="small" fill="outline" onClick={() => void direct(candidate)}>Direkt einsetzen</IonButton>}</article>)}</div>}
+        {!candidatesLoaded ? <div className="absence-loading"><IonSpinner/><span>Eligibility wird geprüft …</span></div> : !candidates.length ? <div className="absence-empty">Keine Ersatzkräfte verfügbar.</div> : <div className="candidate-list">{candidates.map((candidate) => <article key={candidate.worker} className={candidate.eligible ? 'eligible' : 'blocked'}><IonCheckbox disabled={!candidate.eligible} checked={selectedCandidates.has(candidate.worker)} onIonChange={(e) => setSelectedCandidates((current) => { const next = new Set(current); e.detail.checked ? next.add(candidate.worker) : next.delete(candidate.worker); return next; })}/><div><b>{candidate.worker_name}</b><small>{candidate.eligible ? `Geeignet · Score ${candidate.score}` : candidate.blockers?.[0]?.message || 'Nicht geeignet'}</small>{candidate.warnings?.map((warning: any) => <em key={warning.code}>{warning.message}</em>)}</div>{candidate.eligible && <IonButton size="small" fill="outline" onClick={() => void direct(candidate)}>Direkt einsetzen</IonButton>}</article>)}</div>}
         <div className="candidate-footer"><IonInput fill="outline" type="number" min="1" max="72" label="Antwortfrist (Std.)" labelPlacement="floating" value={offerHours} onIonInput={(e) => setOfferHours(Number(val(e) || 12))}/><IonButton disabled={busy || !selectedCandidates.size} onClick={() => void sendOffers()}>An {selectedCandidates.size} Mitarbeiter senden</IonButton></div>
       </div>
     </IonModal>
