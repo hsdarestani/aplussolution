@@ -86,7 +86,10 @@ def capabilities_for_user(user):
         assignment = assignment_for(user)
         if not assignment:
             return sorted(MANAGER_LEGACY_CAPABILITIES)
-        return sorted(set(assignment.access_role.permissions or []) & CAPABILITIES)
+        capabilities = set(assignment.access_role.permissions or []) & CAPABILITIES
+        if not WorkplaceSettings.load().manager_can_manage_roles:
+            capabilities.discard('roles.manage')
+        return sorted(capabilities)
     if user.role == User.Role.WORKER:
         return ['attendance.view', 'schedule.view']
     return []
