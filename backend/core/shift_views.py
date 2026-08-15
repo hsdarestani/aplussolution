@@ -12,6 +12,7 @@ from .services import audit
 from .shift_api import ShiftApiSerializer
 from .shift_service import claim_shift, ensure_slots, refresh_shift_state, release_shift
 from .shift_slots import ShiftSlot
+from .workplace_access import has_capability, location_in_scope, visible_locations
 
 
 class StaffingShiftViewSet(viewsets.ModelViewSet):
@@ -33,18 +34,27 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = self.base_queryset()
-        if user.role in {User.Role.ADMIN, User.Role.MANAGER}:
+        if user.role == User.Role.ADMIN:
             return qs
+        if user.role == User.Role.MANAGER:
+            if not has_capability(user, 'schedule.view'):
+                return qs.none()
+            return qs.filter(location__in=visible_locations(user)).distinct()
         if user.role == User.Role.WORKER:
             return qs.filter(Q(slots__worker=user.worker_profile,slots__status='claimed')|Q(status=Shift.Status.PUBLISHED,slots__status='open')).distinct()
         return qs.filter(client__contacts=user).distinct()
 
     def get_permissions(self):
         if self.action in {'create','update','partial_update','destroy','publish','unpublish'}:
+            self.required_capability = 'schedule.publish' if self.action in {'publish','unpublish'} else 'schedule.edit'
             return [IsAdminOrManager()]
         return [IsAuthenticated()]
 
     def perform_create(self, serializer):
+        location = serializer.validated_data.get('location')
+        if self.request.user.role == User.Role.MANAGER and (not location or not location_in_scope(self.request.user, location)):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('Standort liegt außerhalb deines Verantwortungsbereichs.')
         obj = serializer.save(worker=None, is_open=False)
         ensure_slots(obj)
         if obj.status == Shift.Status.PUBLISHED:
@@ -55,7 +65,10 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         from .scheduling_rules import ensure_worker_eligible
-
+        location = serializer.validated_data.get('location', serializer.instance.location)
+        if self.request.user.role == User.Role.MANAGER and not location_in_scope(self.request.user, location):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('Standort liegt außerhalb deines Verantwortungsbereichs.')
         with transaction.atomic():
             obj = serializer.save(worker=None)
             ensure_slots(obj)
