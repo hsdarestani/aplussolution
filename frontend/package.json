@@ -21,6 +21,7 @@
     "@capacitor/geolocation": "^7.1.5",
     "@capacitor/haptics": "^7.0.1",
     "@capacitor/keyboard": "^7.0.1",
+    "@capacitor/push-notifications": "^7.0.0",
     "@capacitor/status-bar": "^7.0.1",
     "@ionic/react": "^8.7.3",
     "ionicons": "^7.4.0",
