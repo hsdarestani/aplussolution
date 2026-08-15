@@ -39,7 +39,7 @@ def assigned_shift(company, location, position, worker):
     return shift, slot
 
 
-def test_absent_worker_cannot_see_internal_offer_targets_or_manager_note(auth_admin, worker_user, second_worker, company, location, position):
+def test_absent_worker_cannot_see_internal_offer_targets_or_manager_note(auth_admin, admin_user, worker_user, second_worker, company, location, position):
     shift, slot = assigned_shift(company, location, position, worker_user.worker_profile)
     reported = auth_admin.post(
         '/api/operations/callouts/report/',
@@ -49,7 +49,7 @@ def test_absent_worker_cannot_see_internal_offer_targets_or_manager_note(auth_ad
     case = ShiftAbsenceCase.objects.get(pk=reported.data['id'])
     case.manager_note = 'internal dispatcher note'
     case.save(update_fields=['manager_note', 'updated_at'])
-    CoverageOffer.objects.create(case=case, worker=second_worker, offered_by=auth_admin.handler._force_user, expires_at=timezone.now() + timedelta(hours=1))
+    CoverageOffer.objects.create(case=case, worker=second_worker, offered_by=admin_user, expires_at=timezone.now() + timedelta(hours=1))
 
     response = auth(worker_user).get(f'/api/absence-cases/{case.id}/')
     assert response.status_code == 200
