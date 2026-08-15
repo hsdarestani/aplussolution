@@ -8,7 +8,7 @@ export default function AttendanceV3({ user }: { user: User }) {
   const [tab, setTab] = useState<'attendance' | 'payroll'>('attendance');
   return <>
     <div className="time-workspace-tabs">
-      <IonSegment value={tab} onIonChange={(event) => setTab(String(event.detail.value) as 'attendance' | 'payroll')}>
+      <IonSegment aria-label="Arbeitszeitbereiche" value={tab} onIonChange={(event) => setTab(String(event.detail.value) as 'attendance' | 'payroll')}>
         <IonSegmentButton value="attendance"><IonLabel>Zeiterfassung</IonLabel></IonSegmentButton>
         <IonSegmentButton value="payroll"><IonLabel>Abrechnung</IonLabel></IonSegmentButton>
       </IonSegment>
