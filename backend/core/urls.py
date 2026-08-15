@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views
+from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_v4_views, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -18,6 +18,9 @@ for prefix, view in [
     ('shift-swaps', views.ShiftSwapViewSet),
     ('absence-cases', absence_views.AbsenceCaseViewSet),
     ('coverage-offers', absence_views.CoverageOfferViewSet),
+    ('attendance-policies', attendance_v4_views.AttendancePolicyViewSet),
+    ('attendance-notices', attendance_v4_views.AttendanceNoticeViewSet),
+    ('attendance-terminals', attendance_v4_views.AttendanceTerminalViewSet),
     ('contract-templates', views.ContractTemplateViewSet),
     ('contracts', contract_views.ContractViewSet),
     ('documents', searchable_views.DocumentViewSet),
@@ -57,12 +60,17 @@ urlpatterns = [
     path('document-center/templates/<slug:slug>/source/', document_center_views.upload_template_source),
     path('document-center/reminders/run/', document_center_views.run_contract_reminders),
     path('contracts/<uuid:pk>/readiness/', document_center_views.contract_readiness_view),
-    path('attendance/home/', attendance_views.employee_attendance_home),
+    path('attendance/home/', attendance_v4_views.attendance_home_v4),
+    path('attendance/breaks/start/', attendance_v4_views.break_start),
+    path('attendance/breaks/end/', attendance_v4_views.break_end),
+    path('attendance/entries/<uuid:entry_id>/attestation/', attendance_v4_views.attestation_submit),
     path('attendance/entries/<uuid:entry_id>/correction/', attendance_views.request_time_correction),
     path('attendance/entries/<uuid:pk>/close/', attendance_actions.close_running_entry),
     path('attendance/corrections/<uuid:pk>/cancel/', attendance_views.cancel_time_correction),
     path('attendance/corrections/<uuid:pk>/decide/', attendance_views.decide_time_correction),
-    path('attendance/exceptions/', attendance_views.attendance_exceptions),
+    path('attendance/exceptions/', attendance_v4_views.attendance_exceptions_v4),
+    path('attendance/notices/scan/', attendance_v4_views.attendance_scan),
+    path('attendance/terminal/<uuid:public_id>/clock/', attendance_v4_views.terminal_clock),
     path('workers/portal-status/', portal_views.portal_statuses),
     path('workers/<uuid:pk>/invite/', portal_views.invite_worker),
     path('workers/bulk-invite/', portal_views.bulk_invite_workers),
