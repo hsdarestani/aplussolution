@@ -485,7 +485,8 @@ def apply_schedule_template(template: ScheduleTemplate, target_week_start, *, pu
     created = []
     skipped = []
     for item in template.items.select_related('client', 'location', 'position').all():
-        day = target_week_start + timedelta(days=int(item.weekday))
+        weekday_offset = (int(item.weekday) - int(workplace.week_starts_on)) % 7
+        day = target_week_start + timedelta(days=weekday_offset)
         starts_at = timezone.make_aware(datetime.combine(day, item.start_time), timezone.get_current_timezone())
         end_day = day if item.end_time > item.start_time else day + timedelta(days=1)
         ends_at = timezone.make_aware(datetime.combine(end_day, item.end_time), timezone.get_current_timezone())
