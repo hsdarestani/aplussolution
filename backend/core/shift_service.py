@@ -4,7 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from .models import Availability, Shift, WorkerProfile
+from .models import Shift, WorkerProfile
 from .shift_slots import ShiftSlot
 
 
@@ -44,31 +44,15 @@ def refresh_shift_state(shift: Shift) -> Shift:
 
 
 def ensure_worker_can_claim(worker: WorkerProfile, shift: Shift) -> None:
-    slot_overlap = ShiftSlot.objects.filter(
-        worker=worker,
-        status=ShiftSlot.Status.CLAIMED,
-        shift__starts_at__lt=shift.ends_at,
-        shift__ends_at__gt=shift.starts_at,
-    ).exclude(shift=shift).exists()
-    legacy_overlap = Shift.objects.filter(
-        worker=worker,
-        starts_at__lt=shift.ends_at,
-        ends_at__gt=shift.starts_at,
-    ).exclude(pk=shift.pk).exclude(status=Shift.Status.CANCELLED).exists()
-    if slot_overlap or legacy_overlap:
-        raise ValidationError('Du hast in diesem Zeitraum bereits eine Schicht.')
-    if Availability.objects.filter(
-        worker=worker,
-        available=False,
-        starts_at__lt=shift.ends_at,
-        ends_at__gt=shift.starts_at,
-    ).exists():
-        raise ValidationError('Du bist in diesem Zeitraum als nicht verfügbar eingetragen.')
+    """Single source of truth for manual assignment, OpenShift, swaps and auto-assign."""
+    from .scheduling_rules import ensure_worker_eligible
+
+    ensure_worker_eligible(worker, shift)
 
 
 @transaction.atomic
 def claim_shift(shift_id, worker: WorkerProfile) -> ShiftSlot:
-    shift = Shift.objects.select_for_update().select_related('location').get(pk=shift_id)
+    shift = Shift.objects.select_for_update().select_related('location', 'position').get(pk=shift_id)
     if shift.status != Shift.Status.PUBLISHED:
         raise ValidationError('Diese Schicht ist nicht zur Übernahme veröffentlicht.')
     ensure_slots(shift)
