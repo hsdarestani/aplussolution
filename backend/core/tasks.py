@@ -119,3 +119,39 @@ def sync_working_time_current_year(self):
 def backup_working_time():
     from .working_time import create_backup
     return create_backup('weekly')
+
+
+@shared_task
+def expire_coverage_offers():
+    """Expire unanswered replacement offers and put unresolved cases back in the dispatcher queue."""
+    from .absence_models import CoverageOffer, ShiftAbsenceCase
+    from .models import User
+
+    now = timezone.now()
+    expired = list(
+        CoverageOffer.objects.filter(
+            status=CoverageOffer.Status.PENDING,
+            expires_at__isnull=False,
+            expires_at__lte=now,
+        ).values_list('id', 'case_id')
+    )
+    if not expired:
+        return {'expired': 0, 'reopened_cases': 0}
+    CoverageOffer.objects.filter(pk__in=[row[0] for row in expired]).update(status=CoverageOffer.Status.EXPIRED, responded_at=now)
+    reopened = 0
+    for case_id in {row[1] for row in expired}:
+        case = ShiftAbsenceCase.objects.select_related('shift__position').filter(pk=case_id, status=ShiftAbsenceCase.Status.OFFERED).first()
+        if not case or case.offers.filter(status=CoverageOffer.Status.PENDING).exists():
+            continue
+        case.status = ShiftAbsenceCase.Status.COVERAGE_PENDING
+        case.save(update_fields=['status', 'updated_at'])
+        reopened += 1
+        for user in User.objects.filter(role__in=[User.Role.ADMIN, User.Role.MANAGER], is_active=True):
+            Notification.objects.create(
+                user=user,
+                kind=f'coverage-offers-expired-{case.id}',
+                title='Ersatzanfragen ohne Zusage',
+                body=f'{case.shift.position.name}: Ersatz weiterhin offen.',
+                action_url='/operations',
+            )
+    return {'expired': len(expired), 'reopened_cases': reopened}
