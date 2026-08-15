@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_v4_views, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, payroll_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views, workplace_scoped_actions, workplace_scoped_core, workplace_scoped_views, workplace_views
+from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_v4_views, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, payroll_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views, workplace_scoped_actions, workplace_scoped_core, workplace_scoped_forecast, workplace_scoped_scheduling, workplace_scoped_views, workplace_views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -31,17 +31,17 @@ for prefix, view in [
     ('payroll', workplace_scoped_core.ScopedPayrollViewSet),
     ('ratings', views.RatingViewSet),
     ('conversations', views.ConversationViewSet),
-    ('schedule-groups', scheduling_views.ScheduleGroupViewSet),
-    ('schedule-memberships', scheduling_views.ScheduleMembershipViewSet),
-    ('position-qualifications', scheduling_views.WorkerPositionQualificationViewSet),
+    ('schedule-groups', workplace_scoped_scheduling.ScopedScheduleGroupViewSet),
+    ('schedule-memberships', workplace_scoped_scheduling.ScopedScheduleMembershipViewSet),
+    ('position-qualifications', workplace_scoped_scheduling.ScopedWorkerPositionQualificationViewSet),
     ('skill-tags', scheduling_views.SkillTagViewSet),
-    ('worker-skill-tags', scheduling_views.WorkerSkillTagViewSet),
+    ('worker-skill-tags', workplace_scoped_scheduling.ScopedWorkerSkillTagViewSet),
     ('position-skill-tags', scheduling_views.PositionSkillTagViewSet),
-    ('scheduling-policies', scheduling_views.SchedulingPolicyViewSet),
-    ('schedule-templates', scheduling_views.ScheduleTemplateViewSet),
-    ('forecast-days', forecast_views.ForecastDayBudgetViewSet),
-    ('forecast-units', forecast_views.ForecastUnitDefinitionViewSet),
-    ('forecast-unit-days', forecast_views.ForecastUnitDayViewSet),
+    ('scheduling-policies', workplace_scoped_scheduling.ScopedSchedulingPolicyViewSet),
+    ('schedule-templates', workplace_scoped_scheduling.ScopedScheduleTemplateViewSet),
+    ('forecast-days', workplace_scoped_forecast.ScopedForecastDayBudgetViewSet),
+    ('forecast-units', workplace_scoped_forecast.ScopedForecastUnitDefinitionViewSet),
+    ('forecast-unit-days', workplace_scoped_forecast.ScopedForecastUnitDayViewSet),
     ('access-roles', workplace_views.AccessRoleViewSet),
     ('access-assignments', workplace_views.AccessAssignmentViewSet),
 ]:
@@ -112,11 +112,11 @@ urlpatterns = [
     path('scheduling/copy-range/', scheduler_actions.copy_range),
     path('scheduling/bulk-action/', scheduler_actions.bulk_action),
     path('scheduling/clear-range/', scheduler_actions.clear_range),
-    path('scheduling/forecast/', forecast_views.forecast_summary),
-    path('scheduling/forecast/budget/', forecast_actions.budget_upsert),
-    path('scheduling/forecast/unit-day/', forecast_actions.unit_day_upsert),
+    path('scheduling/forecast/', workplace_scoped_forecast.forecast_summary),
+    path('scheduling/forecast/budget/', workplace_scoped_forecast.budget_upsert),
+    path('scheduling/forecast/unit-day/', workplace_scoped_forecast.unit_day_upsert),
     path('scheduling/forecast/import/preview/', forecast_views.forecast_import_preview),
-    path('scheduling/forecast/import/apply/', forecast_views.forecast_import_apply),
+    path('scheduling/forecast/import/apply/', workplace_scoped_forecast.forecast_import_apply),
     path('workplace/settings/', workplace_views.workplace_settings),
     path('workplace/snapshot/', workplace_views.workplace_snapshot),
     path('automation/orders/parse/', automation_views.order_parse),
