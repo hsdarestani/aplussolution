@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_v4_views, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views
+from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_v4_views, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_views, payroll_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -21,6 +21,10 @@ for prefix, view in [
     ('attendance-policies', attendance_v4_views.AttendancePolicyViewSet),
     ('attendance-notices', attendance_v4_views.AttendanceNoticeViewSet),
     ('attendance-terminals', attendance_v4_views.AttendanceTerminalViewSet),
+    ('pay-periods', payroll_views.PayPeriodViewSet),
+    ('timesheets', payroll_views.WorkerTimesheetViewSet),
+    ('timesheet-entries', payroll_views.TimesheetEntryViewSet),
+    ('timesheet-exceptions', payroll_views.TimesheetExceptionViewSet),
     ('contract-templates', views.ContractTemplateViewSet),
     ('contracts', contract_views.ContractViewSet),
     ('documents', searchable_views.DocumentViewSet),
