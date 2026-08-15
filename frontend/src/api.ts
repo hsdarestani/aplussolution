@@ -8,6 +8,16 @@ export type User = {
   last_name: string;
   role: 'admin' | 'manager' | 'worker' | 'client';
   phone: string;
+  capabilities?: string[];
+  access_scope?: {
+    mode: 'all' | 'scoped' | 'self';
+    role?: string;
+    wage_visibility?: 'none' | 'scoped' | 'all';
+    can_share_labor?: boolean;
+    schedules?: string[];
+    locations?: string[];
+    workers?: string[];
+  };
 };
 
 const accessToken = () => localStorage.getItem('access') || '';
