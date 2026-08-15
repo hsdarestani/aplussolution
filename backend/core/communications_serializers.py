@@ -23,6 +23,10 @@ class DeviceRegistrationSerializer(serializers.ModelSerializer):
         model = DeviceRegistration
         fields = ['id', 'token', 'platform', 'device_name', 'app_version', 'active', 'last_seen_at']
         read_only_fields = ['id', 'last_seen_at']
+        # A native token identifies the device installation, not the account.
+        # The view intentionally transfers an existing token to the currently
+        # authenticated user on login/account switch.
+        extra_kwargs = {'token': {'validators': []}}
 
 
 class CommunicationSettingsSerializer(serializers.ModelSerializer):
