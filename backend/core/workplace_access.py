@@ -59,10 +59,7 @@ SYSTEM_ROLES = {
 def seed_system_roles():
     roles = []
     for code, values in SYSTEM_ROLES.items():
-        role, _ = AccessRole.objects.update_or_create(
-            code=code,
-            defaults={**values, 'is_system': True, 'active': True},
-        )
+        role, _ = AccessRole.objects.update_or_create(code=code, defaults={**values, 'is_system': True, 'active': True})
         roles.append(role)
     WorkplaceSettings.load()
     return roles
@@ -118,9 +115,11 @@ def visible_schedule_groups(user, queryset=None):
         return qs.none()
     if not assignment or assignment.scope_mode == UserAccessAssignment.ScopeMode.ALL:
         return qs
-    explicit_ids = list(assignment.schedule_groups.values_list('id', flat=True))
+    ids = set(assignment.schedule_groups.values_list('id', flat=True))
     location_ids = list(assignment.locations.values_list('id', flat=True))
-    return qs.filter(id__in=explicit_ids).union(qs.filter(locations__id__in=location_ids)).distinct() if location_ids else qs.filter(id__in=explicit_ids)
+    if location_ids:
+        ids.update(ScheduleGroup.objects.filter(locations__id__in=location_ids).values_list('id', flat=True))
+    return qs.filter(id__in=ids).distinct()
 
 
 def visible_locations(user, queryset=None):
@@ -133,9 +132,7 @@ def visible_locations(user, queryset=None):
     if not assignment or assignment.scope_mode == UserAccessAssignment.ScopeMode.ALL:
         return qs
     location_ids = set(assignment.locations.values_list('id', flat=True))
-    location_ids.update(
-        Location.objects.filter(schedule_groups__in=assignment.schedule_groups.all()).values_list('id', flat=True)
-    )
+    location_ids.update(Location.objects.filter(schedule_groups__in=assignment.schedule_groups.all()).values_list('id', flat=True))
     return qs.filter(id__in=location_ids).distinct()
 
 
@@ -184,12 +181,7 @@ def visible_workers(user, queryset=None):
     if not assignment or assignment.scope_mode == UserAccessAssignment.ScopeMode.ALL:
         return qs
     worker_ids = set(assignment.workers.values_list('id', flat=True))
-    worker_ids.update(
-        WorkerProfile.objects.filter(
-            schedule_memberships__active=True,
-            schedule_memberships__schedule__in=assignment.schedule_groups.all(),
-        ).values_list('id', flat=True)
-    )
+    worker_ids.update(WorkerProfile.objects.filter(schedule_memberships__active=True, schedule_memberships__schedule__in=assignment.schedule_groups.all()).values_list('id', flat=True))
     location_ids = list(visible_locations(user).values_list('id', flat=True))
     if location_ids:
         worker_ids.update(qs.filter(shifts__location_id__in=location_ids).values_list('id', flat=True))
