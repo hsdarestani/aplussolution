@@ -96,7 +96,10 @@ def clear_range(request):
     qs = Shift.objects.filter(starts_at__gte=starts_at, starts_at__lt=ends_at)
     if request.data.get('location'):
         qs = qs.filter(location_id=request.data['location'])
-    drafts = qs.filter(status=Shift.Status.DRAFT, slots__worker__isnull=True).distinct()
+    drafts = qs.filter(status=Shift.Status.DRAFT).exclude(
+        slots__status=ShiftSlot.Status.CLAIMED,
+        slots__worker__isnull=False,
+    ).distinct()
     count = drafts.count()
     ids = [str(value) for value in drafts.values_list('id', flat=True)]
     drafts.delete()
