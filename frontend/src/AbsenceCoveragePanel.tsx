@@ -20,6 +20,9 @@ const val = (e: any) => e.detail.value ?? '';
 const isManager = (user: User) => ['admin', 'manager'].includes(user.role);
 const dateTime = (input?: string) => input ? new Date(input).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }) : '–';
 const activeStatuses = new Set(['reported', 'coverage_pending', 'offered', 'moved_to_open']);
+const urgentAt = (item: any, now: number) => activeStatuses.has(item.status)
+  && new Date(item.shift_ends_at).getTime() >= now
+  && new Date(item.shift_starts_at).getTime() <= now + 24 * 60 * 60 * 1000;
 const kindLabels: Record<string, string> = {
   sick: 'Krank', emergency: 'Notfall', personal: 'Persönlich verhindert', no_show: 'Nicht erschienen',
   approved_time_off: 'Genehmigte Abwesenheit', other: 'Sonstiger Ausfall',
@@ -43,6 +46,7 @@ export default function AbsenceCoveragePanel({ user, onChanged }: { user: User; 
   const [candidatesLoaded, setCandidatesLoaded] = useState(false);
   const [selectedCandidates, setSelectedCandidates] = useState<Set<string>>(new Set());
   const [offerHours, setOfferHours] = useState(12);
+  const [clock, setClock] = useState(Date.now());
 
   async function load() {
     if (user.role === 'client') return;
@@ -61,6 +65,10 @@ export default function AbsenceCoveragePanel({ user, onChanged }: { user: User; 
   }
 
   useEffect(() => { void load(); }, [user.role]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   async function mutate(path: string, payload: any, success: string) {
     setBusy(true);
@@ -79,8 +87,8 @@ export default function AbsenceCoveragePanel({ user, onChanged }: { user: User; 
   }
 
   const reportOptions = useMemo(() => {
-    const now = Date.now() - 12 * 60 * 60 * 1000;
-    if (!manager) return shifts.filter((shift) => new Date(shift.ends_at).getTime() >= now).map((shift) => ({
+    const recentBoundary = clock - 12 * 60 * 60 * 1000;
+    if (!manager) return shifts.filter((shift) => new Date(shift.ends_at).getTime() >= recentBoundary).map((shift) => ({
       key: `${shift.id}`,
       shift: shift.id,
       worker: undefined,
@@ -93,8 +101,8 @@ export default function AbsenceCoveragePanel({ user, onChanged }: { user: User; 
       worker: assignment.worker,
       slot: assignment.slot,
       label: `${dateTime(shift.starts_at)} · ${assignment.worker_name} · ${shift.position_name}`,
-    }))).filter((item) => item.worker && new Date(shifts.find((shift) => shift.id === item.shift)?.ends_at || 0).getTime() >= now);
-  }, [shifts, manager]);
+    }))).filter((item) => item.worker && new Date(shifts.find((shift) => shift.id === item.shift)?.ends_at || 0).getTime() >= recentBoundary);
+  }, [shifts, manager, clock]);
 
   async function submitReport() {
     const option = reportOptions.find((item) => item.key === report.option);
@@ -136,7 +144,7 @@ export default function AbsenceCoveragePanel({ user, onChanged }: { user: User; 
   }
 
   const activeCases = cases.filter((item) => activeStatuses.has(item.status));
-  const shortNotice = activeCases.filter((item) => item.short_notice).length;
+  const urgentCases = activeCases.filter((item) => urgentAt(item, clock));
   const pendingOffers = offers.filter((item) => item.status === 'pending');
   if (user.role === 'client') return null;
 
@@ -148,7 +156,7 @@ export default function AbsenceCoveragePanel({ user, onChanged }: { user: User; 
 
     <div className="absence-stats">
       <div><small>Offene Ausfälle</small><strong>{activeCases.length}</strong></div>
-      <div><small>≤ 24 Stunden</small><strong>{shortNotice}</strong></div>
+      <div><small>≤ 24 Stunden</small><strong>{urgentCases.length}</strong></div>
       <div><small>{manager ? 'Mit Angeboten' : 'Meine Ersatzanfragen'}</small><strong>{manager ? activeCases.filter((item) => item.open_offer_count > 0).length : pendingOffers.length}</strong></div>
       <div><small>Abgedeckt</small><strong>{cases.filter((item) => item.status === 'covered').length}</strong></div>
     </div>
@@ -162,13 +170,13 @@ export default function AbsenceCoveragePanel({ user, onChanged }: { user: User; 
     </div>}
 
     <div className="absence-list">
-      {cases.map((item) => <article className={`absence-case ${item.short_notice && activeStatuses.has(item.status) ? 'urgent' : ''}`} key={item.id}>
+      {cases.map((item) => { const urgent = urgentAt(item, clock); return <article className={`absence-case ${urgent ? 'urgent' : ''}`} key={item.id}>
         <div className="absence-case-icon"><IonIcon icon={activeStatuses.has(item.status) ? alertCircleOutline : checkmarkCircleOutline}/></div>
-        <div className="absence-case-main"><div className="absence-case-line"><b>{manager ? item.absent_worker_name : item.shift_title}</b>{item.short_notice && <IonBadge color="danger">Kurzfristig</IonBadge>}<IonBadge color={item.status === 'covered' ? 'success' : activeStatuses.has(item.status) ? 'warning' : 'medium'}>{statusLabels[item.status] || item.status}</IonBadge></div><p>{dateTime(item.shift_starts_at)} – {dateTime(item.shift_ends_at)} · {item.location_name}</p><small>{kindLabels[item.kind] || item.kind}{manager && item.reason_note ? ` · ${item.reason_note}` : ''}{item.replacement_worker_name ? ` · Ersatz: ${item.replacement_worker_name}` : ''}</small></div>
+        <div className="absence-case-main"><div className="absence-case-line"><b>{manager ? item.absent_worker_name : item.shift_title}</b>{urgent && <IonBadge color="danger">≤ 24h</IonBadge>}{item.short_notice && <IonBadge color="medium">Kurzfristig gemeldet</IonBadge>}<IonBadge color={item.status === 'covered' ? 'success' : activeStatuses.has(item.status) ? 'warning' : 'medium'}>{statusLabels[item.status] || item.status}</IonBadge></div><p>{dateTime(item.shift_starts_at)} – {dateTime(item.shift_ends_at)} · {item.location_name}</p><small>{kindLabels[item.kind] || item.kind}{manager && item.reason_note ? ` · ${item.reason_note}` : ''}{item.replacement_worker_name ? ` · Ersatz: ${item.replacement_worker_name}` : ''}</small></div>
         {activeStatuses.has(item.status) && <div className="absence-row-actions">
           {manager ? <><IonButton size="small" onClick={() => void openCandidates(item)}>Ersatz finden</IonButton><IonButton size="small" fill="outline" onClick={() => void mutate(`absence-cases/${item.id}/move-to-open/`, {}, 'Platz wurde als OpenShift freigegeben.')}>OpenShift</IonButton><IonButton size="small" fill="clear" color="medium" onClick={() => void mutate(`absence-cases/${item.id}/resolve-uncovered/`, {}, 'Ausfall wurde ohne Ersatz abgeschlossen.')}>Ohne Ersatz schließen</IonButton></> : <IonButton size="small" fill="clear" color="danger" onClick={() => void mutate(`absence-cases/${item.id}/cancel/`, {}, 'Ausfall wurde storniert.')}>Meldung stornieren</IonButton>}
         </div>}
-      </article>)}
+      </article>; })}
       {!cases.length && <div className="absence-empty">Keine Ausfälle vorhanden.</div>}
     </div>
 
