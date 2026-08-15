@@ -80,6 +80,20 @@ export async function api<T = any>(path: string, options: RequestInit = {}, retr
   return response.status === 204 ? ({} as T) : response.json();
 }
 
+export async function apiAll<T = any>(path: string): Promise<T[]> {
+  const rows: T[] = [];
+  let page = 1;
+  while (page <= 200) {
+    const separator = path.includes('?') ? '&' : '?';
+    const data: any = await api(`${path}${separator}page=${page}`);
+    if (Array.isArray(data)) return data as T[];
+    rows.push(...(data?.results || []));
+    if (!data?.next) break;
+    page += 1;
+  }
+  return rows;
+}
+
 export async function apiDownload(path: string, fallbackFilename = 'download') {
   const normalizedPath = path.replace(/^\//, '');
   async function request(token?: string) {
