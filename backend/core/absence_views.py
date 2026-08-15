@@ -1,4 +1,3 @@
-from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -31,22 +30,16 @@ class CoverageOfferSerializer(serializers.ModelSerializer):
     shift_title = serializers.CharField(source='case.shift.position.name', read_only=True)
     shift_starts_at = serializers.DateTimeField(source='case.shift.starts_at', read_only=True)
     location_name = serializers.CharField(source='case.shift.location.name', read_only=True)
-    absent_worker_name = serializers.SerializerMethodField()
 
     class Meta:
         model = CoverageOffer
         fields = [
             'id', 'case', 'worker', 'worker_name', 'status', 'offered_at', 'expires_at', 'responded_at',
             'eligibility_snapshot', 'note', 'shift', 'shift_title', 'shift_starts_at', 'location_name',
-            'absent_worker_name',
         ]
 
     def get_worker_name(self, obj):
         return obj.worker.user.get_full_name() or obj.worker.user.email
-
-    def get_absent_worker_name(self, obj):
-        worker = obj.case.absent_worker
-        return worker.user.get_full_name() or worker.user.email
 
 
 class ShiftAbsenceCaseSerializer(serializers.ModelSerializer):
@@ -82,6 +75,8 @@ class ShiftAbsenceCaseSerializer(serializers.ModelSerializer):
 
 
 class AbsenceCaseViewSet(viewsets.ReadOnlyModelViewSet):
+    # Declared for DRF router basename discovery; role scoping still happens in get_queryset().
+    queryset = ShiftAbsenceCase.objects.all()
     serializer_class = ShiftAbsenceCaseSerializer
     permission_classes = [IsAuthenticated]
     filterset_fields = ['status', 'kind', 'short_notice', 'absent_worker', 'shift']
@@ -144,7 +139,7 @@ class AbsenceCaseViewSet(viewsets.ReadOnlyModelViewSet):
             detail = getattr(exc, 'detail', str(exc))
             return Response({'detail': str(detail)}, status=getattr(exc, 'status_code', 400))
         audit(request, 'absence.targeted_offers_sent', case, {'offers': len(offers)})
-        return Response(CoverageOfferSerializer(offers, many=True).data, status=201)
+        return Response(CoverageOfferSerializer(offers, many=True, context={'request': request}).data, status=201)
 
     @action(detail=True, methods=['post'])
     def replace(self, request, pk=None):
@@ -188,6 +183,8 @@ class AbsenceCaseViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class CoverageOfferViewSet(viewsets.ReadOnlyModelViewSet):
+    # Declared for DRF router basename discovery; role scoping still happens in get_queryset().
+    queryset = CoverageOffer.objects.all()
     serializer_class = CoverageOfferSerializer
     permission_classes = [IsAuthenticated]
     filterset_fields = ['status', 'case', 'worker']
@@ -195,7 +192,7 @@ class CoverageOfferViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         qs = CoverageOffer.objects.select_related(
-            'worker__user', 'case__absent_worker__user', 'case__shift__position', 'case__shift__location'
+            'worker__user', 'case__shift__position', 'case__shift__location'
         )
         if _manager(self.request.user):
             return qs
@@ -214,7 +211,16 @@ class CoverageOfferViewSet(viewsets.ReadOnlyModelViewSet):
             detail = getattr(exc, 'detail', str(exc))
             return Response({'detail': str(detail)}, status=getattr(exc, 'status_code', 400))
         audit(request, 'coverage_offer.responded', offer, {'status': offer.status})
-        return Response({'offer': self.get_serializer(offer).data, 'case': ShiftAbsenceCaseSerializer(case).data})
+        # The replacement worker does not need the absent employee's identity or reason.
+        return Response({
+            'offer': self.get_serializer(offer).data,
+            'case': {
+                'id': str(case.id),
+                'shift': str(case.shift_id),
+                'status': case.status,
+                'coverage_strategy': case.coverage_strategy,
+            },
+        })
 
 
 @api_view(['POST'])
@@ -255,4 +261,4 @@ def report_callout(request):
         detail = getattr(exc, 'detail', str(exc))
         return Response({'detail': str(detail)}, status=getattr(exc, 'status_code', 400))
     audit(request, 'absence.reported', case, {'short_notice': case.short_notice})
-    return Response(ShiftAbsenceCaseSerializer(case).data, status=status.HTTP_201_CREATED)
+    return Response(ShiftAbsenceCaseSerializer(case, context={'request': request}).data, status=status.HTTP_201_CREATED)
