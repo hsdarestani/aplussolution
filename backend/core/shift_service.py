@@ -44,10 +44,22 @@ def refresh_shift_state(shift: Shift) -> Shift:
 
 
 def ensure_worker_can_claim(worker: WorkerProfile, shift: Shift) -> None:
-    """Single source of truth for manual assignment, OpenShift, swaps and auto-assign."""
-    from .scheduling_rules import ensure_worker_eligible
+    """Single source of truth for OpenShift claim eligibility.
 
-    ensure_worker_eligible(worker, shift)
+    The Premium overlapping-OpenShift toggle only relaxes the overlap blocker for
+    employee self-claims. Manager assignment, auto-assign and swaps continue to use
+    the normal strict eligibility engine.
+    """
+    from .scheduler_completion_models import SchedulerCompletionSettings
+    from .scheduling_rules import ensure_worker_eligible, evaluate_worker_for_shift
+
+    if not SchedulerCompletionSettings.load().allow_overlapping_open_shifts:
+        ensure_worker_eligible(worker, shift)
+        return
+    result = evaluate_worker_for_shift(worker, shift)
+    blockers = [item for item in result['blockers'] if item.get('code') != 'overlap']
+    if blockers:
+        raise ValidationError(blockers[0]['message'])
 
 
 @transaction.atomic
