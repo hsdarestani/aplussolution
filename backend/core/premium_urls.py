@@ -1,0 +1,34 @@
+from django.urls import path
+
+from . import premium_views, saml_views
+
+urlpatterns = [
+    path('premium/scheduling-policy/', premium_views.scheduling_policy),
+    path('premium/auto-schedule/', premium_views.auto_schedule_view),
+    path('premium/tags/', premium_views.tags),
+    path('premium/shifts/<uuid:shift_id>/tags/', premium_views.set_shift_tags),
+    path('premium/schedule-templates/', premium_views.schedule_templates),
+    path('premium/task-lists/', premium_views.task_lists),
+    path('premium/task-lists/<uuid:list_id>/assign/', premium_views.task_assign),
+    path('premium/task-runs/', premium_views.task_runs),
+    path('premium/task-runs/<uuid:run_id>/complete/', premium_views.task_complete),
+    path('premium/forecasts/', premium_views.forecasts),
+    path('premium/callouts/', premium_views.callouts),
+    path('premium/callouts/<uuid:pk>/cover/', premium_views.callout_cover),
+    path('premium/time-off-categories/', premium_views.time_off_categories),
+    path('premium/time-off/<uuid:pk>/classify/', premium_views.classify_time_off),
+    path('premium/reports/', premium_views.report_definitions),
+    path('premium/reports/<uuid:pk>/run/', premium_views.report_run),
+    path('premium/api-keys/', premium_views.api_keys),
+    path('premium/api-keys/<uuid:pk>/', premium_views.api_key_revoke),
+    path('premium/webhooks/', premium_views.webhooks),
+    path('premium/webhooks/<uuid:pk>/test/', premium_views.webhook_test),
+    path('premium/integrations/', premium_views.integrations),
+    path('premium/integrations/<uuid:pk>/sync/', premium_views.integration_sync),
+    path('public/v1/<str:resource>/', premium_views.public_api_resource),
+    path('auth/saml/status/', saml_views.saml_status),
+    path('auth/saml/metadata/', saml_views.saml_metadata),
+    path('auth/saml/login/', saml_views.saml_login),
+    path('auth/saml/acs/', saml_views.saml_acs),
+    path('auth/saml/logout/', saml_views.saml_logout),
+]

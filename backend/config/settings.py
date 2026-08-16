@@ -50,3 +50,6 @@ WIW_OPENAI_MODEL=OPENAI_MODEL
 WORKING_TIME_DEFAULT_BREAK_MINUTES=int(os.getenv('WORKING_TIME_DEFAULT_BREAK_MINUTES','0'))
 WORKING_TIME_DEFAULT_MONTHLY_LIMIT=os.getenv('WORKING_TIME_DEFAULT_MONTHLY_LIMIT','0')
 WORKING_TIME_DEFAULT_HOURLY_RATE=os.getenv('WORKING_TIME_DEFAULT_HOURLY_RATE','0')
+
+# Premium enterprise settings (SAML/SSO). Kept in a separate module so IdP secrets remain environment-only.
+from .premium_settings import *  # noqa: F401,F403,E402

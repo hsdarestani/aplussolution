@@ -21,3 +21,4 @@ pytest-django==4.11.1
 pytest-cov==6.2.1
 responses==0.25.7
 openpyxl==3.1.5
+python3-saml==1.16.0
