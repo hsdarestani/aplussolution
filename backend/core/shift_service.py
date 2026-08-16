@@ -63,6 +63,12 @@ def ensure_shift_publish_allowed(shift: Shift) -> None:
 def ensure_worker_can_claim(worker: WorkerProfile, shift: Shift) -> None:
     from .premium_services import violations
 
+    # force a database round-trip before evaluating DecimalField-backed rules.
+    # DRF's force_authenticate and freshly-created fixture/model instances can
+    # retain string values assigned to DecimalFields until they are reloaded.
+    # The production path also benefits when a caller passes an unsaved/cached
+    # profile instance from another service layer.
+    worker = WorkerProfile.objects.select_related('user').get(pk=worker.pk)
     issues = violations(worker, shift)
     if not issues:
         return
