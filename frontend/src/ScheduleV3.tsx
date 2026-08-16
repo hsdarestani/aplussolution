@@ -23,6 +23,7 @@ import {
   checkmarkCircleOutline,
   chevronBackOutline,
   chevronForwardOutline,
+  colorPaletteOutline,
   downloadOutline,
   locationOutline,
   optionsOutline,
@@ -35,15 +36,37 @@ import { api, apiAll, apiDownload, User } from './api';
 import ForecastToolsPanel from './ForecastToolsPanel';
 import SchedulerAdminPanel from './SchedulerAdminPanel';
 import SchedulerCalendar, { CalendarMode, moveAnchor, rangeLabel } from './SchedulerCalendar';
+import SchedulerCompletionPanel, { SchedulerDisplay } from './SchedulerCompletionPanel';
 import SchedulerGroupedGrid from './SchedulerGroupedGrid';
 import './schedule-v2.css';
 
 const val = (event: any) => event.detail.value ?? '';
 const isManager = (user: User) => ['admin', 'manager'].includes(user.role);
-const tm = (input: string) => new Date(input).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
 const dateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+const defaultDisplay: SchedulerDisplay = { color_mode: 'position', timezone_mode: 'workplace', local_timezone: 'Europe/Berlin', workplace_timezone: 'Europe/Berlin' };
 type DisplayMode = 'list' | CalendarMode;
 type ViewBy = 'coverage' | 'positions' | 'users';
+
+function effectiveZone(row: any, display: SchedulerDisplay) {
+  if (display.timezone_mode === 'schedule') return row.location_timezone || display.workplace_timezone || 'Europe/Berlin';
+  if (display.timezone_mode === 'local') return display.local_timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Berlin';
+  return display.workplace_timezone || 'Europe/Berlin';
+}
+
+function tm(input: string, zone?: string) {
+  try { return new Date(input).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: zone }); }
+  catch { return new Date(input).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); }
+}
+
+function zonedDate(input: string, zone?: string) {
+  const date = new Date(input);
+  try {
+    const parts = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: 'short', timeZone: zone }).formatToParts(date);
+    return { day: parts.find((part) => part.type === 'day')?.value || String(date.getDate()), month: parts.find((part) => part.type === 'month')?.value || '' };
+  } catch {
+    return { day: String(date.getDate()), month: date.toLocaleString('de-DE', { month: 'short' }) };
+  }
+}
 
 function viewBounds(mode: DisplayMode, anchor: Date) {
   const start = new Date(anchor);
@@ -85,6 +108,8 @@ export default function ScheduleV3({ user }: { user: User }) {
   const [releaseTarget, setReleaseTarget] = useState<any>();
   const [adminOpen, setAdminOpen] = useState(false);
   const [forecastOpen, setForecastOpen] = useState(false);
+  const [completionOpen, setCompletionOpen] = useState(false);
+  const [display, setDisplay] = useState<SchedulerDisplay>(defaultDisplay);
   const [eligibility, setEligibility] = useState<any>();
   const [eligibilityTarget, setEligibilityTarget] = useState<any>();
   const [displayMode, setDisplayMode] = useState<DisplayMode>('week');
@@ -124,7 +149,16 @@ export default function ScheduleV3({ user }: { user: User }) {
     setTags(tagRows);
   }
 
+  async function loadDisplay() {
+    if (clientView) return;
+    try {
+      const prefs: any = await api('scheduling/display-preferences/');
+      setDisplay((current) => ({ ...current, ...prefs }));
+    } catch { /* scheduler remains usable with defaults */ }
+  }
+
   useEffect(() => { void load(); }, [tab]);
+  useEffect(() => { void loadDisplay(); }, []);
 
   const visible = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase('de');
@@ -149,6 +183,12 @@ export default function ScheduleV3({ user }: { user: User }) {
       return true;
     });
   }, [rows, manager, tab, filterPosition, filterLocation, filterWorker, filterTag, search]);
+
+  const displayRows = useMemo(() => visible.map((row: any) => ({
+    ...row,
+    display_color: display.color_mode === 'shift' ? row.shift_color : display.color_mode === 'location' ? row.location_color : row.position_color,
+    display_time_zone: effectiveZone(row, display),
+  })), [visible, display]);
 
   async function act(path: string, message: string, body: any = {}) {
     setBusy(true);
@@ -306,10 +346,9 @@ export default function ScheduleV3({ user }: { user: User }) {
   return <div className="sv2">
     <div className="sv2-title">
       <div><small>{eyebrow}</small><h1>{title}</h1><p>{intro}</p></div>
-      {manager && <div className="sv2-title-actions">
-        <IonButton fill="outline" onClick={() => setForecastOpen(true)}><IonIcon slot="start" icon={analyticsOutline}/>Forecast Tools</IonButton>
-        <IonButton fill="outline" onClick={() => setAdminOpen(true)}><IonIcon slot="start" icon={optionsOutline}/>Regeln & Qualifikationen</IonButton>
-        <IonButton onClick={create}><IonIcon slot="start" icon={addOutline}/>Personalbedarf</IonButton>
+      {!clientView && <div className="sv2-title-actions">
+        <IonButton fill="outline" onClick={() => setCompletionOpen(true)}><IonIcon slot="start" icon={colorPaletteOutline}/>{manager ? 'Plan-Extras' : 'Planinfos'}</IonButton>
+        {manager && <><IonButton fill="outline" onClick={() => setForecastOpen(true)}><IonIcon slot="start" icon={analyticsOutline}/>Forecast Tools</IonButton><IonButton fill="outline" onClick={() => setAdminOpen(true)}><IonIcon slot="start" icon={optionsOutline}/>Regeln & Qualifikationen</IonButton><IonButton onClick={create}><IonIcon slot="start" icon={addOutline}/>Personalbedarf</IonButton></>}
       </div>}
     </div>
 
@@ -368,25 +407,29 @@ export default function ScheduleV3({ user }: { user: User }) {
 
     {manager && displayMode !== 'list'
       ? viewBy === 'coverage'
-        ? <SchedulerCalendar rows={visible} mode={calendarMode} anchor={anchor} onMove={moveShift} onInspect={inspectEligibility} selected={selected} onToggleSelect={toggleSelect}/>
-        : <SchedulerGroupedGrid rows={visible} mode={calendarMode} anchor={anchor} groupBy={viewBy} onMove={moveShift} onInspect={inspectEligibility} selected={selected} onToggleSelect={toggleSelect}/>
-      : <div className="sv2-list">{visible.map((row: any) => {
+        ? <SchedulerCalendar rows={displayRows} mode={calendarMode} anchor={anchor} onMove={moveShift} onInspect={inspectEligibility} selected={selected} onToggleSelect={toggleSelect}/>
+        : <SchedulerGroupedGrid rows={displayRows} mode={calendarMode} anchor={anchor} groupBy={viewBy} onMove={moveShift} onInspect={inspectEligibility} selected={selected} onToggleSelect={toggleSelect}/>
+      : <div className="sv2-list">{displayRows.map((row: any) => {
         const mine = workerView && tab === 'mine';
-        return <article className={`sv2-card ${mine?'mine':''} ${selected.has(row.id)?'selected':''}`} key={row.id}>
+        const date = zonedDate(row.starts_at, row.display_time_zone);
+        const pending = manager && (row.assignments || []).some((item:any) => item.confirmation_status === 'pending');
+        return <article className={`sv2-card ${mine?'mine':''} ${selected.has(row.id)?'selected':''} ${pending?'unconfirmed':''}`} style={{borderLeftColor:row.display_color||undefined,borderLeftWidth:'4px'}} key={row.id}>
           {manager && <button className="sv2-select" onClick={() => toggleSelect(row.id)} aria-label="Auswählen">{selected.has(row.id)?'✓':'○'}</button>}
-          <div className="sv2-date"><b>{new Date(row.starts_at).getDate()}</b><span>{new Date(row.starts_at).toLocaleString('de-DE',{month:'short'})}</span></div>
+          <div className="sv2-date"><b>{date.day}</b><span>{date.month}</span></div>
           <div className="sv2-body">
             <small>{row.client_name}</small><h3>{row.position_name}</h3>
-            <p><IonIcon icon={timeOutline}/> {tm(row.starts_at)}–{tm(row.ends_at)} · {row.break_minutes||0} Min.</p>
+            <p><IonIcon icon={timeOutline}/> {tm(row.starts_at,row.display_time_zone)}–{tm(row.ends_at,row.display_time_zone)} · {row.break_minutes||0} Min.</p>
             <p><IonIcon icon={locationOutline}/> {row.location_name}</p>
-            {manager && row.assignments?.length ? <p><IonIcon icon={peopleOutline}/> {row.assignments.map((item:any) => item.worker_name).join(', ')}</p> : null}
+            {manager && row.assignments?.length ? <p><IonIcon icon={peopleOutline}/> {row.assignments.map((item:any) => `${item.worker_name}${item.confirmation_status==='pending'?' · unbestätigt':''}`).join(', ')}</p> : null}
             {!!row.required_tags?.length && <div className="sv2-tags">{row.required_tags.map((item:any) => <IonBadge key={item.id} color="medium">{item.name}</IonBadge>)}</div>}
             <div className="sv2-meter"><span style={{width:`${Math.min(100,(Number(row.filled_count||0)/Number(row.required_count||1))*100)}%`}}/></div>
             <em>{row.filled_count||0}/{row.required_count||1} besetzt · {row.open_count||0} frei</em>
           </div>
           <div className="sv2-side">
+            {pending && <IonBadge color="warning">Unbestätigt</IonBadge>}
             <IonBadge color={row.status==='draft'?'medium':row.open_count>0?'primary':'success'}>{row.status==='draft'?'Entwurf':row.open_count>0?'Offen':'Voll'}</IonBadge>
             {workerView && !mine && row.open_count>0 && <IonButton disabled={busy} onClick={() => void act(`shifts/${row.id}/claim/`,'Schicht übernommen.')}><IonIcon slot="start" icon={checkmarkCircleOutline}/>Übernehmen</IonButton>}
+            {workerView && mine && row.my_confirmation?.status === 'pending' && <IonButton disabled={busy} onClick={() => void act(`scheduling/confirmations/${row.my_confirmation.slot}/confirm/`,'Schicht bestätigt.')}><IonIcon slot="start" icon={checkmarkCircleOutline}/>Bestätigen</IonButton>}
             {workerView && mine && <IonButton fill="outline" color="medium" disabled={busy} onClick={() => setReleaseTarget(row)}>Freigeben</IonButton>}
             {manager && row.status==='draft' && <IonButton size="small" onClick={() => void act(`shifts/${row.id}/publish/`,'OpenShift veröffentlicht.')}>Veröffentlichen</IonButton>}
             {manager && row.status==='published' && Number(row.filled_count||0)===0 && <IonButton size="small" fill="outline" onClick={() => void act(`shifts/${row.id}/unpublish/`,'Schicht zurück in Entwurf gesetzt.')}>Zurückziehen</IonButton>}
@@ -394,7 +437,7 @@ export default function ScheduleV3({ user }: { user: User }) {
             {manager && <IonButton size="small" fill="clear" onClick={() => edit(row)}>Bearbeiten</IonButton>}
           </div>
         </article>;
-      })}{!visible.length && <div className="sv2-empty"><h3>Keine passenden Einsätze</h3><p>Suche oder Filter ändern.</p></div>}</div>}
+      })}{!displayRows.length && <div className="sv2-empty"><h3>Keine passenden Einsätze</h3><p>Suche oder Filter ändern.</p></div>}</div>}
 
     <IonModal isOpen={modal} onDidDismiss={() => setModal(false)}><div className="sv2-modal">
       <div className="sv2-modal-head"><h2>{editing?'Personalbedarf bearbeiten':'Personalbedarf anlegen'}</h2><IonButton fill="clear" onClick={() => setModal(false)}>Schließen</IonButton></div>
@@ -421,6 +464,7 @@ export default function ScheduleV3({ user }: { user: User }) {
       </>}
     </div></IonModal>
 
+    {!clientView && <SchedulerCompletionPanel open={completionOpen} onClose={() => setCompletionOpen(false)} user={user} rows={rows} locations={locations} positions={positions} workers={workers} display={display} onDisplayChange={setDisplay} onChanged={load}/>}    
     {manager && <><ForecastToolsPanel open={forecastOpen} onClose={() => setForecastOpen(false)} positions={positions}/><SchedulerAdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} workers={workers} clients={clients} locations={locations} positions={positions}/></>}
     <IonAlert isOpen={!!releaseTarget} onDidDismiss={() => setReleaseTarget(undefined)} header="Schicht freigeben?" message={releaseTarget?`${releaseTarget.position_name || 'Diese Schicht'} wird wieder für andere Mitarbeiter verfügbar.`:''} buttons={[{text:'Abbrechen',role:'cancel'},{text:'Freigeben',role:'destructive',handler:() => {const id=releaseTarget?.id;setReleaseTarget(undefined);if(id)void act(`shifts/${id}/release/`,'Schicht freigegeben.');}}]}/>
     <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={() => setToast('')}/>
