@@ -10,7 +10,7 @@ from .models import Notification, Shift, User
 from .permissions import IsAdminOrManager
 from .services import audit
 from .shift_api import ShiftApiSerializer
-from .shift_service import ensure_slots, refresh_shift_state, release_shift
+from .shift_service import claim_shift, ensure_slots, refresh_shift_state, release_shift
 from .shift_slots import ShiftSlot
 from .workplace_access import has_capability, location_in_scope, visible_locations
 
@@ -137,6 +137,30 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
         shift = self.base_queryset().filter(pk=pk).first()
         if not shift:
             return Response({'detail':'Schicht wurde nicht gefunden.'},status=404)
+        if not shift.slots.filter(status=ShiftSlot.Status.OPEN, worker__isnull=True).exists():
+            return Response({'detail':'Diese Schicht ist bereits vollständig besetzt.'},status=400)
+
+        # Backward-compatible urgent pickup: a published shift that has already
+        # started but has not ended may still be claimed directly. Future shifts
+        # continue through the configurable OpenShift bid/approval workflow.
+        if shift.status == Shift.Status.PUBLISHED and shift.starts_at <= timezone.now() < shift.ends_at:
+            try:
+                slot = claim_shift(pk, request.user.worker_profile)
+            except Exception as exc:
+                detail=getattr(exc,'detail',str(exc)); detail=detail[0] if isinstance(detail,list) else detail
+                return Response({'detail':str(detail)},status=400)
+            Notification.objects.get_or_create(
+                user=request.user,
+                kind=f'shift-claimed-{slot.id}',
+                defaults={
+                    'title':'Schicht übernommen',
+                    'body':f'{slot.shift.starts_at:%d.%m.%Y %H:%M} – {slot.shift.location.name}',
+                    'action_url':'/schedule',
+                },
+            )
+            audit(request,'shift.claimed',slot.shift,{'slot':str(slot.id),'late_pickup':True})
+            return Response(self.get_serializer(self.base_queryset().get(pk=pk)).data)
+
         from .self_service_service import submit_open_shift_request
         try:
             bid, slot = submit_open_shift_request(request.user.worker_profile, shift, request.data.get('note', ''))
