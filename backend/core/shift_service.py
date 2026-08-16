@@ -63,12 +63,22 @@ def ensure_shift_publish_allowed(shift: Shift) -> None:
 def ensure_worker_can_claim(worker: WorkerProfile, shift: Shift) -> None:
     from .premium_services import violations
 
-    # force a database round-trip before evaluating DecimalField-backed rules.
-    # DRF's force_authenticate and freshly-created fixture/model instances can
-    # retain string values assigned to DecimalFields until they are reloaded.
-    # The production path also benefits when a caller passes an unsaved/cached
-    # profile instance from another service layer.
+    # Reload DecimalField-backed values so cached/fresh ORM objects cannot
+    # retain strings assigned before persistence.
     worker = WorkerProfile.objects.select_related('user').get(pk=worker.pk)
+
+    # During the WIW/native cutover older single-person assignments may still
+    # live on Shift.worker without a CLAIMED ShiftSlot. Keep those records in
+    # conflict detection until the migration/audit path has fully normalized
+    # historical data.
+    legacy_overlap = Shift.objects.filter(
+        worker=worker,
+        starts_at__lt=shift.ends_at,
+        ends_at__gt=shift.starts_at,
+    ).exclude(pk=shift.pk).exclude(status=Shift.Status.CANCELLED).exists()
+    if legacy_overlap:
+        raise ValidationError('Du hast in diesem Zeitraum bereits eine Schicht.')
+
     issues = violations(worker, shift)
     if not issues:
         return
