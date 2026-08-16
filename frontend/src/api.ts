@@ -1,4 +1,9 @@
-const API = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api').replace(/\/$/, '');
+import { Capacitor } from '@capacitor/core';
+
+const PRODUCTION_API = 'https://solution.smarbiz.sbs/api';
+const DEVELOPMENT_API = 'http://localhost:8000/api';
+const DEFAULT_API = Capacitor.isNativePlatform() ? PRODUCTION_API : DEVELOPMENT_API;
+const API = (import.meta.env.VITE_API_URL || DEFAULT_API).replace(/\/$/, '');
 
 export type User = {
   id: string;
@@ -14,10 +19,18 @@ const accessToken = () => localStorage.getItem('access') || '';
 const refreshToken = () => localStorage.getItem('refresh') || '';
 let refreshPromise: Promise<string | null> | null = null;
 
+async function request(url: string, options: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, options);
+  } catch {
+    throw new Error('Verbindung zum A+ Server konnte nicht hergestellt werden. Bitte Internetverbindung prüfen und erneut versuchen.');
+  }
+}
+
 async function refreshAccessToken(): Promise<string | null> {
   if (!refreshToken()) return null;
   if (!refreshPromise) {
-    refreshPromise = fetch(`${API}/auth/refresh/`, {
+    refreshPromise = request(`${API}/auth/refresh/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh: refreshToken() }),
@@ -61,14 +74,14 @@ async function parseError(response: Response) {
 
 export async function api<T = any>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
   const normalizedPath = path.replace(/^\//, '');
-  const response = await fetch(`${API}/${normalizedPath}`, {
+  const response = await request(`${API}/${normalizedPath}`, {
     ...options,
     headers: headers(options),
   });
   if (response.status === 401 && retry && !normalizedPath.startsWith('auth/login') && !normalizedPath.startsWith('auth/refresh')) {
     const token = await refreshAccessToken();
     if (token) {
-      const retried = await fetch(`${API}/${normalizedPath}`, { ...options, headers: headers(options, token) });
+      const retried = await request(`${API}/${normalizedPath}`, { ...options, headers: headers(options, token) });
       if (retried.ok) return retried.status === 204 ? ({} as T) : retried.json();
       throw new Error(await parseError(retried));
     }
@@ -81,7 +94,10 @@ export async function api<T = any>(path: string, options: RequestInit = {}, retr
 }
 
 export async function login(email: string, password: string) {
-  const data: any = await api('auth/login/', { method: 'POST', body: JSON.stringify({ email, password }) });
+  const data: any = await api('auth/login/', {
+    method: 'POST',
+    body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+  });
   localStorage.setItem('access', data.access);
   localStorage.setItem('refresh', data.refresh);
   return data.user as User;
