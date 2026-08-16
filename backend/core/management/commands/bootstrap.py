@@ -7,8 +7,9 @@ from core.models import Position, User, WorkerProfile
 
 
 STORE_REVIEW_EMAIL = 'store-review@aplus-solution.de'
-# PBKDF2-SHA256 hash for the dedicated App Store review password. The plaintext
-# password is intentionally not stored in the repository.
+# Safe fallback used only when the reviewer account is first created or somehow
+# has no usable password. Publisher owns the live App Store review credential
+# and synchronizes it immediately before a store submission.
 STORE_REVIEW_PASSWORD_HASH = (
     'pbkdf2_sha256$1000000$uknDBax_fCIHUJqYLqLtyA$'
     '26a+GsJZD5rnNRxW85Tj7CBkjwrGhUZayS/VwCz2QZA='
@@ -98,9 +99,15 @@ class Command(BaseCommand):
             if getattr(reviewer, field) != value:
                 setattr(reviewer, field, value)
                 reviewer_changes.append(field)
-        if reviewer.password != STORE_REVIEW_PASSWORD_HASH:
+
+        # Do not overwrite a valid password on deploy. Publisher is the single
+        # source of truth for the credential sent to App Store Connect and syncs
+        # that secret into this account immediately before submission.
+        password_repaired = False
+        if not reviewer.has_usable_password():
             reviewer.password = STORE_REVIEW_PASSWORD_HASH
             reviewer_changes.append('password')
+            password_repaired = True
         if reviewer_changes:
             reviewer.save(update_fields=sorted(set(reviewer_changes)))
 
@@ -122,9 +129,6 @@ class Command(BaseCommand):
             worker.active = True
             worker_changes.append('active')
         if worker.employee_number != 'STORE-REVIEW-001':
-            # Preserve an existing unique employee number if this account was
-            # intentionally reconciled in production; only fill the canonical
-            # number when it is currently available.
             if not WorkerProfile.objects.filter(employee_number='STORE-REVIEW-001').exclude(pk=worker.pk).exists():
                 worker.employee_number = 'STORE-REVIEW-001'
                 worker_changes.append('employee_number')
@@ -136,7 +140,8 @@ class Command(BaseCommand):
                 'App-Store-Reviewer geprüft: '
                 f'email={STORE_REVIEW_EMAIL}, created={reviewer_created}, '
                 f'active={reviewer.is_active}, role={reviewer.role}, '
-                f'password_hash_matches={reviewer.password == STORE_REVIEW_PASSWORD_HASH}, '
+                f'usable_password={reviewer.has_usable_password()}, '
+                f'password_repaired={password_repaired}, '
                 f'worker_profile_created={worker_created}, worker_active={worker.active}, '
                 f'fields_repaired={",".join(reviewer_changes + worker_changes) or "none"}'
             )
