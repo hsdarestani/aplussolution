@@ -10,7 +10,7 @@ from .models import Notification, Shift, User
 from .permissions import IsAdminOrManager
 from .services import audit
 from .shift_api import ShiftApiSerializer
-from .shift_service import claim_shift, ensure_slots, refresh_shift_state, release_shift
+from .shift_service import ensure_slots, refresh_shift_state, release_shift
 from .shift_slots import ShiftSlot
 from .workplace_access import has_capability, location_in_scope, visible_locations
 
@@ -89,8 +89,21 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
     def available(self, request):
         if request.user.role != User.Role.WORKER:
             return Response({'detail':'Nur Mitarbeiter können verfügbare Schichten abrufen.'},status=403)
-        qs = self.filter_queryset(self.base_queryset().filter(status=Shift.Status.PUBLISHED,starts_at__gte=timezone.now(),slots__status='open').exclude(slots__worker=request.user.worker_profile).distinct())
-        return self._list_response(qs)
+        from .self_service_service import worker_can_access_open_shift
+        worker = request.user.worker_profile
+        base = self.filter_queryset(
+            self.base_queryset().filter(
+                status=Shift.Status.PUBLISHED,
+                starts_at__gte=timezone.now(),
+                slots__status=ShiftSlot.Status.OPEN,
+            ).exclude(slots__worker=worker).distinct()
+        )
+        allowed_ids = []
+        for shift in base:
+            allowed, _ = worker_can_access_open_shift(worker, shift)
+            if allowed:
+                allowed_ids.append(shift.id)
+        return self._list_response(self.base_queryset().filter(pk__in=allowed_ids))
 
     @action(detail=False, methods=['get'])
     def mine(self, request):
@@ -121,23 +134,47 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
     def claim(self, request, pk=None):
         if request.user.role != User.Role.WORKER:
             return Response({'detail':'Nur Mitarbeiter können eine offene Schicht übernehmen.'},status=403)
+        shift = self.base_queryset().filter(pk=pk).first()
+        if not shift:
+            return Response({'detail':'Schicht wurde nicht gefunden.'},status=404)
+        from .self_service_service import submit_open_shift_request
         try:
-            slot=claim_shift(pk,request.user.worker_profile)
+            bid, slot = submit_open_shift_request(request.user.worker_profile, shift, request.data.get('note', ''))
         except Exception as exc:
             detail=getattr(exc,'detail',str(exc)); detail=detail[0] if isinstance(detail,list) else detail
             return Response({'detail':str(detail)},status=400)
-        Notification.objects.get_or_create(user=request.user,kind=f'shift-claimed-{slot.id}',defaults={'title':'Schicht übernommen','body':f'{slot.shift.starts_at:%d.%m.%Y %H:%M} – {slot.shift.location.name}','action_url':'/schedule'})
-        audit(request,'shift.claimed',slot.shift,{'slot':str(slot.id)})
-        return Response(self.get_serializer(self.base_queryset().get(pk=pk)).data)
+        if slot:
+            Notification.objects.get_or_create(
+                user=request.user,
+                kind=f'shift-claimed-{slot.id}',
+                defaults={
+                    'title':'Schicht übernommen',
+                    'body':f'{slot.shift.starts_at:%d.%m.%Y %H:%M} – {slot.shift.location.name}',
+                    'action_url':'/schedule',
+                },
+            )
+            audit(request,'shift.claimed',slot.shift,{'slot':str(slot.id),'open_shift_request':str(bid.id)})
+            return Response(self.get_serializer(self.base_queryset().get(pk=pk)).data)
+        audit(request,'shift.bid_created',shift,{'open_shift_request':str(bid.id)})
+        return Response({
+            'shift': self.get_serializer(self.base_queryset().get(pk=pk)).data,
+            'request': {'id': str(bid.id), 'status': bid.status},
+            'detail': 'Bewerbung wurde zur Genehmigung gesendet.',
+        },status=202)
 
     @action(detail=True, methods=['post'])
     def release(self, request, pk=None):
         if request.user.role != User.Role.WORKER:
             return Response({'detail':'Nur Mitarbeiter können eine eigene Schicht freigeben.'},status=403)
+        shift = self.base_queryset().filter(pk=pk).first()
+        if not shift:
+            return Response({'detail':'Schicht wurde nicht gefunden.'},status=404)
+        from .self_service_service import validate_release
         try:
+            validate_release(request.user.worker_profile, shift)
             slot=release_shift(pk,request.user.worker_profile)
         except Exception as exc:
             detail=getattr(exc,'detail',str(exc)); detail=detail[0] if isinstance(detail,list) else detail
-            return Response({'detail':str(detail)},status=400)
+            return Response({'detail':str(detail)},status=403 if exc.__class__.__name__ == 'PermissionDenied' else 400)
         audit(request,'shift.released_to_pool',slot.shift,{'slot':str(slot.id)})
         return Response(self.get_serializer(self.base_queryset().get(pk=pk)).data)
