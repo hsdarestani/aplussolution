@@ -46,10 +46,11 @@ def test_preview_is_scope_aware_and_cannot_request_wage_columns(api_client, mana
     other_location = Location.objects.create(client=other_company, name='Andere Stadt', address='Andere 1')
     Shift.objects.create(client=other_company, location=other_location, position=position, worker=second_worker, starts_at=now, ends_at=now + timedelta(hours=4), status=Shift.Status.CONFIRMED)
     api_client.force_authenticate(manager_user)
+    local_day = timezone.localtime(now).date().isoformat()
     payload = {
         'data_source': 'shifts',
         'columns': ['employee_number', 'employee_name', 'location'],
-        'filters': {'date_from': now.date().isoformat(), 'date_to': now.date().isoformat()},
+        'filters': {'date_from': local_day, 'date_to': local_day},
     }
     response = api_client.post('/api/reports/builder/preview/', payload, format='json')
     assert response.status_code == 200
@@ -60,7 +61,7 @@ def test_preview_is_scope_aware_and_cannot_request_wage_columns(api_client, mana
 
 @pytest.mark.django_db
 def test_saved_report_exports_csv_and_xlsx_and_audits_run(auth_admin, shift):
-    day = shift.starts_at.date().isoformat()
+    day = timezone.localtime(shift.starts_at).date().isoformat()
     created = auth_admin.post('/api/reports/builder/definitions/', {
         'name': 'Dienstplan Test', 'data_source': 'shifts',
         'columns': ['date', 'employee_name', 'location', 'scheduled_minutes'],
@@ -93,7 +94,7 @@ def test_labor_report_compares_scheduled_actual_and_cost(auth_admin, worker_user
         worker=worker_user.worker_profile, shift=shift,
         clock_in=shift.starts_at + timedelta(minutes=15), clock_out=shift.ends_at + timedelta(minutes=30), approved=True,
     )
-    day = shift.starts_at.date().isoformat()
+    day = timezone.localtime(shift.starts_at).date().isoformat()
     response = auth_admin.post('/api/reports/builder/preview/', {
         'data_source': 'labor',
         'columns': ['employee_name', 'scheduled_minutes', 'actual_minutes', 'variance_minutes', 'scheduled_cost', 'actual_cost'],
@@ -110,7 +111,7 @@ def test_labor_report_compares_scheduled_actual_and_cost(auth_admin, worker_user
 
 @pytest.mark.django_db
 def test_grouped_aggregation_is_whitelisted(auth_admin, shift):
-    day = shift.starts_at.date().isoformat()
+    day = timezone.localtime(shift.starts_at).date().isoformat()
     response = auth_admin.post('/api/reports/builder/preview/', {
         'data_source': 'shifts',
         'columns': ['location'],
@@ -125,7 +126,7 @@ def test_grouped_aggregation_is_whitelisted(auth_admin, shift):
 
 @pytest.mark.django_db
 def test_report_schedule_requires_manage_and_delivers_attachment(api_client, manager_user, auth_admin, admin_user, shift):
-    day = shift.starts_at.date().isoformat()
+    day = timezone.localtime(shift.starts_at).date().isoformat()
     report = ReportDefinition.objects.create(
         name='Tagesreport', data_source='shifts', columns=['date', 'employee_name'],
         filters={'date_from': day, 'date_to': day}, created_by=admin_user,
