@@ -43,20 +43,21 @@ def _future_shift(company, location, position, *, hours_from_now=48, hours=4, st
 
 
 @pytest.mark.django_db
-def test_scheduler_completion_settings_are_admin_managed(api_client, auth_admin, manager_user):
+def test_scheduler_completion_settings_follow_schedule_edit_capability(api_client, auth_admin, manager_user):
     api_client.force_authenticate(manager_user)
     read = api_client.get('/api/scheduling/completion-settings/')
     assert read.status_code == 200
-    assert read.data['can_manage'] is False
-    denied = api_client.patch('/api/scheduling/completion-settings/', {'allow_overlapping_open_shifts': True}, format='json')
-    assert denied.status_code == 403
+    assert read.data['can_manage'] is True
+    manager_changed = api_client.patch('/api/scheduling/completion-settings/', {'allow_overlapping_open_shifts': True}, format='json')
+    assert manager_changed.status_code == 200
+    assert manager_changed.data['allow_overlapping_open_shifts'] is True
 
     changed = auth_admin.patch('/api/scheduling/completion-settings/', {
-        'allow_overlapping_open_shifts': True,
+        'allow_overlapping_open_shifts': False,
         'require_shift_confirmation': False,
     }, format='json')
     assert changed.status_code == 200
-    assert changed.data['allow_overlapping_open_shifts'] is True
+    assert changed.data['allow_overlapping_open_shifts'] is False
     assert changed.data['require_shift_confirmation'] is False
 
 
