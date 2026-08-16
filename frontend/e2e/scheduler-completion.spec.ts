@@ -108,10 +108,13 @@ test('worker confirms own shift and completes only surfaced task',async({page})=
   await expect(panel.getByText('Keine offene Schichtbestätigung.',{exact:true})).toBeVisible();
   await selectPanelTab(panel,'tasks');
   await expect(panel.locator('.task-list')).toHaveCount(1);
-  await expect(panel.getByText('Eingang prüfen',{exact:true})).toHaveCount(1);
-  await expect(panel.getByText('Fremde Aufgabe',{exact:true})).toHaveCount(0);
-  const checkbox=panel.locator('.task-items ion-checkbox').first();
+  const taskRow=panel.locator('.task-items label').filter({hasText:'Eingang prüfen'});
+  await expect(taskRow).toHaveCount(1);
+  await expect(taskRow).toContainText('Eingang prüfen');
+  await expect(taskRow).toContainText('Anna Becker');
+  await expect(panel.locator('.task-items label').filter({hasText:'Fremde Aufgabe'})).toHaveCount(0);
+  const checkbox=taskRow.locator('ion-checkbox');
   await checkbox.click();
-  await expect(panel.getByText('Eingang prüfen',{exact:true})).toHaveClass(/done/);
+  await expect(taskRow.locator('span')).toHaveClass(/done/);
   await expect(panel.locator('ion-segment-button[value="settings"]')).toHaveCount(0);
 });
