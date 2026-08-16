@@ -1,6 +1,5 @@
 from django.db.models import Q
 from django.http import HttpResponse
-from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -78,6 +77,13 @@ def _validate_definition(user, payload, instance=None):
         if item.get('field') not in allowed or item.get('op') not in valid_ops:
             raise ValidationError({'aggregates': 'Ungültige Aggregation.'})
     return source, columns, group_by, aggregates
+
+
+def _recipient_list(raw):
+    recipients = [str(x).strip() for x in (raw or []) if str(x).strip()]
+    if not recipients or any('@' not in item for item in recipients):
+        raise ValidationError({'recipients': 'Mindestens eine gültige E-Mail-Adresse ist erforderlich.'})
+    return recipients
 
 
 @api_view(['GET'])
@@ -210,9 +216,7 @@ def report_schedules(request):
     report = _definitions(request.user).filter(pk=request.data.get('report')).first()
     if not report:
         raise ValidationError({'report': 'Bericht nicht gefunden.'})
-    recipients = [str(x).strip() for x in (request.data.get('recipients') or []) if str(x).strip()]
-    if not recipients or any('@' not in item for item in recipients):
-        raise ValidationError({'recipients': 'Mindestens eine gültige E-Mail-Adresse ist erforderlich.'})
+    recipients = _recipient_list(request.data.get('recipients'))
     frequency = request.data.get('frequency')
     file_format = request.data.get('file_format') or ReportSchedule.FileFormat.CSV
     if frequency not in ReportSchedule.Frequency.values:
@@ -227,7 +231,7 @@ def report_schedules(request):
         timezone=request.data.get('timezone') or 'Europe/Berlin', active=bool(request.data.get('active', True)),
         created_by=request.user,
     )
-    row.next_run_at = _next_run(row, timezone.now() - timezone.timedelta(seconds=1))
+    row.next_run_at = _next_run(row)
     row.save(update_fields=['next_run_at', 'updated_at'])
     audit(request, 'report.schedule_created', row)
     return Response(_schedule_row(row), status=201)
@@ -244,9 +248,11 @@ def report_schedule_detail(request, pk):
         audit(request, 'report.schedule_deleted', row)
         row.delete()
         return Response(status=204)
-    for field in ['frequency', 'file_format', 'recipients', 'local_hour', 'weekday', 'day_of_month', 'timezone', 'active']:
+    for field in ['frequency', 'file_format', 'local_hour', 'weekday', 'day_of_month', 'timezone', 'active']:
         if field in request.data:
             setattr(row, field, request.data[field])
+    if 'recipients' in request.data:
+        row.recipients = _recipient_list(request.data['recipients'])
     if row.frequency not in ReportSchedule.Frequency.values or row.file_format not in ReportSchedule.FileFormat.values:
         raise ValidationError('Ungültige Frequenz oder Exportformat.')
     row.local_hour = min(max(int(row.local_hour), 0), 23)
