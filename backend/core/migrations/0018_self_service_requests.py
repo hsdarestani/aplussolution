@@ -110,6 +110,21 @@ class Migration(migrations.Migration):
             },
         ),
         migrations.CreateModel(
+            name='AvailabilitySeriesOccurrence',
+            fields=[
+                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('occurrence_date', models.DateField()),
+                ('availability', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='preference_occurrence', to='core.availability')),
+                ('series', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='materialized_occurrences', to='core.availabilitypreferenceseries')),
+            ],
+            options={
+                'ordering': ['occurrence_date'],
+                'unique_together': {('series', 'occurrence_date')},
+            },
+        ),
+        migrations.CreateModel(
             name='OpenShiftPolicy',
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
