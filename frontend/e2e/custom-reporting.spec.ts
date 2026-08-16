@@ -58,6 +58,7 @@ test('admin builds, saves, exports and schedules a custom report',async({page})=
   await panel.locator('ion-segment-button[value="schedules"]').click();
   await panel.locator('ion-select').filter({hasText:'Bericht'}).click();
   await page.getByRole('radio',{name:'Wochenreport'}).click();
+  await page.getByRole('button',{name:'OK',exact:true}).click();
   await panel.locator('ion-input').filter({hasText:'Empfänger'}).locator('input').fill('ops@example.com');
   await panel.getByRole('button',{name:'Versand speichern'}).click();
   await expect(panel.getByText(/ops@example.com/)).toBeVisible();
