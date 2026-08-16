@@ -20,6 +20,7 @@ class CoreConfig(AppConfig):
             reporting_tasks,
             scheduler_completion_models,
             scheduling_models,
+            self_service_models,
             shift_slots,
             communications_signals,
             communications_compat_signals,
