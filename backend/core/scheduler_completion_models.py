@@ -6,6 +6,36 @@ from .scheduling_models import ScheduleGroup
 from .shift_slots import ShiftSlot
 
 
+class SchedulerCompletionSettings(TimestampedModel):
+    allow_overlapping_open_shifts = models.BooleanField(default=False)
+    require_shift_confirmation = models.BooleanField(default=True)
+
+    class Meta:
+        app_label = 'core'
+        verbose_name_plural = 'Scheduler completion settings'
+
+    @classmethod
+    def load(cls):
+        obj = cls.objects.order_by('created_at').first()
+        return obj or cls.objects.create()
+
+
+class SchedulerColorOverride(TimestampedModel):
+    class Target(models.TextChoices):
+        SHIFT = 'shift', 'Schicht'
+        LOCATION = 'location', 'Einsatzort / Job Site'
+
+    target_type = models.CharField(max_length=20, choices=Target.choices)
+    target_id = models.UUIDField()
+    color = models.CharField(max_length=20, default='#2457E6')
+
+    class Meta:
+        app_label = 'core'
+        unique_together = ('target_type', 'target_id')
+        ordering = ['target_type', 'target_id']
+        indexes = [models.Index(fields=['target_type', 'target_id'], name='sched_color_target_idx')]
+
+
 class ScheduleAnnotation(TimestampedModel):
     class Kind(models.TextChoices):
         ANNOUNCEMENT = 'announcement', 'Ankündigung'
