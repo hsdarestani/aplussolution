@@ -1,8 +1,35 @@
 import uuid
 
 import django.db.models.deletion
-import django.utils.timezone
 from django.db import migrations, models
+from django.utils import timezone
+
+
+def seed_scheduler_completion(apps, schema_editor):
+    Settings = apps.get_model('core', 'SchedulerCompletionSettings')
+    ShiftSlot = apps.get_model('core', 'ShiftSlot')
+    Confirmation = apps.get_model('core', 'ShiftConfirmation')
+    Settings.objects.get_or_create(
+        allow_overlapping_open_shifts=False,
+        require_shift_confirmation=True,
+    )
+    now = timezone.now()
+    slots = ShiftSlot.objects.filter(
+        status='claimed',
+        worker_id__isnull=False,
+        shift__status__in=['published', 'confirmed'],
+        shift__starts_at__gte=now,
+    ).select_related('shift')
+    for slot in slots.iterator():
+        Confirmation.objects.get_or_create(
+            slot_id=slot.id,
+            defaults={
+                'shift_id': slot.shift_id,
+                'worker_id': slot.worker_id,
+                'publication_at': slot.shift.published_at,
+                'requested_at': now,
+            },
+        )
 
 
 class Migration(migrations.Migration):
@@ -123,8 +150,9 @@ class Migration(migrations.Migration):
                 ('worker', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='shift_confirmations', to='core.workerprofile')),
             ],
             options={
-                'ordering': ['shift__starts_at', 'worker__employee_number'],
+                'ordering': ['requested_at', 'worker_id'],
                 'indexes': [models.Index(fields=['worker', 'confirmed_at'], name='shift_confirm_worker_idx')],
             },
         ),
+        migrations.RunPython(seed_scheduler_completion, migrations.RunPython.noop),
     ]
