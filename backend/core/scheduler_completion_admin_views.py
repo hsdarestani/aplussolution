@@ -1,5 +1,6 @@
 import re
 
+from django.db.models import Q
 from rest_framework import serializers, viewsets
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -71,8 +72,8 @@ class SchedulerColorOverrideViewSet(viewsets.ModelViewSet):
             shift_ids = Shift.objects.filter(location__in=locations).values_list('id', flat=True)
             location_ids = locations.values_list('id', flat=True)
             return qs.filter(
-                serializers.Q(target_type='shift', target_id__in=shift_ids)
-                | serializers.Q(target_type='location', target_id__in=location_ids)
+                Q(target_type='shift', target_id__in=shift_ids)
+                | Q(target_type='location', target_id__in=location_ids)
             )
         return qs.none()
 
