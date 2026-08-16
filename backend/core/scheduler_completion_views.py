@@ -10,14 +10,13 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Shift, User, WorkerProfile
+from .models import Shift, User
 from .permissions import IsAdminOrManager
 from .scheduler_completion_models import (
     ScheduleAnnotation,
     ScheduleTask,
     ScheduleTaskList,
     SchedulerDisplayPreference,
-    ShiftConfirmation,
 )
 from .scheduler_completion_service import (
     annotation_applies_to_worker,
@@ -25,7 +24,7 @@ from .scheduler_completion_service import (
     confirm_shift_slot,
     pending_confirmations_for_worker,
 )
-from .scheduling_models import ScheduleMembership
+from .scheduling_models import ScheduleGroup, ScheduleMembership
 from .services import audit
 from .shift_slots import ShiftSlot
 from .workplace_access import has_capability, location_in_scope, visible_locations
@@ -47,6 +46,45 @@ def _validate_timezone(value):
     except Exception as exc:
         raise serializers.ValidationError('Ungültige IANA-Zeitzone.') from exc
     return value
+
+
+def _worker_visible_task_ids(worker, task_lists):
+    """Return task IDs a worker can see/complete without leaking sibling assignments."""
+    list_rows = list(task_lists.values('id', 'work_date'))
+    if not list_rows:
+        return []
+    dates = {row['work_date'] for row in list_rows}
+    list_dates = {row['id']: row['work_date'] for row in list_rows}
+    position_days = set(
+        Shift.objects.filter(
+            slots__worker=worker,
+            slots__status=ShiftSlot.Status.CLAIMED,
+            starts_at__date__in=dates,
+        ).exclude(status=Shift.Status.CANCELLED)
+        .values_list('starts_at__date', 'position_id')
+    )
+    task_rows = ScheduleTask.objects.filter(task_list_id__in=list_dates).values(
+        'id', 'task_list_id', 'assignee_id', 'position_id'
+    )
+    allowed = []
+    for row in task_rows:
+        if row['assignee_id'] == worker.id:
+            allowed.append(row['id'])
+            continue
+        if row['assignee_id'] is not None:
+            continue
+        if row['position_id'] is None or (list_dates[row['task_list_id']], row['position_id']) in position_days:
+            allowed.append(row['id'])
+    return allowed
+
+
+def _tasks_for_serializer(obj, request):
+    qs = obj.tasks.select_related('assignee__user', 'position', 'completed_by').all()
+    user = getattr(request, 'user', None) if request else None
+    if not user or not user.is_authenticated or user.role != User.Role.WORKER:
+        return qs
+    allowed_ids = _worker_visible_task_ids(user.worker_profile, ScheduleTaskList.objects.filter(pk=obj.pk))
+    return qs.filter(pk__in=allowed_ids)
 
 
 class ScheduleAnnotationSerializer(serializers.ModelSerializer):
@@ -88,7 +126,7 @@ class ScheduleTaskSerializer(serializers.ModelSerializer):
 class ScheduleTaskListSerializer(serializers.ModelSerializer):
     schedule_name = serializers.CharField(source='schedule.name', read_only=True)
     location_name = serializers.CharField(source='location.name', read_only=True)
-    tasks = ScheduleTaskSerializer(many=True, read_only=True)
+    tasks = serializers.SerializerMethodField()
     completed_count = serializers.SerializerMethodField()
     task_count = serializers.SerializerMethodField()
 
@@ -97,11 +135,17 @@ class ScheduleTaskListSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['created_by']
 
+    def _tasks(self, obj):
+        return list(_tasks_for_serializer(obj, self.context.get('request')))
+
+    def get_tasks(self, obj):
+        return ScheduleTaskSerializer(self._tasks(obj), many=True, context=self.context).data
+
     def get_completed_count(self, obj):
-        return sum(1 for task in obj.tasks.all() if task.completed_at)
+        return sum(1 for task in self._tasks(obj) if task.completed_at)
 
     def get_task_count(self, obj):
-        return len(list(obj.tasks.all()))
+        return len(self._tasks(obj))
 
 
 class SchedulerDisplayPreferenceSerializer(serializers.ModelSerializer):
@@ -114,12 +158,13 @@ class SchedulerDisplayPreferenceSerializer(serializers.ModelSerializer):
 
 
 class ScheduleAnnotationViewSet(viewsets.ModelViewSet):
+    queryset = ScheduleAnnotation.objects.all()
     serializer_class = ScheduleAnnotationSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         user = self.request.user
-        qs = ScheduleAnnotation.objects.filter(active=True).select_related('schedule', 'location', 'created_by').prefetch_related('schedule__locations')
+        qs = self.queryset.filter(active=True).select_related('schedule', 'location', 'created_by').prefetch_related('schedule__locations')
         starts_on = parse_date(str(self.request.GET.get('starts_on') or ''))
         ends_on = parse_date(str(self.request.GET.get('ends_on') or ''))
         if starts_on:
@@ -131,10 +176,12 @@ class ScheduleAnnotationViewSet(viewsets.ModelViewSet):
         if user.role == User.Role.MANAGER:
             _require(user, 'schedule.view')
             locations = visible_locations(user)
-            schedule_ids = ScheduleMembership.objects.filter(
-                schedule__locations__in=locations, schedule__active=True
-            ).values_list('schedule_id', flat=True)
-            return qs.filter(Q(location__isnull=True, schedule__isnull=True) | Q(location__in=locations) | Q(schedule_id__in=schedule_ids)).distinct()
+            schedule_ids = ScheduleGroup.objects.filter(active=True, locations__in=locations).values_list('id', flat=True)
+            return qs.filter(
+                Q(location__isnull=True, schedule__isnull=True)
+                | Q(location__in=locations)
+                | Q(schedule_id__in=schedule_ids)
+            ).distinct()
         if user.role == User.Role.WORKER:
             worker = user.worker_profile
             rows = [obj.pk for obj in qs if annotation_applies_to_worker(obj, worker)]
@@ -184,12 +231,13 @@ class ScheduleAnnotationViewSet(viewsets.ModelViewSet):
 
 
 class ScheduleTaskListViewSet(viewsets.ModelViewSet):
+    queryset = ScheduleTaskList.objects.all()
     serializer_class = ScheduleTaskListSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         user = self.request.user
-        qs = ScheduleTaskList.objects.filter(active=True).select_related('schedule', 'location', 'created_by').prefetch_related(
+        qs = self.queryset.filter(active=True).select_related('schedule', 'location', 'created_by').prefetch_related(
             'tasks__assignee__user', 'tasks__position', 'tasks__completed_by'
         )
         date_value = parse_date(str(self.request.GET.get('date') or ''))
@@ -200,7 +248,12 @@ class ScheduleTaskListViewSet(viewsets.ModelViewSet):
         if user.role == User.Role.MANAGER:
             _require(user, 'schedule.view')
             locations = visible_locations(user)
-            return qs.filter(Q(location__isnull=True) | Q(location__in=locations)).distinct()
+            schedule_ids = ScheduleGroup.objects.filter(active=True, locations__in=locations).values_list('id', flat=True)
+            return qs.filter(
+                Q(location__isnull=True, schedule__isnull=True)
+                | Q(location__in=locations)
+                | Q(schedule_id__in=schedule_ids)
+            ).distinct()
         if user.role == User.Role.WORKER:
             worker = user.worker_profile
             schedule_ids = ScheduleMembership.objects.filter(worker=worker, active=True).values_list('schedule_id', flat=True)
@@ -227,8 +280,11 @@ class ScheduleTaskListViewSet(viewsets.ModelViewSet):
         if not _admin(user):
             _require(user, 'schedule.edit')
             location = serializer.validated_data.get('location')
+            schedule = serializer.validated_data.get('schedule')
             if location and not location_in_scope(user, location):
                 raise PermissionDenied('Einsatzort liegt außerhalb deines Verantwortungsbereichs.')
+            if schedule and any(not location_in_scope(user, loc) for loc in schedule.locations.all()):
+                raise PermissionDenied('Dienstplan enthält Einsatzorte außerhalb deines Verantwortungsbereichs.')
         obj = serializer.save(created_by=user)
         audit(self.request, 'schedule.task_list.created', obj)
 
@@ -239,25 +295,20 @@ class ScheduleTaskListViewSet(viewsets.ModelViewSet):
 
 
 class ScheduleTaskViewSet(viewsets.ModelViewSet):
+    queryset = ScheduleTask.objects.all()
     serializer_class = ScheduleTaskSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         allowed_lists = ScheduleTaskListViewSet()
         allowed_lists.request = self.request
-        list_ids = allowed_lists.get_queryset().values_list('id', flat=True)
-        qs = ScheduleTask.objects.filter(task_list_id__in=list_ids).select_related(
+        list_qs = allowed_lists.get_queryset()
+        qs = self.queryset.filter(task_list__in=list_qs).select_related(
             'task_list', 'assignee__user', 'position', 'completed_by'
         )
         user = self.request.user
         if user.role == User.Role.WORKER:
-            worker = user.worker_profile
-            position_ids = Shift.objects.filter(
-                slots__worker=worker,
-                slots__status=ShiftSlot.Status.CLAIMED,
-                starts_at__date=timezone.localdate(),
-            ).values_list('position_id', flat=True)
-            qs = qs.filter(Q(assignee__isnull=True, position__isnull=True) | Q(assignee=worker) | Q(assignee__isnull=True, position_id__in=position_ids))
+            qs = qs.filter(pk__in=_worker_visible_task_ids(user.worker_profile, list_qs))
         return qs
 
     def get_permissions(self):
@@ -268,9 +319,12 @@ class ScheduleTaskViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         task_list = serializer.validated_data['task_list']
-        if self.request.user.role == User.Role.MANAGER:
-            _require(self.request.user, 'schedule.edit')
-            if task_list.location_id and not location_in_scope(self.request.user, task_list.location):
+        user = self.request.user
+        if user.role == User.Role.MANAGER:
+            _require(user, 'schedule.edit')
+            if task_list.location_id and not location_in_scope(user, task_list.location):
+                raise PermissionDenied('Aufgabenliste liegt außerhalb deines Verantwortungsbereichs.')
+            if task_list.schedule_id and any(not location_in_scope(user, loc) for loc in task_list.schedule.locations.all()):
                 raise PermissionDenied('Aufgabenliste liegt außerhalb deines Verantwortungsbereichs.')
         obj = serializer.save()
         audit(self.request, 'schedule.task.created', obj)
@@ -369,8 +423,8 @@ def scheduler_completion_snapshot(request):
     preference, _ = SchedulerDisplayPreference.objects.get_or_create(user=request.user)
     pending_count = pending_confirmations_for_worker(request.user.worker_profile).count() if request.user.role == User.Role.WORKER else 0
     return Response({
-        'annotations': ScheduleAnnotationSerializer(annotations, many=True).data,
-        'task_lists': ScheduleTaskListSerializer(task_lists, many=True).data,
+        'annotations': ScheduleAnnotationSerializer(annotations, many=True, context={'request': request}).data,
+        'task_lists': ScheduleTaskListSerializer(task_lists, many=True, context={'request': request}).data,
         'display': SchedulerDisplayPreferenceSerializer(preference).data,
         'pending_confirmations': pending_count,
     })
