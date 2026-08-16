@@ -186,6 +186,9 @@ def _availability_issue(worker, shift, policy):
         ends_at__gt=shift.starts_at,
     ).exists()
     if not unavailable:
+        from .self_service_service import recurring_unavailable
+        unavailable = recurring_unavailable(worker, shift)
+    if not unavailable:
         return None
     return _issue(policy.availability_mode, 'unavailable', 'Mitarbeiter ist in diesem Zeitraum nicht verfügbar.')
 
@@ -378,12 +381,16 @@ def evaluate_worker_for_shift(worker: WorkerProfile, shift: Shift):
 
     blockers = [item for item in issues if item['severity'] == 'block']
     warnings = [item for item in issues if item['severity'] == 'warn']
-    score = int(worker.ranking_points or 0) * 100 - int(projected_minutes / 60) - len(warnings) * 25
+    from .self_service_service import preferred_availability_bonus
+    preference_bonus = preferred_availability_bonus(worker, shift)
+    score = int(worker.ranking_points or 0) * 100 - int(projected_minutes / 60) - len(warnings) * 25 + preference_bonus
     return {
         'worker': str(worker.id),
         'worker_name': worker.user.get_full_name() or worker.user.email,
         'eligible': not blockers,
         'score': score,
+        'preference_bonus': preference_bonus,
+        'preferred_availability': bool(preference_bonus),
         'projected_week_minutes': projected_minutes,
         'projected_day_minutes': projected_day_minutes,
         'overtime': {
