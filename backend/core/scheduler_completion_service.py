@@ -6,8 +6,8 @@ from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from .models import Notification, Shift, TimeEntry, WorkerProfile
-from .scheduler_completion_models import ScheduleAnnotation, ShiftConfirmation
+from .models import Notification, Shift, TimeEntry
+from .scheduler_completion_models import ScheduleAnnotation, SchedulerCompletionSettings, ShiftConfirmation
 from .scheduling_models import ScheduleMembership
 from .shift_slots import ShiftSlot
 from .workplace_models import WorkplaceSettings
@@ -146,7 +146,7 @@ def apply_business_closed_action(annotation):
 
 
 def sync_shift_confirmations(shift, *, force_reset=False):
-    settings = WorkplaceSettings.load()
+    settings = SchedulerCompletionSettings.load()
     if not settings.require_shift_confirmation:
         ShiftConfirmation.objects.filter(shift=shift).delete()
         return []
