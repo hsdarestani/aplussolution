@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from .models import Shift, User
 from .scheduler_completion_models import SchedulerColorOverride
+from .self_service_models import OpenShiftPolicy, OpenShiftRequest
 from .shift_slots import ShiftSlot
 
 
@@ -19,6 +20,9 @@ class ShiftApiSerializer(serializers.ModelSerializer):
     shift_color = serializers.SerializerMethodField()
     location_color = serializers.SerializerMethodField()
     my_confirmation = serializers.SerializerMethodField()
+    open_shift_policy = serializers.SerializerMethodField()
+    my_open_shift_request = serializers.SerializerMethodField()
+    open_shift_request_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Shift
@@ -27,6 +31,7 @@ class ShiftApiSerializer(serializers.ModelSerializer):
             'position', 'position_name', 'position_color', 'shift_color', 'location_color',
             'starts_at', 'ends_at', 'break_minutes', 'status', 'notes',
             'required_count', 'open_count', 'filled_count', 'assignments', 'required_tags', 'my_confirmation',
+            'open_shift_policy', 'my_open_shift_request', 'open_shift_request_count',
         ]
 
     def _confirmation_row(self, slot):
@@ -90,3 +95,32 @@ class ShiftApiSerializer(serializers.ModelSerializer):
         if not slot:
             return None
         return {'slot': str(slot.id), **self._confirmation_row(slot)}
+
+    def get_open_shift_policy(self, obj):
+        policy = OpenShiftPolicy.objects.filter(shift=obj).first()
+        return {
+            'require_approval': bool(policy.require_approval) if policy else False,
+            'audience_mode': policy.audience_mode if policy else OpenShiftPolicy.AudienceMode.ELIGIBLE,
+        }
+
+    def get_my_open_shift_request(self, obj):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated or user.role != User.Role.WORKER:
+            return None
+        row = OpenShiftRequest.objects.filter(shift=obj, worker=user.worker_profile).order_by('-updated_at').first()
+        if not row:
+            return None
+        return {
+            'id': str(row.id),
+            'status': row.status,
+            'created_at': row.created_at,
+            'decided_at': row.decided_at,
+        }
+
+    def get_open_shift_request_count(self, obj):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated or user.role not in {User.Role.ADMIN, User.Role.MANAGER}:
+            return None
+        return OpenShiftRequest.objects.filter(shift=obj, status=OpenShiftRequest.Status.PENDING_APPROVAL).count()
