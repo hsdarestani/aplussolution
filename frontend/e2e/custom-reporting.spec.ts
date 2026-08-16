@@ -45,9 +45,9 @@ async function mock(page:Page,user:any){
 
 test('admin builds, saves, exports and schedules a custom report',async({page})=>{
   await page.setViewportSize({width:1440,height:1000});await mock(page,admin);await page.goto('/?view=operations');
-  await page.getByRole('button',{name:'Berichte öffnen'}).click();
+  await page.getByRole('button',{name:'Berichte',exact:true}).click();
   const panel=page.getByTestId('custom-reporting-panel');await expect(panel).toBeVisible();await expect(panel.getByRole('heading',{name:'Report Builder'})).toBeVisible();
-  await expect(panel.getByText('Stundenlohn',{exact:true})).toBeVisible();
+  await expect(panel.locator('.reporting-field-list .reporting-check').filter({hasText:'Stundenlohn'}).first()).toBeVisible();
   await panel.getByRole('button',{name:'Vorschau erstellen'}).click();
   await expect(panel.getByText('Anna Becker',{exact:true})).toBeVisible();
   await panel.locator('ion-input').filter({hasText:'Berichtsname'}).locator('input').fill('Wochenreport');
@@ -65,10 +65,11 @@ test('admin builds, saves, exports and schedules a custom report',async({page})=
 
 test('report viewer cannot see wage fields or scheduling controls',async({page})=>{
   await page.setViewportSize({width:390,height:844});await mock(page,viewer);await page.goto('/?view=operations');
-  await page.getByRole('button',{name:'Berichte öffnen'}).click();
+  await page.getByRole('button',{name:'Berichte',exact:true}).click();
   const panel=page.getByTestId('custom-reporting-panel');await expect(panel).toBeVisible();
-  await expect(panel.getByText('Stundenlohn',{exact:true})).toHaveCount(0);
-  await expect(panel.getByText('Geplante Kosten',{exact:true})).toHaveCount(0);
+  const fieldList=panel.locator('.reporting-field-list');
+  await expect(fieldList.locator('.reporting-check').filter({hasText:'Stundenlohn'})).toHaveCount(0);
+  await expect(fieldList.locator('.reporting-check').filter({hasText:'Geplante Kosten'})).toHaveCount(0);
   await expect(panel.locator('ion-segment-button[value="schedules"]')).toHaveCount(0);
   await expect(panel.getByText('Für andere Report-Nutzer teilen',{exact:true})).toHaveCount(0);
 });
