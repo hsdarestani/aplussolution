@@ -13,7 +13,7 @@ CAPABILITIES = {
     'attendance.view', 'attendance.edit',
     'payroll.view', 'payroll.review', 'payroll.export',
     'wage.view', 'labor.share',
-    'reports.view', 'documents.manage',
+    'reports.view', 'reports.manage', 'documents.manage',
 }
 
 MANAGER_LEGACY_CAPABILITIES = CAPABILITIES - {'roles.manage', 'workplace.manage'}
@@ -44,7 +44,7 @@ SYSTEM_ROLES = {
     'payroll': {
         'name': 'Lohn & Zeiten',
         'description': 'Prüft Arbeitszeiten und Pay Periods, ohne Dienstpläne zu bearbeiten.',
-        'permissions': ['manager.access', 'people.view', 'attendance.view', 'attendance.edit', 'payroll.view', 'payroll.review', 'payroll.export', 'wage.view', 'reports.view'],
+        'permissions': ['manager.access', 'people.view', 'attendance.view', 'attendance.edit', 'payroll.view', 'payroll.review', 'payroll.export', 'wage.view', 'reports.view', 'reports.manage'],
         'wage_visibility': AccessRole.WageVisibility.ALL,
     },
     'viewer': {
