@@ -1,0 +1,95 @@
+name: Diagnose Premium production schema
+
+on:
+  push:
+    branches:
+      - hotfix/premium-migration-repair
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install SSH tooling
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Inspect production migration and table state
+        env:
+          SSHPASS: ${{ secrets.PASS }}
+          HOST: ${{ secrets.HOST }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$SSHPASS"
+          sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          echo '=== Core migration history ==='
+          docker compose exec -T backend python manage.py showmigrations core
+          echo '=== Premium table existence ==='
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from django.db import connection
+
+          expected = [
+              'core_schedulingpolicy',
+              'core_shifttag',
+              'core_scheduletemplate',
+              'core_tasklist',
+              'core_forecastmetric',
+              'core_timeoffcategory',
+              'core_reportdefinition',
+              'core_publicapikey',
+              'core_webhooksubscription',
+              'core_samlidentity',
+              'core_externalintegration',
+              'core_shifttaglink',
+              'core_scheduletemplateshift',
+              'core_taskitem',
+              'core_taskrun',
+              'core_taskcompletion',
+              'core_dailyforecast',
+              'core_staffcallout',
+              'core_timeoffclassification',
+              'core_webhookdelivery',
+              'core_shiftpickuprequest',
+              'core_workerlocationmembership',
+          ]
+          with connection.cursor() as cursor:
+              tables = set(connection.introspection.table_names(cursor))
+              for name in expected:
+                  print(f'{name}: {"EXISTS" if name in tables else "MISSING"}')
+              print('=== Existing premium-like tables ===')
+              cursor.execute("""
+                  SELECT tablename
+                  FROM pg_catalog.pg_tables
+                  WHERE schemaname = current_schema()
+                    AND (tablename LIKE 'core_%policy%'
+                         OR tablename LIKE 'core_%task%'
+                         OR tablename LIKE 'core_%forecast%'
+                         OR tablename LIKE 'core_%webhook%'
+                         OR tablename LIKE 'core_%saml%'
+                         OR tablename LIKE 'core_%integration%'
+                         OR tablename LIKE 'core_%tag%'
+                         OR tablename LIKE 'core_%callout%'
+                         OR tablename LIKE 'core_%pickup%'
+                         OR tablename LIKE 'core_%membership%')
+                  ORDER BY tablename
+              """)
+              for row in cursor.fetchall():
+                  print(row[0])
+              print('=== Migration rows 0008-0010 ===')
+              cursor.execute("""
+                  SELECT app, name, applied
+                  FROM django_migrations
+                  WHERE app='core' AND name IN (
+                    '0008_wiw_premium_parity',
+                    '0009_premium_approval_and_labor_sharing',
+                    '0010_seed_premium_defaults'
+                  )
+                  ORDER BY name
+              """)
+              rows = cursor.fetchall()
+              print(rows if rows else 'NONE')
+          PY
+          REMOTE
