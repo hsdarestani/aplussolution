@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import models
 
-from .models import Shift, TimeOffRequest, TimestampedModel, User, WorkerProfile
+from .models import Availability, Shift, TimeOffRequest, TimestampedModel, User, WorkerProfile
 
 
 class SelfServiceSettings(TimestampedModel):
@@ -79,6 +79,17 @@ class AvailabilityPreferenceSeries(TimestampedModel):
         app_label = 'core'
         ordering = ['starts_on', 'worker__employee_number']
         indexes = [models.Index(fields=['worker', 'active', 'starts_on', 'ends_on'], name='avail_series_range_idx')]
+
+
+class AvailabilitySeriesOccurrence(TimestampedModel):
+    series = models.ForeignKey(AvailabilityPreferenceSeries, on_delete=models.CASCADE, related_name='materialized_occurrences')
+    availability = models.OneToOneField(Availability, on_delete=models.CASCADE, related_name='preference_occurrence')
+    occurrence_date = models.DateField()
+
+    class Meta:
+        app_label = 'core'
+        unique_together = ('series', 'occurrence_date')
+        ordering = ['occurrence_date']
 
 
 class TimeOffType(TimestampedModel):
