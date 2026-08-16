@@ -146,10 +146,9 @@ def apply_business_closed_action(annotation):
 
 
 def sync_shift_confirmations(shift, *, force_reset=False):
-    settings = SchedulerCompletionSettings.load()
-    if not settings.require_shift_confirmation:
-        ShiftConfirmation.objects.filter(shift=shift).delete()
-        return []
+    # Confirmation records are always maintained. The workplace setting controls
+    # whether confirmation is actively required/promoted, not whether employees
+    # may voluntarily confirm an assigned shift.
     if shift.status not in {Shift.Status.PUBLISHED, Shift.Status.CONFIRMED}:
         return []
     publication_at = shift.published_at or shift.created_at
@@ -185,6 +184,8 @@ def sync_shift_confirmations(shift, *, force_reset=False):
 
 
 def pending_confirmations_for_worker(worker):
+    if not SchedulerCompletionSettings.load().require_shift_confirmation:
+        return ShiftConfirmation.objects.none()
     return ShiftConfirmation.objects.filter(
         worker=worker,
         confirmed_at__isnull=True,
@@ -205,7 +206,7 @@ def confirm_shift_slot(worker, slot_id, user):
     sync_shift_confirmations(slot.shift)
     confirmation = ShiftConfirmation.objects.select_for_update().filter(slot=slot, worker=worker).first()
     if not confirmation:
-        raise ValidationError('Für diese Schicht ist keine Bestätigung erforderlich.')
+        raise ValidationError('Für diese Schicht ist keine Bestätigung verfügbar.')
     if not confirmation.confirmed_at:
         confirmation.confirmed_at = timezone.now()
         confirmation.confirmed_by = user
