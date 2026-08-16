@@ -1,14 +1,25 @@
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from .attendance_final_service import clock_in_with_restrictions, clock_out_with_restrictions
 from .attendance_v4_models import AttendanceClockEvent
-from .attendance_v4_service import clock_in_worker, clock_out_worker
 from .models import TimeEntry
 from .payroll_service import assert_time_entry_editable
 from .permissions import IsAdminOrManager
 from .services import audit
 from .views import TimeEntryViewSet as LegacyTimeEntryViewSet
 from .workplace_access import has_capability, visible_workers
+
+
+def _clock_method(request):
+    explicit = str(request.data.get('clock_client') or '').strip().lower()
+    if explicit == 'mobile':
+        return AttendanceClockEvent.Method.MOBILE
+    origin = str(request.META.get('HTTP_ORIGIN') or '').lower()
+    user_agent = str(request.META.get('HTTP_USER_AGENT') or '').lower()
+    if origin.startswith('capacitor://') or '; wv)' in user_agent or 'capacitor' in user_agent:
+        return AttendanceClockEvent.Method.MOBILE
+    return AttendanceClockEvent.Method.WEB
 
 
 class TimeEntryViewSet(LegacyTimeEntryViewSet):
@@ -40,13 +51,13 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
         if request.user.role != 'worker':
             return Response({'detail': 'Zeiterfassung ist nur im Mitarbeiterportal möglich.'}, status=403)
         try:
-            entry = clock_in_worker(
+            entry = clock_in_with_restrictions(
                 worker=request.user.worker_profile,
                 shift_id=request.data.get('shift'),
                 lat=request.data.get('lat'),
                 lng=request.data.get('lng'),
                 request=request,
-                method=AttendanceClockEvent.Method.MOBILE,
+                method=_clock_method(request),
                 photo=request.FILES.get('photo'),
             )
         except Exception as exc:
@@ -62,12 +73,12 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
         if request.user.role != 'worker':
             return Response({'detail': 'Zeiterfassung ist nur im Mitarbeiterportal möglich.'}, status=403)
         try:
-            entry, policy = clock_out_worker(
+            entry, policy = clock_out_with_restrictions(
                 worker=request.user.worker_profile,
                 lat=request.data.get('lat'),
                 lng=request.data.get('lng'),
                 request=request,
-                method=AttendanceClockEvent.Method.MOBILE,
+                method=_clock_method(request),
                 photo=request.FILES.get('photo'),
                 note=request.data.get('note', ''),
             )
