@@ -16,6 +16,8 @@ class CoreConfig(AppConfig):
             integration_v7_models,
             payroll_models,
             portal_models,
+            reporting_models,
+            reporting_tasks,
             scheduling_models,
             shift_slots,
             communications_signals,
