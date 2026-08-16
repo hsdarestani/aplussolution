@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from dateutil.parser import isoparse
 from django.db import transaction
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
@@ -10,8 +11,9 @@ from rest_framework.response import Response
 
 from .models import Shift, User, WorkerProfile
 from .permissions import IsAdmin, IsAdminOrManager
-from .premium_models import StaffCallout, WebhookDelivery, WebhookSubscription
-from .premium_services import auto_schedule
+from .premium_models import ReportDefinition, StaffCallout, WebhookDelivery, WebhookSubscription
+from .premium_report_service import run_report
+from .premium_services import auto_schedule, rows_to_csv
 from .premium_tasks import deliver_premium_webhook
 from .services import audit
 from .shift_service import refresh_shift_state
@@ -48,6 +50,20 @@ def auto_schedule_view(request):
         {'assigned': result['assigned'], 'unfilled': result['unfilled']},
     )
     return Response(result)
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminOrManager])
+def report_run(request, pk):
+    definition = get_object_or_404(ReportDefinition, pk=pk)
+    start = _dt(request.data.get('start'), timezone.now() - timedelta(days=90))
+    end = _dt(request.data.get('end'), timezone.now() + timedelta(days=90))
+    columns, rows = run_report(definition, start, end)
+    if request.data.get('format') == 'csv':
+        response = HttpResponse(rows_to_csv(columns, rows), content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = f'attachment; filename="{definition.kind}.csv"'
+        return response
+    return Response({'columns': columns, 'rows': rows, 'count': len(rows)})
 
 
 @api_view(['GET', 'POST'])
