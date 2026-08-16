@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, integration_views, portal_views, searchable_views, shift_views, time_views, views
+from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, integration_views, portal_views, searchable_views, shift_views, store_review_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -29,6 +29,7 @@ router.register('notifications', views.NotificationViewSet, basename='notificati
 urlpatterns = [
     path('', include(router.urls)),
     path('auth/login/', views.login),
+    path('auth/store-review/sync/', store_review_views.sync_store_review_credential),
     path('auth/refresh/', TokenRefreshView.as_view()),
     path('auth/me/', views.me),
     path('auth/change-password/', views.change_password),
