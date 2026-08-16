@@ -13,8 +13,27 @@ cd "$FRONTEND"
 : "${IOS_PROVISIONING_PROFILE_SPECIFIER:?Publisher must provide IOS_PROVISIONING_PROFILE_SPECIFIER}"
 : "${IOS_SIGNING_KEYCHAIN:?Publisher must provide IOS_SIGNING_KEYCHAIN}"
 
+# Native App Store builds must never inherit the browser/dev localhost fallback.
+# Publisher may override this explicitly, but the safe default is always the
+# real A+ Solution production API used by App Review devices.
+export VITE_API_URL="${VITE_API_URL:-https://solution.smarbiz.sbs/api}"
+case "$VITE_API_URL" in
+  https://*) ;;
+  *) echo "Refusing iOS App Store build with non-HTTPS VITE_API_URL: $VITE_API_URL" >&2; exit 1 ;;
+esac
+
+echo "Building iOS against API: $VITE_API_URL"
 npm install --no-audit --no-fund
 npm run build
+
+# Fail before Xcode/signing if the production endpoint was not compiled into
+# the web bundle. This protects against shipping another IPA that calls
+# localhost from WKWebView and surfaces WebKit's generic 'Load failed' error.
+if ! grep -R -F -q "$VITE_API_URL" dist; then
+  echo "Compiled iOS web bundle does not contain expected production API URL." >&2
+  exit 1
+fi
+
 rm -rf ios
 npx cap add ios
 npx cap sync ios
@@ -120,4 +139,4 @@ xcodebuild \
   -exportOptionsPlist "$EXPORT_OPTIONS"
 
 test -n "$(find "$EXPORT_PATH" -maxdepth 1 -name '*.ipa' -print -quit)"
-echo "Publisher iOS IPA created successfully with opaque App Store icon."
+echo "Publisher iOS IPA created successfully with verified production API routing and opaque App Store icon."
