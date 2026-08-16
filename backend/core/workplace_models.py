@@ -38,6 +38,16 @@ class WorkplaceSettings(TimestampedModel):
         obj = cls.objects.order_by('created_at').first()
         return obj or cls.objects.create()
 
+    @property
+    def allow_overlapping_open_shifts(self):
+        from .scheduler_completion_models import SchedulerCompletionSettings
+        return SchedulerCompletionSettings.load().allow_overlapping_open_shifts
+
+    @property
+    def require_shift_confirmation(self):
+        from .scheduler_completion_models import SchedulerCompletionSettings
+        return SchedulerCompletionSettings.load().require_shift_confirmation
+
 
 class AccessRole(TimestampedModel):
     class WageVisibility(models.TextChoices):
