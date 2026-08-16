@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_v4_views, attendance_views, automation_views, communications_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_v7_views, integration_views, payroll_views, portal_views, scheduler_actions, scheduling_views, searchable_views, shift_views, time_views, views, workplace_scoped_actions, workplace_scoped_core, workplace_scoped_forecast, workplace_scoped_scheduling, workplace_scoped_views, workplace_views
+from . import absence_views, admin_center_views, advanced_views, attendance_actions, attendance_v4_views, attendance_views, automation_views, communications_views, contract_views, document_catalog_views, document_center_views, forecast_actions, forecast_views, integration_v7_views, integration_views, payroll_views, portal_views, scheduler_actions, scheduler_completion_admin_views, scheduler_completion_views, scheduling_views, searchable_views, shift_views, time_views, views, workplace_scoped_actions, workplace_scoped_core, workplace_scoped_forecast, workplace_scoped_scheduling, workplace_scoped_views, workplace_views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -38,6 +38,10 @@ for prefix, view in [
     ('position-skill-tags', scheduling_views.PositionSkillTagViewSet),
     ('scheduling-policies', workplace_scoped_scheduling.ScopedSchedulingPolicyViewSet),
     ('schedule-templates', workplace_scoped_scheduling.ScopedScheduleTemplateViewSet),
+    ('schedule-annotations', scheduler_completion_views.ScheduleAnnotationViewSet),
+    ('schedule-task-lists', scheduler_completion_views.ScheduleTaskListViewSet),
+    ('schedule-tasks', scheduler_completion_views.ScheduleTaskViewSet),
+    ('scheduler-colors', scheduler_completion_admin_views.SchedulerColorOverrideViewSet),
     ('forecast-days', workplace_scoped_forecast.ScopedForecastDayBudgetViewSet),
     ('forecast-units', workplace_scoped_forecast.ScopedForecastUnitDefinitionViewSet),
     ('forecast-unit-days', workplace_scoped_forecast.ScopedForecastUnitDayViewSet),
@@ -139,6 +143,11 @@ urlpatterns = [
     path('scheduling/forecast/unit-day/', workplace_scoped_forecast.unit_day_upsert),
     path('scheduling/forecast/import/preview/', forecast_views.forecast_import_preview),
     path('scheduling/forecast/import/apply/', workplace_scoped_forecast.forecast_import_apply),
+    path('scheduling/confirmations/', scheduler_completion_views.shift_confirmations),
+    path('scheduling/confirmations/<uuid:slot_id>/confirm/', scheduler_completion_views.shift_confirm),
+    path('scheduling/display-preferences/', scheduler_completion_views.display_preferences),
+    path('scheduling/completion-snapshot/', scheduler_completion_views.scheduler_completion_snapshot),
+    path('scheduling/completion-settings/', scheduler_completion_admin_views.scheduler_completion_settings),
     path('workplace/settings/', workplace_views.workplace_settings),
     path('workplace/snapshot/', workplace_views.workplace_snapshot),
     path('communications/settings/', communications_views.communication_settings),
