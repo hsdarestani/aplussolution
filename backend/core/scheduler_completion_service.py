@@ -152,7 +152,7 @@ def sync_shift_confirmations(shift, *, force_reset=False):
         return []
     if shift.status not in {Shift.Status.PUBLISHED, Shift.Status.CONFIRMED}:
         return []
-    publication_at = shift.published_at or timezone.now()
+    publication_at = shift.published_at or shift.created_at
     active_slot_ids = []
     confirmations = []
     slots = shift.slots.filter(status=ShiftSlot.Status.CLAIMED, worker__isnull=False).select_related('worker__user')
