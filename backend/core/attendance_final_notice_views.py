@@ -1,9 +1,7 @@
-from rest_framework import viewsets
-
 from .attendance_final_views import FinalAttendanceNoticeViewSet
 
 
-class RoutedAttendanceNoticeViewSet(FinalAttendanceNoticeViewSet, viewsets.ReadOnlyModelViewSet):
+class RoutedAttendanceNoticeViewSet(FinalAttendanceNoticeViewSet):
     """Router-safe final notice surface.
 
     Attendance notices are system-generated. Collection POST/PUT/PATCH/DELETE are
