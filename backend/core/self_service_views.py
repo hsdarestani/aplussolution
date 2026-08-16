@@ -40,7 +40,7 @@ from .self_service_service import (
 )
 from .services import audit
 from .shift_slots import ShiftSlot
-from .workplace_access import has_capability, location_in_scope, visible_workers
+from .workplace_access import has_capability, location_in_scope, visible_locations, visible_workers
 
 
 def _admin(user):
@@ -371,7 +371,7 @@ def open_shift_requests(request):
         qs = qs.filter(worker=user.worker_profile)
     elif user.role == User.Role.MANAGER:
         _require_manager(user, 'schedule.view')
-        qs = qs.filter(shift__location__in=user.access_assignment.locations.all()) if hasattr(user, 'access_assignment') and user.access_assignment.scope_mode == 'scoped' else qs
+        qs = qs.filter(shift__location__in=visible_locations(user)).distinct()
     elif not _admin(user):
         return Response({'results': []})
     return Response({'results': [_serialize_open_request(row) for row in qs[:200]]})
@@ -442,7 +442,7 @@ def coverage_requests(request):
         qs = qs.filter(Q(requested_by=user.worker_profile) | Q(offered_to=user.worker_profile)).distinct()
     elif user.role == User.Role.MANAGER:
         _require_manager(user, 'schedule.view')
-        qs = qs.filter(shift__location__in=user.access_assignment.locations.all()) if hasattr(user, 'access_assignment') and user.access_assignment.scope_mode == 'scoped' else qs
+        qs = qs.filter(shift__location__in=visible_locations(user)).distinct()
     elif not _admin(user):
         return Response({'results': []})
     return Response({'results': [_serialize_coverage(row) for row in qs[:200]]})
