@@ -26,7 +26,7 @@ def seed_scheduler_completion(apps, schema_editor):
             defaults={
                 'shift_id': slot.shift_id,
                 'worker_id': slot.worker_id,
-                'publication_at': slot.shift.published_at,
+                'publication_at': slot.shift.published_at or slot.shift.created_at,
                 'requested_at': now,
             },
         )
