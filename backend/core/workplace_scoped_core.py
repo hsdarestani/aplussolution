@@ -104,12 +104,22 @@ class ScopedTimeOffViewSet(views.TimeOffViewSet):
         return [IsAuthenticated()]
 
     def perform_create(self, serializer):
+        from .scheduler_completion_service import ensure_time_off_allowed
+
         user = self.request.user
+        worker = serializer.validated_data.get('worker')
+        if user.role == User.Role.WORKER:
+            worker = user.worker_profile
         if user.role == User.Role.MANAGER:
             _require(user, 'attendance.edit')
-            worker = serializer.validated_data.get('worker')
             if not worker or not worker_in_scope(user, worker):
                 raise PermissionDenied('Mitarbeiter liegt außerhalb deines Verantwortungsbereichs.')
+        if worker:
+            ensure_time_off_allowed(
+                worker,
+                serializer.validated_data.get('starts_on'),
+                serializer.validated_data.get('ends_on'),
+            )
         return super().perform_create(serializer)
 
 
