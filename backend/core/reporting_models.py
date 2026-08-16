@@ -1,5 +1,5 @@
 from django.db import models
-from django.utils import timezone
+from django.utils import timezone as dj_timezone
 
 from .models import TimestampedModel, User
 
@@ -48,7 +48,7 @@ class ReportSchedule(TimestampedModel):
     day_of_month = models.PositiveSmallIntegerField(default=1)
     timezone = models.CharField(max_length=64, default='Europe/Berlin')
     active = models.BooleanField(default=True)
-    next_run_at = models.DateTimeField(default=timezone.now)
+    next_run_at = models.DateTimeField(default=dj_timezone.now)
     last_run_at = models.DateTimeField(blank=True, null=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='report_schedules')
 
