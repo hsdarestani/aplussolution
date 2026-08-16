@@ -157,6 +157,7 @@ urlpatterns = [
     path('working-time/export/<str:file_format>/', automation_views.worktime_export),
     path('working-time/pdf/<uuid:worker_id>/', automation_views.worktime_pdf),
     path('working-time/backup/', automation_views.worktime_backup),
+    path('reports/builder/', include('core.reporting_urls')),
     path('reports/timesheets.csv', workplace_scoped_views.export_timesheets),
     path('reports/schedule.csv', workplace_scoped_views.export_schedule),
     path('reports/payroll-estimate.csv', workplace_scoped_views.export_payroll_estimate),
