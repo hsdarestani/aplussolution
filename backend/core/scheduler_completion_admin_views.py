@@ -57,11 +57,12 @@ class SchedulerColorOverrideSerializer(serializers.ModelSerializer):
 
 
 class SchedulerColorOverrideViewSet(viewsets.ModelViewSet):
+    queryset = SchedulerColorOverride.objects.all()
     serializer_class = SchedulerColorOverrideSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        qs = SchedulerColorOverride.objects.all()
+        qs = self.queryset
         user = self.request.user
         if _admin(user):
             return qs
@@ -82,19 +83,25 @@ class SchedulerColorOverrideViewSet(viewsets.ModelViewSet):
             return [IsAdminOrManager()]
         return [IsAuthenticated()]
 
-    def perform_create(self, serializer):
+    def _require_manage(self):
         if not _can_manage(self.request.user):
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied('Keine Berechtigung für Scheduler-Farben.')
+
+    def perform_create(self, serializer):
+        self._require_manage()
         obj = serializer.save()
         audit(self.request, 'scheduler.color.created', obj)
 
     def perform_update(self, serializer):
-        if not _can_manage(self.request.user):
-            from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied('Keine Berechtigung für Scheduler-Farben.')
+        self._require_manage()
         obj = serializer.save()
         audit(self.request, 'scheduler.color.updated', obj)
+
+    def perform_destroy(self, instance):
+        self._require_manage()
+        audit(self.request, 'scheduler.color.deleted', instance)
+        instance.delete()
 
 
 @api_view(['GET', 'PATCH'])
