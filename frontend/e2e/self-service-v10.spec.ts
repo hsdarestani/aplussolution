@@ -124,7 +124,7 @@ test('admin reviews bids and coverage and changes self-service policy',async({pa
 
   await panel.getByRole('button',{name:/Anfragen/}).click();
   await expect(panel.getByText('Alex Admin')).toHaveCount(0);
-  await expect(panel.getByText('Anna Becker')).toBeVisible();
+  await expect(panel.getByText('Anna Becker',{exact:true})).toBeVisible();
   await panel.getByRole('button',{name:'Genehmigen'}).click();
   await expect(panel.getByText('Keine offenen Bewerbungen.')).toBeVisible();
 
