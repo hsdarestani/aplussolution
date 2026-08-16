@@ -135,7 +135,8 @@ test('admin reviews bids and coverage and changes self-service policy',async({pa
 
   await panel.getByRole('button',{name:'Self-Service Regeln'}).click();
   const privacy=panel.locator('.ss-setting-toggle').filter({hasText:'Global User Privacy'}).locator('input');
-  await privacy.check();
+  await privacy.click();
+  await expect(panel.getByText('Self-Service-Regel gespeichert.')).toBeVisible();
   await expect(privacy).toBeChecked();
   await expect(panel.getByText('OpenShift Policies')).toBeVisible();
 });
