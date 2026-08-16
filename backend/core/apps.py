@@ -28,5 +28,6 @@ class CoreConfig(AppConfig):
             integration_v7_signals,
             integration_v7_tasks,
             scheduler_completion_signals,
+            self_service_signals,
             workplace_models,
         )
