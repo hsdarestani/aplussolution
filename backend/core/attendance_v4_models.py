@@ -29,6 +29,8 @@ class AttendancePolicy(TimestampedModel):
 
     clock_in_location_mode = models.CharField(max_length=10, choices=Enforcement.choices, default=Enforcement.BLOCK)
     clock_out_location_mode = models.CharField(max_length=10, choices=Enforcement.choices, default=Enforcement.BLOCK)
+    computer_ip_mode = models.CharField(max_length=10, choices=Enforcement.choices, default=Enforcement.OFF)
+    allowed_ip_networks = models.JSONField(default=list, blank=True)
     allow_unscheduled_clock_in = models.BooleanField(default=False)
 
     required_break_after_minutes = models.PositiveIntegerField(default=360)
@@ -202,8 +204,13 @@ class AttendanceAttestation(TimestampedModel):
 
 
 class AttendanceTerminal(TimestampedModel):
+    class ScopeMode(models.TextChoices):
+        LOCATION = 'location', 'Bestimmter Einsatzplan'
+        ALL = 'all', 'Alle Einsatzpläne'
+
     name = models.CharField(max_length=120)
-    location = models.ForeignKey(Location, on_delete=models.CASCADE, related_name='attendance_terminals')
+    scope_mode = models.CharField(max_length=20, choices=ScopeMode.choices, default=ScopeMode.LOCATION)
+    location = models.ForeignKey(Location, on_delete=models.CASCADE, related_name='attendance_terminals', blank=True, null=True)
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     token_hash = models.CharField(max_length=64)
     active = models.BooleanField(default=True)
