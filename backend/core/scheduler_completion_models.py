@@ -116,7 +116,7 @@ class ShiftConfirmation(TimestampedModel):
 
     class Meta:
         app_label = 'core'
-        ordering = ['shift__starts_at', 'worker__employee_number']
+        ordering = ['requested_at', 'worker_id']
         indexes = [models.Index(fields=['worker', 'confirmed_at'], name='shift_confirm_worker_idx')]
 
     @property
