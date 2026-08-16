@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { IonBadge, IonButton } from '@ionic/react';
+import { IonBadge } from '@ionic/react';
 
 export type CalendarMode = 'day' | 'week' | 'twoWeeks' | 'month';
 
@@ -22,9 +22,16 @@ function addDays(value: Date, count: number) {
   return d;
 }
 
-function dateKey(value: Date | string) {
+function dateKey(value: Date | string, zone?: string) {
   const d = typeof value === 'string' ? new Date(value) : value;
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  if (!zone) return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: zone }).formatToParts(d);
+    const get = (type: string) => parts.find((part) => part.type === type)?.value || '';
+    return `${get('year')}-${get('month')}-${get('day')}`;
+  } catch {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
 }
 
 function rangeFor(mode: CalendarMode, anchor: Date) {
@@ -45,8 +52,9 @@ function rangeFor(mode: CalendarMode, anchor: Date) {
   return Array.from({ length: cellCount }, (_, index) => addDays(start, index));
 }
 
-function time(value: string) {
-  return new Date(value).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+function time(value: string, zone?: string) {
+  try { return new Date(value).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: zone }); }
+  catch { return new Date(value).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); }
 }
 
 export function rangeLabel(mode: CalendarMode, anchor: Date) {
@@ -88,7 +96,7 @@ export default function SchedulerCalendar({
   const rowsByDay = useMemo(() => {
     const map = new Map<string, any[]>();
     for (const row of rows) {
-      const key = dateKey(row.starts_at);
+      const key = dateKey(row.starts_at, row.display_time_zone);
       const list = map.get(key) || [];
       list.push(row);
       map.set(key, list);
@@ -126,10 +134,12 @@ export default function SchedulerCalendar({
                 {required > 0 && <IonBadge color={filled >= required ? 'success' : 'warning'}>{filled}/{required}</IonBadge>}
               </header>
               <div className="scheduler-day-shifts">
-                {dayRows.map((shift) => (
-                  <article
+                {dayRows.map((shift) => {
+                  const pending = (shift.assignments || []).some((item: any) => item.confirmation_status === 'pending');
+                  return <article
                     key={shift.id}
-                    className={`scheduler-shift ${shift.status} ${selected.has(shift.id) ? 'selected' : ''}`}
+                    className={`scheduler-shift ${shift.status} ${selected.has(shift.id) ? 'selected' : ''} ${pending ? 'unconfirmed' : ''}`}
+                    style={{ borderLeftColor: shift.display_color || undefined, borderLeftWidth: '4px' }}
                     draggable
                     onDragStart={(event) => {
                       event.dataTransfer.effectAllowed = 'move';
@@ -140,7 +150,7 @@ export default function SchedulerCalendar({
                       {selected.has(shift.id) ? '✓' : '○'}
                     </button>
                     <button className="scheduler-shift-main" onClick={() => onInspect(shift)}>
-                      <span>{time(shift.starts_at)}–{time(shift.ends_at)}</span>
+                      <span>{time(shift.starts_at, shift.display_time_zone)}–{time(shift.ends_at, shift.display_time_zone)}</span>
                       <b>{shift.position_name}</b>
                       <small>{shift.client_name}</small>
                       <em>{shift.location_name}</em>
@@ -148,9 +158,10 @@ export default function SchedulerCalendar({
                     <div className="scheduler-shift-foot">
                       <span>{shift.filled_count || 0}/{shift.required_count || 1} besetzt</span>
                       {Number(shift.open_count || 0) > 0 && <span>{shift.open_count} offen</span>}
+                      {pending && <IonBadge color="warning">Unbestätigt</IonBadge>}
                     </div>
-                  </article>
-                ))}
+                  </article>;
+                })}
                 {!dayRows.length && <div className="scheduler-drop-hint">Schicht hierher ziehen</div>}
               </div>
             </section>
