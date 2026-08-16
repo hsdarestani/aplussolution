@@ -115,13 +115,11 @@ def scheduler_completion_settings(request):
             if field in request.data:
                 setattr(obj, field, request.data[field] not in (False, 'false', '0', 0))
         obj.save(update_fields=['allow_overlapping_open_shifts', 'require_shift_confirmation', 'updated_at'])
-        if not obj.require_shift_confirmation:
-            from .scheduler_completion_models import ShiftConfirmation
-            ShiftConfirmation.objects.all().delete()
-        else:
-            from .scheduler_completion_service import sync_shift_confirmations
-            for shift in Shift.objects.filter(status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED]):
-                sync_shift_confirmations(shift)
+        # Keep confirmation records even when they are optional; the flag controls
+        # only whether pending confirmations are actively prompted to employees.
+        from .scheduler_completion_service import sync_shift_confirmations
+        for shift in Shift.objects.filter(status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED]):
+            sync_shift_confirmations(shift)
         audit(request, 'scheduler.completion_settings.updated', obj)
     return Response({
         'allow_overlapping_open_shifts': obj.allow_overlapping_open_shifts,
