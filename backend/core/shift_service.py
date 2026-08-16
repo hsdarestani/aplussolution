@@ -4,7 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from .models import Availability, Shift, WorkerProfile
+from .models import Shift, WorkerProfile
 from .shift_slots import ShiftSlot
 
 
@@ -43,32 +43,48 @@ def refresh_shift_state(shift: Shift) -> Shift:
     return shift
 
 
+def ensure_shift_publish_allowed(shift: Shift) -> None:
+    from .premium_services import get_policy
+
+    policy = get_policy()
+    if policy.allow_overlapping_open_shifts:
+        return
+    overlaps = Shift.objects.filter(
+        location=shift.location,
+        status=Shift.Status.PUBLISHED,
+        starts_at__lt=shift.ends_at,
+        ends_at__gt=shift.starts_at,
+        slots__status=ShiftSlot.Status.OPEN,
+    ).exclude(pk=shift.pk).distinct()
+    if overlaps.exists():
+        raise ValidationError('Überlappende OpenShifts sind in den Planungsregeln deaktiviert.')
+
+
 def ensure_worker_can_claim(worker: WorkerProfile, shift: Shift) -> None:
-    slot_overlap = ShiftSlot.objects.filter(
-        worker=worker,
-        status=ShiftSlot.Status.CLAIMED,
-        shift__starts_at__lt=shift.ends_at,
-        shift__ends_at__gt=shift.starts_at,
-    ).exclude(shift=shift).exists()
-    legacy_overlap = Shift.objects.filter(
-        worker=worker,
-        starts_at__lt=shift.ends_at,
-        ends_at__gt=shift.starts_at,
-    ).exclude(pk=shift.pk).exclude(status=Shift.Status.CANCELLED).exists()
-    if slot_overlap or legacy_overlap:
-        raise ValidationError('Du hast in diesem Zeitraum bereits eine Schicht.')
-    if Availability.objects.filter(
-        worker=worker,
-        available=False,
-        starts_at__lt=shift.ends_at,
-        ends_at__gt=shift.starts_at,
-    ).exists():
-        raise ValidationError('Du bist in diesem Zeitraum als nicht verfügbar eingetragen.')
+    from .premium_services import violations
+
+    issues = violations(worker, shift)
+    if not issues:
+        return
+    messages = {
+        'required_skills': 'Dir fehlt eine für diese Position erforderliche Qualifikation.',
+        'unavailable': 'Du bist in diesem Zeitraum als nicht verfügbar eingetragen.',
+        'approved_time_off': 'Für diesen Zeitraum liegt eine genehmigte Abwesenheit vor.',
+        'overlap': 'Du hast in diesem Zeitraum bereits eine Schicht.',
+        'multiple_shifts_per_day': 'Mehrere Schichten am selben Tag sind nicht erlaubt.',
+        'minimum_rest': 'Der vorgeschriebene Ruheabstand zwischen Schichten wird unterschritten.',
+        'max_hours_per_day': 'Die maximal erlaubten Tagesstunden würden überschritten.',
+        'max_hours_per_week': 'Die maximal erlaubten Wochenstunden würden überschritten.',
+        'max_days_per_week': 'Die maximal erlaubten Arbeitstage pro Woche würden überschritten.',
+        'max_days_in_row': 'Die maximal erlaubten aufeinanderfolgenden Arbeitstage würden überschritten.',
+        'monthly_hours': 'Das konfigurierte Monatsstundenlimit würde überschritten.',
+    }
+    raise ValidationError(messages.get(issues[0], f'Planungsregel verletzt: {issues[0]}'))
 
 
 @transaction.atomic
-def claim_shift(shift_id, worker: WorkerProfile) -> ShiftSlot:
-    shift = Shift.objects.select_for_update().select_related('location').get(pk=shift_id)
+def claim_shift(shift_id, worker: WorkerProfile, bypass_approval=False) -> ShiftSlot:
+    shift = Shift.objects.select_for_update().select_related('location', 'position').get(pk=shift_id)
     if shift.status != Shift.Status.PUBLISHED:
         raise ValidationError('Diese Schicht ist nicht zur Übernahme veröffentlicht.')
     ensure_slots(shift)
@@ -82,7 +98,7 @@ def claim_shift(shift_id, worker: WorkerProfile) -> ShiftSlot:
         raise ValidationError('Diese Schicht ist bereits vollständig besetzt.')
     slot.worker = worker
     slot.status = ShiftSlot.Status.CLAIMED
-    slot.source = 'worker_claim'
+    slot.source = 'approved_pickup' if bypass_approval else 'worker_claim'
     slot.claimed_at = timezone.now()
     slot.released_at = None
     slot.save(update_fields=['worker', 'status', 'source', 'claimed_at', 'released_at', 'updated_at'])
