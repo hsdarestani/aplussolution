@@ -30,4 +30,5 @@ class CoreConfig(AppConfig):
             scheduler_completion_signals,
             self_service_signals,
             workplace_models,
+            reporting_attendance_extension,
         )
