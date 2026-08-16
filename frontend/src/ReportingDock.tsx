@@ -221,7 +221,7 @@ export default function ReportingDock() {
       <button className="reporting-dock-button" onClick={() => setOpen(true)} aria-label="Berichte">
         <IonIcon icon={barChartOutline} /><span>Berichte</span>
       </button>
-      <IonModal isOpen={open} onDidDismiss={() => setOpen(false)} cssClass="reporting-v8-modal">
+      <IonModal isOpen={open} onDidDismiss={() => setOpen(false)} className="reporting-v8-modal">
         <div className="reporting-v8" data-testid="custom-reporting-panel">
           <header className="reporting-v8-head">
             <div><small>A+ WORKFORCE · ANALYTICS</small><h2>Report Builder</h2><p>Eigene Berichte, Labor-Analyse und automatischer Versand.</p></div>
