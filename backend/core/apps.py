@@ -18,6 +18,7 @@ class CoreConfig(AppConfig):
             portal_models,
             reporting_models,
             reporting_tasks,
+            scheduler_completion_models,
             scheduling_models,
             shift_slots,
             communications_signals,
@@ -25,5 +26,6 @@ class CoreConfig(AppConfig):
             communications_tasks,
             integration_v7_signals,
             integration_v7_tasks,
+            scheduler_completion_signals,
             workplace_models,
         )
