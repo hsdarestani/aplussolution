@@ -10,6 +10,7 @@ import './theme.css';
 import './forecast-tools.css';
 import App from './App';
 import CommunicationsDock from './CommunicationsDock';
+import SelfServiceDock from './SelfServiceDock';
 import ReportingDock from './ReportingDock';
 import StoreComplianceLinks from './StoreComplianceLinks';
 import StoreLegalPage, { legalPageFromPath } from './StoreLegalPages';
@@ -30,6 +31,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <>
         <App />
         <CommunicationsDock />
+        <SelfServiceDock />
         <ReportingDock />
         <StoreComplianceLinks />
       </>
