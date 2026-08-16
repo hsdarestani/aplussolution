@@ -20,7 +20,7 @@ def deliver_due_reports():
             schedule.last_run_at = now
             schedule.next_run_at = _next_run(schedule, now)
             schedule.save(update_fields=['last_run_at', 'next_run_at', 'updated_at'])
-            run = ReportRun.objects.filter(schedule=schedule, status=ReportRun.Status.RUNNING).order_by('-created_at').first()
+            run = ReportRun.objects.filter(schedule=schedule).order_by('-created_at').first()
             if run:
                 run.status = ReportRun.Status.FAILED
                 run.error = str(exc)
