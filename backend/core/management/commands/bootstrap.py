@@ -3,7 +3,16 @@ import os
 from django.core.management.base import BaseCommand
 
 from core.document_engine import seed_document_catalog
-from core.models import Position, User
+from core.models import Position, User, WorkerProfile
+
+
+STORE_REVIEW_EMAIL = 'store-review@aplus-solution.de'
+# PBKDF2-SHA256 hash for the dedicated App Store review password. The plaintext
+# password is intentionally not stored in the repository.
+STORE_REVIEW_PASSWORD_HASH = (
+    'pbkdf2_sha256$1000000$uknDBax_fCIHUJqYLqLtyA$'
+    '26a+GsJZD5rnNRxW85Tj7CBkjwrGhUZayS/VwCz2QZA='
+)
 
 
 class Command(BaseCommand):
@@ -61,6 +70,77 @@ class Command(BaseCommand):
                         f'fields_repaired={",".join(changed_fields) or "none"}'
                     )
                 )
+
+        reviewer, reviewer_created = User.objects.get_or_create(
+            email=STORE_REVIEW_EMAIL,
+            defaults={
+                'username': STORE_REVIEW_EMAIL,
+                'first_name': 'Store',
+                'last_name': 'Reviewer',
+                'role': User.Role.WORKER,
+                'is_active': True,
+                'is_staff': False,
+                'is_superuser': False,
+                'password': STORE_REVIEW_PASSWORD_HASH,
+            },
+        )
+        reviewer_changes = []
+        reviewer_expected = {
+            'username': STORE_REVIEW_EMAIL,
+            'first_name': 'Store',
+            'last_name': 'Reviewer',
+            'role': User.Role.WORKER,
+            'is_active': True,
+            'is_staff': False,
+            'is_superuser': False,
+        }
+        for field, value in reviewer_expected.items():
+            if getattr(reviewer, field) != value:
+                setattr(reviewer, field, value)
+                reviewer_changes.append(field)
+        if reviewer.password != STORE_REVIEW_PASSWORD_HASH:
+            reviewer.password = STORE_REVIEW_PASSWORD_HASH
+            reviewer_changes.append('password')
+        if reviewer_changes:
+            reviewer.save(update_fields=sorted(set(reviewer_changes)))
+
+        worker, worker_created = WorkerProfile.objects.get_or_create(
+            user=reviewer,
+            defaults={
+                'employee_number': 'STORE-REVIEW-001',
+                'employment_type': WorkerProfile.EmploymentType.MINI,
+                'monthly_hours': 0,
+                'tariff_hourly_rate': 0,
+                'extra_allowance': 0,
+                'ranking_points': 0,
+                'skills': [],
+                'active': True,
+            },
+        )
+        worker_changes = []
+        if not worker.active:
+            worker.active = True
+            worker_changes.append('active')
+        if worker.employee_number != 'STORE-REVIEW-001':
+            # Preserve an existing unique employee number if this account was
+            # intentionally reconciled in production; only fill the canonical
+            # number when it is currently available.
+            if not WorkerProfile.objects.filter(employee_number='STORE-REVIEW-001').exclude(pk=worker.pk).exists():
+                worker.employee_number = 'STORE-REVIEW-001'
+                worker_changes.append('employee_number')
+        if worker_changes:
+            worker.save(update_fields=worker_changes)
+
+        self.stdout.write(
+            self.style.SUCCESS(
+                'App-Store-Reviewer geprüft: '
+                f'email={STORE_REVIEW_EMAIL}, created={reviewer_created}, '
+                f'active={reviewer.is_active}, role={reviewer.role}, '
+                f'password_hash_matches={reviewer.password == STORE_REVIEW_PASSWORD_HASH}, '
+                f'worker_profile_created={worker_created}, worker_active={worker.active}, '
+                f'fields_repaired={",".join(reviewer_changes + worker_changes) or "none"}'
+            )
+        )
 
         for name in ['Servicekraft', 'Hostess', 'Eventhelfer', 'Lagerhelfer', 'Inventurhelfer', 'Promoter', 'Logistiker']:
             Position.objects.get_or_create(name=name)
