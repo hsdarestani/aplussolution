@@ -74,10 +74,9 @@ function appShellTransforms(): Plugin {
 }
 
 /**
- * Operations is another large legacy surface. During the WIW cutover we keep
- * the source file stable but remove WIW from the visible/admin workflow and
- * update wording to the native A+ data path. Every replacement is guarded so
- * source drift fails CI rather than silently restoring the old workflow.
+ * Operations is another large legacy surface. Keep the source stable, remove
+ * WIW from the live workflow and mount the native Premium parity control panel
+ * for admins/managers/workers before the existing notification feed.
  */
 function nativeWorkforceCutoverTransforms(): Plugin {
   const replacements: Array<[string, string]> = [
@@ -94,6 +93,7 @@ function nativeWorkforceCutoverTransforms(): Plugin {
               <div className="operations-note">When I Work ist kein Bestandteil des laufenden Betriebs mehr. Historische WIW-IDs bleiben nur für Migration und Audit erhalten.</div>
             </section>
             `;
+  const notificationsMarker = '<Notifications rows={data.notifications || []} readAll={readAll} />';
 
   return {
     name: 'native-workforce-cutover-transforms',
@@ -108,6 +108,9 @@ function nativeWorkforceCutoverTransforms(): Plugin {
       }
       if (!wiwPanel.test(next)) this.error('Operations WIW panel marker changed; update cutover transform.');
       next = next.replace(wiwPanel, nativePanel);
+      if (!next.includes(notificationsMarker)) this.error('Operations notifications marker changed; update Premium mount.');
+      next = next.replace(notificationsMarker, `<PremiumOperations user={user} />\n      ${notificationsMarker}`);
+      next = `import PremiumOperations from './PremiumOperations';\n${next}`;
       return { code: next, map: null };
     },
   };
