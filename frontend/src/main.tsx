@@ -12,6 +12,7 @@ import App from './App';
 import CommunicationsDock from './CommunicationsDock';
 import SelfServiceDockMount from './SelfServiceDockMount';
 import ReportingDock from './ReportingDock';
+import AttendanceFinalDock from './AttendanceFinalDock';
 import StoreComplianceLinks from './StoreComplianceLinks';
 import StoreLegalPage, { legalPageFromPath } from './StoreLegalPages';
 import TimeClockTerminal from './TimeClockTerminal';
@@ -33,6 +34,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <CommunicationsDock />
         <SelfServiceDockMount />
         <ReportingDock />
+        <AttendanceFinalDock />
         <StoreComplianceLinks />
       </>
     )}
