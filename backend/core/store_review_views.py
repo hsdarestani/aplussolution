@@ -1,6 +1,6 @@
 import jwt
 from django.db import transaction
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
@@ -50,8 +50,11 @@ def _github_oidc_claims(request):
 
 
 @api_view(['POST'])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def sync_store_review_credential(request):
+    # This endpoint deliberately bypasses the app's normal JWT authentication:
+    # its bearer token is a GitHub Actions OIDC token and is fully verified here.
     claims = _github_oidc_claims(request)
     if not claims:
         return Response({'detail': 'Forbidden.'}, status=403)
