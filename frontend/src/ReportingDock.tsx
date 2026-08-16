@@ -218,7 +218,7 @@ export default function ReportingDock() {
 
   return (
     <>
-      <button className="reporting-dock-button" onClick={() => setOpen(true)} aria-label="Berichte öffnen">
+      <button className="reporting-dock-button" onClick={() => setOpen(true)} aria-label="Berichte">
         <IonIcon icon={barChartOutline} /><span>Berichte</span>
       </button>
       <IonModal isOpen={open} onDidDismiss={() => setOpen(false)} cssClass="reporting-v8-modal">
