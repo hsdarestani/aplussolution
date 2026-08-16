@@ -80,7 +80,7 @@ test('admin manages scheduler completion extras without leaving the schedule',as
   await expect(panel.getByText('Überlappende OpenShifts erlauben',{exact:true})).toBeVisible();
   const overlap=panel.locator('.sc-toggle').filter({hasText:'Überlappende OpenShifts erlauben'}).locator('ion-toggle');
   await overlap.click();
-  await expect(overlap).toHaveAttribute('aria-checked','true');
+  await expect(overlap).toHaveJSProperty('checked',true);
 
   await panel.locator('ion-segment-button[value="display"]').click();
   await expect(panel.getByText('Farbcodierung',{exact:true})).toBeVisible();
@@ -103,6 +103,6 @@ test('worker confirms own shift and completes only surfaced task',async({page})=
   await expect(panel.getByText('Fremde Aufgabe',{exact:true})).toHaveCount(0);
   const checkbox=panel.locator('.task-items ion-checkbox').first();
   await checkbox.click();
-  await expect(panel.getByText('Eingang prüfen',{exact:true}).locator('..')).toHaveClass(/done/);
+  await expect(panel.getByText('Eingang prüfen',{exact:true})).toHaveClass(/done/);
   await expect(panel.locator('ion-segment-button[value="settings"]')).toHaveCount(0);
 });
