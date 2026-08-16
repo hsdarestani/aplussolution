@@ -13,6 +13,14 @@ const baseShift={
 
 async function json(route:Route,body:any,status=200){await route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});}
 
+async function selectPanelTab(panel:any, tab:string){
+  await panel.locator('ion-segment').evaluate((element:HTMLElement,target:string)=>{
+    const segment=element as any;
+    segment.value=target;
+    element.dispatchEvent(new CustomEvent('ionChange',{detail:{value:target},bubbles:true,composed:true}));
+  },tab);
+}
+
 async function mockScheduler(page:Page,user:any){
   let confirmationPending=true;
   let annotations:any[]=[];
@@ -98,8 +106,9 @@ test('worker confirms own shift and completes only surfaced task',async({page})=
   await page.getByRole('button',{name:'Planinfos'}).click();
   const panel=page.getByTestId('scheduler-completion-panel');await expect(panel).toBeVisible();
   await expect(panel.getByText('Keine offene Schichtbestätigung.',{exact:true})).toBeVisible();
-  await panel.locator('ion-segment-button[value="tasks"]').click();
-  await expect(panel.getByText('Eingang prüfen',{exact:true})).toBeVisible();
+  await selectPanelTab(panel,'tasks');
+  await expect(panel.locator('.task-list')).toHaveCount(1);
+  await expect(panel.getByText('Eingang prüfen',{exact:true})).toHaveCount(1);
   await expect(panel.getByText('Fremde Aufgabe',{exact:true})).toHaveCount(0);
   const checkbox=panel.locator('.task-items ion-checkbox').first();
   await checkbox.click();
