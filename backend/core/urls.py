@@ -27,7 +27,6 @@ for prefix, view in [
 router.register('notifications', views.NotificationViewSet, basename='notification')
 
 urlpatterns = [
-    path('', include(router.urls)),
     path('auth/login/', views.login),
     path('auth/store-review/sync/', store_review_views.sync_store_review_credential),
     path('auth/refresh/', TokenRefreshView.as_view()),
@@ -92,4 +91,8 @@ urlpatterns = [
     path('reports/timesheets.csv', advanced_views.export_timesheets),
     path('reports/schedule.csv', advanced_views.export_schedule),
     path('reports/payroll-estimate.csv', advanced_views.export_payroll_estimate),
+    # Keep the DRF router last so fixed custom endpoints such as
+    # workers/portal-status/ and workers/bulk-invite/ are not interpreted
+    # as WorkerViewSet detail PKs.
+    path('', include(router.urls)),
 ]
