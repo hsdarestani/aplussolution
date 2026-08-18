@@ -212,10 +212,6 @@ def test_qa_worker_portal_status_and_bulk_invite_routes_are_not_shadowed(auth_ad
 
 
 @pytest.mark.django_db
-@pytest.mark.xfail(
-    reason='Known multi-person slot gap: worker Operations overview reads legacy Shift.worker and misses a partial claim when required_count > 1.',
-    strict=True,
-)
 def test_qa_operations_overview_shows_partial_multislot_claim(auth_admin, auth_worker, worker_user, company, location, position):
     now = timezone.now() + timedelta(days=2)
     created = auth_admin.post(
@@ -243,11 +239,15 @@ def test_qa_operations_overview_shows_partial_multislot_claim(auth_admin, auth_w
 
 
 @pytest.mark.django_db
-@pytest.mark.xfail(
-    reason='Known multi-person slot gap: shift swap creation validates legacy Shift.worker and rejects a partial slot-based assignment.',
-    strict=True,
-)
-def test_qa_partial_multislot_claim_can_be_requested_for_swap(auth_admin, auth_worker, worker_user, company, location, position, second_worker):
+def test_qa_partial_multislot_claim_can_be_swapped_and_transfers_only_owned_slot(
+    auth_admin,
+    auth_worker,
+    worker_user,
+    company,
+    location,
+    position,
+    second_worker,
+):
     now = timezone.now() + timedelta(days=2)
     created = auth_admin.post(
         '/api/shifts/',
@@ -278,3 +278,14 @@ def test_qa_partial_multislot_claim_can_be_requested_for_swap(auth_admin, auth_w
         format='json',
     )
     assert swap.status_code == 201
+
+    approved = auth_admin.post(
+        f"/api/operations/swaps/{swap.data['id']}/decide/",
+        {'status': 'approved'},
+        format='json',
+    )
+    assert approved.status_code == 200
+    shift.refresh_from_db()
+    assert not shift.slots.filter(worker=worker_user.worker_profile, status='claimed').exists()
+    assert shift.slots.filter(worker=second_worker, status='claimed').exists()
+    assert shift.worker_id is None
