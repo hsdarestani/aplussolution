@@ -108,3 +108,30 @@ def test_worker_home_uses_claimed_slots_not_legacy_worker(auth_worker, worker_us
     assert any(item['id'] == str(available.id) for item in response.data['available_shifts'])
     assert response.data['month_worked_minutes'] >= 60
     assert response.data['unread_notifications'] >= 1
+
+
+@pytest.mark.django_db
+def test_portal_status_route_is_not_shadowed_by_worker_detail(auth_admin, worker_user):
+    response = auth_admin.get('/api/workers/portal-status/')
+    assert response.status_code == 200
+    assert isinstance(response.data, list)
+    assert any(item['worker_id'] == str(worker_user.worker_profile.id) for item in response.data)
+
+
+@pytest.mark.django_db
+def test_bulk_invite_route_accepts_post_instead_of_worker_detail_405(settings, auth_admin, worker_user):
+    settings.EMAIL_HOST = ''
+    worker_user.set_unusable_password()
+    worker_user.is_onboarded = False
+    worker_user.save(update_fields=['password', 'is_onboarded'])
+
+    response = auth_admin.post(
+        '/api/workers/bulk-invite/',
+        {'worker_ids': [str(worker_user.worker_profile.id)]},
+        format='json',
+    )
+
+    assert response.status_code == 200
+    assert response.data['count'] == 1
+    assert response.data['results'][0]['worker_id'] == str(worker_user.worker_profile.id)
+    assert 'activation_url' in response.data['results'][0]
