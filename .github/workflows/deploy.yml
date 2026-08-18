@@ -55,6 +55,12 @@ jobs:
         env:
           VITE_API_URL: https://solution.smarbiz.sbs/api
         run: npm run build
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run frontend E2E smoke tests
+        working-directory: frontend
+        run: npm run test:e2e
   deploy:
     if: github.event_name == 'push'
     needs: validate

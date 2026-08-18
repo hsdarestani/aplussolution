@@ -1,0 +1,461 @@
+/* A+ Solution brand refresh — visual overrides only. */
+:root {
+  --aplus-blue: #0f5eea;
+  --aplus-blue-deep: #08285f;
+  --aplus-blue-soft: #edf4ff;
+  --aplus-gold: #d7a62f;
+  --aplus-surface: rgba(255, 255, 255, 0.94);
+  --aplus-shadow: 0 14px 40px rgba(15, 35, 75, 0.08);
+}
+
+body,
+ion-app {
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body {
+  background:
+    radial-gradient(circle at 96% 2%, rgba(15, 94, 234, 0.09), transparent 28rem),
+    radial-gradient(circle at 8% 92%, rgba(215, 166, 47, 0.05), transparent 24rem),
+    #f4f7fc;
+}
+
+/* Use the supplied company logo without changing application semantics. */
+.brand .logo,
+.menu-logo,
+.mobile-brand {
+  background-image: url('/5.png') !important;
+  background-repeat: no-repeat !important;
+  background-size: contain !important;
+}
+
+.brand .logo {
+  width: 196px;
+  height: 96px;
+  background-position: left center !important;
+  font-size: 0 !important;
+  letter-spacing: 0 !important;
+}
+
+.menu-logo {
+  width: 176px;
+  height: 76px;
+  margin: 0 10px 18px;
+  padding: 0 !important;
+  background-position: left center !important;
+  font-size: 0 !important;
+  letter-spacing: 0 !important;
+}
+
+.menu-logo > * {
+  opacity: 0 !important;
+}
+
+.mobile-brand {
+  width: 92px;
+  height: 45px;
+  flex: 0 0 92px;
+  background-position: left center !important;
+  font-size: 0 !important;
+}
+
+.mobile-brand > * {
+  opacity: 0 !important;
+}
+
+/* App chrome */
+.app > aside {
+  background:
+    linear-gradient(180deg, rgba(245, 249, 255, 0.82), rgba(255, 255, 255, 0.98) 170px),
+    #fff;
+  border-right-color: #dfe6f1;
+  box-shadow: 10px 0 40px rgba(15, 35, 75, 0.035);
+}
+
+.user {
+  background: linear-gradient(145deg, #f2f6fc, #f8fbff);
+  border: 1px solid #e2e9f4;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.avatar,
+.mobile-avatar {
+  background: linear-gradient(145deg, var(--aplus-blue-deep), var(--aplus-blue));
+}
+
+.app > aside ion-item {
+  --border-radius: 14px;
+  margin: 5px 0;
+  font-weight: 570;
+}
+
+.app > aside ion-item.active {
+  --background: linear-gradient(90deg, #eaf2ff, #f3f7ff);
+  --color: var(--aplus-blue);
+  box-shadow: inset 3px 0 0 var(--aplus-blue);
+}
+
+.app-main {
+  position: relative;
+}
+
+.app-main::before {
+  content: '';
+  position: fixed;
+  width: 420px;
+  height: 420px;
+  right: -210px;
+  top: 120px;
+  border-radius: 50%;
+  background: rgba(15, 94, 234, 0.035);
+  filter: blur(1px);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Typography and spacing */
+.title {
+  margin-bottom: 22px;
+}
+
+.title h1 {
+  color: #111827;
+  font-weight: 780;
+  letter-spacing: -0.035em;
+}
+
+.title p {
+  max-width: 760px;
+  color: #6b7485;
+}
+
+.section-head h3,
+.modal-head h2,
+.chat-head h3 {
+  letter-spacing: -0.02em;
+}
+
+/* Buttons and fields */
+ion-button {
+  --border-radius: 14px;
+  text-transform: none;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+ion-button:not([fill='outline']):not([fill='clear']) {
+  --background: linear-gradient(135deg, #1768ed, #0c51d1);
+  --background-hover: linear-gradient(135deg, #1b70ff, #0d58df);
+  --box-shadow: 0 8px 18px rgba(15, 94, 234, 0.18);
+}
+
+ion-input,
+ion-textarea,
+ion-select,
+ion-searchbar {
+  --highlight-color-focused: var(--aplus-blue);
+}
+
+.form ion-input,
+.form ion-textarea,
+.form ion-select,
+.list-toolbar-v4 ion-input,
+.list-toolbar-v4 ion-select {
+  --border-radius: 15px;
+  --border-color: #dce4ef;
+  --highlight-color-focused: var(--aplus-blue);
+  --background: rgba(255, 255, 255, 0.96);
+}
+
+/* Main surfaces */
+.panel,
+.setup-card,
+.rank-card,
+.worker-pool,
+.messenger {
+  border-color: rgba(218, 226, 238, 0.92);
+  box-shadow: var(--aplus-shadow);
+}
+
+.panel {
+  border-radius: 24px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(253, 254, 255, 0.98)),
+    #fff;
+}
+
+.hero {
+  background:
+    radial-gradient(circle at 92% 0, rgba(215, 166, 47, 0.22), transparent 34%),
+    linear-gradient(120deg, #071f4d, #0f5eea 78%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 24px 52px rgba(8, 40, 95, 0.2);
+}
+
+.stats ion-card {
+  border: 1px solid #e2e9f4;
+  box-shadow: 0 12px 28px rgba(15, 35, 75, 0.06);
+}
+
+/* Global search */
+.global-search-trigger {
+  min-height: 58px;
+  margin-bottom: 24px;
+  padding-inline: 18px;
+  border-color: #dbe4f1;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.93);
+  box-shadow: 0 12px 34px rgba(15, 35, 75, 0.07);
+  backdrop-filter: blur(14px);
+}
+
+.global-search-trigger > ion-icon {
+  color: var(--aplus-blue);
+  opacity: 1;
+}
+
+.global-search-trigger span {
+  color: #667085;
+  opacity: 1;
+}
+
+.global-search-dialog {
+  border-color: #dbe4f1;
+  box-shadow: 0 38px 110px rgba(8, 27, 64, 0.3);
+}
+
+/* Staff & customer / employee portal */
+.portal-access-panel {
+  position: relative;
+  overflow: hidden;
+  padding: 24px;
+  border-color: #dbe5f3;
+  border-radius: 26px;
+  background:
+    radial-gradient(circle at 100% 0, rgba(15, 94, 234, 0.085), transparent 300px),
+    linear-gradient(180deg, #ffffff, #fbfdff);
+  box-shadow: 0 16px 42px rgba(15, 35, 75, 0.075);
+}
+
+.portal-access-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, var(--aplus-blue), var(--aplus-gold));
+}
+
+.portal-access-head small {
+  color: var(--aplus-blue);
+}
+
+.portal-access-head h2 {
+  margin-top: 5px;
+  font-size: 27px;
+  letter-spacing: -0.035em;
+}
+
+.portal-access-stats {
+  gap: 9px;
+  margin: 20px 0 16px;
+}
+
+.portal-access-stats span {
+  padding: 8px 12px;
+  border: 1px solid #e2e9f4;
+  background: #f6f9fd;
+  color: #495466;
+}
+
+.portal-access-stats span b {
+  color: var(--aplus-blue-deep);
+}
+
+.portal-search {
+  gap: 8px;
+}
+
+.portal-search ion-searchbar {
+  min-height: 52px;
+  --background: #f7f9fd;
+  --box-shadow: none;
+  border-color: #dde6f2;
+  border-radius: 16px;
+}
+
+.portal-access-row {
+  padding: 13px 4px;
+}
+
+.portal-person > span {
+  background: linear-gradient(145deg, var(--aplus-blue-deep), #164b9c);
+  box-shadow: 0 6px 14px rgba(8, 40, 95, 0.16);
+}
+
+/* List controls */
+.list-toolbar-v4 {
+  padding: 2px 0 4px;
+  gap: 11px;
+}
+
+.list-toolbar-count {
+  color: #667085;
+  opacity: 1;
+}
+
+/* Rows and dense operational lists */
+.row {
+  border-bottom-color: #edf1f6;
+}
+
+.row:hover {
+  background: linear-gradient(90deg, rgba(237, 244, 255, 0.55), transparent 82%);
+}
+
+.shift-card {
+  border-left-color: var(--aplus-blue);
+  box-shadow: 0 8px 24px rgba(15, 35, 75, 0.055);
+}
+
+/* Login */
+.login {
+  --background:
+    radial-gradient(circle at 18% 12%, rgba(36, 113, 245, 0.55), transparent 34%),
+    radial-gradient(circle at 74% 85%, rgba(215, 166, 47, 0.12), transparent 24%),
+    linear-gradient(135deg, #061632, #092963 62%, #0e438f);
+}
+
+.login-card {
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 34px 90px rgba(0, 0, 0, 0.28);
+}
+
+/* Mobile */
+@media (max-width: 900px) {
+  .app {
+    background:
+      radial-gradient(circle at 100% 0, rgba(15, 94, 234, 0.1), transparent 40%),
+      radial-gradient(circle at 0 72%, rgba(215, 166, 47, 0.035), transparent 34%),
+      #f4f7fc;
+  }
+
+  .mobile-appbar {
+    grid-template-columns: 100px minmax(0, 1fr) 44px;
+    background: rgba(255, 255, 255, 0.95);
+    border-bottom-color: rgba(216, 225, 238, 0.94);
+    box-shadow: 0 9px 28px rgba(8, 35, 77, 0.075);
+  }
+
+  .mobile-page-title small {
+    color: #6d7788;
+    font-weight: 800;
+    letter-spacing: 0.075em;
+  }
+
+  .mobile-page-title strong {
+    color: #172033;
+    font-size: 15.5px;
+    letter-spacing: -0.015em;
+  }
+
+  .mobile-avatar {
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    box-shadow: 0 9px 20px rgba(15, 94, 234, 0.23);
+  }
+
+  .mobile-tabbar {
+    border-top-color: rgba(216, 225, 238, 0.95);
+    box-shadow: 0 -12px 34px rgba(8, 35, 77, 0.1);
+  }
+
+  .mobile-tabbar button {
+    border-radius: 15px;
+  }
+
+  .mobile-tabbar button.active {
+    color: var(--aplus-blue);
+    background: linear-gradient(180deg, #edf4ff, #f4f8ff);
+  }
+
+  .mobile-tabbar button.active::before {
+    background: linear-gradient(90deg, var(--aplus-blue), #4b8cff);
+  }
+
+  main,
+  .app-main {
+    padding: 16px 18px;
+  }
+
+  .global-search-trigger {
+    min-height: 56px;
+    margin-bottom: 22px;
+    border-radius: 19px;
+  }
+
+  .panel,
+  .portal-access-panel {
+    border-radius: 24px;
+  }
+
+  .portal-access-panel {
+    padding: 20px;
+  }
+
+  .portal-access-head h2 {
+    font-size: 25px;
+  }
+
+  .mobile-menu-grid > button {
+    border-color: #dfe6f1;
+    box-shadow: 0 9px 25px rgba(15, 35, 75, 0.055);
+  }
+}
+
+@media (max-width: 620px) {
+  .brand .logo {
+    width: 148px;
+    height: 72px;
+  }
+
+  .mobile-brand {
+    width: 86px;
+    height: 42px;
+    flex-basis: 86px;
+  }
+
+  .mobile-appbar {
+    grid-template-columns: 90px minmax(0, 1fr) 42px;
+    padding-inline: 14px;
+  }
+
+  main,
+  .app-main {
+    padding: 14px 16px;
+  }
+
+  .title h1 {
+    font-size: clamp(25px, 7.4vw, 30px);
+  }
+
+  .portal-access-panel {
+    padding: 18px;
+  }
+
+  .portal-access-head ion-button {
+    margin-top: 14px;
+  }
+
+  .portal-access-stats span {
+    padding: 7px 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
