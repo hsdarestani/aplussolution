@@ -2,7 +2,6 @@ from datetime import timedelta
 
 import pytest
 from django.utils import timezone
-from rest_framework.test import APIClient
 
 from core.models import ClientOrder, Shift, User
 
@@ -74,7 +73,7 @@ def test_qa_client_order_roundtrip_is_scoped_to_own_company(auth_client, company
         format='json',
     )
     assert created.status_code == 201
-    assert created.data['client'] == str(company.id)
+    assert str(created.data['client']) == str(company.id)
     assert created.data['requested_staff'] == 3
 
     other_contact = User.objects.create_user(
@@ -98,8 +97,8 @@ def test_qa_client_order_roundtrip_is_scoped_to_own_company(auth_client, company
     listing = auth_client.get('/api/orders/')
     assert listing.status_code == 200
     rows = listing.data['results'] if isinstance(listing.data, dict) else listing.data
-    assert any(item['id'] == created.data['id'] for item in rows)
-    assert all(item['client'] == str(company.id) for item in rows)
+    assert any(str(item['id']) == str(created.data['id']) for item in rows)
+    assert all(str(item['client']) == str(company.id) for item in rows)
 
 
 @pytest.mark.django_db
@@ -131,7 +130,7 @@ def test_qa_staffing_publish_claim_release_roundtrip(auth_admin, auth_worker, co
     available = auth_worker.get('/api/shifts/available/')
     assert available.status_code == 200
     available_rows = available.data['results'] if isinstance(available.data, dict) else available.data
-    assert any(item['id'] == shift_id for item in available_rows)
+    assert any(str(item['id']) == str(shift_id) for item in available_rows)
 
     claimed = auth_worker.post(f'/api/shifts/{shift_id}/claim/', {}, format='json')
     assert claimed.status_code == 200
@@ -140,7 +139,7 @@ def test_qa_staffing_publish_claim_release_roundtrip(auth_admin, auth_worker, co
 
     mine = auth_worker.get('/api/shifts/mine/')
     mine_rows = mine.data['results'] if isinstance(mine.data, dict) else mine.data
-    assert any(item['id'] == shift_id for item in mine_rows)
+    assert any(str(item['id']) == str(shift_id) for item in mine_rows)
 
     released = auth_worker.post(f'/api/shifts/{shift_id}/release/', {}, format='json')
     assert released.status_code == 200
@@ -162,7 +161,7 @@ def test_qa_worker_availability_and_time_off_roundtrip(auth_worker, auth_admin, 
         format='json',
     )
     assert availability.status_code == 201
-    assert availability.data['worker'] == str(worker_user.worker_profile.id)
+    assert str(availability.data['worker']) == str(worker_user.worker_profile.id)
     assert availability.data['available'] is False
 
     deleted = auth_worker.delete(f"/api/operations/availability/{availability.data['id']}/")
@@ -179,7 +178,7 @@ def test_qa_worker_availability_and_time_off_roundtrip(auth_worker, auth_admin, 
         format='json',
     )
     assert time_off.status_code == 201
-    assert time_off.data['worker'] == str(worker_user.worker_profile.id)
+    assert str(time_off.data['worker']) == str(worker_user.worker_profile.id)
     assert time_off.data['status'] == 'pending'
 
     decided = auth_admin.post(
@@ -214,10 +213,10 @@ def test_qa_worker_portal_status_and_bulk_invite_routes_are_not_shadowed(auth_ad
 
 @pytest.mark.django_db
 @pytest.mark.xfail(
-    reason='Known native-slot cutover gap: worker Operations overview still reads legacy Shift.worker instead of claimed ShiftSlot rows.',
+    reason='Known multi-person slot gap: worker Operations overview reads legacy Shift.worker and misses a partial claim when required_count > 1.',
     strict=True,
 )
-def test_qa_operations_overview_shows_slot_claimed_upcoming_shift(auth_admin, auth_worker, company, location, position):
+def test_qa_operations_overview_shows_partial_multislot_claim(auth_admin, auth_worker, worker_user, company, location, position):
     now = timezone.now() + timedelta(days=2)
     created = auth_admin.post(
         '/api/shifts/',
@@ -228,24 +227,27 @@ def test_qa_operations_overview_shows_slot_claimed_upcoming_shift(auth_admin, au
             'starts_at': now.isoformat(),
             'ends_at': (now + timedelta(hours=5)).isoformat(),
             'status': 'published',
-            'required_count': 1,
+            'required_count': 2,
         },
         format='json',
     )
     assert created.status_code == 201
     assert auth_worker.post(f"/api/shifts/{created.data['id']}/claim/", {}, format='json').status_code == 200
+    shift = Shift.objects.get(pk=created.data['id'])
+    assert shift.worker_id is None
+    assert shift.slots.filter(worker=worker_user.worker_profile, status='claimed').exists()
 
     overview = auth_worker.get('/api/operations/')
     assert overview.status_code == 200
-    assert any(item['id'] == created.data['id'] for item in overview.data['upcoming_shifts'])
+    assert any(str(item['id']) == str(created.data['id']) for item in overview.data['upcoming_shifts'])
 
 
 @pytest.mark.django_db
 @pytest.mark.xfail(
-    reason='Known native-slot cutover gap: shift swap creation validates legacy Shift.worker and rejects slot-based assignments.',
+    reason='Known multi-person slot gap: shift swap creation validates legacy Shift.worker and rejects a partial slot-based assignment.',
     strict=True,
 )
-def test_qa_slot_claimed_shift_can_be_requested_for_swap(auth_admin, auth_worker, company, location, position, second_worker):
+def test_qa_partial_multislot_claim_can_be_requested_for_swap(auth_admin, auth_worker, worker_user, company, location, position, second_worker):
     now = timezone.now() + timedelta(days=2)
     created = auth_admin.post(
         '/api/shifts/',
@@ -256,12 +258,15 @@ def test_qa_slot_claimed_shift_can_be_requested_for_swap(auth_admin, auth_worker
             'starts_at': now.isoformat(),
             'ends_at': (now + timedelta(hours=5)).isoformat(),
             'status': 'published',
-            'required_count': 1,
+            'required_count': 2,
         },
         format='json',
     )
     assert created.status_code == 201
     assert auth_worker.post(f"/api/shifts/{created.data['id']}/claim/", {}, format='json').status_code == 200
+    shift = Shift.objects.get(pk=created.data['id'])
+    assert shift.worker_id is None
+    assert shift.slots.filter(worker=worker_user.worker_profile, status='claimed').exists()
 
     swap = auth_worker.post(
         '/api/operations/swaps/',
