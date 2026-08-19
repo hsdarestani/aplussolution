@@ -8,7 +8,9 @@ from django.utils.crypto import get_random_string
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import User
 
-def _state(provider,target): return signing.dumps({'provider':provider,'target':target,'nonce':get_random_string(24)},salt='social-oauth')
+def _canonical_target(): return settings.APP_URL.rstrip('/') + '/auth/callback'
+def _safe_target(target): return target if target == _canonical_target() else _canonical_target()
+def _state(provider,target): return signing.dumps({'provider':provider,'target':_safe_target(target),'nonce':get_random_string(24)},salt='social-oauth')
 def start(provider,target):
     state=_state(provider,target)
     if provider=='google':
@@ -48,5 +50,5 @@ def finish(provider,code,state):
     if not user.last_name and profile.get('family_name'):
         user.last_name=profile.get('family_name',''); changed.append('last_name')
     if changed: user.save(update_fields=changed)
-    refresh=RefreshToken.for_user(user); target=data['target']; separator='&' if '?' in target else '?'
+    refresh=RefreshToken.for_user(user); target=_safe_target(data['target']); separator='&' if '?' in target else '?'
     return f"{target}{separator}access={refresh.access_token}&refresh={refresh}"
