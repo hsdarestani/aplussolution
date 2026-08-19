@@ -23,11 +23,18 @@ const refreshToken = () => localStorage.getItem('refresh') || '';
 let refreshPromise: Promise<string | null> | null = null;
 
 async function request(url: string, options: RequestInit): Promise<Response> {
-  try {
-    return await fetch(url, options);
-  } catch {
-    throw new Error('Verbindung zum A+ Server konnte nicht hergestellt werden. Bitte Internetverbindung prüfen und erneut versuchen.');
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await fetch(url, options);
+    } catch (error: any) {
+      if (error?.name === 'AbortError') throw error;
+      lastError = error;
+      if (attempt === 0) await new Promise((resolve) => window.setTimeout(resolve, 800));
+    }
   }
+  console.warn('A+ API network request failed after retry', lastError);
+  throw new Error('Der A+ Server ist momentan nicht erreichbar. Bitte kurz warten und erneut versuchen.');
 }
 
 async function refreshAccessToken(): Promise<string | null> {
