@@ -104,7 +104,10 @@ export async function login(email: string, password: string) {
 }
 
 export const me = () => api<User>('auth/me/');
-export const socialUrl = (provider: 'google' | 'apple') => `${API}/auth/oauth/${provider}/start/?target=${encodeURIComponent(`${window.location.origin}/auth/callback`)}`;
+// Do not send a user-controlled target URL. The backend already knows the canonical
+// application callback URL. Keeping the OAuth start URL free of nested URLs also
+// avoids edge/WAF false positives on the production domain.
+export const socialUrl = (provider: 'google' | 'apple') => `${API}/auth/oauth/${provider}/start/`;
 
 export function consumeOAuth() {
   const params = new URLSearchParams(location.search);
