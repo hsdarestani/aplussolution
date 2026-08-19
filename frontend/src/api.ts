@@ -1,5 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { enrichLocationPayload, installLocationPicker } from './locationPicker';
+import { installSignaturePad } from './signaturePad';
 
 const PRODUCTION_API = 'https://solution.smarbiz.sbs/api';
 const DEVELOPMENT_API = 'http://localhost:8000/api';
@@ -7,6 +8,7 @@ const DEFAULT_API = Capacitor.isNativePlatform() ? PRODUCTION_API : DEVELOPMENT_
 const API = (import.meta.env.VITE_API_URL || DEFAULT_API).replace(/\/$/, '');
 
 installLocationPicker();
+installSignaturePad();
 
 export type User = {
   id: string;
