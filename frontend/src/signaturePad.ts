@@ -66,8 +66,9 @@ function enhanceSignatureInput(input: HTMLElement) {
   input.insertAdjacentElement('afterend', shell);
   input.style.display = 'none';
 
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
+  const context = canvas.getContext('2d');
+  if (!context) return;
+  const ctx: CanvasRenderingContext2D = context;
 
   let drawing = false;
   let hasInk = false;
