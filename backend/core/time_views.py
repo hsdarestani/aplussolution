@@ -37,6 +37,10 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
 
         if not shift:
             return Response({'detail': 'Aktuell gibt es keine passende bestätigte Schicht zum Einstempeln.'}, status=400)
+        if shift.location.latitude is None or shift.location.longitude is None:
+            return Response({
+                'detail': 'Für diesen Einsatzort ist noch keine GPS-Position hinterlegt. Bitte in Personal & Kunden → Einsatzorte den Standort per Karte oder „Mein Standort“ festlegen.'
+            }, status=400)
         error = geofence_error(shift, request.data.get('lat'), request.data.get('lng'))
         if error:
             return Response({'detail': error}, status=400)
