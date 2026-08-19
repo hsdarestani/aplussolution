@@ -1,4 +1,7 @@
+from urllib.parse import parse_qs, urlparse
+
 import pytest
+from django.core import signing
 
 from core.models import ClientCompany, Contract, ContractTemplate, User, WorkerProfile
 
@@ -11,6 +14,22 @@ def test_login_success_and_failure(api_client, worker_user):
     assert ok.data['access'] and ok.data['refresh']
     bad = api_client.post('/api/auth/login/', {'email': worker_user.email, 'password': 'wrong'}, format='json')
     assert bad.status_code == 400
+
+
+@pytest.mark.django_db
+def test_oauth_start_uses_canonical_app_target(settings, api_client):
+    settings.APP_URL = 'https://solution.smarbiz.sbs'
+    settings.GOOGLE_OAUTH_CLIENT_ID = 'google-client'
+    settings.GOOGLE_OAUTH_REDIRECT_URI = 'https://solution.smarbiz.sbs/api/auth/oauth/google/callback/'
+
+    response = api_client.get('/api/auth/oauth/google/start/?target=https://evil.example/steal')
+
+    assert response.status_code == 302
+    location = response['Location']
+    assert urlparse(location).netloc == 'accounts.google.com'
+    state = parse_qs(urlparse(location).query)['state'][0]
+    payload = signing.loads(state, salt='social-oauth', max_age=600)
+    assert payload['target'] == 'https://solution.smarbiz.sbs/auth/callback'
 
 
 @pytest.mark.django_db
