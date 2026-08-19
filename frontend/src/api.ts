@@ -113,12 +113,23 @@ export function consumeOAuth() {
   const params = new URLSearchParams(location.search);
   const access = params.get('access');
   const refresh = params.get('refresh');
+  const oauthError = params.get('error');
+
   if (access && refresh) {
     localStorage.setItem('access', access);
     localStorage.setItem('refresh', refresh);
     history.replaceState({}, '', '/');
     return true;
   }
+
+  if (oauthError) {
+    // The backend redirects failed social sign-ins back to the SPA. Previously the
+    // query parameter was silently ignored, making a real OAuth error look like a
+    // no-op. Surface it immediately and clean the URL so a refresh does not repeat it.
+    history.replaceState({}, '', '/');
+    window.setTimeout(() => window.alert(`Google/Apple Login: ${oauthError}`), 0);
+  }
+
   return false;
 }
 
