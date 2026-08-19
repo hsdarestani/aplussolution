@@ -2,16 +2,16 @@ name: Configure production integrations
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/configure-production-integrations.yml'
+  workflow_run:
+    workflows: ['Validate and deploy production']
+    types: [completed]
 
 permissions:
   contents: read
 
 jobs:
   configure:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Install SSH tooling
