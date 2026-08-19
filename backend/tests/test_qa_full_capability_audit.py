@@ -7,7 +7,8 @@ from core.models import ClientOrder, Shift, User
 
 
 @pytest.mark.django_db
-def test_qa_admin_onboards_worker_and_client_then_both_can_login(auth_admin, api_client):
+def test_qa_admin_onboards_worker_and_client_then_both_can_login(auth_admin, api_client, settings):
+    settings.EMAIL_HOST = ''
     worker = auth_admin.post(
         '/api/workers/onboard/',
         {
@@ -23,11 +24,30 @@ def test_qa_admin_onboards_worker_and_client_then_both_can_login(auth_admin, api
     )
     assert worker.status_code == 201
     assert worker.data['worker']['employee_number'] == 'QA-W-001'
-    assert worker.data['temporary_password']
+    assert worker.data['temporary_password'] is None
+    assert worker.data['requires_activation'] is True
+
+    worker_id = worker.data['worker']['id']
+    invited = auth_admin.post(f'/api/workers/{worker_id}/invite/', {}, format='json')
+    assert invited.status_code == 201
+    assert invited.data['delivered'] is False
+    token = invited.data['activation_url'].split('token=', 1)[1]
+
+    activated = api_client.post(
+        '/api/auth/activation/complete/',
+        {
+            'token': token,
+            'password': 'QaWorkerPass123!',
+            'password_confirm': 'QaWorkerPass123!',
+        },
+        format='json',
+    )
+    assert activated.status_code == 200
+    assert activated.data['user']['role'] == 'worker'
 
     worker_login = api_client.post(
         '/api/auth/login/',
-        {'email': 'qa.worker@example.com', 'password': worker.data['temporary_password']},
+        {'email': 'qa.worker@example.com', 'password': 'QaWorkerPass123!'},
         format='json',
     )
     assert worker_login.status_code == 200
