@@ -5,6 +5,9 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
 concurrency:
   group: aplus-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
@@ -166,3 +169,37 @@ jobs:
           docker compose ps
           docker image prune -f
           REMOTE
+  deployment-status:
+    if: always() && github.event_name == 'push'
+    needs: [validate, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Publish deployment status
+        run: |
+          set -euo pipefail
+          validate='${{ needs.validate.result }}'
+          deploy='${{ needs.deploy.result }}'
+          if [ "$validate" = 'success' ] && [ "$deploy" = 'success' ]; then
+            overall='success'
+          else
+            overall='failed'
+          fi
+          body=$(cat <<EOF
+          Automated production deployment status.
+
+          - Commit: `${{ github.sha }}`
+          - Validation: **$validate**
+          - Deploy: **$deploy**
+          - Overall: **$overall**
+          - Production: `https://solution.smarbiz.sbs`
+          - Workflow run: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+
+          No secrets are included in this issue.
+          EOF
+          )
+          gh api --method PATCH "repos/${{ github.repository }}/issues/84" \
+            -f body="$body" \
+            -f state=closed >/dev/null
