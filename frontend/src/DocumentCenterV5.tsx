@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { IonAlert, IonBadge, IonButton, IonIcon, IonSpinner, IonToast } from '@ionic/react';
+import { IonAlert, IonBadge, IonButton, IonContent, IonIcon, IonModal, IonSpinner, IonToast } from '@ionic/react';
 import {
   alertCircleOutline,
   checkmarkCircleOutline,
@@ -39,6 +39,20 @@ type ActionItem = {
   message: string;
 };
 
+type MissingField = {
+  field: string;
+  label: string;
+  source?: string;
+};
+
+type FixTarget = {
+  state: any;
+  contract: any;
+  fields: MissingField[];
+  definitions: Record<string, any>;
+  values: Record<string, any>;
+};
+
 const roleLabel: Record<string, string> = {
   employee: 'Mitarbeiter',
   employer: 'Arbeitgeber',
@@ -54,12 +68,29 @@ const actionLabel: Record<string, string> = {
   deadline: 'Frist prüfen',
 };
 
+function sourceLabel(source?: string) {
+  if (source?.startsWith('master.')) return 'Personalstammdaten';
+  if (source?.startsWith('worker.') || source?.startsWith('user.')) return 'Mitarbeiterprofil';
+  if (source?.startsWith('company.')) return 'Firmendaten';
+  if (source?.startsWith('contract.')) return 'Vertrag';
+  return 'Vertrag';
+}
+
+function normalizeFieldValue(definition: any, raw: any) {
+  const kind = definition?.type || 'text';
+  if (kind === 'boolean') return raw === true || raw === 'true';
+  if (kind === 'number' || kind === 'money') return raw === '' || raw == null ? '' : Number(raw);
+  return raw;
+}
+
 export default function DocumentCenterV5({ onChanged }: { onChanged?: () => void | Promise<void> }) {
   const [data, setData] = useState<any>();
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
   const [expanded, setExpanded] = useState(false);
   const [pendingSource, setPendingSource] = useState<{ template: TemplateState; file: File }>();
+  const [fixTarget, setFixTarget] = useState<FixTarget>();
+  const [fixBusy, setFixBusy] = useState(false);
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const load = async () => {
@@ -80,8 +111,100 @@ export default function DocumentCenterV5({ onChanged }: { onChanged?: () => void
   const templates: TemplateState[] = data?.templates || [];
   const visibleActions = expanded ? actions : actions.slice(0, 8);
 
+  async function openMissingFields(item: ActionItem) {
+    const state = (data?.contracts || []).find((contract: any) => contract.id === item.id);
+    const fields: MissingField[] = state?.missing_fields || [];
+    if (!fields.length) {
+      sessionStorage.setItem('aplus:focus', JSON.stringify({ view: 'contracts', id: item.id, source: 'document-center' }));
+      window.setTimeout(() => document.getElementById(`contract-${item.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 40);
+      setToast('Keine fehlenden Pflichtangaben gefunden. Vertrag wurde geöffnet.');
+      return;
+    }
+
+    setFixBusy(true);
+    try {
+      const [contract, catalog]: any[] = await Promise.all([
+        api(`contracts/${item.id}/`),
+        api('document-catalog/'),
+      ]);
+      const template = (catalog?.documents || []).find((entry: any) => entry.slug === contract.template_slug);
+      const definitions = Object.fromEntries((template?.fields || []).map((field: any) => [field.name, field]));
+      let master: any = undefined;
+      if (contract.worker) {
+        try {
+          master = await api(`workers/${contract.worker}/master-data/`);
+        } catch {
+          master = undefined;
+        }
+      }
+      const values: Record<string, any> = {};
+      for (const field of fields) {
+        const sourceKey = field.source?.startsWith('master.') ? field.source.slice('master.'.length) : '';
+        values[field.field] = contract.variables?.[field.field] ?? (sourceKey ? master?.data?.[sourceKey] : '') ?? '';
+      }
+      setFixTarget({ state, contract, fields, definitions, values });
+    } catch (error: any) {
+      setToast(error.message);
+    } finally {
+      setFixBusy(false);
+    }
+  }
+
+  async function saveMissingFields() {
+    if (!fixTarget) return;
+    const missing = fixTarget.fields.filter((field) => {
+      const value = fixTarget.values[field.field];
+      return value == null || String(value).trim() === '';
+    });
+    if (missing.length) {
+      setToast(`Bitte noch ausfüllen: ${missing.map((field) => field.label).join(', ')}`);
+      return;
+    }
+
+    setFixBusy(true);
+    try {
+      const masterPatch: Record<string, any> = {};
+      const variablePatch: Record<string, any> = { ...(fixTarget.contract.variables || {}) };
+      for (const field of fixTarget.fields) {
+        const definition = fixTarget.definitions[field.field] || {};
+        const normalized = normalizeFieldValue(definition, fixTarget.values[field.field]);
+        if (field.source?.startsWith('master.') && fixTarget.contract.worker) {
+          masterPatch[field.source.slice('master.'.length)] = normalized;
+        } else {
+          variablePatch[field.field] = normalized;
+        }
+      }
+
+      if (fixTarget.contract.worker && Object.keys(masterPatch).length) {
+        await api(`workers/${fixTarget.contract.worker}/master-data/`, {
+          method: 'PATCH',
+          body: JSON.stringify({ data: masterPatch }),
+        });
+      }
+      if (Object.keys(variablePatch).length !== Object.keys(fixTarget.contract.variables || {}).length || fixTarget.fields.some((field) => !field.source?.startsWith('master.'))) {
+        await api(`contracts/${fixTarget.contract.id}/`, {
+          method: 'PATCH',
+          body: JSON.stringify({ variables: variablePatch }),
+        });
+      }
+
+      setFixTarget(undefined);
+      await load();
+      await onChanged?.();
+      setToast('Pflichtangaben gespeichert. Der Vertrag wurde erneut geprüft.');
+    } catch (error: any) {
+      setToast(error.message);
+    } finally {
+      setFixBusy(false);
+    }
+  }
+
   async function contractAction(item: ActionItem) {
     if (item.type !== 'contract') return;
+    if (item.action === 'fix_data') {
+      await openMissingFields(item);
+      return;
+    }
     try {
       if (item.action === 'generate') {
         await api(`contracts/${item.id}/generate_pdf/`, { method: 'POST', body: '{}' });
@@ -185,7 +308,7 @@ export default function DocumentCenterV5({ onChanged }: { onChanged?: () => void
               {item.action === 'install_source' && item.slug ? (
                 <IonButton size="small" fill="outline" onClick={() => fileInputs.current[item.slug!]?.click()}>Datei wählen</IonButton>
               ) : (
-                <IonButton size="small" fill={item.severity === 'critical' ? 'solid' : 'outline'} onClick={() => void contractAction(item)}>Öffnen</IonButton>
+                <IonButton size="small" disabled={fixBusy} fill={item.severity === 'critical' ? 'solid' : 'outline'} onClick={() => void contractAction(item)}>{item.action === 'fix_data' ? 'Fehlende Daten' : 'Öffnen'}</IonButton>
               )}
             </div>
           ))}
@@ -218,6 +341,61 @@ export default function DocumentCenterV5({ onChanged }: { onChanged?: () => void
           </div>
         </div>
       </div>
+
+      <IonModal isOpen={!!fixTarget} onDidDismiss={() => !fixBusy && setFixTarget(undefined)}>
+        <IonContent className="ion-padding">
+          <div style={{ maxWidth: 760, margin: '0 auto', padding: '8px 0 28px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 18 }}>
+              <div>
+                <small style={{ fontWeight: 800, letterSpacing: '.12em', opacity: .55 }}>VERTRAG · PFLICHTANGABEN</small>
+                <h2 style={{ margin: '6px 0 6px' }}>Fehlende Daten ergänzen</h2>
+                <p style={{ margin: 0, opacity: .68 }}>{fixTarget?.contract?.title} · {fixTarget?.state?.subject}</p>
+              </div>
+              <IonButton fill="clear" disabled={fixBusy} onClick={() => setFixTarget(undefined)}>Schließen</IonButton>
+            </div>
+            <div style={{ border: '1px solid rgba(220,38,38,.18)', background: 'rgba(220,38,38,.035)', borderRadius: 16, padding: 14, marginBottom: 16 }}>
+              <b>{fixTarget?.fields.length || 0} Pflichtangabe(n) fehlen.</b>
+              <div style={{ marginTop: 5, fontSize: 13, opacity: .68 }}>Personalstammdaten werden dauerhaft beim Mitarbeiter gespeichert; vertragsbezogene Werte nur in diesem Vertrag.</div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 12 }}>
+              {fixTarget?.fields.map((field) => {
+                const definition = fixTarget.definitions[field.field] || {};
+                const kind = definition.type || 'text';
+                const value = fixTarget.values[field.field] ?? '';
+                return <label key={field.field} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 12, border: '1px solid var(--line,#e5e7eb)', borderRadius: 14, background: 'var(--card,#fff)' }}>
+                  <span style={{ fontWeight: 700, fontSize: 14 }}>{field.label} *</span>
+                  <small style={{ opacity: .55 }}>{sourceLabel(field.source)}</small>
+                  {kind === 'choice' ? (
+                    <select value={String(value)} onChange={(event) => setFixTarget((current) => current ? ({ ...current, values: { ...current.values, [field.field]: event.target.value } }) : current)} style={{ minHeight: 42, border: '1px solid #d0d5dd', borderRadius: 10, padding: '0 10px', background: 'transparent', color: 'inherit' }}>
+                      <option value="">Bitte wählen</option>
+                      {(definition.choices || []).map((choice: string) => <option value={choice} key={choice}>{choice}</option>)}
+                    </select>
+                  ) : kind === 'boolean' ? (
+                    <select value={value === true || value === 'true' ? 'true' : value === false || value === 'false' ? 'false' : ''} onChange={(event) => setFixTarget((current) => current ? ({ ...current, values: { ...current.values, [field.field]: event.target.value } }) : current)} style={{ minHeight: 42, border: '1px solid #d0d5dd', borderRadius: 10, padding: '0 10px', background: 'transparent', color: 'inherit' }}>
+                      <option value="">Bitte wählen</option>
+                      <option value="true">Ja</option>
+                      <option value="false">Nein</option>
+                    </select>
+                  ) : (
+                    <input
+                      type={kind === 'date' ? 'date' : kind === 'number' || kind === 'money' ? 'number' : 'text'}
+                      step={kind === 'money' ? '0.01' : undefined}
+                      value={String(value)}
+                      onChange={(event) => setFixTarget((current) => current ? ({ ...current, values: { ...current.values, [field.field]: event.target.value } }) : current)}
+                      style={{ minHeight: 42, border: '1px solid #d0d5dd', borderRadius: 10, padding: '0 11px', background: 'transparent', color: 'inherit', font: 'inherit' }}
+                    />
+                  )}
+                </label>;
+              })}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
+              <IonButton fill="outline" disabled={fixBusy} onClick={() => setFixTarget(undefined)}>Abbrechen</IonButton>
+              <IonButton disabled={fixBusy} onClick={() => void saveMissingFields()}>{fixBusy ? <IonSpinner name="dots" /> : 'Speichern & erneut prüfen'}</IonButton>
+            </div>
+          </div>
+        </IonContent>
+      </IonModal>
+
       <IonAlert
         isOpen={!!pendingSource}
         onDidDismiss={clearPendingSource}
