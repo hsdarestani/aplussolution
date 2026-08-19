@@ -187,19 +187,15 @@ jobs:
           else
             overall='failed'
           fi
-          body=$(cat <<EOF
-          Automated production deployment status.
-
-          - Commit: `${{ github.sha }}`
-          - Validation: **$validate**
-          - Deploy: **$deploy**
-          - Overall: **$overall**
-          - Production: `https://solution.smarbiz.sbs`
-          - Workflow run: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
-
-          No secrets are included in this issue.
-          EOF
-          )
+          body=$(printf '%s\n\n- Commit: %s\n- Validation: **%s**\n- Deploy: **%s**\n- Overall: **%s**\n- Production: https://solution.smarbiz.sbs\n- Workflow run: %s/%s/actions/runs/%s\n\nNo secrets are included in this issue.\n' \
+            'Automated production deployment status.' \
+            '${{ github.sha }}' \
+            "$validate" \
+            "$deploy" \
+            "$overall" \
+            '${{ github.server_url }}' \
+            '${{ github.repository }}' \
+            '${{ github.run_id }}')
           gh api --method PATCH "repos/${{ github.repository }}/issues/84" \
             -f body="$body" \
             -f state=closed >/dev/null
