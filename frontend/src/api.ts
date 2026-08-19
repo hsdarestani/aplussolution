@@ -37,6 +37,39 @@ async function request(url: string, options: RequestInit): Promise<Response> {
   throw new Error('Der A+ Server ist momentan nicht erreichbar. Bitte kurz warten und erneut versuchen.');
 }
 
+function geoAttempt(options: PositionOptions): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('GEO_UNAVAILABLE'));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(resolve, reject, options);
+  });
+}
+
+async function reliableCoordinates(): Promise<{ lat: number; lng: number }> {
+  if (typeof navigator === 'undefined' || !navigator.geolocation) {
+    throw new Error('Dieses Gerät unterstützt keine Standortbestimmung. Bitte GPS/Standortdienste verwenden.');
+  }
+  try {
+    const position = await geoAttempt({ enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 });
+    return { lat: position.coords.latitude, lng: position.coords.longitude };
+  } catch (first: any) {
+    if (first?.code === 1) {
+      throw new Error('Standortzugriff ist blockiert. Bitte für solution.smarbiz.sbs Standort erlauben und erneut versuchen.');
+    }
+  }
+  try {
+    const position = await geoAttempt({ enableHighAccuracy: true, timeout: 25000, maximumAge: 600000 });
+    return { lat: position.coords.latitude, lng: position.coords.longitude };
+  } catch (second: any) {
+    if (second?.code === 1) {
+      throw new Error('Standortzugriff ist blockiert. Bitte für solution.smarbiz.sbs Standort erlauben und erneut versuchen.');
+    }
+    throw new Error('Der aktuelle Standort konnte nicht bestimmt werden. Bitte GPS aktivieren, kurz ins Freie/Fensternähe gehen oder die Standortberechtigung prüfen.');
+  }
+}
+
 async function refreshAccessToken(): Promise<string | null> {
   if (!refreshToken()) return null;
   if (!refreshPromise) {
@@ -84,15 +117,30 @@ async function parseError(response: Response) {
 
 async function prepareOptions(normalizedPath: string, options: RequestInit): Promise<RequestInit> {
   const method = String(options.method || 'GET').toUpperCase();
-  if (normalizedPath !== 'locations/' || method !== 'POST' || typeof options.body !== 'string') return options;
+  if (method !== 'POST' || typeof options.body !== 'string') return options;
 
+  if (normalizedPath === 'time-entries/clock_in/' || normalizedPath === 'time-entries/clock_out/') {
+    let payload: any;
+    try {
+      payload = JSON.parse(options.body);
+    } catch {
+      payload = {};
+    }
+    if (payload.lat == null || payload.lng == null) {
+      const coords = await reliableCoordinates();
+      payload.lat = coords.lat;
+      payload.lng = coords.lng;
+    }
+    return { ...options, body: JSON.stringify(payload) };
+  }
+
+  if (normalizedPath !== 'locations/') return options;
   let payload: any;
   try {
     payload = JSON.parse(options.body);
   } catch {
     return options;
   }
-
   const enriched = await enrichLocationPayload(payload);
   return {
     ...options,
