@@ -81,6 +81,29 @@ def test_admin_invite_endpoint_returns_link_when_smtp_missing(settings, auth_adm
 
 
 @pytest.mark.django_db
+def test_new_worker_onboard_requires_portal_activation(auth_admin):
+    response = auth_admin.post('/api/workers/onboard/', {
+        'email': 'new-worker@example.com',
+        'first_name': 'Neu',
+        'last_name': 'Mitarbeiter',
+        'employee_number': 'MA-NEW-001',
+    }, format='json')
+
+    assert response.status_code == 201
+    assert response.data['temporary_password'] is None
+    assert response.data['requires_activation'] is True
+
+    user = User.objects.get(email='new-worker@example.com')
+    assert user.has_usable_password() is False
+    assert user.is_onboarded is False
+
+    status_response = auth_admin.get('/api/workers/portal-status/?search=new-worker@example.com')
+    assert status_response.status_code == 200
+    assert len(status_response.data) == 1
+    assert status_response.data[0]['state'] == 'not_activated'
+
+
+@pytest.mark.django_db
 def test_worker_home_uses_claimed_slots_not_legacy_worker(auth_worker, worker_user, company, location, position):
     now = timezone.now()
     own = Shift.objects.create(
