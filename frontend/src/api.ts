@@ -104,7 +104,11 @@ export async function login(email: string, password: string) {
 }
 
 export const me = () => api<User>('auth/me/');
-export const socialUrl = (provider: 'google' | 'apple') => `${API}/auth/oauth/${provider}/start/?target=${encodeURIComponent(`${window.location.origin}/auth/callback`)}`;
+
+// The backend owns the OAuth callback target. Do not send a user-controlled
+// target URL in the query string; this avoids open-redirect risk and prevents
+// security/WAF layers from treating the request as a redirect-abuse pattern.
+export const socialUrl = (provider: 'google' | 'apple') => `${API}/auth/oauth/${provider}/start/`;
 
 export function consumeOAuth() {
   const params = new URLSearchParams(location.search);
