@@ -103,12 +103,6 @@ export async function login(email: string, password: string) {
   return data.user as User;
 }
 
-export const me = () => api<User>('auth/me/');
-// Do not send a user-controlled target URL. The backend already knows the canonical
-// application callback URL. Keeping the OAuth start URL free of nested URLs also
-// avoids edge/WAF false positives on the production domain.
-export const socialUrl = (provider: 'google' | 'apple') => `${API}/auth/oauth/${provider}/start/`;
-
 function showOAuthError(message: string) {
   const existing = document.getElementById('oauth-error-banner');
   if (existing) existing.remove();
@@ -135,6 +129,25 @@ function showOAuthError(message: string) {
   document.body.appendChild(banner);
 }
 
+export async function me() {
+  try {
+    const user = await api<User>('auth/me/');
+    sessionStorage.removeItem('oauth-login-pending');
+    return user;
+  } catch (reason: any) {
+    if (sessionStorage.getItem('oauth-login-pending')) {
+      sessionStorage.removeItem('oauth-login-pending');
+      window.setTimeout(() => showOAuthError(`OAuth completed, but portal session failed: ${reason?.message || 'Unknown error'}`), 0);
+    }
+    throw reason;
+  }
+}
+
+// Do not send a user-controlled target URL. The backend already knows the canonical
+// application callback URL. Keeping the OAuth start URL free of nested URLs also
+// avoids edge/WAF false positives on the production domain.
+export const socialUrl = (provider: 'google' | 'apple') => `${API}/auth/oauth/${provider}/start/`;
+
 export function consumeOAuth() {
   const params = new URLSearchParams(location.search);
   const access = params.get('access');
@@ -144,13 +157,13 @@ export function consumeOAuth() {
   if (access && refresh) {
     localStorage.setItem('access', access);
     localStorage.setItem('refresh', refresh);
+    sessionStorage.setItem('oauth-login-pending', '1');
     history.replaceState({}, '', '/');
     return true;
   }
 
   if (oauthError) {
-    // Navigation-triggered alert() is unreliable on mobile browsers. Render a
-    // persistent DOM banner instead, then remove sensitive/noisy query text.
+    sessionStorage.removeItem('oauth-login-pending');
     history.replaceState({}, '', '/');
     window.setTimeout(() => showOAuthError(oauthError), 0);
   }
@@ -159,5 +172,6 @@ export function consumeOAuth() {
 
 export function logout() {
   localStorage.clear();
+  sessionStorage.removeItem('oauth-login-pending');
   location.href = '/';
 }
