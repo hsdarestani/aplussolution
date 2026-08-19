@@ -1,0 +1,40 @@
+/* Keep the large Mitarbeiter/Kunden master-data lists compact on desktop.
+   Scoped to the columns immediately following ListToolbar so other .columns
+   layouts are unaffected. */
+@media (min-width: 900px) {
+  .list-toolbar-v4 + .columns > .panel {
+    max-height: min(62vh, 620px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .list-toolbar-v4 + .columns > .panel > .section-head {
+    position: sticky;
+    top: -20px;
+    z-index: 3;
+    margin: -20px -20px 0;
+    padding: 20px 20px 14px;
+    background: #fff;
+    border-bottom: 1px solid #eef0f4;
+  }
+
+  .list-toolbar-v4 + .columns > .panel::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .list-toolbar-v4 + .columns > .panel::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .list-toolbar-v4 + .columns > .panel::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 999px;
+    border: 2px solid #fff;
+  }
+
+  .list-toolbar-v4 + .columns > .panel {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+  }
+}
