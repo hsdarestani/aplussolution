@@ -6,6 +6,9 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/diagnose-production-oauth.yml'
+  workflow_run:
+    workflows: ['Configure production integrations']
+    types: [completed]
 
 permissions:
   contents: read
@@ -13,6 +16,7 @@ permissions:
 
 jobs:
   diagnose:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Install SSH tooling
