@@ -1,9 +1,12 @@
 import { Capacitor } from '@capacitor/core';
+import { enrichLocationPayload, installLocationPicker } from './locationPicker';
 
 const PRODUCTION_API = 'https://solution.smarbiz.sbs/api';
 const DEVELOPMENT_API = 'http://localhost:8000/api';
 const DEFAULT_API = Capacitor.isNativePlatform() ? PRODUCTION_API : DEVELOPMENT_API;
 const API = (import.meta.env.VITE_API_URL || DEFAULT_API).replace(/\/$/, '');
+
+installLocationPicker();
 
 export type User = {
   id: string;
@@ -72,33 +75,6 @@ async function parseError(response: Response) {
   return message;
 }
 
-function currentCoordinates(): Promise<{ latitude: number; longitude: number; accuracy: number }> {
-  if (typeof navigator === 'undefined' || !navigator.geolocation) {
-    return Promise.reject(new Error('Dieses Gerät unterstützt keine Standortbestimmung.'));
-  }
-  return new Promise((resolve, reject) => {
-    navigator.geolocation.getCurrentPosition(
-      (position) => resolve({
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-        accuracy: position.coords.accuracy,
-      }),
-      (error) => {
-        if (error.code === error.PERMISSION_DENIED) {
-          reject(new Error('Standortzugriff wurde nicht erlaubt. Bitte die Standortfreigabe für A+ Solution aktivieren.'));
-          return;
-        }
-        if (error.code === error.TIMEOUT) {
-          reject(new Error('Der aktuelle Standort konnte nicht rechtzeitig bestimmt werden. Bitte GPS aktivieren und erneut versuchen.'));
-          return;
-        }
-        reject(new Error('Der aktuelle Standort konnte nicht bestimmt werden. Bitte GPS und Standortdienste prüfen.'));
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
-    );
-  });
-}
-
 async function prepareOptions(normalizedPath: string, options: RequestInit): Promise<RequestInit> {
   const method = String(options.method || 'GET').toUpperCase();
   if (normalizedPath !== 'locations/' || method !== 'POST' || typeof options.body !== 'string') return options;
@@ -110,21 +86,10 @@ async function prepareOptions(normalizedPath: string, options: RequestInit): Pro
     return options;
   }
 
-  if (payload.latitude != null && payload.longitude != null) return options;
-
-  const useCurrentLocation = window.confirm(
-    'GPS-Geofence einrichten?\n\nOK: aktuellen Standort dieses Geräts als Mittelpunkt verwenden.\nAbbrechen: Einsatzort ohne GPS-Geofence speichern.',
-  );
-  if (!useCurrentLocation) return options;
-
-  const coords = await currentCoordinates();
-  payload.latitude = coords.latitude.toFixed(6);
-  payload.longitude = coords.longitude.toFixed(6);
-  payload.geofence_radius_m = Number(payload.geofence_radius_m || 250);
-
+  const enriched = await enrichLocationPayload(payload);
   return {
     ...options,
-    body: JSON.stringify(payload),
+    body: JSON.stringify(enriched),
   };
 }
 
