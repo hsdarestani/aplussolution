@@ -60,6 +60,8 @@ def required_signature_roles(contract):
 def sign_contract(contract, signer_name, signature_data, request, requested_role=None):
     if not signer_name or not signature_data:
         raise ValueError('Name und Signatur sind erforderlich.')
+    if isinstance(signature_data, str) and signature_data.startswith('data:image/') and len(signature_data) > 900_000:
+        raise ValueError('Die gezeichnete Signatur ist zu groß. Bitte löschen und erneut, etwas kompakter, unterschreiben.')
     role = allowed_signature_role(contract, request.user, requested_role)
     if role not in required_signature_roles(contract):
         raise ValueError('Diese Signaturrolle ist für das Dokument nicht vorgesehen.')
@@ -100,5 +102,7 @@ def sign_contract(contract, signer_name, signature_data, request, requested_role
     from .document_engine import generate_contract_files
     if contract.template.source_file or contract.template.source_format == 'html':
         generate_contract_files(contract, validate=False)
+        from .signature_pdf import stamp_drawn_signatures
+        stamp_drawn_signatures(contract)
     audit(request, 'contract.signed', contract, {'role': role, 'signer': signer_name, 'hash': signature_hash})
     return signature
