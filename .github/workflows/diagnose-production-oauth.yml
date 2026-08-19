@@ -45,18 +45,46 @@ jobs:
           print('app_url_ok=', settings.APP_URL == 'https://solution.smarbiz.sbs')
           print('smtp_configured=', bool(settings.EMAIL_HOST and settings.EMAIL_HOST_USER and settings.EMAIL_HOST_PASSWORD))
           print('openai_configured=', bool(settings.OPENAI_API_KEY))
-          print('apple_server_configured=', bool(settings.APPLE_SERVICE_ID and settings.APPLE_TEAM_ID and settings.APPLE_KEY_ID and (settings.APPLE_PRIVATE_KEY or settings.APPLE_PRIVATE_KEY_PATH)))
+
+          apple_private_key_present = bool(settings.APPLE_PRIVATE_KEY or settings.APPLE_PRIVATE_KEY_PATH)
+          print('apple_service_id_configured=', bool(settings.APPLE_SERVICE_ID))
+          print('apple_team_id_configured=', bool(settings.APPLE_TEAM_ID))
+          print('apple_key_id_configured=', bool(settings.APPLE_KEY_ID))
+          print('apple_private_key_configured=', apple_private_key_present)
+          print('apple_redirect_configured=', settings.APPLE_OAUTH_REDIRECT_URI == 'https://solution.smarbiz.sbs/api/auth/oauth/apple/callback/')
+          print('apple_server_configured=', bool(settings.APPLE_SERVICE_ID and settings.APPLE_TEAM_ID and settings.APPLE_KEY_ID and apple_private_key_present))
+
+          apple_url = oauth.start('apple', 'https://solution.smarbiz.sbs/auth/callback') if settings.APPLE_SERVICE_ID else ''
+          apple_parsed = urlparse(apple_url) if apple_url else None
+          apple_query = parse_qs(apple_parsed.query) if apple_parsed else {}
+          print('apple_start_host_ok=', bool(apple_parsed and apple_parsed.netloc == 'appleid.apple.com'))
+          print('apple_start_client_id_present=', bool(apple_query.get('client_id', [''])[0]))
+          print('apple_start_redirect_ok=', apple_query.get('redirect_uri', [''])[0] == settings.APPLE_OAUTH_REDIRECT_URI)
+
+          if settings.APPLE_SERVICE_ID and settings.APPLE_TEAM_ID and settings.APPLE_KEY_ID and apple_private_key_present:
+              try:
+                  secret = oauth.apple_client_secret()
+                  print('apple_client_secret_generation_ok=', bool(secret))
+              except Exception as exc:
+                  print('apple_client_secret_generation_ok=', False)
+                  print('apple_client_secret_error_type=', type(exc).__name__)
+          else:
+              print('apple_client_secret_generation_ok=', False)
           PY
 
-          ORIGIN_HEADERS=$(mktemp)
-          ORIGIN_STATUS=$(curl -ksS --resolve solution.smarbiz.sbs:443:127.0.0.1 -o /dev/null -D "$ORIGIN_HEADERS" -w '%{http_code}' --max-time 20 'https://solution.smarbiz.sbs/api/auth/oauth/google/start/' || true)
-          ORIGIN_LOCATION=$(awk 'BEGIN{IGNORECASE=1} /^Location:/{print $2}' "$ORIGIN_HEADERS" | tr -d '\r' | tail -1)
-          echo "origin_google_without_target_status=$ORIGIN_STATUS"
-          case "$ORIGIN_LOCATION" in
-            https://accounts.google.com/*) echo 'origin_google_location_host_ok=True' ;;
-            *) echo 'origin_google_location_host_ok=False' ;;
-          esac
-          rm -f "$ORIGIN_HEADERS"
+          for PROVIDER in google apple; do
+            ORIGIN_HEADERS=$(mktemp)
+            ORIGIN_STATUS=$(curl -ksS --resolve solution.smarbiz.sbs:443:127.0.0.1 -o /dev/null -D "$ORIGIN_HEADERS" -w '%{http_code}' --max-time 20 "https://solution.smarbiz.sbs/api/auth/oauth/$PROVIDER/start/" || true)
+            ORIGIN_LOCATION=$(awk 'BEGIN{IGNORECASE=1} /^Location:/{print $2}' "$ORIGIN_HEADERS" | tr -d '\r' | tail -1)
+            echo "origin_${PROVIDER}_without_target_status=$ORIGIN_STATUS"
+            case "$PROVIDER:$ORIGIN_LOCATION" in
+              google:https://accounts.google.com/*) echo 'origin_google_location_host_ok=True' ;;
+              apple:https://appleid.apple.com/*) echo 'origin_apple_location_host_ok=True' ;;
+              google:*) echo 'origin_google_location_host_ok=False' ;;
+              apple:*) echo 'origin_apple_location_host_ok=False' ;;
+            esac
+            rm -f "$ORIGIN_HEADERS"
+          done
           REMOTE
           )"
           printf '%s\n' "$OUTPUT" | tee /tmp/oauth-status.txt
@@ -75,7 +103,7 @@ jobs:
 
           opener = urllib.request.build_opener(NoRedirect)
 
-          def check(label, url):
+          def check(label, url, expected_host):
               req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 OAuthHealthCheck/1.0'})
               try:
                   response = opener.open(req, timeout=20)
@@ -88,13 +116,14 @@ jobs:
                   title = re.search(r'<title[^>]*>(.*?)</title>', body, re.I | re.S)
                   safe_title = re.sub(r'\s+', ' ', title.group(1)).strip()[:120] if title else ''
                   print(f'{label}_status={exc.code}')
-                  print(f'{label}_location_host_ok={urlparse(location).netloc == "accounts.google.com"}')
+                  print(f'{label}_location_host_ok={urlparse(location).netloc == expected_host}')
                   print(f'{label}_server={exc.headers.get("Server", "")[:80]}')
                   print(f'{label}_cf_ray_present={bool(exc.headers.get("CF-RAY"))}')
                   print(f'{label}_body_title={safe_title}')
 
-          check('public_google_with_target', 'https://solution.smarbiz.sbs/api/auth/oauth/google/start/?target=https%3A%2F%2Fsolution.smarbiz.sbs%2Fauth%2Fcallback')
-          check('public_google_without_target', 'https://solution.smarbiz.sbs/api/auth/oauth/google/start/')
+          check('public_google_with_target', 'https://solution.smarbiz.sbs/api/auth/oauth/google/start/?target=https%3A%2F%2Fsolution.smarbiz.sbs%2Fauth%2Fcallback', 'accounts.google.com')
+          check('public_google_without_target', 'https://solution.smarbiz.sbs/api/auth/oauth/google/start/', 'accounts.google.com')
+          check('public_apple_without_target', 'https://solution.smarbiz.sbs/api/auth/oauth/apple/start/', 'appleid.apple.com')
           PY
 
       - name: Publish safe diagnostic
