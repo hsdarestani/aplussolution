@@ -144,7 +144,8 @@ jobs:
           done
           test "$backend_ready" -eq 1
 
-          docker compose exec -T backend python manage.py shell -c "from django.conf import settings; assert settings.OPENAI_API_KEY; assert settings.EMAIL_HOST == 'smtp.strato.de'; assert settings.EMAIL_HOST_USER == 'app@aplus-solution.de'; assert settings.COMPANY_ADDRESS; assert settings.GOOGLE_OAUTH_REDIRECT_URI.endswith('/google/callback/'); assert settings.APPLE_TEAM_ID == '884MVA2MD5'; assert settings.APPLE_SERVICE_ID == 'de.aplussolution.workforce.web'; print('Production integration settings loaded')"
+          docker compose exec -T backend python manage.py shell -c "from django.conf import settings; assert settings.OPENAI_API_KEY; assert settings.EMAIL_HOST == 'smtp.strato.de'; assert settings.EMAIL_HOST_USER == 'app@aplus-solution.de'; assert settings.COMPANY_ADDRESS; assert settings.GOOGLE_OAUTH_REDIRECT_URI.endswith('/google/callback/'); assert settings.APPLE_TEAM_ID == '884MVA2MD5'; assert settings.APPLE_SERVICE_ID == 'de.aplussolution.workforce.web'; assert settings.APPLE_OAUTH_REDIRECT_URI.endswith('/apple/callback/'); print('Production integration settings loaded')"
+          docker compose exec -T backend python manage.py shell -c "from django.conf import settings; from core.oauth import apple_client_secret; assert settings.APPLE_KEY_ID; assert settings.APPLE_PRIVATE_KEY; token=apple_client_secret(); assert isinstance(token, str) and token.count('.') == 2; print('Apple Sign in client secret generation OK')"
           docker compose exec -T backend python manage.py shell -c "from django.core.mail import get_connection; c=get_connection(); opened=c.open(); assert opened is not False; c.close(); print('STRATO SMTP authentication OK')"
           curl -fsS https://solution.smarbiz.sbs/health/ >/dev/null
           REMOTE
