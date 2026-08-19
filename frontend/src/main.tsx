@@ -8,6 +8,7 @@ import '@ionic/react/css/typography.css';
 import '@ionic/react/css/padding.css';
 import './theme.css';
 import './brand-refresh.css';
+import './people-lists.css';
 import App from './App';
 import StoreComplianceLinks from './StoreComplianceLinks';
 import StoreLegalPage, { legalPageFromPath } from './StoreLegalPages';
