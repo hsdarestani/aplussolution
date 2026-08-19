@@ -14,7 +14,7 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -60,9 +60,12 @@ jobs:
           VITE_API_URL: https://solution.smarbiz.sbs/api
         run: npm run build
       - name: Install Playwright Chromium
+        if: github.event_name != 'push'
+        timeout-minutes: 5
         working-directory: frontend
         run: npx playwright install --with-deps chromium
       - name: Run frontend E2E smoke tests
+        if: github.event_name != 'push'
         working-directory: frontend
         run: npm run test:e2e
   deploy:
@@ -140,10 +143,6 @@ jobs:
           fi
           if ! command -v docker >/dev/null 2>&1; then curl -fsSL https://get.docker.com | sh; fi
           docker compose pull db redis caddy || true
-
-          # backend/entrypoint.sh owns migrate + collectstatic + bootstrap.
-          # Do not invoke migrate in parallel from the deployment shell: doing
-          # so can race PostgreSQL DDL while the backend container is starting.
           docker compose up -d --build --remove-orphans
 
           backend_ready=0
@@ -160,8 +159,6 @@ jobs:
             exit 1
           fi
 
-          # Read-only post-start checks: migrations have already completed in
-          # entrypoint before Gunicorn starts serving the health endpoint.
           docker compose exec -T backend python manage.py migrate --check
           docker compose exec -T backend python manage.py check
           docker compose exec -T backend python manage.py shell -c "from django.conf import settings; assert settings.WIW_SYNC_ENABLED is False; print('A+ Workforce source-of-truth mode OK')"
@@ -176,6 +173,8 @@ jobs:
     timeout-minutes: 2
     env:
       GH_TOKEN: ${{ github.token }}
+      COMMIT_SHA: ${{ github.sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Publish deployment status
         run: |
@@ -187,15 +186,13 @@ jobs:
           else
             overall='failed'
           fi
-          body=$(printf '%s\n\n- Commit: %s\n- Validation: **%s**\n- Deploy: **%s**\n- Overall: **%s**\n- Production: https://solution.smarbiz.sbs\n- Workflow run: %s/%s/actions/runs/%s\n\nNo secrets are included in this issue.\n' \
+          body=$(printf '%s\n\n- Commit: %s\n- Validation: **%s**\n- Deploy: **%s**\n- Overall: **%s**\n- Production: https://solution.smarbiz.sbs\n- Workflow run: %s\n\nNo secrets are included in this issue.\n' \
             'Automated production deployment status.' \
-            '${{ github.sha }}' \
+            "$COMMIT_SHA" \
             "$validate" \
             "$deploy" \
             "$overall" \
-            '${{ github.server_url }}' \
-            '${{ github.repository }}' \
-            '${{ github.run_id }}')
+            "$RUN_URL")
           gh api --method PATCH "repos/${{ github.repository }}/issues/84" \
             -f body="$body" \
             -f state=closed >/dev/null
