@@ -94,22 +94,36 @@ jobs:
           body=$(printf 'Production deployment is running.\n\n- Commit: %s\n- Validation: **success**\n- Phase: **deploying**\n- Workflow run: %s\n' "$COMMIT_SHA" "$RUN_URL")
           gh api --method PATCH "repos/${{ github.repository }}/issues/84" -f body="$body" -f state=open >/dev/null
       - uses: actions/checkout@v4
-      - name: Install SSH tooling
-        timeout-minutes: 3
+      - name: Prepare password SSH authentication
+        timeout-minutes: 1
+        env:
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
         run: |
           set -euo pipefail
-          sudo timeout 120s apt-get -o Acquire::Retries=3 update -qq
-          sudo timeout 120s apt-get -o Acquire::Retries=3 install -y -qq sshpass rsync
+          test -n "$DEPLOY_PASSWORD"
+          command -v ssh >/dev/null
+          command -v scp >/dev/null
+          command -v setsid >/dev/null
+          cat > /tmp/aplus-askpass.sh <<'ASKPASS'
+          #!/bin/sh
+          printf '%s\n' "$DEPLOY_PASSWORD"
+          ASKPASS
+          chmod 700 /tmp/aplus-askpass.sh
       - name: Preflight production connectivity
         timeout-minutes: 2
         env:
-          SSHPASS: ${{ secrets.PASS }}
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
+          SSH_ASKPASS: /tmp/aplus-askpass.sh
+          SSH_ASKPASS_REQUIRE: force
+          DISPLAY: :0
         run: |
           set -euo pipefail
-          test -n "$HOST" && test -n "$SSHPASS"
-          sshpass -e ssh -qT \
+          test -n "$HOST" && test -n "$DEPLOY_PASSWORD"
+          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
+          setsid -w ssh -qT \
             -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=15 \
             -o ServerAliveInterval=10 \
             -o ServerAliveCountMax=3 \
@@ -117,25 +131,44 @@ jobs:
       - name: Upload release
         timeout-minutes: 5
         env:
-          SSHPASS: ${{ secrets.PASS }}
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
+          SSH_ASKPASS: /tmp/aplus-askpass.sh
+          SSH_ASKPASS_REQUIRE: force
+          DISPLAY: :0
         run: |
           set -euo pipefail
-          sshpass -e rsync -az --delete \
-            --exclude '.git' \
-            --exclude '.env' \
-            --exclude 'frontend/node_modules' \
-            -e 'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ServerAliveInterval=10 -o ServerAliveCountMax=3' \
-            ./ root@"$HOST":/opt/aplussolution/
+          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
+          tar \
+            --exclude='.git' \
+            --exclude='.env' \
+            --exclude='frontend/node_modules' \
+            -czf /tmp/aplussolution-release.tgz .
+          setsid -w scp -q \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 \
+            /tmp/aplussolution-release.tgz root@"$HOST":/tmp/aplussolution-release.tgz
+          setsid -w ssh -qT \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 \
+            root@"$HOST" \
+            "mkdir -p /opt/aplussolution && find /opt/aplussolution -mindepth 1 -maxdepth 1 ! -name .env -exec rm -rf {} + && tar -xzf /tmp/aplussolution-release.tgz -C /opt/aplussolution && rm -f /tmp/aplussolution-release.tgz"
       - name: Configure and start production release
         timeout-minutes: 12
         env:
-          SSHPASS: ${{ secrets.PASS }}
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
+          SSH_ASKPASS: /tmp/aplus-askpass.sh
+          SSH_ASKPASS_REQUIRE: force
+          DISPLAY: :0
         run: |
           set -euo pipefail
-          sshpass -e ssh \
+          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
+          setsid -w ssh \
             -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=15 \
             -o ServerAliveInterval=10 \
             -o ServerAliveCountMax=6 \
