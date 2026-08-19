@@ -16,6 +16,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Publish deployment start
+        if: github.event_name == 'push'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          body=$(printf 'Production deployment is running.\n\n- Commit: %s\n- Phase: **validation**\n- Workflow run: %s\n' "$COMMIT_SHA" "$RUN_URL")
+          gh api --method PATCH "repos/${{ github.repository }}/issues/84" -f body="$body" -f state=open >/dev/null
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -74,6 +84,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Publish deploy phase
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          body=$(printf 'Production deployment is running.\n\n- Commit: %s\n- Validation: **success**\n- Phase: **deploying**\n- Workflow run: %s\n' "$COMMIT_SHA" "$RUN_URL")
+          gh api --method PATCH "repos/${{ github.repository }}/issues/84" -f body="$body" -f state=open >/dev/null
       - uses: actions/checkout@v4
       - name: Install SSH tooling
         timeout-minutes: 3
@@ -177,6 +196,7 @@ jobs:
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Publish deployment status
+        continue-on-error: true
         run: |
           set -euo pipefail
           validate='${{ needs.validate.result }}'
