@@ -129,6 +129,16 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
+        // Never let the SPA navigation fallback swallow server/API endpoints.
+        // OAuth starts as a same-origin navigation and must reach Django so it
+        // can return the provider redirect instead of the cached app shell.
+        navigateFallbackDenylist: [
+          /^\/api\//,
+          /^\/admin\//,
+          /^\/health\//,
+          /^\/media\//,
+          /^\/static\//,
+        ],
       },
       manifest: {
         name: 'A+ Solution Workforce',
