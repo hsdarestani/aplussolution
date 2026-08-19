@@ -13,9 +13,25 @@ jobs:
   configure:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - name: Install SSH tooling
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Ensure SSH tooling
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v sshpass >/dev/null 2>&1; then
+            echo 'sshpass already available'
+            exit 0
+          fi
+          if ! sudo -n timeout 60s apt-get install -y -qq sshpass; then
+            sudo -n timeout 90s apt-get update -qq \
+              -o Acquire::Retries=2 \
+              -o Acquire::http::Timeout=15 \
+              -o Acquire::https::Timeout=15
+            sudo -n timeout 60s apt-get install -y -qq sshpass
+          fi
+          command -v sshpass >/dev/null
 
       - name: Validate production secret set
         env:
@@ -45,6 +61,7 @@ jobs:
           fi
 
       - name: Sync integrations into production .env
+        timeout-minutes: 15
         env:
           HOST: ${{ secrets.HOST }}
           SSHPASS: ${{ secrets.PASS }}
@@ -62,7 +79,12 @@ jobs:
           GOOGLE_SECRET_B64="$(printf '%s' "$GOOGLE_OAUTH_CLIENT_SECRET" | base64 -w0)"
           APPLE_KEY_ID_B64="$(printf '%s' "$APPLE_SIGNIN_KEY_ID" | base64 -w0)"
 
-          sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" \
+          timeout 720s sshpass -e ssh \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=3 \
+            root@"$HOST" \
             "EMAIL_PASS_B64='$EMAIL_PASS_B64' OPENAI_KEY_B64='$OPENAI_KEY_B64' GOOGLE_ID_B64='$GOOGLE_ID_B64' GOOGLE_SECRET_B64='$GOOGLE_SECRET_B64' APPLE_KEY_ID_B64='$APPLE_KEY_ID_B64' APPLE_PRIVATE_KEY_B64='$APPLE_SIGNIN_PRIVATE_KEY_BASE64' bash -s" <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
@@ -147,5 +169,5 @@ jobs:
           docker compose exec -T backend python manage.py shell -c "from django.conf import settings; assert settings.OPENAI_API_KEY; assert settings.EMAIL_HOST == 'smtp.strato.de'; assert settings.EMAIL_HOST_USER == 'app@aplus-solution.de'; assert settings.COMPANY_ADDRESS; assert settings.GOOGLE_OAUTH_REDIRECT_URI.endswith('/google/callback/'); assert settings.APPLE_TEAM_ID == '884MVA2MD5'; assert settings.APPLE_SERVICE_ID == 'de.aplussolution.workforce.web'; assert settings.APPLE_OAUTH_REDIRECT_URI.endswith('/apple/callback/'); print('Production integration settings loaded')"
           docker compose exec -T backend python manage.py shell -c "from django.conf import settings; from core.oauth import apple_client_secret; assert settings.APPLE_KEY_ID; assert settings.APPLE_PRIVATE_KEY; token=apple_client_secret(); assert isinstance(token, str) and token.count('.') == 2; print('Apple Sign in client secret generation OK')"
           docker compose exec -T backend python manage.py shell -c "from django.core.mail import get_connection; c=get_connection(); opened=c.open(); assert opened is not False; c.close(); print('STRATO SMTP authentication OK')"
-          curl -fsS https://solution.smarbiz.sbs/health/ >/dev/null
+          curl -fsS --max-time 20 https://solution.smarbiz.sbs/health/ >/dev/null
           REMOTE
