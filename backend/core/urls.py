@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, integration_views, portal_views, searchable_views, shift_views, store_review_views, time_views, views
+from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, integration_views, oauth_views, portal_views, searchable_views, shift_views, store_review_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -33,8 +33,8 @@ urlpatterns = [
     path('auth/me/', views.me),
     path('auth/change-password/', views.change_password),
     path('auth/account-deletion/', views.request_account_deletion),
-    path('auth/oauth/<str:provider>/start/', views.oauth_start),
-    path('auth/oauth/<str:provider>/callback/', views.oauth_callback),
+    path('auth/oauth/<str:provider>/start/', oauth_views.oauth_start),
+    path('auth/oauth/<str:provider>/callback/', oauth_views.oauth_callback),
     path('auth/activation/validate/', portal_views.activation_validate),
     path('auth/activation/complete/', portal_views.activation_complete),
     path('employee/home/', portal_views.employee_home),
