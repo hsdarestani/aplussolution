@@ -109,10 +109,38 @@ export const me = () => api<User>('auth/me/');
 // avoids edge/WAF false positives on the production domain.
 export const socialUrl = (provider: 'google' | 'apple') => `${API}/auth/oauth/${provider}/start/`;
 
+function showOAuthError(message: string) {
+  const existing = document.getElementById('oauth-error-banner');
+  if (existing) existing.remove();
+  const banner = document.createElement('div');
+  banner.id = 'oauth-error-banner';
+  banner.setAttribute('role', 'alert');
+  banner.style.cssText = [
+    'position:fixed',
+    'z-index:2147483647',
+    'left:16px',
+    'right:16px',
+    'top:16px',
+    'max-width:720px',
+    'margin:0 auto',
+    'padding:14px 16px',
+    'border-radius:12px',
+    'background:#fff',
+    'color:#8b1e1e',
+    'border:1px solid #efb7b7',
+    'box-shadow:0 12px 36px rgba(0,0,0,.18)',
+    'font:600 14px/1.45 system-ui,-apple-system,sans-serif',
+  ].join(';');
+  banner.textContent = `Google/Apple Login: ${message}`;
+  document.body.appendChild(banner);
+}
+
 export function consumeOAuth() {
   const params = new URLSearchParams(location.search);
   const access = params.get('access');
   const refresh = params.get('refresh');
+  const oauthError = params.get('oauth_error') || params.get('error');
+
   if (access && refresh) {
     localStorage.setItem('access', access);
     localStorage.setItem('refresh', refresh);
@@ -120,9 +148,12 @@ export function consumeOAuth() {
     return true;
   }
 
-  // Leave OAuth errors in the URL until the Login component has rendered them.
-  // Mobile browsers can suppress navigation-triggered alert() calls, which made
-  // a real callback failure look like the Google button simply did nothing.
+  if (oauthError) {
+    // Navigation-triggered alert() is unreliable on mobile browsers. Render a
+    // persistent DOM banner instead, then remove sensitive/noisy query text.
+    history.replaceState({}, '', '/');
+    window.setTimeout(() => showOAuthError(oauthError), 0);
+  }
   return false;
 }
 
