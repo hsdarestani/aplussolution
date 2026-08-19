@@ -14,17 +14,53 @@ import StoreLegalPage, { legalPageFromPath } from './StoreLegalPages';
 
 setupIonicReact({ mode: 'md' });
 
-const legalPage = legalPageFromPath(window.location.pathname);
+function renderApp() {
+  const legalPage = legalPageFromPath(window.location.pathname);
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    {legalPage ? (
-      <StoreLegalPage page={legalPage} />
-    ) : (
-      <>
-        <App />
-        <StoreComplianceLinks />
-      </>
-    )}
-  </React.StrictMode>,
-);
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      {legalPage ? (
+        <StoreLegalPage page={legalPage} />
+      ) : (
+        <>
+          <App />
+          <StoreComplianceLinks />
+        </>
+      )}
+    </React.StrictMode>,
+  );
+}
+
+async function retireLegacyPwa() {
+  if (!('serviceWorker' in navigator)) return false;
+
+  try {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    const hadController = Boolean(navigator.serviceWorker.controller);
+
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    }
+
+    // unregister() does not release the controller from the current page. Reload
+    // exactly once after clearing caches so the next navigation is network-only.
+    if ((registrations.length > 0 || hadController) && sessionStorage.getItem('legacy-sw-cleanup-reload') !== '1') {
+      sessionStorage.setItem('legacy-sw-cleanup-reload', '1');
+      window.location.reload();
+      return true;
+    }
+
+    sessionStorage.removeItem('legacy-sw-cleanup-reload');
+  } catch {
+    // A cleanup failure must never prevent the login screen from rendering.
+  }
+
+  return false;
+}
+
+void retireLegacyPwa().then((reloading) => {
+  if (!reloading) renderApp();
+});
