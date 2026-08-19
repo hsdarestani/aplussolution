@@ -18,7 +18,7 @@ jobs:
       - name: Install SSH tooling
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
 
-      - name: Read safe production OAuth status
+      - name: Read safe production OAuth status and origin response
         env:
           HOST: ${{ secrets.HOST }}
           PASS: ${{ secrets.PASS }}
@@ -47,6 +47,16 @@ jobs:
           print('openai_configured=', bool(settings.OPENAI_API_KEY))
           print('apple_server_configured=', bool(settings.APPLE_SERVICE_ID and settings.APPLE_TEAM_ID and settings.APPLE_KEY_ID and (settings.APPLE_PRIVATE_KEY or settings.APPLE_PRIVATE_KEY_PATH)))
           PY
+
+          ORIGIN_HEADERS=$(mktemp)
+          ORIGIN_STATUS=$(curl -ksS --resolve solution.smarbiz.sbs:443:127.0.0.1 -o /dev/null -D "$ORIGIN_HEADERS" -w '%{http_code}' --max-time 20 'https://solution.smarbiz.sbs/api/auth/oauth/google/start/' || true)
+          ORIGIN_LOCATION=$(awk 'BEGIN{IGNORECASE=1} /^Location:/{print $2}' "$ORIGIN_HEADERS" | tr -d '\r' | tail -1)
+          echo "origin_google_without_target_status=$ORIGIN_STATUS"
+          case "$ORIGIN_LOCATION" in
+            https://accounts.google.com/*) echo 'origin_google_location_host_ok=True' ;;
+            *) echo 'origin_google_location_host_ok=False' ;;
+          esac
+          rm -f "$ORIGIN_HEADERS"
           REMOTE
           )"
           printf '%s\n' "$OUTPUT" | tee /tmp/oauth-status.txt
