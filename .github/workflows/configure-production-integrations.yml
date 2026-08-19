@@ -1,0 +1,104 @@
+name: Configure production integrations
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ['Validate and deploy production']
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  configure:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install SSH tooling
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Require production secrets
+        env:
+          HOST: ${{ secrets.HOST }}
+          PASS: ${{ secrets.PASS }}
+          APP_EMAIL_PASS: ${{ secrets.APPEMAILPASS }}
+          WIW_OPENAI_KEY: ${{ secrets.WIW_OPENAI_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST"
+          test -n "$PASS"
+          test -n "$APP_EMAIL_PASS"
+          test -n "$WIW_OPENAI_KEY"
+
+      - name: Sync integrations into production .env
+        env:
+          HOST: ${{ secrets.HOST }}
+          SSHPASS: ${{ secrets.PASS }}
+          APP_EMAIL_PASS: ${{ secrets.APPEMAILPASS }}
+          WIW_OPENAI_KEY: ${{ secrets.WIW_OPENAI_KEY }}
+        run: |
+          set -euo pipefail
+          EMAIL_PASS_B64="$(printf '%s' "$APP_EMAIL_PASS" | base64 -w0)"
+          OPENAI_KEY_B64="$(printf '%s' "$WIW_OPENAI_KEY" | base64 -w0)"
+
+          sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" \
+            "EMAIL_PASS_B64='$EMAIL_PASS_B64' OPENAI_KEY_B64='$OPENAI_KEY_B64' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          test -f .env
+
+          export APP_EMAIL_PASS="$(printf '%s' "$EMAIL_PASS_B64" | base64 -d)"
+          export OPENAI_SECRET="$(printf '%s' "$OPENAI_KEY_B64" | base64 -d)"
+
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path('.env')
+          lines = path.read_text(encoding='utf-8').splitlines()
+          updates = {
+              'EMAIL_HOST': 'smtp.strato.de',
+              'EMAIL_PORT': '587',
+              'EMAIL_HOST_USER': 'app@aplus-solution.de',
+              'EMAIL_HOST_PASSWORD': os.environ['APP_EMAIL_PASS'],
+              'EMAIL_USE_TLS': '1',
+              'DEFAULT_FROM_EMAIL': 'A+ Solution <app@aplus-solution.de>',
+              'OPENAI_API_KEY': os.environ['OPENAI_SECRET'],
+              'WIW_OPENAI_KEY': os.environ['OPENAI_SECRET'],
+              'COMPANY_NAME': 'A+ Solution GmbH',
+              'COMPANY_ADDRESS': 'Carl-Sonnenschein Straße 57, D-65936 Frankfurt am Main',
+          }
+
+          remaining = dict(updates)
+          output = []
+          for line in lines:
+              if '=' in line and not line.lstrip().startswith('#'):
+                  key = line.split('=', 1)[0].strip()
+                  if key in remaining:
+                      output.append(f'{key}={remaining.pop(key)}')
+                      continue
+              output.append(line)
+          if remaining:
+              if output and output[-1] != '':
+                  output.append('')
+              output.append('# Managed production integrations')
+              output.extend(f'{key}={value}' for key, value in remaining.items())
+          path.write_text('\n'.join(output) + '\n', encoding='utf-8')
+          PY
+
+          docker compose up -d --build --remove-orphans
+
+          backend_ready=0
+          for i in $(seq 1 60); do
+            if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
+              backend_ready=1
+              break
+            fi
+            sleep 5
+          done
+          test "$backend_ready" -eq 1
+
+          docker compose exec -T backend python manage.py shell -c "from django.conf import settings; assert settings.OPENAI_API_KEY; assert settings.EMAIL_HOST == 'smtp.strato.de'; assert settings.EMAIL_HOST_USER == 'app@aplus-solution.de'; assert settings.COMPANY_ADDRESS; print('Production integration settings loaded')"
+          docker compose exec -T backend python manage.py shell -c "from django.core.mail import get_connection; c=get_connection(); opened=c.open(); assert opened is not False; c.close(); print('STRATO SMTP authentication OK')"
+          curl -fsS https://solution.smarbiz.sbs/health/ >/dev/null
+          REMOTE
