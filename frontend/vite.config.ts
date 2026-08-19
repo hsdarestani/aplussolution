@@ -122,25 +122,13 @@ export default defineConfig({
     nativeWorkforceCutoverTransforms(),
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // Temporarily retire the service worker. Existing mobile clients can keep an
+      // old Workbox navigation fallback alive and serve the SPA for /api/oauth
+      // navigations. selfDestroying publishes a replacement worker that removes
+      // the old registration/caches and reloads controlled clients.
+      selfDestroying: true,
       injectRegister: false,
       includeAssets: ['favicon.svg'],
-      workbox: {
-        cleanupOutdatedCaches: true,
-        clientsClaim: true,
-        skipWaiting: true,
-        // The SPA fallback must never swallow backend navigations. This matters
-        // especially for OAuth: after the PWA service worker becomes active,
-        // /api/auth/oauth/* has to reach Django on every attempt instead of
-        // being answered with cached index.html.
-        navigateFallbackDenylist: [
-          /^\/api\//,
-          /^\/admin(?:\/|$)/,
-          /^\/static\//,
-          /^\/media\//,
-          /^\/health(?:\/|$)/,
-        ],
-      },
       manifest: {
         name: 'A+ Solution Workforce',
         short_name: 'A+ Solution',
