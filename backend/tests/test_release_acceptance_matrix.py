@@ -85,7 +85,7 @@ def test_payroll_isolation_worker_sees_only_own_statement(
     assert response.status_code == 200
     data = rows(response)
     assert len(data) == 1
-    assert data[0]['worker'] == str(worker_user.worker_profile.id)
+    assert str(data[0]['worker']) == str(worker_user.worker_profile.id)
 
 
 @pytest.mark.django_db
