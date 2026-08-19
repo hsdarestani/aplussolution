@@ -14,22 +14,48 @@ permissions:
   contents: read
   issues: write
 
+concurrency:
+  group: diagnose-production-oauth
+  cancel-in-progress: true
+
 jobs:
   diagnose:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: Install SSH tooling
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Ensure SSH tooling
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v sshpass >/dev/null 2>&1; then
+            echo 'sshpass already available'
+            exit 0
+          fi
+          if ! sudo -n timeout 60s apt-get install -y -qq sshpass; then
+            sudo -n timeout 90s apt-get update -qq \
+              -o Acquire::Retries=2 \
+              -o Acquire::http::Timeout=15 \
+              -o Acquire::https::Timeout=15
+            sudo -n timeout 60s apt-get install -y -qq sshpass
+          fi
+          command -v sshpass >/dev/null
 
       - name: Read safe production OAuth status and origin response
+        timeout-minutes: 4
         env:
           HOST: ${{ secrets.HOST }}
           PASS: ${{ secrets.PASS }}
         run: |
           set -euo pipefail
           test -n "$HOST" && test -n "$PASS"
-          OUTPUT="$(SSHPASS="$PASS" sshpass -e ssh -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
+          OUTPUT="$(timeout 180s env SSHPASS="$PASS" sshpass -e ssh \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=2 \
+            root@"$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
           docker compose exec -T backend python manage.py shell <<'PY'
@@ -94,6 +120,7 @@ jobs:
           printf '%s\n' "$OUTPUT" | tee /tmp/oauth-status.txt
 
       - name: Compare public OAuth start responses
+        timeout-minutes: 2
         run: |
           python - <<'PY' | tee -a /tmp/oauth-status.txt
           import re
@@ -124,6 +151,10 @@ jobs:
                   print(f'{label}_server={exc.headers.get("Server", "")[:80]}')
                   print(f'{label}_cf_ray_present={bool(exc.headers.get("CF-RAY"))}')
                   print(f'{label}_body_title={safe_title}')
+              except Exception as exc:
+                  print(f'{label}_status=0')
+                  print(f'{label}_location_host_ok=False')
+                  print(f'{label}_error_type={type(exc).__name__}')
 
           check('public_google_with_target', 'https://solution.smarbiz.sbs/api/auth/oauth/google/start/?target=https%3A%2F%2Fsolution.smarbiz.sbs%2Fauth%2Fcallback', 'accounts.google.com')
           check('public_google_without_target', 'https://solution.smarbiz.sbs/api/auth/oauth/google/start/', 'accounts.google.com')
