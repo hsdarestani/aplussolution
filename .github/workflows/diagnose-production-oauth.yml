@@ -54,6 +54,7 @@ jobs:
       - name: Verify public OAuth start response
         run: |
           python - <<'PY' | tee -a /tmp/oauth-status.txt
+          import re
           import urllib.error
           import urllib.request
           from urllib.parse import urlparse
@@ -63,15 +64,23 @@ jobs:
                   return None
 
           url = 'https://solution.smarbiz.sbs/api/auth/oauth/google/start/?target=https%3A%2F%2Fsolution.smarbiz.sbs%2Fauth%2Fcallback'
+          req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 OAuthHealthCheck/1.0'})
           opener = urllib.request.build_opener(NoRedirect)
           try:
-              opener.open(url, timeout=20)
-              print('public_google_start_status=200')
+              response = opener.open(req, timeout=20)
+              print(f'public_google_start_status={response.status}')
               print('public_google_location_host_ok=False')
+              print(f'public_google_server={response.headers.get("Server", "")[:80]}')
           except urllib.error.HTTPError as exc:
               location = exc.headers.get('Location', '')
+              body = exc.read(500).decode('utf-8', 'replace')
+              title = re.search(r'<title[^>]*>(.*?)</title>', body, re.I | re.S)
+              safe_title = re.sub(r'\s+', ' ', title.group(1)).strip()[:120] if title else ''
               print(f'public_google_start_status={exc.code}')
               print(f'public_google_location_host_ok={urlparse(location).netloc == "accounts.google.com"}')
+              print(f'public_google_server={exc.headers.get("Server", "")[:80]}')
+              print(f'public_google_cf_ray_present={bool(exc.headers.get("CF-RAY"))}')
+              print(f'public_google_body_title={safe_title}')
           PY
 
       - name: Publish safe diagnostic
