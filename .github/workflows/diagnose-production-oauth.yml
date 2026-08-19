@@ -47,12 +47,32 @@ jobs:
           print('openai_configured=', bool(settings.OPENAI_API_KEY))
           print('apple_server_configured=', bool(settings.APPLE_SERVICE_ID and settings.APPLE_TEAM_ID and settings.APPLE_KEY_ID and (settings.APPLE_PRIVATE_KEY or settings.APPLE_PRIVATE_KEY_PATH)))
           PY
-
-          STATUS=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 'http://127.0.0.1:8080/api/auth/oauth/google/start/?target=https%3A%2F%2Fsolution.smarbiz.sbs%2Fauth%2Fcallback' || true)
-          echo "google_start_http_status=$STATUS"
           REMOTE
           )"
           printf '%s\n' "$OUTPUT" | tee /tmp/oauth-status.txt
+
+      - name: Verify public OAuth start response
+        run: |
+          python - <<'PY' | tee -a /tmp/oauth-status.txt
+          import urllib.error
+          import urllib.request
+          from urllib.parse import urlparse
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          url = 'https://solution.smarbiz.sbs/api/auth/oauth/google/start/?target=https%3A%2F%2Fsolution.smarbiz.sbs%2Fauth%2Fcallback'
+          opener = urllib.request.build_opener(NoRedirect)
+          try:
+              opener.open(url, timeout=20)
+              print('public_google_start_status=200')
+              print('public_google_location_host_ok=False')
+          except urllib.error.HTTPError as exc:
+              location = exc.headers.get('Location', '')
+              print(f'public_google_start_status={exc.code}')
+              print(f'public_google_location_host_ok={urlparse(location).netloc == "accounts.google.com"}')
+          PY
 
       - name: Publish safe diagnostic
         uses: actions/github-script@v7
