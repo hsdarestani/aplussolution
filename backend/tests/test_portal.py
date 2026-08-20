@@ -134,11 +134,74 @@ def test_worker_home_uses_claimed_slots_not_legacy_worker(auth_worker, worker_us
 
 
 @pytest.mark.django_db
+def test_employee_home_ignores_imported_and_open_time_rows(auth_worker, worker_user):
+    now = timezone.now()
+    TimeEntry.objects.create(
+        worker=worker_user.worker_profile,
+        clock_in=now - timedelta(hours=2),
+        clock_out=now - timedelta(hours=1),
+        approved=True,
+    )
+    TimeEntry.objects.create(
+        worker=worker_user.worker_profile,
+        clock_in=now - timedelta(hours=10),
+        clock_out=now - timedelta(hours=1),
+        approved=False,
+        wiw_time_id='legacy-time-home-1',
+    )
+    TimeEntry.objects.create(
+        worker=worker_user.worker_profile,
+        clock_in=now - timedelta(hours=20),
+        clock_out=None,
+        approved=False,
+        wiw_time_id='legacy-time-home-open',
+    )
+
+    response = auth_worker.get('/api/employee/home/')
+
+    assert response.status_code == 200
+    assert response.data['month_worked_minutes'] == 60
+
+
+@pytest.mark.django_db
 def test_portal_status_route_is_not_shadowed_by_worker_detail(auth_admin, worker_user):
     response = auth_admin.get('/api/workers/portal-status/')
     assert response.status_code == 200
     assert isinstance(response.data, list)
     assert any(item['worker_id'] == str(worker_user.worker_profile.id) for item in response.data)
+
+
+@pytest.mark.django_db
+def test_portal_status_and_bulk_invite_skip_synthetic_migration_workers(settings, auth_admin):
+    settings.EMAIL_HOST = ''
+    user = User.objects.create(email='wiw-portal-only@sync.invalid', role='worker', is_active=True)
+    user.set_unusable_password(); user.save()
+    worker = WorkerProfile.objects.create(user=user, employee_number='WIW-PORTAL-ONLY', active=True, wiw_user_id='portal-only')
+
+    statuses = auth_admin.get('/api/workers/portal-status/?search=WIW-PORTAL-ONLY')
+    assert statuses.status_code == 200
+    assert statuses.data == []
+
+    bulk = auth_admin.post('/api/workers/bulk-invite/', {'worker_ids': [str(worker.id)]}, format='json')
+    assert bulk.status_code == 200
+    assert bulk.data['count'] == 0
+    assert bulk.data['results'] == []
+    assert not PortalInvitation.objects.filter(user=user).exists()
+
+    direct = auth_admin.post(f'/api/workers/{worker.id}/invite/', {}, format='json')
+    assert direct.status_code == 404
+
+
+@pytest.mark.django_db
+def test_worker_list_api_hides_synthetic_migration_rows(auth_admin):
+    user = User.objects.create(email='wiw-list-only@sync.invalid', role='worker', is_active=True)
+    user.set_unusable_password(); user.save()
+    worker = WorkerProfile.objects.create(user=user, employee_number='WIW-LIST-ONLY', active=True, wiw_user_id='list-only')
+
+    response = auth_admin.get('/api/workers/?search=WIW-LIST-ONLY')
+    assert response.status_code == 200
+    rows = response.data.get('results', response.data) if hasattr(response.data, 'get') else response.data
+    assert all(str(item['id']) != str(worker.id) for item in rows)
 
 
 @pytest.mark.django_db
