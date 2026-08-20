@@ -9,6 +9,7 @@ on:
 permissions:
   contents: write
 
+# One-shot patch workflow; remove after successful application.
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -119,7 +120,7 @@ def test_admin_exception_center_ignores_archived_wiw_history(auth_admin, company
         position=position,
         worker=archived_worker,
         starts_at=now - timedelta(days=2),
-        ends_at=now - timedelta(days=2, hours=-4),
+        ends_at=now - timedelta(days=2) + timedelta(hours=4),
         status=Shift.Status.COMPLETED,
         required_count=1,
         wiw_shift_id='wiw-shift-archive-123',
