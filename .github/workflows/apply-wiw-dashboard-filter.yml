@@ -1,0 +1,144 @@
+name: Apply WIW operational dashboard filter
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-wiw-dashboard-filter.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Filter legacy WIW data from live attention queue
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('backend/core/admin_center_views.py')
+          text = path.read_text()
+
+          replacements = [
+              (
+                  "        ).select_related('client', 'location', 'position').annotate(\n",
+                  "        ).filter(\n            Q(wiw_shift_id__isnull=True) | Q(wiw_shift_id='')\n        ).select_related('client', 'location', 'position').annotate(\n",
+              ),
+              (
+                  "            shift__ends_at__gte=now - timedelta(hours=12),\n        ).select_related(\n",
+                  "            shift__ends_at__gte=now - timedelta(hours=12),\n        ).filter(\n            Q(shift__wiw_shift_id__isnull=True) | Q(shift__wiw_shift_id='')\n        ).select_related(\n",
+              ),
+              (
+                  "        ends_at__gte=now - timedelta(hours=12),\n    ).exclude(\n        slots__status=ShiftSlot.Status.CLAIMED,\n",
+                  "        ends_at__gte=now - timedelta(hours=12),\n    ).filter(\n        Q(wiw_shift_id__isnull=True) | Q(wiw_shift_id='')\n    ).exclude(\n        slots__status=ShiftSlot.Status.CLAIMED,\n",
+              ),
+              (
+                  "    for correction in TimeEntryCorrection.objects.filter(\n        status=TimeEntryCorrection.Status.PENDING\n    ).select_related('requested_by__user', 'entry').order_by('created_at')[:60]:\n",
+                  "    for correction in TimeEntryCorrection.objects.filter(\n        status=TimeEntryCorrection.Status.PENDING\n    ).filter(\n        Q(entry__wiw_time_id__isnull=True) | Q(entry__wiw_time_id='')\n    ).select_related('requested_by__user', 'entry').order_by('created_at')[:60]:\n",
+              ),
+              (
+                  "    for entry in TimeEntry.objects.filter(\n        approved=False,\n        clock_out__isnull=False,\n    ).select_related('worker__user', 'shift__position').order_by('clock_out')[:60]:\n",
+                  "    for entry in TimeEntry.objects.filter(\n        approved=False,\n        clock_out__isnull=False,\n    ).filter(\n        Q(wiw_time_id__isnull=True) | Q(wiw_time_id='')\n    ).select_related('worker__user', 'shift__position').order_by('clock_out')[:60]:\n",
+              ),
+              (
+                  "    workers = list(WorkerProfile.objects.filter(active=True).select_related('user').order_by('user__last_name')[:250])\n",
+                  "    workers = list(\n        WorkerProfile.objects.filter(active=True)\n        .filter(Q(wiw_user_id__isnull=True) | Q(wiw_user_id=''))\n        .select_related('user')\n        .order_by('user__last_name')[:250]\n    )\n",
+              ),
+              (
+                  "    for run in IntegrationSyncRun.objects.filter(\n        status=IntegrationSyncRun.Status.FAILED,\n        started_at__gte=now - timedelta(days=14),\n    ).order_by('-started_at')[:20]:\n",
+                  "    for run in IntegrationSyncRun.objects.filter(\n        status=IntegrationSyncRun.Status.FAILED,\n        started_at__gte=now - timedelta(days=14),\n    ).exclude(provider='wiw').order_by('-started_at')[:20]:\n",
+              ),
+              (
+                  "    for request in TimeOffRequest.objects.filter(status=TimeOffRequest.Status.PENDING).select_related(\n        'worker__user'\n    ).order_by('created_at')[:40]:\n",
+                  "    for request in TimeOffRequest.objects.filter(status=TimeOffRequest.Status.PENDING).filter(\n        Q(worker__wiw_user_id__isnull=True) | Q(worker__wiw_user_id='')\n    ).select_related('worker__user').order_by('created_at')[:40]:\n",
+              ),
+              (
+                  "    for swap in ShiftSwapRequest.objects.filter(status=ShiftSwapRequest.Status.PENDING).select_related(\n        'requested_by__user', 'shift__position'\n    ).order_by('created_at')[:40]:\n",
+                  "    for swap in ShiftSwapRequest.objects.filter(status=ShiftSwapRequest.Status.PENDING).filter(\n        Q(requested_by__wiw_user_id__isnull=True) | Q(requested_by__wiw_user_id='')\n    ).select_related('requested_by__user', 'shift__position').order_by('created_at')[:40]:\n",
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'Patch marker not found: {old[:90]!r}')
+              text = text.replace(old, new, 1)
+
+          banner = "    # Live dashboard deliberately excludes records imported from legacy When I Work.\n    # WIW remains available for archive/reporting and the final controlled migration.\n"
+          marker = "def _exception_center_items(now):\n    items = []\n"
+          if banner not in text:
+              text = text.replace(marker, marker + banner, 1)
+          path.write_text(text)
+
+          test_path = Path('backend/tests/test_admin_center_phase4.py')
+          tests = test_path.read_text()
+          if 'test_admin_exception_center_ignores_legacy_wiw_operational_noise' not in tests:
+              anchor = "\n\n@pytest.mark.django_db\ndef test_admin_exception_center_filters_category_and_query"
+              if anchor not in tests:
+                  raise SystemExit('Test anchor not found')
+              new_test = r'''
+
+@pytest.mark.django_db
+def test_admin_exception_center_ignores_legacy_wiw_operational_noise(auth_admin, worker_user, company, location, position):
+    now = timezone.now()
+    worker = worker_user.worker_profile
+    worker.wiw_user_id = 'legacy-worker-42'
+    worker.save(update_fields=['wiw_user_id', 'updated_at'])
+    EmployeeMasterData.objects.create(
+        worker=worker,
+        completeness=20,
+        missing_fields=['iban', 'tax_identification_number'],
+    )
+    legacy_shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        starts_at=now - timedelta(hours=2),
+        ends_at=now - timedelta(hours=1),
+        status=Shift.Status.COMPLETED,
+        required_count=1,
+        wiw_shift_id='legacy-shift-42',
+    )
+    TimeEntry.objects.create(
+        worker=worker,
+        shift=legacy_shift,
+        clock_in=now - timedelta(hours=2),
+        clock_out=now - timedelta(hours=1),
+        approved=False,
+        wiw_time_id='legacy-time-42',
+    )
+    IntegrationSyncRun.objects.create(
+        provider='wiw',
+        status=IntegrationSyncRun.Status.FAILED,
+        mode='final_full',
+        errors=[{'error': 'historical import issue'}],
+    )
+
+    response = auth_admin.get('/api/admin/exceptions/')
+    assert response.status_code == 200
+    assert not any('legacy-worker-42' in str(item) for item in response.data['results'])
+    assert not any(item['category'] == 'integrations' and 'WIW' in item['message'] for item in response.data['results'])
+    assert response.data['summary']['by_category']['attendance'] == 0
+    assert response.data['summary']['by_category']['documents'] == 0
+'''
+              tests = tests.replace(anchor, new_test + anchor, 1)
+              test_path.write_text(tests)
+          PY
+          git diff --check
+          python -m py_compile backend/core/admin_center_views.py backend/tests/test_admin_center_phase4.py
+      - name: Commit filter
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/core/admin_center_views.py backend/tests/test_admin_center_phase4.py
+          git commit -m "Exclude legacy WIW data from live operations dashboard"
+          git push origin main
