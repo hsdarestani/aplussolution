@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, integration_views, live_admin_center, oauth_views, portal_views, searchable_views, shift_views, store_review_views, time_views, views
+from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, integration_views, live_admin_center, live_operations, oauth_views, portal_views, searchable_views, shift_views, store_review_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -64,7 +64,7 @@ urlpatterns = [
     path('document-catalog/', document_catalog_views.document_catalog),
     path('document-catalog/seed/', integration_views.seed_catalog),
     path('document-catalog/import-bundle/', integration_views.import_bundle),
-    path('operations/', advanced_views.operations_overview),
+    path('operations/', live_operations.operations_overview),
     path('operations/schedule-quality/', advanced_views.schedule_quality),
     path('operations/availability/', advanced_views.availability_create),
     path('operations/availability/<uuid:pk>/', advanced_views.availability_delete),
