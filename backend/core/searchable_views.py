@@ -6,6 +6,9 @@ from . import views
 from .permissions import IsAdminOrManager
 
 
+SYNTHETIC_MIGRATION_EMAIL_SUFFIX = '@sync.invalid'
+
+
 def _mark_worker_pending_activation(worker):
     """New workers must activate their own portal instead of receiving an admin password."""
     user = worker.user
@@ -23,6 +26,12 @@ class ClientCompanyViewSet(views.ClientCompanyViewSet):
 class WorkerViewSet(views.WorkerViewSet):
     search_fields = ['user__first_name', 'user__last_name', 'user__email', 'employee_number', 'employment_type']
     ordering_fields = ['employee_number', 'user__first_name', 'user__last_name', 'created_at', 'updated_at']
+
+    def get_queryset(self):
+        # Synthetic rows are retained for migration/audit but are not real A+
+        # workforce profiles. Filtering here keeps pagination counts, searches,
+        # CSV-facing lists and every frontend consumer consistent.
+        return super().get_queryset().exclude(user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX)
 
     @action(detail=False, methods=['post'], permission_classes=[IsAdminOrManager])
     def onboard(self, request):
