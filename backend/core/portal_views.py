@@ -13,6 +13,18 @@ from .shift_api import ShiftApiSerializer
 from .shift_slots import ShiftSlot
 
 
+SYNTHETIC_MIGRATION_EMAIL_SUFFIX = '@sync.invalid'
+
+
+def operational_workers():
+    """Workers that can participate in the live A+ portal.
+
+    Synthetic @sync.invalid rows are retained for migration/audit only and must
+    never be counted as portal users or receive invitations.
+    """
+    return WorkerProfile.objects.exclude(user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX)
+
+
 def shift_queryset():
     return Shift.objects.select_related('order', 'client', 'location', 'position').annotate(
         filled_count=Count('slots', filter=Q(slots__status='claimed', slots__worker__isnull=False), distinct=True),
@@ -48,7 +60,7 @@ def activation_complete(request):
 def portal_statuses(request):
     if request.user.role not in {User.Role.ADMIN, User.Role.MANAGER}:
         return Response({'detail': 'Keine Berechtigung.'}, status=403)
-    workers = WorkerProfile.objects.filter(active=True).select_related('user').order_by('user__first_name', 'user__last_name')
+    workers = operational_workers().filter(active=True).select_related('user').order_by('user__first_name', 'user__last_name')
     search = (request.GET.get('search') or '').strip()
     if search:
         workers = workers.filter(Q(user__first_name__icontains=search) | Q(user__last_name__icontains=search) | Q(user__email__icontains=search) | Q(employee_number__icontains=search))
@@ -59,9 +71,9 @@ def portal_statuses(request):
 def invite_worker(request, pk):
     if request.user.role not in {User.Role.ADMIN, User.Role.MANAGER}:
         return Response({'detail': 'Keine Berechtigung.'}, status=403)
-    worker = WorkerProfile.objects.select_related('user').filter(pk=pk, active=True).first()
+    worker = operational_workers().select_related('user').filter(pk=pk, active=True).first()
     if not worker:
-        return Response({'detail': 'Mitarbeiter wurde nicht gefunden.'}, status=404)
+        return Response({'detail': 'Mitarbeiter wurde nicht gefunden oder ist nur als Migrationsdatensatz vorhanden.'}, status=404)
     try:
         invitation, activation_url, delivered = create_portal_invitation(worker, request.user)
     except ValueError as exc:
@@ -76,7 +88,7 @@ def invite_worker(request, pk):
 def bulk_invite_workers(request):
     if request.user.role not in {User.Role.ADMIN, User.Role.MANAGER}:
         return Response({'detail': 'Keine Berechtigung.'}, status=403)
-    workers = WorkerProfile.objects.filter(active=True, user__is_active=True).select_related('user')
+    workers = operational_workers().filter(active=True, user__is_active=True).select_related('user')
     ids = request.data.get('worker_ids') or []
     if ids:
         workers = workers.filter(pk__in=ids)
@@ -104,7 +116,18 @@ def employee_home(request):
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     mine = shift_queryset().filter(slots__worker=worker, slots__status=ShiftSlot.Status.CLAIMED, ends_at__gte=now).distinct()
     available = shift_queryset().filter(status=Shift.Status.PUBLISHED, starts_at__gte=now, slots__status=ShiftSlot.Status.OPEN, slots__worker__isnull=True).exclude(slots__worker=worker, slots__status=ShiftSlot.Status.CLAIMED).distinct()
-    worked_minutes = sum(entry.worked_minutes for entry in TimeEntry.objects.filter(worker=worker, clock_in__gte=month_start))
+    # The live employee dashboard reflects completed native A+ entries only.
+    # Imported WIW time rows remain available for archive/reporting but must not
+    # inflate the current monthly total or turn an old open row into worked time.
+    worked_minutes = sum(
+        entry.worked_minutes
+        for entry in TimeEntry.objects.filter(
+            worker=worker,
+            clock_in__gte=month_start,
+            clock_out__isnull=False,
+            wiw_time_id__isnull=True,
+        )
+    )
     contracts = Contract.objects.filter(worker=worker).exclude(status__in=[Contract.Status.CANCELLED, Contract.Status.EXPIRED])
     notifications = Notification.objects.filter(user=request.user).order_by('-created_at')[:8]
     return Response({
