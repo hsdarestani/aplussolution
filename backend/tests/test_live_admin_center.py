@@ -47,5 +47,5 @@ def test_live_admin_center_excludes_imported_wiw_noise(auth_admin, worker_user, 
     assert response.status_code == 200
     assert response.data['summary']['by_category']['attendance'] == 0
     assert response.data['summary']['by_category']['documents'] == 0
-    assert response.data['summary']['by_category']['integrations'] == 0
-    assert not response.data['results']
+    assert response.data['summary']['by_category']['integrations'] == 1
+    assert all(item['category'] == 'integrations' for item in response.data['results'])
