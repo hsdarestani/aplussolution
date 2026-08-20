@@ -7,6 +7,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from . import advanced_views as base
+from . import slot_compat_views_v2 as slots
 from .models import (
     Availability,
     ClientCompany,
@@ -22,6 +23,7 @@ from .models import (
     WorkerProfile,
 )
 from .serializers import AvailabilitySerializer, NotificationSerializer, ShiftSerializer
+from .shift_slots import ShiftSlot
 
 
 SYNTHETIC_MIGRATION_EMAIL_SUFFIX = '@sync.invalid'
@@ -57,19 +59,20 @@ def operations_overview(request):
     }
 
     if base._is_manager(user):
-        findings = base._schedule_findings()
+        # Use the slot-aware staffing implementation so multi-person demand remains
+        # accurate while live counters below exclude migration-only history.
+        findings = slots._schedule_findings()
         current_month_start, current_month_end = base._month_bounds()
-        month_start_dt = base._aware_start(current_month_start)
-        month_end_dt = base._aware_start(current_month_end)
         estimated_cost = Decimal('0')
-        for shift in Shift.objects.filter(
-            worker__isnull=False,
-            starts_at__lt=month_end_dt,
-            ends_at__gte=month_start_dt,
-        ).exclude(status=Shift.Status.CANCELLED).select_related('worker'):
+        for worker, shift in slots._assignment_pairs(
+            base._aware_start(current_month_start),
+            base._aware_start(current_month_end),
+        ):
+            if str(worker.user.email or '').lower().endswith(SYNTHETIC_MIGRATION_EMAIL_SUFFIX):
+                continue
             minutes = max(0, int((shift.ends_at - shift.starts_at).total_seconds() // 60) - shift.break_minutes)
-            rate = shift.worker.tariff_hourly_rate or Decimal('0')
-            allowance = shift.worker.extra_allowance or Decimal('0')
+            rate = worker.tariff_hourly_rate or Decimal('0')
+            allowance = worker.extra_allowance or Decimal('0')
             estimated_cost += (Decimal(minutes) / Decimal(60)) * (rate + allowance)
 
         operational_entries = _operational_time_entries()
@@ -87,7 +90,9 @@ def operations_overview(request):
                 {'id': str(worker.id), 'name': worker.user.get_full_name() or worker.user.email}
                 for worker in _operational_workers().select_related('user').order_by('user__first_name')
             ],
-            'pending_time_off': TimeOffRequest.objects.filter(status=TimeOffRequest.Status.PENDING).count(),
+            'pending_time_off': TimeOffRequest.objects.filter(status=TimeOffRequest.Status.PENDING).exclude(
+                worker__user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX
+            ).count(),
             'unapproved_time_entries': operational_entries.filter(approved=False, clock_out__isnull=False).count(),
             'missing_clock_outs': operational_entries.filter(
                 clock_out__isnull=True,
@@ -102,6 +107,10 @@ def operations_overview(request):
         })
     elif user.role == User.Role.WORKER:
         worker = user.worker_profile
+        upcoming = Shift.objects.filter(
+            Q(slots__worker=worker, slots__status=ShiftSlot.Status.CLAIMED) | Q(worker=worker),
+            starts_at__gte=now,
+        ).exclude(status=Shift.Status.CANCELLED).distinct().order_by('starts_at')[:20]
         data.update({
             'current_worker_id': str(worker.id),
             'swap_candidates': [
@@ -117,14 +126,12 @@ def operations_overview(request):
                     Q(requested_by=worker) | Q(offered_to=worker)
                 ).select_related('shift__position', 'requested_by__user', 'offered_to__user').order_by('-created_at')[:30]
             ],
-            'upcoming_shifts': ShiftSerializer(
-                Shift.objects.filter(worker=worker, starts_at__gte=now).order_by('starts_at')[:20], many=True
-            ).data,
+            'upcoming_shifts': ShiftSerializer(upcoming, many=True).data,
         })
     else:
         companies = user.client_companies.all()
         company_ids = {str(pk) for pk in companies.values_list('pk', flat=True)}
-        client_findings = base._schedule_findings()['coverage_gaps']
+        client_findings = slots._schedule_findings()['coverage_gaps']
         data.update({
             'coverage_gaps': [item for item in client_findings if item.get('client') in company_ids],
             'contracts_due': Contract.objects.filter(
