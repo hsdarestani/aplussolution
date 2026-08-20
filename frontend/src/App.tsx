@@ -89,25 +89,25 @@ const icons: Record<string, string> = {
 const nav: Record<string, [View, string][]> = {
   admin: [
     ['dashboard', 'Übersicht'],
+    ['orders', 'Auftragseingang & AI'],
     ['schedule', 'Dienstplanung'],
     ['time', 'Zeiterfassung'],
-    ['contracts', 'Verträge'],
-    ['documents', 'Dokumente'],
-    ['orders', 'Aufträge'],
     ['people', 'Personal & Kunden'],
+    ['contracts', 'Verträge & ANÜ'],
+    ['documents', 'Dokumente & Lohn'],
     ['messages', 'Nachrichten'],
-    ['operations', 'Steuerzentrale'],
+    ['operations', 'Mehr / Steuerzentrale'],
   ],
   manager: [
     ['dashboard', 'Übersicht'],
+    ['orders', 'Auftragseingang & AI'],
     ['schedule', 'Dienstplanung'],
     ['time', 'Zeiterfassung'],
-    ['contracts', 'Verträge'],
-    ['documents', 'Dokumente'],
-    ['orders', 'Aufträge'],
     ['people', 'Personal & Kunden'],
+    ['contracts', 'Verträge & ANÜ'],
+    ['documents', 'Dokumente & Lohn'],
     ['messages', 'Nachrichten'],
-    ['operations', 'Steuerzentrale'],
+    ['operations', 'Mehr / Steuerzentrale'],
   ],
   worker: [
     ['dashboard', 'Start'],
@@ -432,6 +432,15 @@ function Dashboard({
         </h2>
         <span>● System aktiv</span>
       </div>
+      {isManager(user) && (
+        <div className="button-group priority-actions">
+          <IonButton onClick={() => navigate('orders')}><IonIcon slot="start" icon={briefcaseOutline} />Auftrag & AI</IonButton>
+          <IonButton fill="outline" onClick={() => navigate('schedule')}><IonIcon slot="start" icon={calendarOutline} />Dienstplan</IonButton>
+          <IonButton fill="outline" onClick={() => navigate('time')}><IonIcon slot="start" icon={stopwatchOutline} />Zeiterfassung</IonButton>
+          <IonButton fill="outline" onClick={() => navigate('people')}><IonIcon slot="start" icon={peopleOutline} />Personal</IonButton>
+          <IonButton fill="clear" href="?view=operations#arbeitszeitkonto">Arbeitszeit & Lohn</IonButton>
+        </div>
+      )}
       <div className="stats">
         {cards.map((entry: any[]) => (
           <IonCard key={entry[0]}>
@@ -2378,6 +2387,9 @@ function Orders({ user }: { user: User }) {
   const [listQuery, setListQuery] = useState('');
   const [listStatus, setListStatus] = useState('');
   const [listSort, setListSort] = useState('-starts_at');
+  const [aiOpen, setAiOpen] = useState(false);
+  const [orderText, setOrderText] = useState('');
+  const [parsedOrder, setParsedOrder] = useState<any>();
 
   const load = async () => {
     const params = new URLSearchParams();
@@ -2442,18 +2454,71 @@ function Orders({ user }: { user: User }) {
     }
   }
 
+  async function parseAiOrder() {
+    if (!orderText.trim()) {
+      setToast('Bitte zuerst den Text der Kundenanfrage einfügen.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const result: any = await api('automation/orders/parse/', {
+        method: 'POST',
+        body: JSON.stringify({ text: orderText }),
+      });
+      setParsedOrder(result);
+      setToast(`${result.shifts?.length || 0} Schicht(en) erkannt. Bitte kurz prüfen.`);
+    } catch (reason: any) {
+      setToast(reason.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approveAiOrder() {
+    if (!parsedOrder) return void parseAiOrder();
+    setBusy(true);
+    try {
+      const result: any = await api('automation/orders/approve/', {
+        method: 'POST',
+        body: JSON.stringify({ parsed: parsedOrder, raw_text: orderText }),
+      });
+      setAiOpen(false);
+      setOrderText('');
+      setParsedOrder(undefined);
+      await load();
+      setToast(`${result.created_count || 0} Personalplatz/-plätze als OpenShift in A+ Workforce erstellt.`);
+    } catch (reason: any) {
+      setToast(reason.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
       <Title
-        title="Aufträge"
-        text="Veranstaltungen und Personalbedarf direkt übermitteln und disponieren."
+        title={isManager(user) ? 'Auftragseingang & AI' : 'Aufträge'}
+        text={isManager(user) ? 'Kundenanfragen einlesen, mit AI prüfen und direkt als OpenShifts disponieren.' : 'Veranstaltungen und Personalbedarf direkt übermitteln.'}
         action={
-          <IonButton onClick={() => setOpen(true)}>
-            <IonIcon slot="start" icon={addOutline} />
-            Neuer Auftrag
-          </IonButton>
+          <div className="button-group">
+            {isManager(user) && (
+              <IonButton onClick={() => { setParsedOrder(undefined); setAiOpen(true); }}>
+                <IonIcon slot="start" icon={briefcaseOutline} />
+                Anfrage mit AI einlesen
+              </IonButton>
+            )}
+            <IonButton fill={isManager(user) ? 'outline' : 'solid'} onClick={() => setOpen(true)}>
+              <IonIcon slot="start" icon={addOutline} />
+              Neuer Auftrag
+            </IonButton>
+          </div>
         }
       />
+      {isManager(user) && (
+        <div className="notice">
+          <b>Schnellster Ablauf:</b> Kundenmail kopieren → AI analysiert Datum, Zeiten, Anzahl, Position und Einsatzort → kurz prüfen → OpenShifts erstellen.
+        </div>
+      )}
       <ListToolbar
         query={listQuery}
         onQuery={setListQuery}
@@ -2501,6 +2566,36 @@ function Orders({ user }: { user: User }) {
         ))}
         {!rows.length && <Empty>Noch keine Aufträge.</Empty>}
       </div>
+
+      <FormModal
+        open={aiOpen}
+        title="Kundenanfrage mit AI einlesen"
+        onClose={() => { setAiOpen(false); setParsedOrder(undefined); }}
+        onSave={parsedOrder ? approveAiOrder : parseAiOrder}
+        busy={busy}
+        saveLabel={parsedOrder ? 'Prüfen & OpenShifts erstellen' : 'Mit AI analysieren'}
+      >
+        <IonTextarea
+          className="full"
+          autoGrow
+          fill="outline"
+          label="Text aus Kunden-E-Mail / Anfrage"
+          labelPlacement="floating"
+          value={orderText}
+          onIonInput={(event) => { setOrderText(String(value(event))); setParsedOrder(undefined); }}
+        />
+        {parsedOrder && (
+          <div className="notice full">
+            <b>{parsedOrder.request_id || 'Auftrag erkannt'}</b>
+            <p>Bitte diese erkannten Schichten vor dem Erstellen kurz prüfen:</p>
+            {parsedOrder.shifts?.map((item: any, index: number) => (
+              <div key={index}>
+                {item.date} · {item.start_time}–{item.end_time} · {item.count}× {item.role} · {item.site_text || item.location_text}
+              </div>
+            ))}
+          </div>
+        )}
+      </FormModal>
 
       <FormModal
         open={open}
@@ -3056,7 +3151,9 @@ export default function App() {
   if (!user) return <IonApp><Login done={setUser} /></IonApp>;
 
   const items = nav[user.role] || nav.worker;
-  const primaryViews: View[] = ['dashboard', 'schedule', 'time', 'messages'];
+  const primaryViews: View[] = isManager(user)
+    ? ['orders', 'schedule', 'time', 'people']
+    : ['dashboard', 'schedule', 'time', 'messages'];
   const mobilePrimaryItems = items.filter(([key]) => primaryViews.includes(key));
   const mobileMoreItems = items.filter(([key]) => !primaryViews.includes(key));
   const currentLabel = view === 'profile' ? 'Profil' : items.find(([key]) => key === view)?.[1] || 'A+ Solution';
@@ -3068,8 +3165,10 @@ export default function App() {
   };
   const mobileLabels: Partial<Record<View, string>> = {
     dashboard: 'Start',
+    orders: 'Aufträge',
     schedule: 'Plan',
     time: 'Zeit',
+    people: 'Personal',
     messages: 'Chat',
   };
   const navigateTo = (next: View) => {

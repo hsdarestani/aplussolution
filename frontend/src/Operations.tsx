@@ -31,6 +31,7 @@ import {
   warningOutline,
 } from 'ionicons/icons';
 import { api, User } from './api';
+import PremiumOperations from './PremiumOperations';
 import './operations.css';
 
 const unpack = (data: any): any[] => data?.results || data || [];
@@ -322,7 +323,7 @@ export default function Operations({ user }: { user: User }) {
 
   async function approveParsedOrder() {
     if (!parsedOrder) return;
-    const result = await run('automation/orders/approve/', { parsed: parsedOrder, raw_text: orderText }, 'OpenShifts wurden in When I Work erstellt.');
+    const result = await run('automation/orders/approve/', { parsed: parsedOrder, raw_text: orderText }, 'OpenShifts wurden in A+ Workforce erstellt.');
     if (result) {
       setOrderText('');
       setParsedOrder(undefined);
@@ -484,7 +485,7 @@ export default function Operations({ user }: { user: User }) {
 
           <div className="operations-grid two">
             <section className="operations-panel" data-testid="wiw-integration-panel">
-              <div className="operations-head"><div><h3>When I Work</h3><p>Personal, Orte, Positionen, Schichten, Zeiten und Abwesenheiten automatisch übernehmen.</p></div><IonBadge color={wiwStatus?.configured ? 'success' : 'warning'}>{wiwStatus?.configured ? 'Verbunden' : 'Nicht konfiguriert'}</IonBadge></div>
+              <div className="operations-head"><div><h3>WIW Migration / Altbestand</h3><p>Nur noch für historischen Abgleich und Migration; A+ Workforce ist das operative Hauptsystem.</p></div><IonBadge color={wiwStatus?.configured ? 'success' : 'warning'}>{wiwStatus?.configured ? 'Verbunden' : 'Nicht konfiguriert'}</IonBadge></div>
               <div className="operations-actions">
                 <IonButton disabled={!wiwStatus?.configured || busy} onClick={() => syncWiw('incremental')}>Jetzt synchronisieren</IonButton>
                 <IonButton fill="outline" disabled={!wiwStatus?.configured || busy} onClick={() => syncWiw('full')}>Vollabgleich</IonButton>
@@ -514,20 +515,20 @@ export default function Operations({ user }: { user: User }) {
                 {!orderPackages.length && <Empty>Noch keine Auftragspakete vorhanden.</Empty>}
               </div>
             </section>
-            <section className="operations-panel" data-testid="working-time-panel">
+            <section id="arbeitszeitkonto" className="operations-panel" data-testid="working-time-panel">
               <div className="operations-head"><div><h3>Arbeitszeitkonto</h3><p>Ist-/Sollstunden, Plusstunden, Übertrag, Auszahlung, Korrektur und kumulierter Saldo.</p></div><IonIcon icon={calendarOutline} /></div>
               <div className="report-fields">
                 <IonInput fill="outline" type="date" label="Von" labelPlacement="floating" value={workingTimeRange.start} onIonInput={(event) => setWorkingTimeRange({ ...workingTimeRange, start: value(event) })} />
                 <IonInput fill="outline" type="date" label="Bis" labelPlacement="floating" value={workingTimeRange.end} onIonInput={(event) => setWorkingTimeRange({ ...workingTimeRange, end: value(event) })} />
               </div>
               <div className="operations-actions">
-                <IonButton onClick={syncWorkingTime}>Aus WIW synchronisieren</IonButton>
+                <IonButton onClick={syncWorkingTime}>Arbeitszeit aktualisieren</IonButton>
                 <IonButton fill="outline" onClick={() => setModal('working-time-settings')}>Einstellungen</IonButton>
                 <IonButton fill="outline" onClick={() => download('working-time/export/xlsx/', 'arbeitszeitkonto.xlsx')}>Excel</IonButton>
                 <IonButton fill="outline" onClick={() => download('working-time/export/csv/', 'arbeitszeitkonto.csv')}>CSV</IonButton>
                 <IonButton fill="clear" onClick={createWorkingTimeBackup}>Backup</IonButton>
               </div>
-              <div className="operations-note">{workingTimeRecords.length} Monatsdatensätze · {workingTime.employees?.length || 0} Mitarbeiter. Manuelle Auszahlungen und Korrekturen bleiben bei jeder WIW-Synchronisierung erhalten.</div>
+              <div className="operations-note">{workingTimeRecords.length} Monatsdatensätze · {workingTime.employees?.length || 0} Mitarbeiter. Manuelle Auszahlungen und Korrekturen bleiben bei jeder Aktualisierung erhalten.</div>
             </section>
           </div>
 
@@ -596,6 +597,8 @@ export default function Operations({ user }: { user: User }) {
         </div>
       )}
 
+      {isManager(user) && <PremiumOperations user={user} />}
+
       <Notifications rows={data.notifications || []} readAll={readAll} />
 
       <Modal open={modal === 'availability'} title="Verfügbarkeit eintragen" close={() => setModal('')} save={createAvailability} busy={busy}>
@@ -627,7 +630,7 @@ export default function Operations({ user }: { user: User }) {
         <div className="operations-note full">Das Paket wird anhand der SHA-256-Prüfsummen validiert. Die privaten Originaldateien werden nicht im öffentlichen Repository gespeichert.</div>
       </Modal>
 
-      <Modal open={modal === 'order-parser'} title="Auftrag analysieren und OpenShifts erstellen" close={() => setModal('')} save={parsedOrder ? approveParsedOrder : parseOrder} busy={busy} saveLabel={parsedOrder ? 'Prüfen & in WIW erstellen' : 'Mit AI analysieren'}>
+      <Modal open={modal === 'order-parser'} title="Auftrag analysieren und OpenShifts erstellen" close={() => setModal('')} save={parsedOrder ? approveParsedOrder : parseOrder} busy={busy} saveLabel={parsedOrder ? 'Prüfen & OpenShifts erstellen' : 'Mit AI analysieren'}>
         <IonTextarea className="full" autoGrow label="Deutscher Auftragstext" labelPlacement="floating" fill="outline" value={orderText} onIonInput={(event) => { setOrderText(value(event)); setParsedOrder(undefined); }} />
         {parsedOrder && <div className="operations-note full"><b>{parsedOrder.request_id}</b><br/>{parsedOrder.shifts?.map((item: any, index: number) => <span key={index}>{item.date} · {item.start_time}–{item.end_time} · {item.count}× {item.role} · {item.site_text}<br/></span>)}</div>}
       </Modal>
