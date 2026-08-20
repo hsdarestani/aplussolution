@@ -169,6 +169,36 @@ function productionUiPolish(): Plugin {
         return { code: next, map: null };
       }
 
+      if (normalizedId.endsWith('/src/AttendanceV3.tsx')) {
+        let next = code;
+        next = next.split('> 12 Std. aktiv').join('Über 12 Std. offen');
+        next = next.split('Ungewöhnlich lange laufende Timer').join('Ungewöhnlich lange offene Zeiterfassungen');
+        next = next.split('Laufenden Timer beenden?').join('Offene Zeiterfassung prüfen?');
+        next = next.split('Timer beenden').join('Prüfen & schließen');
+        next = replaceRequired(
+          this,
+          next,
+          '<div className="running-time">{durationLabel(entry.clock_in, undefined, now)} Std.</div>',
+          '<div className="running-time">{Math.max(1, Math.floor((now - new Date(entry.clock_in).getTime()) / 86400000))} Tag(e) offen</div>',
+          'long running attendance age',
+        );
+        next = replaceRequired(
+          this,
+          next,
+          '<div className="attendance-section-head"><div><small>PRIORITÄT 2</small><h2>Nicht freigegebene Zeiten</h2></div></div>',
+          '<div className="attendance-section-head"><div><small>PRIORITÄT 2</small><h2>Nicht freigegebene Zeiten</h2><p>{Number(data.counts?.unapproved_entries || 0) > Number(data.unapproved_entries?.length || 0) ? `${data.unapproved_entries?.length || 0} neueste von ${data.counts?.unapproved_entries || 0} offenen Einträgen werden angezeigt.` : `Abgeschlossene Zeiten, die noch geprüft werden müssen.`}</p></div></div>',
+          'attendance list truncation notice',
+        );
+        next = replaceRequired(
+          this,
+          next,
+          '  const active = data.active_entry;\n  return (\n    <>',
+          '  const active = data.active_entry;\n  const staleActive = data.stale_active_entry;\n  return (\n    <>\n      {staleActive && (\n        <section className="attendance-panel danger-panel">\n          <div className="attendance-section-head"><div><small>PRÜFUNG ERFORDERLICH</small><h2>Eine ältere Zeiterfassung ist noch offen.</h2></div></div>\n          <div className="attendance-row attention"><div className="attendance-person"><b>{staleActive.shift_title || `Arbeitszeit`}</b><small>Start {dateTime(staleActive.clock_in)}</small></div><div className="attendance-change"><span>Dieser Eintrag ist ungewöhnlich lange offen und muss von Administration/Disposition geprüft werden.</span></div><IonBadge color="danger">Gesperrt</IonBadge></div>\n        </section>\n      )}',
+          'worker stale attendance warning',
+        );
+        return { code: next, map: null };
+      }
+
       return null;
     },
   };
