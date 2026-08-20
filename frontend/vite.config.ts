@@ -171,6 +171,7 @@ function productionUiPolish(): Plugin {
 
       if (normalizedId.endsWith('/src/AttendanceV3.tsx')) {
         let next = code;
+        next = next.split('ARBEITSZEIT · EXCEPTIONS').join('ARBEITSZEIT · PRÜFFÄLLE');
         next = next.split('> 12 Std. aktiv').join('Über 12 Std. offen');
         next = next.split('Ungewöhnlich lange laufende Timer').join('Ungewöhnlich lange offene Zeiterfassungen');
         next = next.split('Laufenden Timer beenden?').join('Offene Zeiterfassung prüfen?');
