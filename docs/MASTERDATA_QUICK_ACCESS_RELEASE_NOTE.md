@@ -1,0 +1,1 @@
+Release note: improved discovery for newly created Einsatzorte and Positionen, expandable lists, combined search, and a native position color picker.
