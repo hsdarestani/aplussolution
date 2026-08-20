@@ -35,19 +35,24 @@ test('shift form uses separate friendly date and time controls', async ({ page }
 
   const start = page.getByTestId('datetime-beginn');
   const end = page.getByTestId('datetime-ende');
+  const startDate = start.locator('input[aria-label="Beginn Datum"]');
+  const startTime = start.locator('input[aria-label="Beginn Uhrzeit"]');
+  const endDate = end.locator('input[aria-label="Ende Datum"]');
+  const endTime = end.locator('input[aria-label="Ende Uhrzeit"]');
+
   await expect(start).toBeVisible();
   await expect(end).toBeVisible();
   await expect(start.getByRole('button', { name: 'Heute' })).toBeVisible();
   await expect(start.getByRole('button', { name: 'Morgen' })).toBeVisible();
-  await expect(start.getByLabel('Beginn Datum')).toBeVisible();
-  await expect(start.getByLabel('Beginn Uhrzeit')).toBeVisible();
-  await expect(end.getByLabel('Ende Datum')).toBeVisible();
-  await expect(end.getByLabel('Ende Uhrzeit')).toBeVisible();
+  await expect(startDate).toBeVisible();
+  await expect(startTime).toBeVisible();
+  await expect(endDate).toBeVisible();
+  await expect(endTime).toBeVisible();
   await expect(page.locator('ion-input[type="datetime-local"]')).toHaveCount(0);
 
   await start.getByRole('button', { name: 'Morgen' }).click();
-  await expect(start.getByLabel('Beginn Datum')).not.toHaveValue('');
-  await expect(end.getByLabel('Ende Datum')).not.toHaveValue('');
+  await expect(startDate).not.toHaveValue('');
+  await expect(endDate).not.toHaveValue('');
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
