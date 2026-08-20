@@ -60,7 +60,7 @@ def activation_complete(request):
 def portal_statuses(request):
     if request.user.role not in {User.Role.ADMIN, User.Role.MANAGER}:
         return Response({'detail': 'Keine Berechtigung.'}, status=403)
-    workers = operational_workers().filter(active=True).select_related('user').order_by('user__first_name', 'user__last_name')
+    workers = operational_workers().filter(active=True, user__is_active=True).select_related('user').order_by('user__first_name', 'user__last_name')
     search = (request.GET.get('search') or '').strip()
     if search:
         workers = workers.filter(Q(user__first_name__icontains=search) | Q(user__last_name__icontains=search) | Q(user__email__icontains=search) | Q(employee_number__icontains=search))
@@ -71,9 +71,9 @@ def portal_statuses(request):
 def invite_worker(request, pk):
     if request.user.role not in {User.Role.ADMIN, User.Role.MANAGER}:
         return Response({'detail': 'Keine Berechtigung.'}, status=403)
-    worker = operational_workers().select_related('user').filter(pk=pk, active=True).first()
+    worker = operational_workers().select_related('user').filter(pk=pk, active=True, user__is_active=True).first()
     if not worker:
-        return Response({'detail': 'Mitarbeiter wurde nicht gefunden oder ist nur als Migrationsdatensatz vorhanden.'}, status=404)
+        return Response({'detail': 'Mitarbeiter wurde nicht gefunden, ist deaktiviert oder ist nur als Migrationsdatensatz vorhanden.'}, status=404)
     try:
         invitation, activation_url, delivered = create_portal_invitation(worker, request.user)
     except ValueError as exc:
