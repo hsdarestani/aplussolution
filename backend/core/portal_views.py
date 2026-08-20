@@ -78,9 +78,15 @@ def invite_worker(request, pk):
         invitation, activation_url, delivered = create_portal_invitation(worker, request.user)
     except ValueError as exc:
         return Response({'detail': str(exc)}, status=400)
-    payload = {'status': invitation_status(worker), 'delivered': delivered, 'expires_at': invitation.expires_at}
-    if not delivered:
-        payload['activation_url'] = activation_url
+    # This endpoint is admin/manager-only. Always return the one-time activation
+    # URL so support/QA can hand the link to the worker even when SMTP accepted
+    # the message. The raw token is never stored server-side and still expires.
+    payload = {
+        'status': invitation_status(worker),
+        'delivered': delivered,
+        'expires_at': invitation.expires_at,
+        'activation_url': activation_url,
+    }
     return Response(payload, status=201)
 
 
@@ -98,10 +104,13 @@ def bulk_invite_workers(request):
             continue
         try:
             invitation, activation_url, delivered = create_portal_invitation(worker, request.user)
-            item = {'worker_id': str(worker.id), 'email': worker.user.email, 'delivered': delivered, 'expires_at': invitation.expires_at}
-            if not delivered:
-                item['activation_url'] = activation_url
-            results.append(item)
+            results.append({
+                'worker_id': str(worker.id),
+                'email': worker.user.email,
+                'delivered': delivered,
+                'expires_at': invitation.expires_at,
+                'activation_url': activation_url,
+            })
         except ValueError as exc:
             results.append({'worker_id': str(worker.id), 'email': worker.user.email, 'error': str(exc)})
     return Response({'results': results, 'count': len(results)})
