@@ -9,6 +9,7 @@ const val = (e:any) => e.detail.value ?? '';
 const isManager = (u:User) => ['admin','manager'].includes(u.role);
 const tm = (x:string) => new Date(x).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
 const workerLabel = (worker:any) => worker?.user_detail?.name || worker?.user_detail?.email || worker?.employee_number || 'Mitarbeiter';
+const isSyntheticWorker = (worker:any) => String(worker?.user_detail?.email || '').toLowerCase().endsWith('@sync.invalid');
 
 export default function ScheduleV2({user}:{user:User}) {
   const [rows,setRows]=useState<any[]>([]), [clients,setClients]=useState<any[]>([]), [locations,setLocations]=useState<any[]>([]), [positions,setPositions]=useState<any[]>([]), [orders,setOrders]=useState<any[]>([]), [workers,setWorkers]=useState<any[]>([]);
@@ -27,13 +28,16 @@ export default function ScheduleV2({user}:{user:User}) {
       return;
     }
     const [s,c,l,p,o,w]=await Promise.all([api(`shifts/?ordering=starts_at${q}`),api('clients/'),api('locations/'),api('positions/'),api('orders/'),api('workers/?ordering=user__last_name')]);
-    setRows(unpack(s)); setClients(unpack(c)); setLocations(unpack(l)); setPositions(unpack(p)); setOrders(unpack(o)); setWorkers(unpack(w).filter((item:any)=>item.active!==false));
+    setRows(unpack(s)); setClients(unpack(c)); setLocations(unpack(l)); setPositions(unpack(p)); setOrders(unpack(o)); setWorkers(unpack(w).filter((item:any)=>item.active!==false&&!isSyntheticWorker(item)));
   }
   useEffect(()=>{void load();},[tab]);
 
   const visible=useMemo(()=>rows.filter((x:any)=>{
     if(user.role==='client') return true;
     if(!isManager(user)||tab==='all') return true;
+    // Operational planning should not start with already-ended shifts. Historical
+    // rows remain available under "Alle" for audit and lookup.
+    if(x.ends_at && new Date(x.ends_at).getTime()<Date.now()) return false;
     if(tab==='draft') return x.status==='draft';
     if(tab==='filled') return x.status!=='draft'&&Number(x.open_count||0)===0;
     return x.status==='published'&&Number(x.open_count||0)>0;
