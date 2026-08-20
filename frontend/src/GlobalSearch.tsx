@@ -38,6 +38,9 @@ const typeIcon: Record<string, string> = {
   contract: documentTextOutline,
 };
 
+const isMigrationOnlyResult = (result: Result) =>
+  result.type === 'worker' && `${result.label || ''} ${result.subtitle || ''}`.toLowerCase().includes('@sync.invalid');
+
 export default function GlobalSearch({ onNavigate }: { onNavigate: (view: any) => void }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -100,7 +103,7 @@ export default function GlobalSearch({ onNavigate }: { onNavigate: (view: any) =
     onNavigate(result.view);
   };
 
-  const results: Result[] = data?.results || [];
+  const results: Result[] = (data?.results || []).filter((result: Result) => !isMigrationOnlyResult(result));
 
   return (
     <>
