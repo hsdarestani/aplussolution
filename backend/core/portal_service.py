@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import secrets
 from datetime import timedelta
 from urllib.parse import quote
@@ -11,6 +12,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import User, WorkerProfile
 from .portal_models import PortalInvitation
+
+
+logger = logging.getLogger(__name__)
 
 
 def is_real_email(email: str) -> bool:
@@ -68,18 +72,25 @@ def create_portal_invitation(worker: WorkerProfile, created_by=None, lifetime_ho
     activation_url = f"{settings.APP_URL.rstrip('/')}/aktivieren?token={quote(raw)}"
     delivered = False
     if settings.EMAIL_HOST and settings.EMAIL_HOST_USER:
-        send_mail(
-            'A+ Solution – Mitarbeiterportal aktivieren',
-            'Hallo,\n\nbitte aktiviere dein A+ Solution Mitarbeiterportal über diesen Link:\n'
-            f'{activation_url}\n\nDer Link ist einmalig und 72 Stunden gültig.',
-            settings.DEFAULT_FROM_EMAIL,
-            [user.email],
-            fail_silently=False,
-        )
-        invitation.delivered_at = timezone.now()
-        invitation.delivery_channel = 'email'
-        invitation.save(update_fields=['delivered_at', 'delivery_channel', 'updated_at'])
-        delivered = True
+        try:
+            send_mail(
+                'A+ Solution – Mitarbeiterportal aktivieren',
+                'Hallo,\n\nbitte aktiviere dein A+ Solution Mitarbeiterportal über diesen Link:\n'
+                f'{activation_url}\n\nDer Link ist einmalig und 72 Stunden gültig.',
+                settings.DEFAULT_FROM_EMAIL,
+                [user.email],
+                fail_silently=False,
+            )
+        except Exception:
+            # Email delivery is best-effort. The invitation itself must remain
+            # usable so an admin can copy the one-time activation URL even when
+            # the mailbox/domain is unavailable (for example during QA).
+            logger.warning('Portal invitation email delivery failed for user_id=%s', user.id, exc_info=True)
+        else:
+            invitation.delivered_at = timezone.now()
+            invitation.delivery_channel = 'email'
+            invitation.save(update_fields=['delivered_at', 'delivery_channel', 'updated_at'])
+            delivered = True
     return invitation, activation_url, delivered
 
 
