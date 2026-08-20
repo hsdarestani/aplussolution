@@ -18,7 +18,7 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
         if request.user.role != 'worker':
             return Response({'detail': 'Zeiterfassung ist nur im Mitarbeiterportal möglich.'}, status=403)
         worker = request.user.worker_profile
-        if TimeEntry.objects.filter(worker=worker, clock_out__isnull=True).exists():
+        if TimeEntry.objects.filter(worker=worker, wiw_time_id__isnull=True, clock_out__isnull=True).exists():
             return Response({'detail': 'Du bist bereits eingestempelt.'}, status=400)
 
         ownership = Q(slots__worker=worker, slots__status='claimed') | Q(worker=worker)
@@ -53,3 +53,26 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
         )
         audit(request, 'time.clock_in', entry)
         return Response(self.get_serializer(entry).data, status=201)
+
+    @action(detail=False, methods=['post'])
+    def clock_out(self, request):
+        if request.user.role != 'worker':
+            return Response({'detail': 'Zeiterfassung ist nur im Mitarbeiterportal möglich.'}, status=403)
+        entry = TimeEntry.objects.filter(
+            worker=request.user.worker_profile,
+            wiw_time_id__isnull=True,
+            clock_out__isnull=True,
+        ).order_by('-clock_in').first()
+        if not entry:
+            return Response({'detail': 'Keine laufende A+ Zeiterfassung gefunden.'}, status=400)
+        if entry.shift_id:
+            entry.shift = Shift.objects.select_related('location').get(pk=entry.shift_id)
+        error = geofence_error(entry.shift, request.data.get('lat'), request.data.get('lng'))
+        if error:
+            return Response({'detail': error}, status=400)
+        entry.clock_out = timezone.now()
+        entry.clock_out_lat = request.data.get('lat')
+        entry.clock_out_lng = request.data.get('lng')
+        entry.save(update_fields=['clock_out', 'clock_out_lat', 'clock_out_lng', 'updated_at'])
+        audit(request, 'time.clock_out', entry)
+        return Response(self.get_serializer(entry).data)
