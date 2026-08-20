@@ -47,15 +47,17 @@ test('master data quick access surfaces new records and uses a color picker', as
   await page.goto('/?view=people');
 
   await expect(page.getByRole('heading', { name: 'Personal & Kunden' })).toBeVisible();
-  await expect(page.getByTestId('masterdata-quick-panel')).toBeVisible();
-  await expect(page.getByText('QA Newest Testsite', { exact: true })).toBeVisible();
-  await expect(page.getByText('QA Newest Position', { exact: true })).toBeVisible();
+  const panel = page.getByTestId('masterdata-quick-panel');
+  await expect(panel).toBeVisible();
+  await expect(panel.getByText('QA Newest Testsite', { exact: true })).toBeVisible();
+  await expect(panel.getByText('QA Newest Position', { exact: true })).toBeVisible();
 
-  await expect(page.getByRole('button', { name: 'Alle 7 anzeigen' }).first()).toBeVisible();
-  await page.getByRole('button', { name: 'Alle 7 anzeigen' }).first().click();
-  await expect(page.getByText('Standort 1', { exact: true })).toBeVisible();
+  const showAll = panel.getByRole('button', { name: 'Alle 7 anzeigen' }).first();
+  await expect(showAll).toBeVisible();
+  await showAll.click();
+  await expect(panel.getByText('Standort 1', { exact: true })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Position anlegen', exact: true }).click();
+  await panel.getByRole('button', { name: 'Position anlegen', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Position anlegen' })).toBeVisible();
   await expect(page.getByLabel('Farbe auswählen')).toBeVisible();
 });
