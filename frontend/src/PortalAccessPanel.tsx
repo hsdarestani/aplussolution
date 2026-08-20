@@ -17,9 +17,7 @@ import {
   IonToggle,
 } from '@ionic/react';
 import {
-  addOutline,
   briefcaseOutline,
-  businessOutline,
   checkmarkCircleOutline,
   closeCircleOutline,
   copyOutline,
@@ -31,6 +29,7 @@ import {
 } from 'ionicons/icons';
 import { api } from './api';
 import './employee-portal.css';
+import './masterdata-quick.css';
 
 const label:any={active:'Aktiv',invited:'Einladung offen',not_activated:'Nicht aktiviert',missing_email:'E-Mail fehlt'};
 const color:any={active:'success',invited:'primary',not_activated:'warning',missing_email:'danger'};
