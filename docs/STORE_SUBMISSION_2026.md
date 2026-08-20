@@ -1,7 +1,7 @@
 # A+ Solution — Store Submission & Privacy Map (2026)
 
 Canonical release checklist for `de.aplussolution.workforce`.
-Store declarations must describe the shipped production build, even when a private distribution method exempts a questionnaire.
+This checklist follows the final **Public / Public** distribution decision in `docs/PUBLIC_STORE_RELEASE.md`. Store declarations must describe the exact shipped production build.
 
 ## 1. Product classification
 
@@ -17,42 +17,44 @@ Store declarations must describe the shipped production build, even when a priva
 - Imprint: `https://solution.smarbiz.sbs/impressum`
 - Audience: A+ Solution employees, dispatch and management; not a consumer service.
 - Public self-registration: **No**.
-- Store build login: **company-provisioned email/password only**.
+- Store build login: **company-provisioned account only**.
 - Ads: **No**.
 - Advertising/cross-app tracking: **No**.
 - Background location: **No**.
 - Precise location: **Yes, foreground only when a worker deliberately clocks in/out for a geofenced worksite.**
 
-## 2. Distribution choice
+## 2. Final distribution choice
 
-### Employee-owned or otherwise unmanaged phones — practical default
+The current release must be publicly visible under the A+ Solution developer profile on both stores while operational access remains account-restricted.
 
-- **Google Play:** normal Play production distribution, but all app functionality remains behind a company-provisioned account. Complete the full Data Safety and App Content declarations below.
-- **Apple:** submit through normal App Review and request **Unlisted App** distribution. The app is then absent from search/categories and is installed using the direct App Store link; the app login still prevents unauthorized use.
+- **Google Play:** Public production listing.
+- **Apple App Store:** Public Distribution, discoverable on the App Store.
+- **Managed Google Play Private App:** **Do not use for this release.**
+- **Apple Private Custom App:** **Do not use for this release.**
+- **Apple Unlisted App:** **Do not request for this release.**
 
-### Company-managed devices / work profiles
+Downloading the app does not create an account and does not grant access to company data. Accounts remain provisioned by A+ Solution GmbH or activated through an authorized invitation.
 
-- **Android:** Managed Google Play **Private App**, restricted to the A+ Solution organization/EMM.
-- **Apple:** Apple Business Manager **Private Custom App**, restricted to the A+ Solution Organization ID.
+In App Store Connect use:
 
-Choose Apple public/unlisted vs private before first approval. Switching an approved Apple app between public and private requires a new app record; public can later be changed to unlisted.
+`Pricing and Availability → App Distribution Methods → Public`
 
 ## 3. Access model and reviewer account
 
-There is no user registration. Accounts are created by A+ Solution administration or activated by a personal invitation. The store build exposes only the organization email/password login.
+There is no public user registration. Accounts are created by A+ Solution administration or activated by a personal invitation. Public users may install the application, but only authorized company accounts can access operational data.
 
 Create one dedicated reviewer user with synthetic/sample data only. Never give a store reviewer access to real employee, payroll, bank, tax, health, client-confidential or production-sensitive records.
 
 Suggested Review Notes:
 
 ```text
-A+ Solution is an internal workforce-management app used by employees and management of A+ Solution GmbH. There is no public registration and no public account creation.
+A+ Solution is the official workforce application of A+ Solution GmbH. The application is publicly distributed on the App Store / Google Play, while operational access is restricted to employees and management whose accounts are provisioned by A+ Solution GmbH. There is no public self-registration.
 
 Reviewer access:
 Email: [REVIEW_EMAIL]
 Password: [REVIEW_PASSWORD]
 
-The supplied reviewer account contains synthetic sample data only.
+The supplied reviewer account contains synthetic sample data only, does not require OTP/2FA and can be used regardless of reviewer location.
 
 Location permission is requested only when the reviewer actively uses clock-in/clock-out for a worksite that requires geofence validation. The current precise foreground location is stored with that time entry. The app does not use background location, advertising tracking, or ads.
 
@@ -63,7 +65,7 @@ Deletion: https://solution.smarbiz.sbs/konto-loeschen
 
 ## 4. Google Play — App Content
 
-Use these answers for a normal Play listing. Managed Google Play private apps may be exempt from the Data Safety form, but keep this mapping current.
+Use these answers for the public Play production listing.
 
 ### App access
 
@@ -178,7 +180,7 @@ Interne Dienstplanung, Zeiterfassung und Dokumente für A+ Solution.
 ### Full German description
 
 ```text
-A+ Solution ist die interne Workforce-App der A+ Solution GmbH für freigeschaltete Mitarbeiter, Disposition und Management.
+A+ Solution ist die Workforce-App der A+ Solution GmbH für freigeschaltete Mitarbeiter, Disposition und Management.
 
 Die App bündelt Dienstplanung, Arbeitszeiterfassung, Verfügbarkeiten, Verträge, Dokumente, Lohnunterlagen, interne Nachrichten und weitere betriebliche Abläufe in einem geschützten Zugang.
 
@@ -196,14 +198,17 @@ The exact self-hosted Publisher configuration is documented in `docs/PUBLISHER_B
 
 For the first-ever Google Play upload, use the Publisher-generated Android upload key and back it up immediately. Do not establish the Play package using a different signing/upload key first.
 
+The public Android build targets Android 16 / API 36 as required for the current release path.
+
 ## 10. Pre-submit gate
 
 Before Submit:
 
+- Distribution is **Public** on both Google Play and Apple App Store.
 - Privacy, support, deletion and imprint routes are public without login.
 - No placeholder legal text remains.
 - Reviewer user is active and contains synthetic data only.
-- Reviewer can log in with company credentials; there is no public signup/social-login surface in the store build.
+- Reviewer can log in with company credentials; there is no public signup mechanism.
 - Location text matches foreground-only behavior.
 - App remains usable when location is denied except for a geofenced clock action that actually requires it.
 - Screenshots contain no real employee, payroll, bank, tax, health or client-confidential data.
