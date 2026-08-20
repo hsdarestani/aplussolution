@@ -1,0 +1,112 @@
+name: Diagnose production workforce
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-production-workforce.yml'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: diagnose-production-workforce
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Ensure SSH tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v sshpass >/dev/null 2>&1; then
+            sudo -n apt-get update -qq
+            sudo -n apt-get install -y -qq sshpass
+          fi
+
+      - name: Read safe aggregate workforce status
+        env:
+          HOST: ${{ secrets.HOST }}
+          PASS: ${{ secrets.PASS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$PASS"
+          timeout 180s env SSHPASS="$PASS" sshpass -e ssh \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=2 \
+            root@"$HOST" 'bash -s' <<'REMOTE' | tee /tmp/workforce-audit.txt
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from django.db.models import Q, Min, Max
+          from django.utils import timezone
+          from datetime import timedelta
+          from core.models import TimeEntry, WorkerProfile
+          from core.attendance_views import _operational_time_entries as attendance_operational
+          from core.live_operations import _operational_time_entries as control_operational
+
+          closed_unapproved = TimeEntry.objects.filter(approved=False, clock_out__isnull=False)
+          open_rows = TimeEntry.objects.filter(clock_out__isnull=True)
+          long_open = open_rows.filter(clock_in__lte=timezone.now() - timedelta(hours=12))
+          synthetic = Q(worker__user__email__iendswith='@sync.invalid')
+          wiw_id = Q(wiw_time_id__isnull=False) & ~Q(wiw_time_id='')
+          wiw_sync = Q(wiw_synced_at__isnull=False)
+          linked_worker = Q(worker__wiw_user_id__isnull=False) & ~Q(worker__wiw_user_id='')
+          linked_shift = Q(shift__wiw_shift_id__isnull=False) & ~Q(shift__wiw_shift_id='')
+
+          def count(label, qs):
+              print(f'{label}={qs.count()}')
+
+          count('time_entries_total', TimeEntry.objects.all())
+          count('workers_active_operational', WorkerProfile.objects.filter(active=True, user__is_active=True).exclude(user__email__iendswith='@sync.invalid'))
+          count('workers_synthetic_migration', WorkerProfile.objects.filter(user__email__iendswith='@sync.invalid'))
+          count('unapproved_closed_total', closed_unapproved)
+          count('unapproved_closed_wiw_id', closed_unapproved.filter(wiw_id))
+          count('unapproved_closed_wiw_synced', closed_unapproved.filter(wiw_sync))
+          count('unapproved_closed_synthetic_worker', closed_unapproved.filter(synthetic))
+          count('unapproved_closed_null_wiw_id_real_worker', closed_unapproved.filter(wiw_time_id__isnull=True).exclude(synthetic))
+          count('unapproved_closed_null_wiw_id_linked_worker', closed_unapproved.filter(wiw_time_id__isnull=True).filter(linked_worker).exclude(synthetic))
+          count('unapproved_closed_null_wiw_id_linked_shift', closed_unapproved.filter(wiw_time_id__isnull=True).filter(linked_shift).exclude(synthetic))
+          count('attendance_operational_unapproved', attendance_operational().filter(approved=False, clock_out__isnull=False))
+          count('control_operational_unapproved', control_operational().filter(approved=False, clock_out__isnull=False))
+          count('open_total', open_rows)
+          count('open_over_12h_total', long_open)
+          count('open_over_12h_wiw_id', long_open.filter(wiw_id))
+          count('open_over_12h_synthetic_worker', long_open.filter(synthetic))
+          count('attendance_operational_open_over_12h', attendance_operational().filter(clock_out__isnull=True, clock_in__lte=timezone.now() - timedelta(hours=12)))
+          bounds = attendance_operational().filter(approved=False, clock_out__isnull=False).aggregate(oldest=Min('clock_in'), newest=Max('clock_in'))
+          print('attendance_operational_oldest_date=' + (bounds['oldest'].date().isoformat() if bounds['oldest'] else 'none'))
+          print('attendance_operational_newest_date=' + (bounds['newest'].date().isoformat() if bounds['newest'] else 'none'))
+          PY
+          REMOTE
+
+      - name: Publish safe aggregate diagnostic
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const output = fs.readFileSync('/tmp/workforce-audit.txt', 'utf8').trim();
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 85,
+              state: 'closed',
+              title: 'Production workforce data audit',
+              body: [
+                'Automated safe aggregate production workforce diagnostic.',
+                '',
+                '```text', output, '```',
+                '',
+                'No employee names, emails, row IDs, credentials, tokens, or row-level personal data are included.',
+                '',
+                `Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              ].join('\n')
+            });
