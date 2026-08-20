@@ -264,9 +264,9 @@ test.describe('Phase 6 mobile QA', () => {
 
     await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
     const moreMenu = page.locator('.mobile-menu-grid');
-    await expect(moreMenu.getByRole('button', { name: 'Verträge', exact: true })).toBeVisible();
-    await expect(moreMenu.getByRole('button', { name: 'Personal & Kunden', exact: true })).toBeVisible();
-    await expect(moreMenu.getByRole('button', { name: 'Steuerzentrale', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Verträge & ANÜ', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Dokumente & Lohn', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Mehr / Steuerzentrale', exact: true })).toBeVisible();
   });
 
   test('client sees a client-scoped schedule without manager controls or manager API fan-out', async ({ page }) => {
