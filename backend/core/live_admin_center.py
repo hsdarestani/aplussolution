@@ -15,8 +15,9 @@ def _nonempty(field):
 def _legacy_wiw_item_keys(items):
     """Return exception keys that belong to imported WIW history.
 
-    Imported data remains in the database for archive/reporting and the final
-    controlled cutover. It must not create day-to-day action noise meanwhile.
+    Imported people, shifts and time records remain in the database for
+    archive/reporting and the final controlled cutover. They must not create
+    day-to-day action noise meanwhile.
     """
     shift_ids = set()
     time_entry_ids = set()
@@ -79,8 +80,6 @@ def _is_legacy_wiw_item(item, imported_workers, imported_shifts, imported_entrie
     meta = item.get('meta') or {}
     worker_id = str(meta.get('worker_id') or '')
 
-    if category == 'integrations' and str(meta.get('provider') or '').lower() == 'wiw':
-        return True
     if category == 'staffing':
         return object_id in imported_shifts
     if category == 'documents':
