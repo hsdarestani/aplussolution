@@ -32,13 +32,15 @@ const client = {
   phone: '',
 };
 
+const hoursFromNow = (hours: number) => new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+
 const availableShift = {
   id: 'shift-1',
   client_name: 'Main Suites Frankfurt',
   position_name: 'Servicekraft',
   location_name: 'Frankfurt Innenstadt',
-  starts_at: '2026-08-03T16:00:00+02:00',
-  ends_at: '2026-08-03T23:00:00+02:00',
+  starts_at: hoursFromNow(4),
+  ends_at: hoursFromNow(11),
   break_minutes: 30,
   status: 'published',
   required_count: 4,
@@ -123,7 +125,7 @@ async function mockApi(page: Page, user: typeof worker | typeof admin | typeof c
           {
             id: 'entry-long-1',
             worker_name: 'Mina Berger',
-            clock_in: '2026-07-30T18:00:00+02:00',
+            clock_in: hoursFromNow(-13),
           },
         ],
       });
@@ -251,19 +253,20 @@ test.describe('Phase 6 mobile QA', () => {
     await expectNoHorizontalPageOverflow(page);
 
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeit' }).click();
-    await expect(page.getByRole('heading', { name: 'Ungewöhnlich lange laufende Timer' })).toBeVisible();
-    await page.getByRole('button', { name: 'Timer beenden' }).click();
-    await expect(page.getByText('Laufenden Timer beenden?', { exact: true })).toBeVisible();
-    await expect(page.locator('ion-alert textarea')).toBeVisible();
-    await page.locator('ion-alert textarea').fill('E2E Prüfung');
+    await expect(page.getByRole('heading', { name: /Ungewöhnlich lange (laufende Timer|offene Zeiterfassungen)/ })).toBeVisible();
+    await page.getByRole('button', { name: /Timer beenden|Prüfen & schließen/ }).click();
+    const closeAlert = page.locator('ion-alert');
+    await expect(closeAlert).toBeVisible();
+    await expect(closeAlert.locator('textarea')).toBeVisible();
+    await closeAlert.locator('textarea').fill('E2E Prüfung');
     await page.getByRole('button', { name: 'Abbrechen' }).click();
-    await expect(page.getByText('Laufenden Timer beenden?', { exact: true })).toBeHidden();
+    await expect(closeAlert).toBeHidden();
 
     await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
     const moreMenu = page.locator('.mobile-menu-grid');
-    await expect(moreMenu.getByRole('button', { name: 'Verträge', exact: true })).toBeVisible();
-    await expect(moreMenu.getByRole('button', { name: 'Personal & Kunden', exact: true })).toBeVisible();
-    await expect(moreMenu.getByRole('button', { name: 'Steuerzentrale', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Verträge & ANÜ', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Dokumente & Lohn', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Mehr / Steuerzentrale', exact: true })).toBeVisible();
   });
 
   test('client sees a client-scoped schedule without manager controls or manager API fan-out', async ({ page }) => {
