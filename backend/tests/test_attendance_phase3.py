@@ -21,9 +21,10 @@ def test_worker_attendance_home_tracks_active_timer_and_history(auth_worker, wor
     )
     assert clocked.status_code == 201
 
+    native_entry = TimeEntry.objects.get(wiw_time_id__isnull=True)
     home = auth_worker.get('/api/attendance/home/')
     assert home.status_code == 200
-    assert home.data['active_entry']['id'] == str(TimeEntry.objects.get().id)
+    assert home.data['active_entry']['id'] == str(native_entry.id)
     assert home.data['stale_active_entry'] is None
     assert home.data['eligible_shift']['id'] == str(shift.id)
 
@@ -37,7 +38,46 @@ def test_worker_attendance_home_tracks_active_timer_and_history(auth_worker, wor
     home = auth_worker.get('/api/attendance/home/')
     assert home.data['active_entry'] is None
     assert home.data['stale_active_entry'] is None
-    assert home.data['history'][0]['id'] == str(TimeEntry.objects.get().id)
+    assert home.data['history'][0]['id'] == str(native_entry.id)
+
+
+@pytest.mark.django_db
+def test_worker_native_clock_ignores_imported_open_wiw_timer(auth_worker, worker_user, shift):
+    now = timezone.now()
+    shift.starts_at = now - timedelta(minutes=5)
+    shift.ends_at = now + timedelta(hours=4)
+    shift.save(update_fields=['starts_at', 'ends_at', 'updated_at'])
+    imported = TimeEntry.objects.create(
+        worker=worker_user.worker_profile,
+        shift=shift,
+        clock_in=now - timedelta(days=3),
+        clock_out=None,
+        approved=False,
+        wiw_time_id='legacy-open-1',
+        wiw_synced_at=now - timedelta(days=1),
+    )
+
+    home = auth_worker.get('/api/attendance/home/')
+    assert home.status_code == 200
+    assert home.data['active_entry'] is None
+    assert home.data['stale_active_entry'] is None
+
+    clocked = auth_worker.post(
+        '/api/time-entries/clock_in/',
+        {'shift': str(shift.id), 'lat': 50.1100, 'lng': 8.6800},
+        format='json',
+    )
+    assert clocked.status_code == 201
+    assert TimeEntry.objects.filter(worker=worker_user.worker_profile, wiw_time_id__isnull=True, clock_out__isnull=True).count() == 1
+
+    clocked_out = auth_worker.post(
+        '/api/time-entries/clock_out/',
+        {'lat': 50.1100, 'lng': 8.6800},
+        format='json',
+    )
+    assert clocked_out.status_code == 200
+    imported.refresh_from_db()
+    assert imported.clock_out is None
 
 
 @pytest.mark.django_db
@@ -117,19 +157,38 @@ def test_worker_requests_correction_and_manager_approves(worker_user, manager_us
 
 @pytest.mark.django_db
 def test_manager_exception_inbox_only_surfaces_attention_items(worker_user, manager_user, shift):
+    now = timezone.now()
     TimeEntry.objects.create(
         worker=worker_user.worker_profile,
         shift=shift,
-        clock_in=timezone.now() - timedelta(hours=4),
-        clock_out=timezone.now() - timedelta(hours=1),
+        clock_in=now - timedelta(hours=4),
+        clock_out=now - timedelta(hours=1),
         approved=False,
     )
     TimeEntry.objects.create(
         worker=worker_user.worker_profile,
         shift=shift,
-        clock_in=timezone.now() - timedelta(hours=13),
+        clock_in=now - timedelta(hours=13),
         clock_out=None,
         approved=False,
+    )
+    # Real employees can also have historical WIW rows. Those remain in the
+    # database for audit/history but must not enter the live A+ approval queue.
+    TimeEntry.objects.create(
+        worker=worker_user.worker_profile,
+        shift=shift,
+        clock_in=now - timedelta(days=10, hours=4),
+        clock_out=now - timedelta(days=10, hours=1),
+        approved=False,
+        wiw_time_id='legacy-closed-real-worker',
+    )
+    TimeEntry.objects.create(
+        worker=worker_user.worker_profile,
+        shift=shift,
+        clock_in=now - timedelta(days=10),
+        clock_out=None,
+        approved=False,
+        wiw_time_id='legacy-open-real-worker',
     )
 
     manager = APIClient(); manager.force_authenticate(manager_user)
