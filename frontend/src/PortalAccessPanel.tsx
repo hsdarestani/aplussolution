@@ -35,12 +35,11 @@ export default function PortalAccessPanel() {
     setBusy(row.worker_id);
     try {
       const result: any = await api(`workers/${row.worker_id}/invite/`, { method: 'POST', body: '{}' });
-      if (result.activation_url) {
-        await navigator.clipboard?.writeText(result.activation_url);
-        setToast('Aktivierungslink wurde erstellt und in die Zwischenablage kopiert.');
-      } else {
-        setToast('Einladung wurde per E-Mail versendet.');
-      }
+      if (!result.activation_url) throw new Error('Aktivierungslink konnte nicht erstellt werden.');
+      await navigator.clipboard?.writeText(result.activation_url);
+      setToast(result.delivered
+        ? 'Einladung wurde per E-Mail versendet. Aktivierungslink wurde zusätzlich kopiert.'
+        : 'Aktivierungslink wurde erstellt und in die Zwischenablage kopiert.');
       await load();
     } catch (error: any) {
       setToast(error.message);
@@ -61,7 +60,7 @@ export default function PortalAccessPanel() {
         .join('\n');
       if (links) {
         await navigator.clipboard?.writeText(links);
-        setToast(`${result.count} Einladung(en) erstellt. Links wurden kopiert.`);
+        setToast(`${result.count} Einladung(en) erstellt. Aktivierungslinks wurden kopiert.`);
       } else {
         setToast(`${result.count} Einladung(en) verarbeitet.`);
       }
@@ -105,7 +104,7 @@ export default function PortalAccessPanel() {
           <div className="portal-person"><span>{String(row.name || 'M')[0].toUpperCase()}</span><div><b>{row.name}</b><p>{row.email}</p></div></div>
           <IonBadge color={color[row.state] || 'medium'}>{label[row.state] || row.state}</IonBadge>
           {row.state !== 'active' && row.state !== 'missing_email' && <IonButton size="small" fill="outline" disabled={!!busy} onClick={() => invite(row)}>
-            <IonIcon slot="start" icon={row.state === 'invited' ? copyOutline : mailOutline} />{row.state === 'invited' ? 'Neu senden' : 'Einladen'}
+            <IonIcon slot="start" icon={row.state === 'invited' ? copyOutline : mailOutline} />{row.state === 'invited' ? 'Neu senden & Link kopieren' : 'Einladen & Link kopieren'}
           </IonButton>}
         </div>)}
       </div>
