@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, global_search_views, integration_views, live_admin_center, live_operations, oauth_views, portal_views, searchable_views, shift_views, store_review_views, time_views, views
+from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, global_search_views, integration_views, live_admin_center, live_operations, native_operations, oauth_views, portal_views, searchable_views, shift_views, store_review_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -65,13 +65,13 @@ urlpatterns = [
     path('document-catalog/seed/', integration_views.seed_catalog),
     path('document-catalog/import-bundle/', integration_views.import_bundle),
     path('operations/', live_operations.operations_overview),
-    path('operations/schedule-quality/', advanced_views.schedule_quality),
+    path('operations/schedule-quality/', native_operations.schedule_quality),
     path('operations/availability/', advanced_views.availability_create),
     path('operations/availability/<uuid:pk>/', advanced_views.availability_delete),
-    path('operations/swaps/', advanced_views.swap_create),
-    path('operations/swaps/<uuid:pk>/decide/', advanced_views.swap_decide),
-    path('operations/copy-week/', advanced_views.copy_week),
-    path('operations/bulk-publish/', advanced_views.bulk_publish),
+    path('operations/swaps/', native_operations.swap_create),
+    path('operations/swaps/<uuid:pk>/decide/', native_operations.swap_decide),
+    path('operations/copy-week/', native_operations.copy_week),
+    path('operations/bulk-publish/', native_operations.bulk_publish),
     path('operations/notifications/read-all/', advanced_views.notifications_read_all),
     path('operations/folders/', advanced_views.folder_summary),
     path('operations/readiness/', advanced_views.readiness),
@@ -89,7 +89,7 @@ urlpatterns = [
     path('working-time/pdf/<uuid:worker_id>/', automation_views.worktime_pdf),
     path('working-time/backup/', automation_views.worktime_backup),
     path('reports/timesheets.csv', advanced_views.export_timesheets),
-    path('reports/schedule.csv', advanced_views.export_schedule),
+    path('reports/schedule.csv', native_operations.export_schedule),
     path('reports/payroll-estimate.csv', advanced_views.export_payroll_estimate),
     # Keep the DRF router last so fixed custom endpoints such as
     # workers/portal-status/ and workers/bulk-invite/ are not interpreted

@@ -128,7 +128,10 @@ def test_copy_week_and_bulk_publish(auth_admin, shift):
     response = auth_admin.post('/api/operations/bulk-publish/', {'ids': [str(copied.id)]}, format='json')
     assert response.status_code == 200
     copied.refresh_from_db()
-    assert copied.status == Shift.Status.PUBLISHED
+    # Copy Week preserves the original assignment. A fully staffed published
+    # demand therefore transitions to CONFIRMED, matching the canonical
+    # single-shift publish endpoint and ShiftSlot state machine.
+    assert copied.status == Shift.Status.CONFIRMED
 
 
 @pytest.mark.django_db
