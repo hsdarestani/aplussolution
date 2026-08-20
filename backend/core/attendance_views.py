@@ -13,6 +13,11 @@ from .services import audit
 from .shift_api import ShiftApiSerializer
 
 
+SYNTHETIC_MIGRATION_EMAIL_SUFFIX = '@sync.invalid'
+ATTENDANCE_LIST_LIMIT = 100
+STALE_WORKER_TIMER_HOURS = 16
+
+
 def _parse_requested_datetime(value):
     if value in (None, ''):
         return None
@@ -50,6 +55,11 @@ def _manager_only(request):
     return request.user.role in {User.Role.ADMIN, User.Role.MANAGER}
 
 
+def _operational_time_entries():
+    """Exclude synthetic migration-only people from live operational queues."""
+    return TimeEntry.objects.exclude(worker__user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX)
+
+
 @api_view(['GET'])
 def employee_attendance_home(request):
     if request.user.role != User.Role.WORKER:
@@ -62,29 +72,39 @@ def employee_attendance_home(request):
         timezone.get_current_timezone(),
     )
 
-    active = TimeEntry.objects.select_related('shift__position', 'worker__user').filter(
+    open_entry = TimeEntry.objects.select_related('shift__position', 'worker__user').filter(
         worker=worker,
         clock_out__isnull=True,
     ).order_by('-clock_in').first()
+    stale_active = (
+        open_entry
+        if open_entry and open_entry.clock_in <= now - timedelta(hours=STALE_WORKER_TIMER_HOURS)
+        else None
+    )
+    active = None if stale_active else open_entry
 
     history_qs = TimeEntry.objects.select_related('shift__position', 'worker__user').filter(
         worker=worker,
         clock_out__isnull=False,
     ).order_by('-clock_in')[:30]
 
+    # Never let a forgotten open timer inflate a worker's monthly worked total.
     month_entries = TimeEntry.objects.select_related('shift').filter(
         worker=worker,
         clock_in__gte=month_start,
+        clock_out__isnull=False,
     )
     month_worked_minutes = sum(entry.worked_minutes for entry in month_entries)
 
     ownership = Q(slots__worker=worker, slots__status='claimed') | Q(worker=worker)
-    eligible_shift = Shift.objects.filter(
-        ownership,
-        starts_at__lte=now + timedelta(hours=4),
-        ends_at__gte=now - timedelta(hours=4),
-        status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
-    ).select_related('order', 'client', 'location', 'position').distinct().order_by('starts_at').first()
+    eligible_shift = None
+    if stale_active is None:
+        eligible_shift = Shift.objects.filter(
+            ownership,
+            starts_at__lte=now + timedelta(hours=4),
+            ends_at__gte=now - timedelta(hours=4),
+            status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
+        ).select_related('order', 'client', 'location', 'position').distinct().order_by('starts_at').first()
 
     corrections = TimeEntryCorrection.objects.select_related(
         'entry', 'requested_by__user'
@@ -92,6 +112,7 @@ def employee_attendance_home(request):
 
     return Response({
         'active_entry': TimeEntrySerializer(active, context={'request': request}).data if active else None,
+        'stale_active_entry': TimeEntrySerializer(stale_active, context={'request': request}).data if stale_active else None,
         'eligible_shift': ShiftApiSerializer(eligible_shift, context={'request': request}).data if eligible_shift else None,
         'month_worked_minutes': month_worked_minutes,
         'pending_corrections': sum(1 for item in corrections if item.status == TimeEntryCorrection.Status.PENDING),
@@ -220,25 +241,36 @@ def attendance_exceptions(request):
         return Response({'detail': 'Keine Berechtigung.'}, status=403)
 
     now = timezone.now()
-    unapproved = TimeEntry.objects.select_related('worker__user', 'shift__position').filter(
+    operational_entries = _operational_time_entries().select_related('worker__user', 'shift__position')
+    unapproved_qs = operational_entries.filter(
         clock_out__isnull=False,
         approved=False,
-    ).order_by('-clock_in')[:100]
-    long_running = TimeEntry.objects.select_related('worker__user', 'shift__position').filter(
+    ).order_by('-clock_in')
+    long_running_qs = operational_entries.filter(
         clock_out__isnull=True,
         clock_in__lte=now - timedelta(hours=12),
-    ).order_by('clock_in')[:100]
-    corrections = TimeEntryCorrection.objects.select_related(
+    ).order_by('clock_in')
+    corrections_qs = TimeEntryCorrection.objects.select_related(
         'entry', 'requested_by__user'
-    ).filter(status=TimeEntryCorrection.Status.PENDING).order_by('created_at')[:100]
+    ).filter(status=TimeEntryCorrection.Status.PENDING).exclude(
+        requested_by__user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX
+    ).order_by('created_at')
+
+    unapproved_count = unapproved_qs.count()
+    long_running_count = long_running_qs.count()
+    corrections_count = corrections_qs.count()
+    unapproved = list(unapproved_qs[:ATTENDANCE_LIST_LIMIT])
+    long_running = list(long_running_qs[:ATTENDANCE_LIST_LIMIT])
+    corrections = list(corrections_qs[:ATTENDANCE_LIST_LIMIT])
 
     return Response({
         'counts': {
-            'pending_corrections': len(corrections),
-            'unapproved_entries': len(unapproved),
-            'long_running_entries': len(long_running),
-            'total': len(corrections) + len(unapproved) + len(long_running),
+            'pending_corrections': corrections_count,
+            'unapproved_entries': unapproved_count,
+            'long_running_entries': long_running_count,
+            'total': corrections_count + unapproved_count + long_running_count,
         },
+        'list_limit': ATTENDANCE_LIST_LIMIT,
         'pending_corrections': [correction_payload(item) for item in corrections],
         'unapproved_entries': TimeEntrySerializer(unapproved, many=True, context={'request': request}).data,
         'long_running_entries': TimeEntrySerializer(long_running, many=True, context={'request': request}).data,
