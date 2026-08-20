@@ -4,8 +4,9 @@ import { calendarOutline, chevronForwardOutline, documentTextOutline, notificati
 import { api, User } from './api';
 import './employee-portal.css';
 
-const time = (x:string) => new Date(x).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
-const day = (x:string) => new Date(x).toLocaleDateString('de-DE',{weekday:'short',day:'2-digit',month:'short'});
+const APP_TIME_ZONE = 'Europe/Berlin';
+const time = (x:string) => new Date(x).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit',timeZone:APP_TIME_ZONE});
+const day = (x:string) => new Date(x).toLocaleDateString('de-DE',{weekday:'short',day:'2-digit',month:'short',timeZone:APP_TIME_ZONE});
 
 export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:any)=>void}) {
   const [data,setData]=useState<any>();
