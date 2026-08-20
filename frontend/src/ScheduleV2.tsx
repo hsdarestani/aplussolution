@@ -10,6 +10,37 @@ const isManager = (u:User) => ['admin','manager'].includes(u.role);
 const tm = (x:string) => new Date(x).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
 const workerLabel = (worker:any) => worker?.user_detail?.name || worker?.user_detail?.email || worker?.employee_number || 'Mitarbeiter';
 const isSyntheticWorker = (worker:any) => String(worker?.user_detail?.email || '').toLowerCase().endsWith('@sync.invalid');
+const pad = (value:number) => String(value).padStart(2,'0');
+const localDate = (offsetDays=0) => {
+  const date = new Date();
+  date.setDate(date.getDate()+offsetDays);
+  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}`;
+};
+const splitDateTime = (input?:string) => {
+  const [date='',rest=''] = String(input||'').split('T');
+  return {date,time:rest.slice(0,5)};
+};
+const joinDateTime = (date:string,time:string) => date&&time?`${date}T${time}`:'';
+const toLocalDateTime = (date:Date) => `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+
+function FriendlyDateTime({label,value,onChange}:{label:string;value?:string;onChange:(next:string)=>void}) {
+  const parts=splitDateTime(value);
+  const setDate=(date:string)=>onChange(joinDateTime(date,parts.time||'09:00'));
+  const setTime=(time:string)=>onChange(joinDateTime(parts.date||localDate(),time));
+  return <div className="sv2-datetime" data-testid={`datetime-${label.toLowerCase()}`}>
+    <div className="sv2-datetime-head">
+      <b>{label} *</b>
+      <div className="sv2-date-shortcuts">
+        <IonButton size="small" fill="clear" onClick={()=>setDate(localDate())}>Heute</IonButton>
+        <IonButton size="small" fill="clear" onClick={()=>setDate(localDate(1))}>Morgen</IonButton>
+      </div>
+    </div>
+    <div className="sv2-datetime-fields">
+      <IonInput aria-label={`${label} Datum`} fill="outline" type="date" label="Datum" labelPlacement="floating" value={parts.date} onIonInput={e=>setDate(String(val(e)))}/>
+      <IonInput aria-label={`${label} Uhrzeit`} fill="outline" type="time" step="900" label="Uhrzeit" labelPlacement="floating" value={parts.time} onIonInput={e=>setTime(String(val(e)))}/>
+    </div>
+  </div>;
+}
 
 export default function ScheduleV2({user}:{user:User}) {
   const [rows,setRows]=useState<any[]>([]), [clients,setClients]=useState<any[]>([]), [locations,setLocations]=useState<any[]>([]), [positions,setPositions]=useState<any[]>([]), [orders,setOrders]=useState<any[]>([]), [workers,setWorkers]=useState<any[]>([]);
@@ -46,6 +77,20 @@ export default function ScheduleV2({user}:{user:User}) {
   async function act(path:string,msg:string){setBusy(true);try{await api(path,{method:'POST',body:'{}'});setToast(msg);await load();}catch(e:any){setToast(e.message);}finally{setBusy(false);}}
   function create(){setEditing(undefined);setForm({required_count:1,break_minutes:0,publish_now:true,workers:[]});setModal(true);}
   function edit(x:any){setEditing(x.id);setForm({...x,workers:(x.assigned_workers||[]).map((worker:any)=>worker.id),starts_at:x.starts_at?.slice(0,16),ends_at:x.ends_at?.slice(0,16),publish_now:x.status==='published'});setModal(true);}
+  function setShiftDateTime(field:'starts_at'|'ends_at',next:string){
+    setForm((current:any)=>{
+      const updated={...current,[field]:next};
+      if(field==='starts_at'&&next){
+        const start=new Date(next);
+        const currentEnd=current.ends_at?new Date(current.ends_at):undefined;
+        if(!currentEnd||currentEnd<=start){
+          const suggestedEnd=new Date(start.getTime()+4*60*60*1000);
+          updated.ends_at=toLocalDateTime(suggestedEnd);
+        }
+      }
+      return updated;
+    });
+  }
   async function save(){
     setBusy(true);
     try{
@@ -87,7 +132,8 @@ export default function ScheduleV2({user}:{user:User}) {
       <IonSelect fill="outline" label="Auftrag" labelPlacement="floating" value={form.order} onIonChange={e=>setForm({...form,order:val(e)})}><IonSelectOption value="">Ohne Auftrag</IonSelectOption>{orders.filter(x=>!form.client||x.client===form.client).map(x=><IonSelectOption key={x.id} value={x.id}>{x.title}</IonSelectOption>)}</IonSelect>
       <IonSelect fill="outline" label="Einsatzort *" labelPlacement="floating" value={form.location} onIonChange={e=>setForm({...form,location:val(e)})}>{locations.filter(x=>!form.client||!x.client||x.client===form.client).map(x=><IonSelectOption key={x.id} value={x.id}>{x.name}</IonSelectOption>)}</IonSelect>
       <IonSelect fill="outline" label="Position *" labelPlacement="floating" value={form.position} onIonChange={e=>setForm({...form,position:val(e)})}>{positions.map(x=><IonSelectOption key={x.id} value={x.id}>{x.name}</IonSelectOption>)}</IonSelect>
-      <IonInput fill="outline" type="datetime-local" label="Beginn *" labelPlacement="floating" value={form.starts_at} onIonInput={e=>setForm({...form,starts_at:val(e)})}/><IonInput fill="outline" type="datetime-local" label="Ende *" labelPlacement="floating" value={form.ends_at} onIonInput={e=>setForm({...form,ends_at:val(e)})}/>
+      <FriendlyDateTime label="Beginn" value={form.starts_at} onChange={next=>setShiftDateTime('starts_at',next)}/>
+      <FriendlyDateTime label="Ende" value={form.ends_at} onChange={next=>setShiftDateTime('ends_at',next)}/>
       <IonInput fill="outline" type="number" min="1" label="Benötigte Mitarbeiter *" labelPlacement="floating" value={form.required_count} onIonInput={e=>setForm({...form,required_count:Math.max(Number(val(e)||1),(form.workers||[]).length)})}/><IonInput fill="outline" type="number" min="0" label="Pause (Min.)" labelPlacement="floating" value={form.break_minutes} onIonInput={e=>setForm({...form,break_minutes:val(e)})}/>
       <IonSelect className="full" multiple interface="alert" fill="outline" label="Mitarbeiter direkt zuweisen (optional)" labelPlacement="floating" value={form.workers||[]} onIonChange={e=>{const selected=Array.isArray(val(e))?val(e):[];setForm({...form,workers:selected,required_count:Math.max(Number(form.required_count||1),selected.length)});}}>
         {workers.map(worker=><IonSelectOption key={worker.id} value={worker.id}>{workerLabel(worker)} · {worker.employee_number}</IonSelectOption>)}
