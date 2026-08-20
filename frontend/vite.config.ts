@@ -73,53 +73,9 @@ function appShellTransforms(): Plugin {
   };
 }
 
-/**
- * Operations is another large legacy surface. Keep the source stable, remove
- * WIW from the live workflow and mount the native Premium parity control panel
- * for admins/managers/workers before the existing notification feed.
- */
-function nativeWorkforceCutoverTransforms(): Plugin {
-  const replacements: Array<[string, string]> = [
-    ["    ['When I Work', data.wiw_configured],\n", ''],
-    ['OpenShifts wurden in When I Work erstellt.', 'OpenShifts wurden direkt in A+ Workforce erstellt.'],
-    ['WIW-Schichten wurden in Vertragspakete übernommen.', 'Lokale Schichten wurden in Vertragspakete übernommen.'],
-    ['Deutschen Auftragstext analysieren, OpenShifts in WIW erzeugen und Kundenvertrag vorbereiten.', 'Deutschen Auftragstext analysieren, OpenShifts direkt in A+ Workforce erzeugen und Kundenvertrag vorbereiten.'],
-    ['Aus WIW synchronisieren', 'Aus Zeiterfassung berechnen'],
-    ['Manuelle Auszahlungen und Korrekturen bleiben bei jeder WIW-Synchronisierung erhalten.', 'Manuelle Auszahlungen und Korrekturen bleiben bei jeder Neuberechnung erhalten.'],
-  ];
-  const wiwPanel = /<section className="operations-panel" data-testid="wiw-integration-panel">[\s\S]*?<\/section>\s*(?=<section className="operations-panel" data-testid="document-catalog-panel">)/;
-  const nativePanel = `<section className="operations-panel" data-testid="native-data-source-panel">
-              <div className="operations-head"><div><h3>A+ Workforce Datenbasis</h3><p>Schichten, Besetzungen und Arbeitszeiten werden direkt in dieser App geführt.</p></div><IonBadge color="success">Aktiv</IonBadge></div>
-              <div className="operations-note">When I Work ist kein Bestandteil des laufenden Betriebs mehr. Historische WIW-IDs bleiben nur für Migration und Audit erhalten.</div>
-            </section>
-            `;
-  const notificationsMarker = '<Notifications rows={data.notifications || []} readAll={readAll} />';
-
-  return {
-    name: 'native-workforce-cutover-transforms',
-    enforce: 'pre',
-    transform(code, id) {
-      const normalizedId = id.replace(/\\/g, '/').split('?')[0];
-      if (!normalizedId.endsWith('/src/Operations.tsx')) return null;
-      let next = code;
-      for (const [from, to] of replacements) {
-        if (!next.includes(from)) this.error(`Operations cutover marker changed: ${from}`);
-        next = next.replace(from, to);
-      }
-      if (!wiwPanel.test(next)) this.error('Operations WIW panel marker changed; update cutover transform.');
-      next = next.replace(wiwPanel, nativePanel);
-      if (!next.includes(notificationsMarker)) this.error('Operations notifications marker changed; update Premium mount.');
-      next = next.replace(notificationsMarker, `<PremiumOperations user={user} />\n      ${notificationsMarker}`);
-      next = `import PremiumOperations from './PremiumOperations';\n${next}`;
-      return { code: next, map: null };
-    },
-  };
-}
-
 export default defineConfig({
   plugins: [
     appShellTransforms(),
-    nativeWorkforceCutoverTransforms(),
     react(),
     VitePWA({
       // Temporarily retire the service worker. Existing mobile clients can keep an
