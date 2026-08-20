@@ -25,6 +25,9 @@ from .shift_service import (
 from .shift_slots import ShiftSlot
 
 
+SYNTHETIC_MIGRATION_EMAIL_SUFFIX = '@sync.invalid'
+
+
 class StaffingShiftViewSet(viewsets.ModelViewSet):
     queryset = Shift.objects.all()
     serializer_class = ShiftApiSerializer
@@ -139,12 +142,12 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                     pk__in=requested_ids,
                     active=True,
                     user__is_active=True,
-                )
+                ).exclude(user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX)
             )
             worker_by_id = {str(worker.pk): worker for worker in workers}
             missing = [worker_id for worker_id in requested_ids if worker_id not in worker_by_id]
             if missing:
-                return Response({'detail': 'Mindestens ein ausgewählter Mitarbeiter ist nicht aktiv oder wurde nicht gefunden.'}, status=400)
+                return Response({'detail': 'Mindestens ein ausgewählter Mitarbeiter ist nicht aktiv, nur ein Migrationsdatensatz oder wurde nicht gefunden.'}, status=400)
             desired_workers = [worker_by_id[worker_id] for worker_id in requested_ids]
 
             current_slots = list(claimed_slots(shift).select_for_update().select_related('worker__user'))
