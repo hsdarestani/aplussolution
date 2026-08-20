@@ -56,8 +56,10 @@ def _manager_only(request):
 
 
 def _operational_time_entries():
-    """Exclude synthetic migration-only people from live operational queues."""
-    return TimeEntry.objects.exclude(worker__user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX)
+    """Return native A+ time rows only; WIW rows remain available for migration/audit."""
+    return TimeEntry.objects.filter(wiw_time_id__isnull=True).exclude(
+        worker__user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX
+    )
 
 
 @api_view(['GET'])
@@ -72,8 +74,10 @@ def employee_attendance_home(request):
         timezone.get_current_timezone(),
     )
 
+    # A historical WIW timer must never block the native A+ clock.
     open_entry = TimeEntry.objects.select_related('shift__position', 'worker__user').filter(
         worker=worker,
+        wiw_time_id__isnull=True,
         clock_out__isnull=True,
     ).order_by('-clock_in').first()
     stale_active = (
@@ -88,7 +92,8 @@ def employee_attendance_home(request):
         clock_out__isnull=False,
     ).order_by('-clock_in')[:30]
 
-    # Never let a forgotten open timer inflate a worker's monthly worked total.
+    # Closed historical entries still belong in payroll/history. Forgotten open
+    # timers, however, must never inflate the monthly total.
     month_entries = TimeEntry.objects.select_related('shift').filter(
         worker=worker,
         clock_in__gte=month_start,
@@ -252,7 +257,10 @@ def attendance_exceptions(request):
     ).order_by('clock_in')
     corrections_qs = TimeEntryCorrection.objects.select_related(
         'entry', 'requested_by__user'
-    ).filter(status=TimeEntryCorrection.Status.PENDING).exclude(
+    ).filter(
+        status=TimeEntryCorrection.Status.PENDING,
+        entry__wiw_time_id__isnull=True,
+    ).exclude(
         requested_by__user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX
     ).order_by('created_at')
 
