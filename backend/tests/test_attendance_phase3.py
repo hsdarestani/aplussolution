@@ -5,7 +5,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from core.attendance_models import TimeEntryCorrection
-from core.models import Notification, TimeEntry
+from core.models import Notification, TimeEntry, User, WorkerProfile
 
 
 @pytest.mark.django_db
@@ -24,6 +24,7 @@ def test_worker_attendance_home_tracks_active_timer_and_history(auth_worker, wor
     home = auth_worker.get('/api/attendance/home/')
     assert home.status_code == 200
     assert home.data['active_entry']['id'] == str(TimeEntry.objects.get().id)
+    assert home.data['stale_active_entry'] is None
     assert home.data['eligible_shift']['id'] == str(shift.id)
 
     clocked_out = auth_worker.post(
@@ -35,7 +36,36 @@ def test_worker_attendance_home_tracks_active_timer_and_history(auth_worker, wor
 
     home = auth_worker.get('/api/attendance/home/')
     assert home.data['active_entry'] is None
+    assert home.data['stale_active_entry'] is None
     assert home.data['history'][0]['id'] == str(TimeEntry.objects.get().id)
+
+
+@pytest.mark.django_db
+def test_worker_home_marks_old_open_timer_as_stale_and_does_not_count_it(worker_user, shift):
+    now = timezone.now()
+    stale = TimeEntry.objects.create(
+        worker=worker_user.worker_profile,
+        shift=shift,
+        clock_in=now - timedelta(hours=20),
+        clock_out=None,
+        approved=False,
+    )
+    TimeEntry.objects.create(
+        worker=worker_user.worker_profile,
+        shift=shift,
+        clock_in=now - timedelta(hours=3),
+        clock_out=now - timedelta(hours=1),
+        approved=True,
+    )
+
+    worker = APIClient(); worker.force_authenticate(worker_user)
+    response = worker.get('/api/attendance/home/')
+
+    assert response.status_code == 200
+    assert response.data['active_entry'] is None
+    assert response.data['stale_active_entry']['id'] == str(stale.id)
+    assert response.data['eligible_shift'] is None
+    assert response.data['month_worked_minutes'] == 120
 
 
 @pytest.mark.django_db
@@ -112,3 +142,64 @@ def test_manager_exception_inbox_only_surfaces_attention_items(worker_user, mana
     worker = APIClient(); worker.force_authenticate(worker_user)
     denied = worker.get('/api/attendance/exceptions/')
     assert denied.status_code == 403
+
+
+@pytest.mark.django_db
+def test_manager_exception_count_is_not_capped_by_display_limit(worker_user, manager_user, shift):
+    now = timezone.now()
+    TimeEntry.objects.bulk_create([
+        TimeEntry(
+            worker=worker_user.worker_profile,
+            shift=shift,
+            clock_in=now - timedelta(days=2, minutes=index),
+            clock_out=now - timedelta(days=2, minutes=index - 30),
+            approved=False,
+        )
+        for index in range(105)
+    ])
+
+    manager = APIClient(); manager.force_authenticate(manager_user)
+    response = manager.get('/api/attendance/exceptions/')
+
+    assert response.status_code == 200
+    assert response.data['counts']['unapproved_entries'] == 105
+    assert response.data['list_limit'] == 100
+    assert len(response.data['unapproved_entries']) == 100
+
+
+@pytest.mark.django_db
+def test_manager_exception_queue_ignores_synthetic_migration_workers(manager_user, shift):
+    synthetic_user = User.objects.create_user(
+        email='wiw-history-test@sync.invalid',
+        password='temporary-password-123',
+        first_name='Legacy',
+        last_name='Import',
+        role=User.Role.WORKER,
+    )
+    synthetic_worker = WorkerProfile.objects.create(
+        user=synthetic_user,
+        employee_number='WIW-HIST-TEST-1',
+    )
+    now = timezone.now()
+    TimeEntry.objects.create(
+        worker=synthetic_worker,
+        shift=shift,
+        clock_in=now - timedelta(days=4),
+        clock_out=now - timedelta(days=4) + timedelta(hours=5),
+        approved=False,
+    )
+    TimeEntry.objects.create(
+        worker=synthetic_worker,
+        shift=shift,
+        clock_in=now - timedelta(days=4),
+        clock_out=None,
+        approved=False,
+    )
+
+    manager = APIClient(); manager.force_authenticate(manager_user)
+    response = manager.get('/api/attendance/exceptions/')
+
+    assert response.status_code == 200
+    assert response.data['counts']['unapproved_entries'] == 0
+    assert response.data['counts']['long_running_entries'] == 0
+    assert response.data['counts']['total'] == 0
