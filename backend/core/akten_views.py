@@ -40,19 +40,21 @@ def _worker_shifts(worker):
 
 
 def _worker_contracts(worker):
-    """Include direct worker contracts and client ANÜ documents linked through assigned WIW shifts.
+    """Include direct worker contracts and client ANÜ documents covering assigned shifts.
 
-    Client ANÜ contracts can cover more than one employee, so Contract.worker cannot represent all
-    participants. The automation stores the covered WIW shift IDs in variables.shift_ids; resolve
-    those links here so the same signed ANÜ is visible in every affected employee Akte.
+    A client ANÜ can cover multiple employees, so Contract.worker cannot express all participants.
+    Native A+ contracts store local Shift UUIDs in variables.shift_ids while historical migrated
+    contracts may contain WIW IDs. Match both identifiers so the same immutable signed ANÜ appears
+    in every affected employee Akte as well as the client Akte.
     """
     shifts = list(_worker_shifts(worker).only('id', 'wiw_shift_id'))
-    remote_ids = {str(shift.wiw_shift_id) for shift in shifts if shift.wiw_shift_id}
+    covered_shift_ids = {str(shift.id) for shift in shifts}
+    covered_shift_ids.update(str(shift.wiw_shift_id) for shift in shifts if shift.wiw_shift_id)
     linked_contract_ids = []
-    if remote_ids:
+    if covered_shift_ids:
         for contract in Contract.objects.filter(client__isnull=False).exclude(variables={}):
             shift_ids = (contract.variables or {}).get('shift_ids') or []
-            if remote_ids.intersection(str(value) for value in shift_ids):
+            if covered_shift_ids.intersection(str(value) for value in shift_ids):
                 linked_contract_ids.append(contract.id)
     return (
         Contract.objects.filter(Q(worker=worker) | Q(pk__in=linked_contract_ids))
