@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import premium_views, saml_views
+from . import premium_mutation_views, premium_views, saml_views
 
 urlpatterns = [
     path('premium/scheduling-policy/', premium_views.scheduling_policy),
@@ -9,6 +9,7 @@ urlpatterns = [
     path('premium/shifts/<uuid:shift_id>/tags/', premium_views.set_shift_tags),
     path('premium/schedule-templates/', premium_views.schedule_templates),
     path('premium/task-lists/', premium_views.task_lists),
+    path('premium/task-lists/<uuid:pk>/', premium_mutation_views.task_list_delete),
     path('premium/task-lists/<uuid:list_id>/assign/', premium_views.task_assign),
     path('premium/task-runs/', premium_views.task_runs),
     path('premium/task-runs/<uuid:run_id>/complete/', premium_views.task_complete),
@@ -18,10 +19,12 @@ urlpatterns = [
     path('premium/time-off-categories/', premium_views.time_off_categories),
     path('premium/time-off/<uuid:pk>/classify/', premium_views.classify_time_off),
     path('premium/reports/', premium_views.report_definitions),
+    path('premium/reports/<uuid:pk>/', premium_mutation_views.report_definition_delete),
     path('premium/reports/<uuid:pk>/run/', premium_views.report_run),
     path('premium/api-keys/', premium_views.api_keys),
     path('premium/api-keys/<uuid:pk>/', premium_views.api_key_revoke),
     path('premium/webhooks/', premium_views.webhooks),
+    path('premium/webhooks/<uuid:pk>/', premium_mutation_views.webhook_delete),
     path('premium/webhooks/<uuid:pk>/test/', premium_views.webhook_test),
     path('premium/integrations/', premium_views.integrations),
     path('premium/integrations/<uuid:pk>/sync/', premium_views.integration_sync),
