@@ -64,7 +64,7 @@ export default function NativePushRegistration() {
         }
       }));
 
-      handles.push(await PushNotifications.addListener('registrationError', (error: any) => {
+      handles.push(await PushNotifications.addListener('registrationError', (error: unknown) => {
         console.warn('Native push registration error', error);
       }));
 
@@ -91,6 +91,17 @@ export default function NativePushRegistration() {
         if (permission.receive !== 'granted') {
           console.info('Native push permission not granted.');
           return;
+        }
+        if (Capacitor.getPlatform() === 'android') {
+          await PushNotifications.createChannel({
+            id: 'aplus_updates',
+            name: 'A+ Solution Updates',
+            description: 'Schichten, Verträge, Nachrichten und wichtige Änderungen',
+            importance: 5,
+            visibility: 1,
+            sound: 'default',
+            vibration: true,
+          });
         }
         await PushNotifications.register();
       } catch (error) {
