@@ -55,17 +55,13 @@ def test_delivery_uses_registered_device_and_deactivates_invalid_token(monkeypat
     assert 'UNREGISTERED' in device.last_error
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 def test_new_notification_enqueues_native_push_after_commit(monkeypatch, worker_user):
     calls = []
     monkeypatch.setattr(push_signals, 'push_provider_configured', lambda: True)
     monkeypatch.setattr(push_signals.send_notification_push, 'delay', lambda notification_id: calls.append(notification_id))
 
-    with pytest.MonkeyPatch.context() as _:
-        Notification.objects.create(user=worker_user, title='Vertrag bereit', action_url='/contracts')
-
-    # django_db tests are not wrapped in TestCase's deferred on_commit callback,
-    # so the receiver should have queued the new notification immediately.
+    Notification.objects.create(user=worker_user, title='Vertrag bereit', action_url='/contracts')
     assert len(calls) == 1
 
 
