@@ -68,14 +68,15 @@ test('admin payroll workspace shows monthly figures and persists adjustments wit
   });
 
   await page.goto('/?view=operations#arbeitszeitkonto');
-  await expect(page.getByTestId('payroll-workspace')).toBeVisible();
+  const workspace = page.getByTestId('payroll-workspace');
+  await expect(workspace).toBeVisible();
   await expect(page.getByText('Anna Becker')).toBeVisible();
   await expect(page.getByText('1.400,00 €').first()).toBeVisible();
   await expect(page.getByText('17,50 €')).toBeVisible();
 
   await page.getByLabel('Auszahlung Anna Becker 2026-08').fill('1');
   await page.getByLabel('Korrektur Anna Becker 2026-08').fill('-0.5');
-  await page.getByRole('button', { name: 'Speichern' }).click();
+  await workspace.getByRole('button', { name: 'Speichern', exact: true }).click();
   await expect(page.getByText(/Folgemonate wurden neu berechnet/)).toBeVisible();
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
