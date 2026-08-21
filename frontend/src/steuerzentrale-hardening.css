@@ -1,0 +1,88 @@
+/* Steuerzentrale production hardening.
+   Keep KPI content readable even when Ionic/global card tokens change. */
+.operations-stats ion-card {
+  --background: #fff;
+  --color: #101828;
+  min-height: 96px;
+  color: #101828 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.operations-stats ion-card-content {
+  display: flex !important;
+  min-height: 96px;
+  padding: 16px 18px !important;
+  flex-direction: column;
+  justify-content: center;
+  color: #101828 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.operations-stats ion-card-content small {
+  display: block !important;
+  min-height: 17px;
+  color: #667085 !important;
+  font-size: 12px !important;
+  font-weight: 600;
+  line-height: 1.4;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.operations-stats ion-card-content strong {
+  display: block !important;
+  margin-top: 8px !important;
+  color: #101828 !important;
+  font-size: clamp(20px, 2vw, 27px) !important;
+  font-weight: 750;
+  line-height: 1.15;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.aplus-api-health {
+  position: fixed;
+  z-index: 2147483000;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  width: min(430px, calc(100vw - 32px));
+  padding: 13px 15px;
+  border: 1px solid #f0c36d;
+  border-radius: 14px;
+  background: #fffaf0;
+  box-shadow: 0 16px 45px rgba(16, 24, 40, .16);
+  color: #5f4200;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.aplus-api-health b {
+  display: block;
+  margin-bottom: 3px;
+  color: #3b2a00;
+}
+
+.aplus-api-health button {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border: 1px solid #c89224;
+  border-radius: 9px;
+  background: #fff;
+  color: #6c4b00;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (max-width: 620px) {
+  .operations-stats ion-card {
+    min-height: 92px;
+  }
+
+  .operations-stats ion-card-content {
+    min-height: 92px;
+    padding: 14px 16px !important;
+  }
+}
