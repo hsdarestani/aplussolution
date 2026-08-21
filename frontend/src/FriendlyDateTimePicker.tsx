@@ -143,7 +143,7 @@ export default function FriendlyDateTimePicker() {
 
     const openFromElement = (element: HTMLElement) => {
       const kind = pickerKindFromType(element.dataset.aplusPickerKind);
-      if (!kind || openingRef.current) return;
+      if (!kind || openingRef.current || element.hasAttribute('disabled') || (element as any).disabled) return;
       openingRef.current = true;
       window.setTimeout(() => { openingRef.current = false; }, 120);
       const next: PickerTarget = {
@@ -236,8 +236,8 @@ export default function FriendlyDateTimePicker() {
       isOpen={!!target}
       onDidDismiss={close}
       cssClass="friendly-picker-modal"
-      initialBreakpoint={0.82}
-      breakpoints={[0, 0.82, 0.96]}
+      initialBreakpoint={0.96}
+      breakpoints={[0, 0.96, 1]}
       handleBehavior="cycle"
     >
       <div className="friendly-picker-sheet">
@@ -264,21 +264,23 @@ export default function FriendlyDateTimePicker() {
           </div>
         )}
 
-        {!!target && (
-          <IonDatetime
-            key={`${target.kind}-${target.label}`}
-            locale="de-DE"
-            firstDayOfWeek={1}
-            hourCycle="h23"
-            presentation={presentation}
-            preferWheel={target.kind === 'time'}
-            value={draft}
-            min={target.min ? toIonDatetimeValue(target.kind, target.min) : undefined}
-            max={target.max ? toIonDatetimeValue(target.kind, target.max) : undefined}
-            minuteValues={minutes}
-            onIonChange={(event) => setDraft(String(Array.isArray(event.detail.value) ? event.detail.value[0] || '' : event.detail.value || ''))}
-          />
-        )}
+        <div className="friendly-picker-calendar">
+          {!!target && (
+            <IonDatetime
+              key={`${target.kind}-${target.label}`}
+              locale="de-DE"
+              firstDayOfWeek={1}
+              hourCycle="h23"
+              presentation={presentation}
+              preferWheel={target.kind === 'time'}
+              value={draft}
+              min={target.min ? toIonDatetimeValue(target.kind, target.min) : undefined}
+              max={target.max ? toIonDatetimeValue(target.kind, target.max) : undefined}
+              minuteValues={minutes}
+              onIonChange={(event) => setDraft(String(Array.isArray(event.detail.value) ? event.detail.value[0] || '' : event.detail.value || ''))}
+            />
+          )}
+        </div>
 
         <div className="friendly-picker-actions">
           {!!target?.value && <IonButton expand="block" fill="clear" color="medium" onClick={clearValue}>Wert löschen</IonButton>}
