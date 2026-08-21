@@ -41,7 +41,7 @@ const nativeDateControl = `function DateControl({label,value,onChange}:{label:st
 
 const germanDateControl = `const formatGermanDate = (iso: string) => {
   const match = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(iso || '');
-  return match ? \\`\\${match[3]}.\\${match[2]}.\\${match[1]}\\` : '';
+  return match ? match[3] + '.' + match[2] + '.' + match[1] : '';
 };
 const parseGermanDate = (text: string) => {
   const match = /^(\\d{1,2})\\.(\\d{1,2})\\.(\\d{4})$/.exec(text.trim());
@@ -49,7 +49,7 @@ const parseGermanDate = (text: string) => {
   const day = Number(match[1]); const month = Number(match[2]); const year = Number(match[3]);
   const date = new Date(Date.UTC(year, month - 1, day));
   if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return '';
-  return \\`\\${String(year).padStart(4, '0')}-\\${String(month).padStart(2, '0')}-\\${String(day).padStart(2, '0')}\\`;
+  return String(year).padStart(4, '0') + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
 };
 
 function DateControl({label,value,onChange}:{label:string;value:string;onChange:(value:string)=>void}) {
@@ -62,7 +62,7 @@ function DateControl({label,value,onChange}:{label:string;value:string;onChange:
   };
   return <label className="premium-field-control"><span>{label}</span><div className="premium-input-shell premium-date-shell">
     <input className="premium-date-text" aria-label={label} inputMode="numeric" placeholder="TT.MM.JJJJ" value={draft} onChange={event=>setDraft(event.currentTarget.value)} onBlur={commit} onKeyDown={event=>{ if(event.key==='Enter'){ event.preventDefault(); commit(); } }}/>
-    <button type="button" className="premium-date-button" aria-label={\\`\\${label}: Kalender öffnen\\`} onClick={event=>{ const picker=event.currentTarget.parentElement?.querySelector<HTMLInputElement>('.premium-native-date'); if(picker?.showPicker) picker.showPicker(); else picker?.click(); }}>▦</button>
+    <button type="button" className="premium-date-button" aria-label={label + ': Kalender öffnen'} onClick={event=>{ const picker=event.currentTarget.parentElement?.querySelector<HTMLInputElement>('.premium-native-date'); if(picker?.showPicker) picker.showPicker(); else picker?.click(); }}>▦</button>
     <input className="premium-native-date" type="date" tabIndex={-1} aria-hidden="true" value={value} onChange={event=>{ const iso=event.currentTarget.value; if(iso){ onChange(iso); setDraft(formatGermanDate(iso)); } }}/>
   </div></label>;
 }`;
