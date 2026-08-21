@@ -54,6 +54,6 @@ test('client order form loads only the client-scoped locations returned by the A
   const locationSelect = page.locator('ion-select').filter({ hasText: 'Einsatzort' }).last();
   await locationSelect.click();
 
-  await expect(page.getByText('QA Client Portal Standort', { exact: true })).toBeVisible();
-  await expect(page.getByText('QA Frankfurt Testsite', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('radio', { name: 'QA Client Portal Standort' })).toBeVisible();
+  await expect(page.getByRole('radio', { name: 'QA Frankfurt Testsite' })).toHaveCount(0);
 });
