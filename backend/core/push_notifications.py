@@ -7,7 +7,6 @@ from typing import Any
 import httpx
 import jwt
 from celery import shared_task
-from django.utils import timezone
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import service_account
 
@@ -46,9 +45,12 @@ def firebase_project_id() -> str:
 
 
 def _apns_values() -> tuple[str, str, str, str, bool]:
+    # APNs auth keys are capability-scoped. Do not reuse Sign in with Apple or
+    # App Store Connect API keys here: they can be syntactically valid .p8 keys
+    # while still being rejected by APNs.
     team_id = os.getenv('APNS_TEAM_ID', '').strip() or os.getenv('APPLE_TEAM_ID', '').strip()
-    key_id = os.getenv('APNS_KEY_ID', '').strip() or os.getenv('APPLE_KEY_ID', '').strip()
-    private_key = _multiline(os.getenv('APNS_PRIVATE_KEY', '')) or _multiline(os.getenv('APPLE_PRIVATE_KEY', ''))
+    key_id = os.getenv('APNS_KEY_ID', '').strip()
+    private_key = _multiline(os.getenv('APNS_PRIVATE_KEY', ''))
     bundle_id = os.getenv('APNS_BUNDLE_ID', '').strip() or DEFAULT_BUNDLE_ID
     sandbox = os.getenv('APNS_USE_SANDBOX', '0').strip().lower() in {'1', 'true', 'yes'}
     return team_id, key_id, private_key, bundle_id, sandbox
@@ -87,7 +89,7 @@ def _fcm_access_token() -> str:
 def _apns_provider_token() -> str:
     team_id, key_id, private_key, _, _ = _apns_values()
     if not (team_id and key_id and private_key):
-        raise RuntimeError('APNs signing key is not configured.')
+        raise RuntimeError('Dedicated APNs signing key is not configured.')
     now = time.time()
     if (
         _APNS_CACHE['token']
@@ -217,8 +219,8 @@ def deliver_notification(notification: Notification) -> dict[str, int]:
     return result
 
 
-@shared_task(bind=True, autoretry_for=(httpx.TransportError,), retry_backoff=True, retry_kwargs={'max_retries': 3})
-def send_notification_push(self, notification_id: str):
+@shared_task
+def send_notification_push(notification_id: str):
     notification = Notification.objects.select_related('user').filter(pk=notification_id).first()
     if not notification:
         return {'missing': 1}
