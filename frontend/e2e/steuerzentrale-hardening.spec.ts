@@ -53,7 +53,7 @@ async function openSteuerzentrale(page: any) {
 async function expectWorkforceProControlsVisible(page: any) {
   const premium = page.getByTestId('premium-operations-panel');
   await expect(premium).toBeVisible();
-  const labels = ['Automatische Dienstplanung','OpenShift-Übernahme freigeben','Standortübergreifender Personaleinsatz','Überlappende OpenShifts','Mehrere Schichten pro Tag','Zeitzonenumschaltung'];
+  const labels = ['Automatische Dienstplanung','OpenShift-Übernahme freigeben','Standortübergreifender Personaleinsatz','Überlappende OpenShifts zulassen','Mehrere Schichten pro Tag','Zeitzonenumschaltung'];
   for (const label of labels) {
     const node = premium.getByText(label, { exact: true }).last();
     await expect(node).toBeVisible();
