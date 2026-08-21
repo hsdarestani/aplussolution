@@ -1,4 +1,5 @@
 from difflib import SequenceMatcher
+from uuid import UUID
 
 from django.db import transaction
 from django.utils import timezone
@@ -23,13 +24,29 @@ def _position_from_structured_value(value):
     text = str(value).strip()
     if not text:
         return None
+
+    # Position IDs are UUIDs. Do not ask PostgreSQL to cast arbitrary client text
+    # such as "Servicekräfte" to UUID; invalid casts can surface as a 500.
     try:
-        by_id = Position.objects.filter(pk=text, active=True).first()
-    except (TypeError, ValueError):
-        by_id = None
-    if by_id:
-        return by_id
+        position_id = UUID(text)
+    except (TypeError, ValueError, AttributeError):
+        position_id = None
+    if position_id:
+        by_id = Position.objects.filter(pk=position_id, active=True).first()
+        if by_id:
+            return by_id
+
     return Position.objects.filter(name__iexact=text, active=True).first()
+
+
+def _function_values(raw):
+    if not raw:
+        return []
+    if isinstance(raw, (list, tuple, set)):
+        return list(raw)
+    if isinstance(raw, dict):
+        return [raw]
+    return [raw]
 
 
 def _infer_position(order, explicit=None):
@@ -37,12 +54,16 @@ def _infer_position(order, explicit=None):
     if position:
         return position
 
-    for value in order.functions or []:
+    for value in _function_values(order.functions):
         position = _position_from_structured_value(value)
         if position:
             return position
 
-    haystack = _normalize(f'{order.title} {order.description}')
+    function_text = ' '.join(
+        str(value.get('name') or value.get('role') or value.get('label') or '') if isinstance(value, dict) else str(value or '')
+        for value in _function_values(order.functions)
+    )
+    haystack = _normalize(f'{order.title} {order.description} {function_text}')
     tokens = [token.strip('.,;:()[]{}') for token in haystack.split() if len(token) > 2]
     candidates = []
     for item in Position.objects.filter(active=True):
