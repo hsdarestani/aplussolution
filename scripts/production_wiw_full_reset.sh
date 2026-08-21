@@ -3,7 +3,10 @@ set -Eeuo pipefail
 
 cd /opt/aplussolution
 
-DONE_MARKER="/root/.aplussolution-wiw-full-reset-20260821.done"
+# v2 reruns the clean import once with bounded WIW history windows. The v1
+# marker is intentionally not reused because the first broad-range reconciliation
+# exposed a silent-empty /shifts response from WIW.
+DONE_MARKER="/root/.aplussolution-wiw-full-reset-bounded-v2-20260821.done"
 BACKUP_DIR="/root/aplussolution-backups"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 DB_BACKUP="$BACKUP_DIR/pre-wiw-full-reset-$STAMP.sql.gz"
@@ -13,7 +16,7 @@ COUNTS_BEFORE="$BACKUP_DIR/pre-wiw-counts-$STAMP.log"
 COUNTS_AFTER="$BACKUP_DIR/post-wiw-counts-$STAMP.log"
 
 if [[ -f "$DONE_MARKER" ]]; then
-  echo "WIW full reset already completed; marker: $DONE_MARKER"
+  echo "WIW bounded full reset already completed; marker: $DONE_MARKER"
   cat "$DONE_MARKER"
   exit 0
 fi
@@ -61,7 +64,7 @@ restore_database() {
 }
 
 # Non-destructive credential/API preflight. The final import performs its own
-# complete 2000-01-01..2100-01-01 snapshot fetch after the clean database boots.
+# complete 2000-01-01..2100-01-01 bounded snapshot fetch after the clean DB boots.
 docker compose exec -T backend python manage.py shell -c "from core.wiw import WhenIWorkClient; c=WhenIWorkClient(); checks={};
 for r in ('users','positions','locations','sites','shifts','times','availabilities','requests'):
     checks[r]=len(c.collection(r, params={'limit': 1}, optional=False).items)
@@ -76,28 +79,21 @@ sha256sum "$DB_BACKUP" > "$DB_CHECKSUM"
 chmod 600 "$DB_BACKUP" "$DB_CHECKSUM" "$COUNTS_BEFORE"
 echo "Production backup ready: $DB_BACKUP"
 
-IMPORT_OK=0
-
 perform_clean_import() {
   docker compose stop backend celery celery-beat >/dev/null || return 1
   reset_database || return 1
   docker compose exec -T redis redis-cli FLUSHALL >/dev/null || return 1
 
-  # Starting backend on the empty DB reruns all schema/data migrations and bootstrap,
-  # preserving production secrets from .env while removing all prior app records.
   docker compose up -d backend >/dev/null || return 1
   wait_backend || {
     docker compose logs --no-color --tail=250 backend >&2 || true
     return 1
   }
 
-  # This command fetches every supported WIW resource over the complete history
-  # window 2000-01-01..2100-01-01, imports it, and refuses success if reconciliation
-  # finds any remote IDs missing locally.
+  # Dynamic WIW resources are proactively split into bounded windows and a
+  # current/default probe must be contained in the resulting history snapshot.
   docker compose exec -T backend python manage.py migrate_wiw_final --apply --strict --compact | tee "$REPORT_FILE" || return 1
 
-  # Strict reconciliation is complemented by requiring the actual final_full sync
-  # run to have zero row-level errors.
   docker compose exec -T backend python manage.py shell -c "from core.models import IntegrationSyncRun; r=IntegrationSyncRun.objects.filter(provider='wiw',mode='final_full').order_by('-created_at').first(); assert r is not None, 'No final_full WIW run'; assert r.status == 'success', r.errors; print({'sync_id':str(r.id),'status':r.status,'counts':r.counts,'errors':r.errors})" || return 1
 
   docker compose exec -T backend python manage.py shell -c "from django.conf import settings; from core.models import User,WorkerProfile,ClientCompany,Location,Position,Shift,TimeEntry,Availability,TimeOffRequest; assert settings.WIW_SYNC_ENABLED is False; print({'users':User.objects.count(),'workers':WorkerProfile.objects.count(),'clients':ClientCompany.objects.count(),'locations':Location.objects.count(),'positions':Position.objects.count(),'shifts':Shift.objects.count(),'times':TimeEntry.objects.count(),'availabilities':Availability.objects.count(),'requests':TimeOffRequest.objects.count(),'wiw_sync_enabled':settings.WIW_SYNC_ENABLED})" | tee "$COUNTS_AFTER" || return 1
@@ -107,10 +103,8 @@ perform_clean_import() {
   return 0
 }
 
-if perform_clean_import; then
-  IMPORT_OK=1
-else
-  echo "WIW clean import failed; restoring the exact pre-reset production backup." >&2
+if ! perform_clean_import; then
+  echo "WIW bounded clean import failed; restoring the exact pre-reset production backup." >&2
   restore_database
   exit 1
 fi
@@ -126,5 +120,5 @@ counts_after=$COUNTS_AFTER
 EOF
 chmod 600 "$DONE_MARKER"
 
-echo "WIW full reset/import completed and verified."
+echo "WIW bounded full reset/import completed and verified."
 cat "$DONE_MARKER"
