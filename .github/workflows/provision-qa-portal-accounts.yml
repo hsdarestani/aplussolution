@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   provision:
@@ -21,6 +22,7 @@ jobs:
           sudo apt-get install -y -qq sshpass >/dev/null
 
       - name: Create test portals and emit encrypted credentials
+        id: provision
         env:
           HOST: ${{ secrets.HOST }}
           PASS: ${{ secrets.PASS }}
@@ -127,3 +129,12 @@ jobs:
 
           CIPHER="$(printf '%s' "$QA_JSON" | openssl pkeyutl -encrypt -pubin -inkey /tmp/qa-public.pem -pkeyopt rsa_padding_mode:oaep | base64 -w0)"
           echo "QA_CREDENTIALS_RSA_B64=$CIPHER"
+          echo "cipher=$CIPHER" >> "$GITHUB_OUTPUT"
+
+      - name: Publish encrypted credential ciphertext
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CIPHER: ${{ steps.provision.outputs.cipher }}
+        run: |
+          body=$(printf 'QA portal accounts were provisioned on production.\n\n`QA_CREDENTIALS_RSA_B64=%s`\n\nThe payload is RSA-encrypted; no plaintext password is stored in GitHub.' "$CIPHER")
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/119" -f body="$body" -f state=open >/dev/null
