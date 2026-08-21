@@ -46,6 +46,7 @@ jobs:
           python -m compileall .
           python manage.py check
           python manage.py makemigrations --check --dry-run
+          bash -n ../scripts/production_wiw_full_reset.sh
       - name: Run backend tests with coverage
         working-directory: backend
         env:
@@ -82,7 +83,7 @@ jobs:
     if: github.event_name == 'push'
     needs: validate
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 75
     steps:
       - name: Publish deploy phase
         continue-on-error: true
@@ -226,6 +227,24 @@ jobs:
           docker compose ps
           docker image prune -f
           REMOTE
+      - name: Authorized one-time WIW full reset and import
+        timeout-minutes: 50
+        env:
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
+          HOST: ${{ secrets.HOST }}
+          SSH_ASKPASS: /tmp/aplus-askpass.sh
+          SSH_ASKPASS_REQUIRE: force
+          DISPLAY: :0
+        run: |
+          set -euo pipefail
+          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
+          setsid -w ssh \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=20 \
+            -o ServerAliveCountMax=20 \
+            root@"$HOST" 'bash /opt/aplussolution/scripts/production_wiw_full_reset.sh'
   deployment-status:
     if: always() && github.event_name == 'push'
     needs: [validate, deploy]

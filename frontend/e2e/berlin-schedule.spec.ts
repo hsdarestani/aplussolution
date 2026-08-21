@@ -67,7 +67,10 @@ async function mockWorker(page: Page) {
 
 test.use({ timezoneId: 'Asia/Tehran' });
 
+const fixedNow = new Date('2026-08-21T08:00:00Z');
+
 test('schedule always shows German business time regardless of device timezone', async ({ page }) => {
+  await page.clock.setFixedTime(fixedNow);
   await mockAdmin(page);
   await page.goto('/?view=schedule');
 
@@ -80,6 +83,7 @@ test('schedule always shows German business time regardless of device timezone',
 });
 
 test('worker home always shows German business time regardless of device timezone', async ({ page }) => {
+  await page.clock.setFixedTime(fixedNow);
   await mockWorker(page);
   await page.goto('/?view=home');
 

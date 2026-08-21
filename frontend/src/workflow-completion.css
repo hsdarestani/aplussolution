@@ -1,0 +1,256 @@
+.akte-open-button,
+.order-upload-button,
+.workflow-actions button,
+.akte-head button {
+  border: 1px solid rgba(36, 87, 230, .22);
+  background: #fff;
+  color: #1d4ed8;
+  border-radius: 10px;
+  min-height: 36px;
+  padding: 8px 12px;
+  font: 700 13px/1 system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+}
+
+.akte-open-button {
+  margin-left: 6px;
+  flex: 0 0 auto;
+}
+
+.order-upload-button {
+  background: linear-gradient(135deg, #173c8f, #2457e6);
+  color: #fff;
+  border: 0;
+  box-shadow: 0 8px 24px rgba(36, 87, 230, .22);
+}
+
+.akte-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  background: rgba(8, 15, 35, .55);
+  backdrop-filter: blur(8px);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.akte-modal,
+.order-upload-modal {
+  width: min(980px, 100%);
+  max-height: min(88vh, 920px);
+  overflow: auto;
+  border-radius: 22px;
+  background: #f8fafc;
+  box-shadow: 0 28px 90px rgba(8, 15, 35, .30);
+  padding: 22px;
+}
+
+.order-upload-modal {
+  width: min(640px, 100%);
+  display: grid;
+  gap: 16px;
+}
+
+.akte-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.akte-head small {
+  color: #2457e6;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
+.akte-head h2 {
+  margin: 4px 0 4px;
+  font-size: clamp(24px, 4vw, 34px);
+  color: #0f172a;
+}
+
+.akte-head p,
+.akte-empty,
+.workflow-note {
+  margin: 0;
+  color: #64748b;
+}
+
+.akte-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.akte-summary > div {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  border-radius: 16px;
+  padding: 14px;
+  display: grid;
+  gap: 5px;
+}
+
+.akte-summary span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.akte-summary strong {
+  color: #0f172a;
+  font-size: 24px;
+}
+
+.akte-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.akte-sections section {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 16px;
+  min-width: 0;
+}
+
+.akte-sections h3 {
+  margin: 0 0 10px;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.akte-sections h3 em {
+  font-style: normal;
+  font-size: 12px;
+  background: #eef2ff;
+  color: #2457e6;
+  border-radius: 999px;
+  padding: 4px 8px;
+}
+
+.akte-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-top: 1px solid #eef2f7;
+}
+
+.akte-row:first-of-type {
+  border-top: 0;
+}
+
+.akte-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.akte-row b {
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.akte-row small,
+.akte-row span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.akte-row a {
+  color: #2457e6;
+  text-decoration: none;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.order-upload-modal label {
+  display: grid;
+  gap: 7px;
+  color: #334155;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.order-upload-modal select,
+.order-upload-modal textarea,
+.order-upload-modal input[type="file"] {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 12px;
+  padding: 11px 12px;
+  font: 500 14px/1.4 system-ui, -apple-system, sans-serif;
+  color: #0f172a;
+}
+
+.order-file span {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.workflow-note,
+.workflow-message {
+  border-radius: 12px;
+  padding: 11px 12px;
+  background: #f1f5f9;
+}
+
+.workflow-message {
+  color: #166534;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+}
+
+.workflow-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.workflow-actions .primary {
+  background: #2457e6;
+  color: #fff;
+  border-color: #2457e6;
+}
+
+.workflow-global-message {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 11000;
+  max-width: 420px;
+  background: #0f172a;
+  color: #fff;
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 16px 50px rgba(15, 23, 42, .28);
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .akte-overlay { padding: 0; align-items: end; }
+  .akte-modal,
+  .order-upload-modal {
+    max-height: 92vh;
+    border-radius: 20px 20px 0 0;
+    padding: 16px;
+  }
+  .akte-sections { grid-template-columns: 1fr; }
+  .akte-head { align-items: flex-start; }
+  .akte-open-button { min-height: 34px; padding: 7px 10px; }
+  .order-upload-button { width: 100%; margin-top: 8px; }
+  .title:has(.order-upload-button) { flex-wrap: wrap; }
+  .workflow-actions { flex-direction: column-reverse; }
+  .workflow-actions button { width: 100%; }
+}
