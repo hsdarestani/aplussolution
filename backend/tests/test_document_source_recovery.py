@@ -17,6 +17,11 @@ def _write_docx(path: Path, marker='document'):
         archive.writestr('word/document.xml', f'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>{marker}</w:t></w:r></w:p></w:body></w:document>')
 
 
+def _write_pdf(path: Path, marker='document'):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b'%PDF-1.4\n%' + marker.encode('utf-8') + b'\n%%EOF\n')
+
+
 @pytest.mark.django_db
 def test_catalog_source_is_recovered_from_persistent_media_and_manifest(tmp_path):
     with override_settings(MEDIA_ROOT=tmp_path):
@@ -50,6 +55,46 @@ def test_catalog_source_is_recovered_from_persistent_media_and_manifest(tmp_path
         assert second['recovered'] == 1
         assert template.source_file.name == 'contract_templates/AV_Muster_20262027.docx'
         assert source_exists(template)
+
+
+@pytest.mark.django_db
+def test_recovery_accepts_safe_user_copy_suffixes(tmp_path):
+    with override_settings(MEDIA_ROOT=tmp_path):
+        ensure_document_catalog(recover_sources=False)
+        directory = tmp_path / 'contract_templates'
+        copied_pdf = directory / 'Personalfragebogen A+  (7).pdf'
+        copied_docx = directory / 'AV Muster 20262027 (2).docx'
+        _write_pdf(copied_pdf, 'personalfragebogen')
+        _write_docx(copied_docx, 'arbeitsvertrag')
+
+        result = recover_document_sources(slugs=['personalfragebogen-standard', 'arbeitsvertrag-dgb-gvp'])
+
+        assert result['complete'] is True
+        assert result['recovered'] == 2
+        personnel = ContractTemplate.objects.get(slug='personalfragebogen-standard')
+        contract = ContractTemplate.objects.get(slug='arbeitsvertrag-dgb-gvp')
+        assert personnel.source_file.name.endswith('Personalfragebogen A+  (7).pdf')
+        assert contract.source_file.name.endswith('AV Muster 20262027 (2).docx')
+        assert source_exists(personnel)
+        assert source_exists(contract)
+
+
+@pytest.mark.django_db
+def test_recovery_prefers_exact_canonical_name_over_different_copy(tmp_path):
+    with override_settings(MEDIA_ROOT=tmp_path):
+        ensure_document_catalog(recover_sources=False)
+        directory = tmp_path / 'contract_templates'
+        canonical = directory / 'Aufhebungsvertrag - Muster.docx'
+        copied = directory / 'Aufhebungsvertrag - Muster (1).docx'
+        _write_docx(canonical, 'approved-canonical')
+        _write_docx(copied, 'different-copy')
+
+        result = recover_document_sources(slugs=['aufhebungsvertrag'])
+
+        assert result['complete'] is True
+        assert result['recovered'] == 1
+        template = ContractTemplate.objects.get(slug='aufhebungsvertrag')
+        assert template.source_file.name.endswith('Aufhebungsvertrag - Muster.docx')
 
 
 @pytest.mark.django_db

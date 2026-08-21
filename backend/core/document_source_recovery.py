@@ -15,6 +15,10 @@ from .models import ContractTemplate
 
 MANIFEST_NAME = '.source-manifest.json'
 _DJANGO_COLLISION_SUFFIX = re.compile(r'_[A-Za-z0-9]{7}$')
+_COPY_SUFFIX = re.compile(
+    r'(?:\s*[\(\[]\s*\d+\s*[\)\]]|\s+(?:copy|kopie)(?:\s*\d+)?)$',
+    re.IGNORECASE,
+)
 
 
 def _catalog_dir() -> Path:
@@ -33,11 +37,33 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _fingerprint(filename: str) -> str:
+def _normalized_fingerprint(filename: str, *, strip_copy_suffix: bool) -> str:
     stem = Path(filename).stem.strip()
-    stem = _DJANGO_COLLISION_SUFFIX.sub('', stem)
+    while True:
+        previous = stem
+        stem = _DJANGO_COLLISION_SUFFIX.sub('', stem).strip()
+        if strip_copy_suffix:
+            stem = _COPY_SUFFIX.sub('', stem).strip()
+        if stem == previous:
+            break
     normalized = unicodedata.normalize('NFKD', stem).casefold()
     return ''.join(char for char in normalized if char.isalnum())
+
+
+def _fingerprint(filename: str) -> str:
+    """Match safe OS/browser copy names such as ``file (1).pdf`` to the canonical source.
+
+    User uploads and browser downloads frequently gain ``(1)``, ``(2)`` or ``(7)``
+    before the extension. Those bytes are still the supplied private source and must
+    survive a database reset. Django's own seven-character collision suffix is also
+    ignored. The stricter fingerprint below is retained so an exact canonical name
+    can win over differing copies without guessing between legal documents.
+    """
+    return _normalized_fingerprint(filename, strip_copy_suffix=True)
+
+
+def _strict_fingerprint(filename: str) -> str:
+    return _normalized_fingerprint(filename, strip_copy_suffix=False)
 
 
 def _relative_storage_name(path: Path) -> str:
@@ -144,6 +170,18 @@ def _candidate_files(catalog: dict) -> list[Path]:
     return sorted(candidates, key=lambda path: (path.stat().st_mtime_ns, path.name), reverse=True)
 
 
+def _preferred_candidates(catalog: dict, candidates: list[Path]) -> list[Path]:
+    """Prefer the canonical filename when copies with different bytes also exist.
+
+    A canonical/sanitized source name is stronger evidence than ``(1)``/``(2)``
+    copies. If no strict canonical candidate exists, all copy candidates remain in
+    the pool and the checksum ambiguity guard below decides whether recovery is safe.
+    """
+    expected = _strict_fingerprint(catalog.get('source_name') or '')
+    exact = [path for path in candidates if _strict_fingerprint(path.name) == expected]
+    return exact or candidates
+
+
 def _manifest_candidate(slug: str, catalog: dict, manifest: dict) -> Path | None:
     entry = manifest.get('templates', {}).get(slug)
     if not isinstance(entry, dict) or not entry.get('storage_name'):
@@ -217,15 +255,16 @@ def recover_document_sources(slugs=None) -> dict:
             result['missing'].append({'slug': slug, 'source_name': catalog.get('source_name') or ''})
             continue
 
-        checksums = {_sha256(path) for path in candidates}
-        if len(candidates) > 1 and len(checksums) > 1:
+        preferred = _preferred_candidates(catalog, candidates)
+        checksums = {_sha256(path) for path in preferred}
+        if len(preferred) > 1 and len(checksums) > 1:
             result['ambiguous'].append({
                 'slug': slug,
-                'files': [_relative_storage_name(path) for path in candidates],
+                'files': [_relative_storage_name(path) for path in preferred],
             })
             continue
 
-        _attach_existing_file(template, candidates[0])
+        _attach_existing_file(template, preferred[0])
         result['recovered'] += 1
 
     expected_count = len(selected & set(CATALOG_BY_SLUG))

@@ -42,6 +42,70 @@
   visibility: visible !important;
 }
 
+/* Ionic controls in Workforce Pro are Shadow-DOM components. On the production
+   theme they can inherit a transparent/white foreground while their boxes remain
+   visible. Pin the public color variables/parts so labels, values and toggles can
+   never turn into empty white rectangles. */
+.premium-ops,
+.premium-ops .premium-box,
+.premium-ops .premium-toggle-grid,
+.premium-ops .premium-fields {
+  color: #101828 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.premium-ops .premium-toggle-grid ion-item {
+  --background: #fff;
+  --color: #101828;
+  --border-color: rgba(15, 35, 70, .08);
+  color: #101828 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.premium-ops .premium-toggle-grid ion-label {
+  display: block !important;
+  color: #101828 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.premium-ops ion-toggle {
+  --track-background: #d0d5dd;
+  --track-background-checked: var(--ion-color-primary, #2f6bff);
+  --handle-background: #fff;
+  --handle-background-checked: #fff;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.premium-ops ion-input,
+.premium-ops ion-select,
+.premium-ops ion-textarea {
+  --background: #fff;
+  --color: #101828;
+  --placeholder-color: #667085;
+  --placeholder-opacity: 1;
+  color: #101828 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.premium-ops ion-input::part(label),
+.premium-ops ion-select::part(label),
+.premium-ops ion-textarea::part(label) {
+  color: #475467 !important;
+  opacity: 1 !important;
+}
+
+.premium-ops ion-input::part(native),
+.premium-ops ion-select::part(text),
+.premium-ops ion-textarea::part(native) {
+  color: #101828 !important;
+  opacity: 1 !important;
+}
+
 .aplus-api-health {
   position: fixed;
   z-index: 2147483000;
