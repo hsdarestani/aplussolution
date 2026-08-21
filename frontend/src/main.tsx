@@ -20,6 +20,7 @@ import PayrollWorkspaceEnhancer from './PayrollWorkspaceEnhancer';
 import WorkflowCompletionEnhancer from './WorkflowCompletionEnhancer';
 import ApiHealthBanner from './ApiHealthBanner';
 import HeaderQuickAccess from './HeaderQuickAccess';
+import NativePushRegistration from './NativePushRegistration';
 import { installBerlinLocaleDefaults } from './berlinLocale';
 import { installOperationalFetchResilience } from './operationalFetchResilience';
 
@@ -38,6 +39,7 @@ function renderApp() {
         <>
           <App />
           <HeaderQuickAccess />
+          <NativePushRegistration />
           <StoreComplianceLinks />
           <FriendlyDateTimePicker />
           <PayrollWorkspaceEnhancer />
