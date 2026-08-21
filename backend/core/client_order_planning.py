@@ -23,7 +23,10 @@ def _position_from_structured_value(value):
     text = str(value).strip()
     if not text:
         return None
-    by_id = Position.objects.filter(pk=text, active=True).first()
+    try:
+        by_id = Position.objects.filter(pk=text, active=True).first()
+    except (TypeError, ValueError):
+        by_id = None
     if by_id:
         return by_id
     return Position.objects.filter(name__iexact=text, active=True).first()
@@ -61,42 +64,35 @@ def _infer_position(order, explicit=None):
     return best if best_score >= 0.70 else None
 
 
-@api_view(['POST'])
-@permission_classes([IsAdminOrManager])
-def confirm_and_plan_order(request, pk):
+def plan_client_order(order_id, request, explicit_position=None):
+    """Confirm one client order and create its multi-slot OpenShift exactly once."""
     with transaction.atomic():
         order = (
             ClientOrder.objects.select_for_update()
             .select_related('client', 'location')
-            .filter(pk=pk)
+            .filter(pk=order_id)
             .first()
         )
         if not order:
-            return Response({'detail': 'Auftrag wurde nicht gefunden.'}, status=404)
+            raise ValueError('Auftrag wurde nicht gefunden.')
 
         existing = order.shifts.exclude(status=Shift.Status.CANCELLED).order_by('starts_at').first()
         if existing:
             if order.status != ClientOrder.Status.CONFIRMED:
                 order.status = ClientOrder.Status.CONFIRMED
                 order.save(update_fields=['status', 'updated_at'])
-            return Response({
-                'detail': 'Der Auftrag ist bereits eingeplant.',
-                'created': False,
-                'shift': ShiftSerializer(existing).data,
-            })
+            return order, existing, False
 
         if not order.location_id:
-            return Response({'detail': 'Bitte zuerst einen Einsatzort im Auftrag hinterlegen.'}, status=400)
+            raise ValueError('Bitte zuerst einen Einsatzort im Auftrag hinterlegen.')
         if order.location.client_id not in (None, order.client_id):
-            return Response({'detail': 'Der Einsatzort gehört nicht zu diesem Kunden.'}, status=400)
+            raise ValueError('Der Einsatzort gehört nicht zu diesem Kunden.')
         if not order.starts_at or not order.ends_at or order.ends_at <= order.starts_at:
-            return Response({'detail': 'Beginn und Ende des Auftrags sind ungültig.'}, status=400)
+            raise ValueError('Beginn und Ende des Auftrags sind ungültig.')
 
-        position = _infer_position(order, request.data.get('position'))
+        position = _infer_position(order, explicit_position)
         if not position:
-            return Response({
-                'detail': 'Die Funktion/Position konnte nicht eindeutig erkannt werden. Bitte im Kundenauftrag eine Position auswählen.'
-            }, status=400)
+            raise ValueError('Die Funktion/Position konnte nicht eindeutig erkannt werden.')
 
         shift = Shift.objects.create(
             order=order,
@@ -121,9 +117,20 @@ def confirm_and_plan_order(request, pk):
             'position_id': str(position.id),
             'required_count': shift.required_count,
         })
+        return order, shift, True
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminOrManager])
+def confirm_and_plan_order(request, pk):
+    try:
+        _order, shift, created = plan_client_order(pk, request, request.data.get('position'))
+    except ValueError as exc:
+        message = str(exc)
+        return Response({'detail': message}, status=404 if message == 'Auftrag wurde nicht gefunden.' else 400)
 
     return Response({
-        'detail': 'Auftrag wurde bestätigt und direkt eingeplant.',
-        'created': True,
+        'detail': 'Auftrag wurde bestätigt und direkt eingeplant.' if created else 'Der Auftrag ist bereits eingeplant.',
+        'created': created,
         'shift': ShiftSerializer(shift).data,
-    }, status=201)
+    }, status=201 if created else 200)
