@@ -3,12 +3,8 @@ const PATCH_FLAG = Symbol.for('aplus.berlin-locale-patched');
 
 function includesGermanLocale(locales?: Intl.LocalesArgument): boolean {
   if (!locales) return false;
-  if (typeof locales === 'string') return locales.toLowerCase().startsWith('de');
-  try {
-    return Array.from(locales as Iterable<string>).some((locale) => String(locale).toLowerCase().startsWith('de'));
-  } catch {
-    return false;
-  }
+  const values = Array.isArray(locales) ? locales : [locales];
+  return values.some((locale) => String(locale).toLowerCase().startsWith('de'));
 }
 
 function berlinOptions(locales: Intl.LocalesArgument | undefined, options?: Intl.DateTimeFormatOptions) {
@@ -17,7 +13,7 @@ function berlinOptions(locales: Intl.LocalesArgument | undefined, options?: Intl
 }
 
 export function installBerlinLocaleDefaults() {
-  const proto = Date.prototype as Date & Record<PropertyKey, unknown>;
+  const proto = Date.prototype as any;
   if (proto[PATCH_FLAG]) return;
 
   const originalDateTime = Date.prototype.toLocaleString;
@@ -28,21 +24,21 @@ export function installBerlinLocaleDefaults() {
     configurable: true,
     writable: true,
     value: function toLocaleString(locales?: Intl.LocalesArgument, options?: Intl.DateTimeFormatOptions) {
-      return originalDateTime.call(this, locales as any, berlinOptions(locales, options));
+      return Reflect.apply(originalDateTime, this, [locales, berlinOptions(locales, options)]);
     },
   });
   Object.defineProperty(Date.prototype, 'toLocaleDateString', {
     configurable: true,
     writable: true,
     value: function toLocaleDateString(locales?: Intl.LocalesArgument, options?: Intl.DateTimeFormatOptions) {
-      return originalDate.call(this, locales as any, berlinOptions(locales, options));
+      return Reflect.apply(originalDate, this, [locales, berlinOptions(locales, options)]);
     },
   });
   Object.defineProperty(Date.prototype, 'toLocaleTimeString', {
     configurable: true,
     writable: true,
     value: function toLocaleTimeString(locales?: Intl.LocalesArgument, options?: Intl.DateTimeFormatOptions) {
-      return originalTime.call(this, locales as any, berlinOptions(locales, options));
+      return Reflect.apply(originalTime, this, [locales, berlinOptions(locales, options)]);
     },
   });
   Object.defineProperty(Date.prototype, PATCH_FLAG, {
