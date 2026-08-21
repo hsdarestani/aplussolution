@@ -96,7 +96,7 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
                 or worker.monthly_hours
                 or settings.WORKING_TIME_DEFAULT_MONTHLY_LIMIT
             )
-            base_rate, allowance, effective_rate = effective_hourly_rate(worker, row_setting)
+            _base_rate, _allowance, effective_rate = effective_hourly_rate(worker, row_setting)
 
             prior = (
                 WorkingTimeAccountRecord.objects
@@ -134,7 +134,7 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
                         'hourly_rate': effective_rate,
                         'gross_amount': gross,
                         'raw_entries': raw_entries,
-                        'source': 'aplus_time_entries_approved',
+                        'source': 'aplus_time_entries',
                         'synced_at': now,
                     },
                 )
@@ -157,7 +157,7 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
             message=message,
             records_count=count,
             metadata={
-                'source': 'aplus_time_entries_approved',
+                'source': 'aplus_time_entries',
                 'closed_entries': len(closed_entries),
                 'approved_entries': len(approved_entries),
                 'excluded_unapproved_entries': excluded_unapproved,
