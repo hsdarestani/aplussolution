@@ -28,13 +28,16 @@ function installGoogleServices() {
   const targetPath = path.join(cwd, 'android', 'app', 'google-services.json');
   const encoded = String(process.env.GOOGLE_SERVICES_JSON_BASE64 || '').trim();
   const raw = String(process.env.GOOGLE_SERVICES_JSON || '').trim();
+  const checkedIn = path.join(cwd, 'firebase', 'google-services.json');
   if (encoded) {
     fs.writeFileSync(targetPath, Buffer.from(encoded, 'base64'));
   } else if (raw) {
     fs.writeFileSync(targetPath, raw);
+  } else if (fs.existsSync(checkedIn)) {
+    fs.copyFileSync(checkedIn, targetPath);
   }
   if (requirePush && !fs.existsSync(targetPath)) {
-    throw new Error('Native Android push requires GOOGLE_SERVICES_JSON_BASE64 or GOOGLE_SERVICES_JSON.');
+    throw new Error('Native Android push requires GOOGLE_SERVICES_JSON_BASE64, GOOGLE_SERVICES_JSON, or firebase/google-services.json.');
   }
   if (fs.existsSync(targetPath)) console.log('Firebase google-services.json installed for Android push.');
 }
