@@ -82,7 +82,7 @@ urlpatterns = [
     path('automation/orders/packages/', automation_views.order_packages),
     path('automation/orders/packages/<uuid:pk>/generate/', automation_views.order_generate),
     path('automation/orders/sync-packages/', automation_views.order_sync_packages),
-    path('working-time/settings/', automation_views.worktime_settings),
+    path('working-time/settings/', payroll_views.worktime_settings),
     path('working-time/sync/', automation_views.worktime_sync),
     path('working-time/records/', automation_views.worktime_records),
     path('working-time/records/<uuid:pk>/', automation_views.worktime_record_update),
