@@ -213,6 +213,12 @@ export default function FriendlyDateTimePicker() {
     close();
   }
 
+  function clearValue() {
+    if (!target) return;
+    emitValue(target.element, '');
+    close();
+  }
+
   function setQuick(offset: number) {
     if (!target) return;
     setDraft(quickPickerValue(target.kind, offset));
@@ -268,6 +274,7 @@ export default function FriendlyDateTimePicker() {
         )}
 
         <div className="friendly-picker-actions">
+          {!!target?.value && <IonButton expand="block" fill="clear" color="medium" onClick={clearValue}>Wert löschen</IonButton>}
           <IonButton expand="block" size="large" disabled={!draft} onClick={apply}>Übernehmen</IonButton>
         </div>
       </div>
