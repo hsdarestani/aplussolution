@@ -95,17 +95,19 @@ async function expectWorkforceProControlsVisible(page: any) {
   const premium = page.getByTestId('premium-operations-panel');
   await expect(premium).toBeVisible();
 
+  // The production UI enhancer deliberately Germanizes the raw PremiumOperations
+  // copy. Assert what users actually see instead of coupling the test to raw JSX.
   const labels = [
-    'Auto Scheduling',
+    'Automatische Dienstplanung',
     'OpenShift-Übernahme freigeben',
-    'Labor Sharing zwischen Einsatzorten',
+    'Standortübergreifender Personaleinsatz',
     'Überlappende OpenShifts',
     'Mehrere Schichten pro Tag',
     'Zeitzonenumschaltung',
   ];
 
   for (const label of labels) {
-    const node = premium.locator('ion-label').filter({ hasText: label });
+    const node = premium.getByText(label, { exact: true }).last();
     await expect(node).toBeVisible();
     const style = await node.evaluate((element) => {
       const computed = getComputedStyle(element);
@@ -117,7 +119,12 @@ async function expectWorkforceProControlsVisible(page: any) {
     expect(style.color).not.toBe('rgb(255, 255, 255)');
   }
 
-  await expect(premium.locator('ion-toggle')).toHaveCount(6);
+  await expect(premium.getByRole('switch')).toHaveCount(6);
+  for (let index = 0; index < 6; index += 1) await expect(premium.getByRole('switch').nth(index)).toBeVisible();
+  await expect(premium.getByRole('spinbutton', { name: 'Ruhezeit zwischen Tagen' })).toHaveValue('11');
+  await expect(premium.getByRole('spinbutton', { name: 'Max. Std./Tag' })).toHaveValue('10');
+  await expect(premium.getByRole('spinbutton', { name: 'Max. Std./Woche' })).toHaveValue('48');
+  await expect(premium.getByRole('spinbutton', { name: 'Max. Tage in Folge' })).toHaveValue('6');
   await expect(premium.getByText('Regeln speichern', { exact: true })).toBeVisible();
   await expect(premium.getByText('Vorschau', { exact: true })).toBeVisible();
   await expect(premium.getByText('Automatisch besetzen', { exact: true })).toBeVisible();
@@ -153,9 +160,6 @@ test('KPI cards stay visible and German timestamps use Europe/Berlin', async ({ 
     expect(style.color).not.toBe('rgba(0, 0, 0, 0)');
   }
 
-  // 23:30 UTC is 00:30 on 2 January in Berlin, but still 15:30 on 1 January
-  // in the deliberately configured America/Los_Angeles browser timezone.
-  // Native de-DE short formatting is 2.1.2026 rather than 02.01.2026.
   await expect(page.getByText(/2\.1\.2026.*00:30/)).toBeVisible();
   await expect(page.getByText('8/8 installiert')).toBeVisible();
   await expectWorkforceProControlsVisible(page);
