@@ -7,6 +7,19 @@ from .document_source_recovery import source_exists
 from .models import ContractTemplate
 
 
+def _public_recovery_summary(result):
+    result = result if isinstance(result, dict) else {}
+    return {
+        'complete': bool(result.get('complete')),
+        'expected': int(result.get('expected') or 0),
+        'installed': int(result.get('installed') or 0),
+        'recovered': int(result.get('recovered') or 0),
+        'missing': [str(item.get('slug')) for item in result.get('missing', []) if isinstance(item, dict) and item.get('slug')],
+        'ambiguous': [str(item.get('slug')) for item in result.get('ambiguous', []) if isinstance(item, dict) and item.get('slug')],
+        'invalid': [str(item.get('slug')) for item in result.get('invalid', []) if isinstance(item, dict) and item.get('slug')],
+    }
+
+
 @api_view(['GET'])
 def document_catalog(request):
     bootstrap = ensure_document_catalog()
@@ -32,5 +45,5 @@ def document_catalog(request):
         'count': len(rows),
         'documents': rows,
         'complete': all(row['source_installed'] for row in rows),
-        'recovery': bootstrap.get('sources', {}),
+        'recovery': _public_recovery_summary(bootstrap.get('sources', {})),
     })
