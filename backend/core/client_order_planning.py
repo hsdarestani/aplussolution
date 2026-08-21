@@ -88,12 +88,11 @@ def _infer_position(order, explicit=None):
 def plan_client_order(order_id, request, explicit_position=None):
     """Confirm one client order and create its multi-slot OpenShift exactly once."""
     with transaction.atomic():
-        order = (
-            ClientOrder.objects.select_for_update()
-            .select_related('client', 'location')
-            .filter(pk=order_id)
-            .first()
-        )
+        # Lock only the ClientOrder row. Joining nullable relations here makes
+        # PostgreSQL reject SELECT ... FOR UPDATE with
+        # "FOR UPDATE cannot be applied to the nullable side of an outer join".
+        # Client/location are loaded lazily below after the order row is locked.
+        order = ClientOrder.objects.select_for_update().filter(pk=order_id).first()
         if not order:
             raise ValueError('Auftrag wurde nicht gefunden.')
 
