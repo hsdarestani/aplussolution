@@ -24,9 +24,91 @@ if (appNext.includes(localDateTime)) {
   throw new Error('Legacy App.tsx dateTime helper marker changed; update prepare-build.mjs.');
 }
 
+// The backend is the source of truth for document lifecycle actions. Never show
+// an action that contract_readiness will reject, and never offer a signature role
+// that the selected document does not require.
+const legacyGenerateButton = `                {contract.status === 'draft' && (
+                  <IonButton size="small" fill="outline" onClick={() => contractAction(contract.id, 'generate_pdf')}>
+                    PDF erstellen
+                  </IonButton>
+                )}`;
+const readinessGenerateButton = `                {contract.readiness?.generation_allowed && (
+                  <IonButton size="small" fill="outline" onClick={() => contractAction(contract.id, 'generate_pdf')}>
+                    PDF erstellen
+                  </IonButton>
+                )}
+                {contract.status === 'draft' && contract.readiness && !contract.readiness.generation_allowed && (
+                  <IonButton
+                    size="small"
+                    fill="outline"
+                    disabled
+                    title={(contract.readiness.blocking_issues || []).map((issue: any) => issue.label).join(' · ') || 'Dokument ist noch nicht erzeugbar.'}
+                  >
+                    PDF nicht bereit
+                  </IonButton>
+                )}`;
+if (appNext.includes(legacyGenerateButton)) {
+  appNext = appNext.replace(legacyGenerateButton, readinessGenerateButton);
+} else if (!appNext.includes('PDF nicht bereit')) {
+  throw new Error('Contract PDF action marker changed; update prepare-build.mjs.');
+}
+
+const legacySendCondition = `{['draft', 'ready'].includes(contract.status) && (`;
+const readinessSendCondition = `{contract.readiness?.send_allowed && (`;
+if (appNext.includes(legacySendCondition)) {
+  appNext = appNext.replace(legacySendCondition, readinessSendCondition);
+} else if (!appNext.includes(readinessSendCondition)) {
+  throw new Error('Contract send action marker changed; update prepare-build.mjs.');
+}
+
+const legacySignatureCondition = `{(['client', 'worker'].includes(user.role) || isManager(user)) && ['ready', 'sent'].includes(contract.status) && !contract.signatures?.some((item: any) => item.role === (isManager(user) ? 'employer' : user.role === 'worker' ? 'employee' : 'client')) && (`;
+const readinessSignatureCondition = `{(['client', 'worker'].includes(user.role) || isManager(user)) && ['ready', 'sent'].includes(contract.status) && contract.readiness?.pending_signature_roles?.includes(isManager(user) ? 'employer' : user.role === 'worker' ? 'employee' : 'client') && (`;
+if (appNext.includes(legacySignatureCondition)) {
+  appNext = appNext.replace(legacySignatureCondition, readinessSignatureCondition);
+} else if (!appNext.includes(readinessSignatureCondition)) {
+  throw new Error('Contract signature action marker changed; update prepare-build.mjs.');
+}
+
 if (appNext !== appSource) {
   writeFileSync(appPath, appNext);
 }
+
+// Make the real drawing signature pad deterministic in dev, production and the
+// native store builds. The enhancer converts the legacy signature textarea to a
+// touch/mouse canvas while keeping the API payload unchanged.
+const mainPath = new URL('../src/main.tsx', import.meta.url);
+const mainSource = readFileSync(mainPath, 'utf8');
+let mainNext = mainSource;
+const resilienceImport = "import { installOperationalFetchResilience } from './operationalFetchResilience';";
+const signatureImport = "import { installSignaturePad } from './signaturePad';";
+if (!mainNext.includes(signatureImport)) {
+  if (!mainNext.includes(resilienceImport)) throw new Error('main.tsx resilience import marker changed; update prepare-build.mjs.');
+  mainNext = mainNext.replace(resilienceImport, `${resilienceImport}\n${signatureImport}`);
+}
+const resilienceInstall = 'installOperationalFetchResilience();';
+const signatureInstall = 'installSignaturePad();';
+if (!mainNext.includes(signatureInstall)) {
+  if (!mainNext.includes(resilienceInstall)) throw new Error('main.tsx install marker changed; update prepare-build.mjs.');
+  mainNext = mainNext.replace(resilienceInstall, `${resilienceInstall}\n${signatureInstall}`);
+}
+if (mainNext !== mainSource) writeFileSync(mainPath, mainNext);
+
+// Ionic's IonDatetime derives a narrow implicit year window when min/max are
+// absent on some mobile builds. Give unrestricted business date fields an
+// explicit 1900..2100 range so contracts can be dated beyond 2027.
+const friendlyPath = new URL('../src/FriendlyDateTimePicker.tsx', import.meta.url);
+const friendlySource = readFileSync(friendlyPath, 'utf8');
+let friendlyNext = friendlySource;
+const nativeBounds = `              min={target.min ? toIonDatetimeValue(target.kind, target.min) : undefined}
+              max={target.max ? toIonDatetimeValue(target.kind, target.max) : undefined}`;
+const wideBounds = `              min={target.min ? toIonDatetimeValue(target.kind, target.min) : target.kind === 'date' || target.kind === 'month' ? '1900-01-01' : target.kind === 'datetime-local' ? '1900-01-01T00:00' : undefined}
+              max={target.max ? toIonDatetimeValue(target.kind, target.max) : target.kind === 'date' || target.kind === 'month' ? '2100-12-31' : target.kind === 'datetime-local' ? '2100-12-31T23:59' : undefined}`;
+if (friendlyNext.includes(nativeBounds)) {
+  friendlyNext = friendlyNext.replace(nativeBounds, wideBounds);
+} else if (!friendlyNext.includes("'2100-12-31'")) {
+  throw new Error('FriendlyDateTimePicker bounds marker changed; update prepare-build.mjs.');
+}
+if (friendlyNext !== friendlySource) writeFileSync(friendlyPath, friendlyNext);
 
 // Chrome/Windows renders native date inputs using the device/browser locale even
 // when the app language is German. Workforce Pro must always show TT.MM.JJJJ,

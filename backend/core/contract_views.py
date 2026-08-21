@@ -1,5 +1,5 @@
 from django.utils import timezone
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
@@ -13,8 +13,19 @@ from .serializers import ContractSerializer
 from .services import allowed_signature_role, audit, sign_contract
 
 
+class ContractLifecycleSerializer(ContractSerializer):
+    """Expose backend lifecycle/readiness decisions to every scoped contract row."""
+
+    readiness = serializers.SerializerMethodField()
+
+    def get_readiness(self, obj):
+        return contract_readiness(obj)
+
+
 class ContractViewSet(SearchableContractViewSet):
     """Contract lifecycle with immutable sent/signed documents."""
+
+    serializer_class = ContractLifecycleSerializer
 
     def perform_update(self, serializer):
         contract = serializer.instance
@@ -123,7 +134,7 @@ class ContractViewSet(SearchableContractViewSet):
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=400)
         contract.refresh_from_db()
-        return Response(ContractSerializer(contract, context={'request': request}).data)
+        return Response(ContractLifecycleSerializer(contract, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
     def cancel(self, request, pk=None):
