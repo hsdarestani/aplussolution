@@ -17,5 +17,7 @@ class CoreConfig(AppConfig):
             shift_slots,
         )
         from .smart_docx_integration import install_smart_docx_renderer
+        from .smartdocs_contract_integration import install_smartdocs_contract_renderer
 
         install_smart_docx_renderer()
+        install_smartdocs_contract_renderer()
