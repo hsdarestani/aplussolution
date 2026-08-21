@@ -123,7 +123,8 @@ test('KPI cards stay visible and German timestamps use Europe/Berlin', async ({ 
 
   // 23:30 UTC is 00:30 on 2 January in Berlin, but still 15:30 on 1 January
   // in the deliberately configured America/Los_Angeles browser timezone.
-  await expect(page.getByText(/02\.01\.2026.*00:30/)).toBeVisible();
+  // Native de-DE short formatting is 2.1.2026 rather than 02.01.2026.
+  await expect(page.getByText(/2\.1\.2026.*00:30/)).toBeVisible();
   await expect(page.getByText('8/8 installiert')).toBeVisible();
 });
 
