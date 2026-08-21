@@ -14,6 +14,7 @@ import StoreComplianceLinks from './StoreComplianceLinks';
 import StoreLegalPage, { legalPageFromPath } from './StoreLegalPages';
 import FriendlyDateTimePicker from './FriendlyDateTimePicker';
 import PayrollWorkspaceEnhancer from './PayrollWorkspaceEnhancer';
+import WorkflowCompletionEnhancer from './WorkflowCompletionEnhancer';
 
 setupIonicReact({ mode: 'md' });
 
@@ -30,6 +31,7 @@ function renderApp() {
           <StoreComplianceLinks />
           <FriendlyDateTimePicker />
           <PayrollWorkspaceEnhancer />
+          <WorkflowCompletionEnhancer />
         </>
       )}
     </React.StrictMode>,
