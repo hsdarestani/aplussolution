@@ -14,6 +14,8 @@ class CoreConfig(AppConfig):
             premium_models,
             premium_signals,
             premium_tasks,
+            push_models,
+            push_signals,
             shift_slots,
         )
         from .smart_docx_integration import install_smart_docx_renderer
