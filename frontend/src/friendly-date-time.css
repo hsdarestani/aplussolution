@@ -18,12 +18,14 @@ ion-modal.friendly-picker-modal {
 }
 
 .friendly-picker-sheet {
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   background: var(--ion-background-color, #fff);
-  padding: 10px 18px calc(18px + env(safe-area-inset-bottom));
+  padding: 10px 18px calc(14px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 .friendly-picker-head {
@@ -31,6 +33,7 @@ ion-modal.friendly-picker-modal {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex: 0 0 auto;
 }
 
 .friendly-picker-title {
@@ -77,19 +80,32 @@ ion-modal.friendly-picker-modal {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  flex: 0 0 auto;
 }
 
-.friendly-picker-sheet ion-datetime {
+.friendly-picker-calendar {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  align-items: flex-start;
+}
+
+.friendly-picker-calendar ion-datetime {
   width: 100%;
   max-width: 100%;
   margin: 0 auto;
+  flex: 0 0 auto;
   border-radius: 20px;
   background: color-mix(in srgb, var(--ion-background-color, #fff) 94%, var(--ion-color-primary, #155eef));
 }
 
 .friendly-picker-actions {
-  margin-top: auto;
-  padding-top: 2px;
+  flex: 0 0 auto;
+  padding-top: 4px;
+  background: var(--ion-background-color, #fff);
 }
 
 @media (min-width: 700px) {
