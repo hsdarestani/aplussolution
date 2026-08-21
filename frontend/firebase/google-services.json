@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "556347591130",
+    "project_id": "ancient-timing-308015",
+    "storage_bucket": "ancient-timing-308015.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:556347591130:android:fec117edf6a469c2b918e3",
+        "android_client_info": {
+          "package_name": "de.aplussolution.workforce"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "556347591130-tp73mcv3b5i045amjvnn8ihju4sto6p5.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyArzZJLcsTKLY_6Rh_Rx0ijjnC9rgHcFZg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "556347591130-tp73mcv3b5i045amjvnn8ihju4sto6p5.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
