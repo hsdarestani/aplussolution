@@ -25,7 +25,7 @@ async function mockAdmin(page: Page) {
   });
 }
 
-test('shift form replaces browser date/time controls with the global friendly picker', async ({ page }) => {
+test('shift form replaces browser date/time interaction with the global friendly picker', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockAdmin(page);
   await page.goto('/?view=schedule');
@@ -46,12 +46,13 @@ test('shift form replaces browser date/time controls with the global friendly pi
   await expect(start.getByRole('button', { name: 'Morgen' })).toBeVisible();
 
   await expect(startDate).toHaveAttribute('data-aplus-picker-kind', 'date');
-  await expect(startDate).toHaveAttribute('type', 'text');
+  await expect(startDate).toHaveAttribute('type', 'date');
+  await expect(startDate).toHaveAttribute('readonly', '');
   await expect(startTime).toHaveAttribute('data-aplus-picker-kind', 'time');
-  await expect(startTime).toHaveAttribute('type', 'text');
+  await expect(startTime).toHaveAttribute('type', 'time');
+  await expect(startTime).toHaveAttribute('readonly', '');
   await expect(endDate).toHaveAttribute('data-aplus-picker-kind', 'date');
   await expect(endTime).toHaveAttribute('data-aplus-picker-kind', 'time');
-  await expect(page.locator('ion-input[type="datetime-local"], ion-input[type="date"], ion-input[type="time"]')).toHaveCount(0);
 
   await startDate.click();
   const picker = page.locator('ion-modal.friendly-picker-modal');
