@@ -112,6 +112,13 @@ function productionUiPolish(): Plugin {
           "    setWorkers(unpack(workerData).filter((worker: any) => !String(worker.user_detail?.email || '').toLowerCase().endsWith('@sync.invalid')));",
           'people synthetic-worker filter',
         );
+        next = replaceRequired(
+          this,
+          next,
+          `    if (isManager(user)) {\n      const [clientData, locationData] = await Promise.all([api('clients/?ordering=name'), api('locations/')]);\n      setClients(unpack(clientData).filter((client: any) => client.active));\n      setLocations(unpack(locationData).filter((location: any) => location.active));\n    }`,
+          `    if (isManager(user)) {\n      const [clientData, locationData] = await Promise.all([api('clients/?ordering=name'), api('locations/')]);\n      setClients(unpack(clientData).filter((client: any) => client.active));\n      setLocations(unpack(locationData).filter((location: any) => location.active));\n    } else if (user.role === 'client') {\n      const locationData = await api('locations/');\n      setLocations(unpack(locationData).filter((location: any) => location.active));\n    }`,
+          'client order scoped locations',
+        );
         next = next.split("{worker.user_detail?.name?.[0] || 'M'}").join("{worker.user_detail?.name?.[0]?.toUpperCase() || 'M'}");
         next = next.split('{position.name}').join("{position.name === 'WIW Einsatz' ? 'Einsatz' : position.name}");
         next = replaceRequired(
