@@ -1,9 +1,11 @@
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from .models import ClientCompany, ClientOrder, Contract, Document, Location, PayrollStatement, Shift, User, WorkerProfile
 from .serializers import ClientCompanySerializer, ClientOrderSerializer, ContractSerializer, DocumentSerializer, LocationSerializer, PayrollStatementSerializer, ShiftSerializer, WorkerProfileSerializer
+from .shift_slots import ShiftSlot
 
 
 def _manager(user):
@@ -25,6 +27,42 @@ def _document_groups(documents, request):
     return groups
 
 
+def _worker_shifts(worker):
+    """Return native slot assignments plus legacy Shift.worker rows without duplicates."""
+    return (
+        Shift.objects.filter(
+            Q(worker=worker) |
+            Q(slots__worker=worker, slots__status=ShiftSlot.Status.CLAIMED)
+        )
+        .exclude(status=Shift.Status.CANCELLED)
+        .distinct()
+    )
+
+
+def _worker_contracts(worker):
+    """Include direct worker contracts and client ANÜ documents linked through assigned WIW shifts.
+
+    Client ANÜ contracts can cover more than one employee, so Contract.worker cannot represent all
+    participants. The automation stores the covered WIW shift IDs in variables.shift_ids; resolve
+    those links here so the same signed ANÜ is visible in every affected employee Akte.
+    """
+    shifts = list(_worker_shifts(worker).only('id', 'wiw_shift_id'))
+    remote_ids = {str(shift.wiw_shift_id) for shift in shifts if shift.wiw_shift_id}
+    linked_contract_ids = []
+    if remote_ids:
+        for contract in Contract.objects.filter(client__isnull=False).exclude(variables={}):
+            shift_ids = (contract.variables or {}).get('shift_ids') or []
+            if remote_ids.intersection(str(value) for value in shift_ids):
+                linked_contract_ids.append(contract.id)
+    return (
+        Contract.objects.filter(Q(worker=worker) | Q(pk__in=linked_contract_ids))
+        .select_related('template', 'worker__user', 'client')
+        .prefetch_related('signatures')
+        .distinct()
+        .order_by('-updated_at')
+    )
+
+
 @api_view(['GET'])
 def worker_akte(request, pk):
     worker = get_object_or_404(WorkerProfile.objects.select_related('user'), pk=pk)
@@ -32,12 +70,13 @@ def worker_akte(request, pk):
     if not _manager(request.user) and not own_worker:
         return Response({'detail': 'Keine Berechtigung für diese Mitarbeiterakte.'}, status=403)
 
-    contracts = Contract.objects.filter(worker=worker).select_related('template', 'worker__user', 'client').prefetch_related('signatures').order_by('-updated_at')
+    contracts = _worker_contracts(worker)
     documents = Document.objects.filter(worker=worker).select_related('worker__user', 'client')
     if own_worker:
         documents = documents.exclude(visibility=Document.Visibility.ADMIN)
     payroll = PayrollStatement.objects.filter(worker=worker).select_related('worker__user').order_by('-period')
-    shifts = Shift.objects.filter(worker=worker).select_related('worker__user', 'client', 'location', 'position').order_by('-starts_at')[:50]
+    shift_qs = _worker_shifts(worker)
+    shifts = shift_qs.select_related('worker__user', 'client', 'location', 'position').order_by('-starts_at')[:50]
 
     return Response({
         'kind': 'worker',
@@ -48,7 +87,7 @@ def worker_akte(request, pk):
             'contracts': contracts.count(),
             'documents': documents.count(),
             'payroll': payroll.count(),
-            'shifts': Shift.objects.filter(worker=worker).count(),
+            'shifts': shift_qs.count(),
         },
         'contracts': ContractSerializer(contracts, many=True, context={'request': request}).data,
         'document_folders': _document_groups(documents, request),
