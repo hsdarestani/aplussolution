@@ -67,7 +67,7 @@ function announce(type: 'aplus-api-degraded' | 'aplus-api-recovered', url: URL, 
 }
 
 export function installOperationalFetchResilience() {
-  const marker = window as Window & Record<PropertyKey, unknown>;
+  const marker = window as any;
   if (marker[PATCH_FLAG]) return;
   const originalFetch = window.fetch.bind(window);
   const degradedPaths = new Set<string>();
