@@ -1,0 +1,120 @@
+ion-input.aplus-friendly-ion-picker,
+input.aplus-friendly-native-picker {
+  cursor: pointer;
+}
+
+ion-input.aplus-friendly-ion-picker::part(native) {
+  cursor: pointer;
+}
+
+input.aplus-friendly-native-picker {
+  background-image: linear-gradient(transparent, transparent);
+}
+
+ion-modal.friendly-picker-modal {
+  --width: min(560px, 100%);
+  --border-radius: 26px 26px 0 0;
+  --box-shadow: 0 -18px 50px rgba(15, 23, 42, 0.18);
+}
+
+.friendly-picker-sheet {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ion-background-color, #fff);
+  padding: 10px 18px calc(14px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.friendly-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+.friendly-picker-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.friendly-picker-title > span {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--ion-color-primary, #155eef) 12%, transparent);
+  color: var(--ion-color-primary, #155eef);
+  flex: 0 0 auto;
+}
+
+.friendly-picker-title ion-icon {
+  font-size: 22px;
+}
+
+.friendly-picker-title small {
+  display: block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .13em;
+  opacity: .55;
+  margin-bottom: 2px;
+}
+
+.friendly-picker-title h2 {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.friendly-picker-quick {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+
+.friendly-picker-calendar {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  align-items: flex-start;
+}
+
+.friendly-picker-calendar ion-datetime {
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+  flex: 0 0 auto;
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--ion-background-color, #fff) 94%, var(--ion-color-primary, #155eef));
+}
+
+.friendly-picker-actions {
+  flex: 0 0 auto;
+  padding-top: 4px;
+  background: var(--ion-background-color, #fff);
+}
+
+@media (min-width: 700px) {
+  ion-modal.friendly-picker-modal {
+    --width: 520px;
+    --border-radius: 26px;
+  }
+
+  .friendly-picker-sheet {
+    padding: 16px 22px 22px;
+  }
+}

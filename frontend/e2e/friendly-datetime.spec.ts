@@ -25,7 +25,7 @@ async function mockAdmin(page: Page) {
   });
 }
 
-test('shift form uses separate friendly date and time controls', async ({ page }) => {
+test('shift form replaces browser date/time interaction with the global friendly picker', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockAdmin(page);
   await page.goto('/?view=schedule');
@@ -35,24 +35,45 @@ test('shift form uses separate friendly date and time controls', async ({ page }
 
   const start = page.getByTestId('datetime-beginn');
   const end = page.getByTestId('datetime-ende');
-  const startDate = start.locator('input[aria-label="Beginn Datum"]');
-  const startTime = start.locator('input[aria-label="Beginn Uhrzeit"]');
-  const endDate = end.locator('input[aria-label="Ende Datum"]');
-  const endTime = end.locator('input[aria-label="Ende Uhrzeit"]');
+  const startDate = start.locator('ion-input[aria-label="Beginn Datum"]');
+  const startTime = start.locator('ion-input[aria-label="Beginn Uhrzeit"]');
+  const endDate = end.locator('ion-input[aria-label="Ende Datum"]');
+  const endTime = end.locator('ion-input[aria-label="Ende Uhrzeit"]');
 
   await expect(start).toBeVisible();
   await expect(end).toBeVisible();
   await expect(start.getByRole('button', { name: 'Heute' })).toBeVisible();
   await expect(start.getByRole('button', { name: 'Morgen' })).toBeVisible();
-  await expect(startDate).toBeVisible();
-  await expect(startTime).toBeVisible();
-  await expect(endDate).toBeVisible();
-  await expect(endTime).toBeVisible();
-  await expect(page.locator('ion-input[type="datetime-local"]')).toHaveCount(0);
 
-  await start.getByRole('button', { name: 'Morgen' }).click();
-  await expect(startDate).not.toHaveValue('');
-  await expect(endDate).not.toHaveValue('');
+  await expect(startDate).toHaveAttribute('data-aplus-picker-kind', 'date');
+  await expect(startDate).toHaveAttribute('type', 'date');
+  await expect(startDate).toHaveAttribute('readonly', '');
+  await expect(startTime).toHaveAttribute('data-aplus-picker-kind', 'time');
+  await expect(startTime).toHaveAttribute('type', 'time');
+  await expect(startTime).toHaveAttribute('readonly', '');
+  await expect(endDate).toHaveAttribute('data-aplus-picker-kind', 'date');
+  await expect(endTime).toHaveAttribute('data-aplus-picker-kind', 'time');
+
+  await startDate.click();
+  const picker = page.locator('ion-modal.friendly-picker-modal');
+  await expect(picker).toBeVisible();
+  await expect(picker.getByRole('heading', { name: 'Beginn Datum' })).toBeVisible();
+  await expect(picker.getByRole('button', { name: 'Heute' })).toBeVisible();
+  await expect(picker.getByRole('button', { name: 'Morgen' })).toBeVisible();
+
+  await picker.getByRole('button', { name: 'Morgen' }).click();
+  await picker.getByRole('button', { name: 'Übernehmen' }).click();
+  await expect(picker).not.toBeVisible();
+  await expect.poll(async () => startDate.evaluate((element: any) => String(element.value || ''))).not.toBe('');
+  await expect.poll(async () => endDate.evaluate((element: any) => String(element.value || ''))).not.toBe('');
+
+  await startTime.click();
+  await expect(picker).toBeVisible();
+  await expect(picker.getByRole('heading', { name: 'Beginn Uhrzeit' })).toBeVisible();
+  await expect(picker.getByRole('button', { name: 'Jetzt' })).toBeVisible();
+  await expect(picker.locator('ion-datetime[presentation="time"]')).toBeVisible();
+  await picker.getByRole('button', { name: 'Abbrechen' }).click();
+  await expect(picker).not.toBeVisible();
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
