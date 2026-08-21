@@ -3,8 +3,8 @@ from .native_workforce import (
     approve_order as _approve_order,
     generate_client_contract as _generate_client_contract,
     sync_packages_from_local_shifts,
-    sync_working_time,
 )
+from .payroll_engine import sync_working_time
 from .order_automation import _validate_parsed, extract_request_id, fallback_request_id, payload_hash
 
 
