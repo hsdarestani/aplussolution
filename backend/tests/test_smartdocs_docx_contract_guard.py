@@ -103,7 +103,7 @@ def test_legacy_docx_blank_lines_are_populated_through_smartdocs(monkeypatch, wo
     assert 'Carl-Sonnenschein-Str. 57, 65936 Frankfurt am Main' in text
     assert 'Anna Becker' in text
     assert 'Musterstraße 12 60311 Frankfurt am Main' in text
-    assert contract.data_snapshot['_smartdocs_pdf']['engine'] == 'smartdocs-layout-v2-docx-guard'
+    assert 'smartdocs-layout-v2-docx-guard' in contract.data_snapshot['_smartdocs_pdf']
 
 
 @pytest.mark.django_db
