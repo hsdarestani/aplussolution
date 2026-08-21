@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { api, User } from './api';
+import { api, type User } from './api';
 import './workflow-completion.css';
 
 type EntityKind = 'worker' | 'client';
@@ -202,6 +202,7 @@ function OrderUploadModal({ close, orders, reload }: { close: () => void; orders
           </select>
         </label>
         {!orders.length && <div className="workflow-note">Noch kein Auftrag vorhanden. Lege zuerst über „Neuer Auftrag“ die Veranstaltung an.</div>}
+        {selected?.attachment && <div className="workflow-note">Bereits hochgeladen: <a href={selected.attachment} target="_blank" rel="noreferrer">aktuelle Auftragsdatei öffnen</a></div>}
         <label>Zusätzliche Functions / Hinweise
           <textarea aria-label="Functions und Hinweise" rows={4} value={note} onChange={(event) => setNote(event.target.value)} placeholder="z. B. 4 Service, 2 Runner, Dresscode …" />
         </label>
