@@ -170,8 +170,8 @@ export default function PayrollWorkspaceEnhancer() {
               <th>SOLL</th>
               <th>Δ</th>
               <th>Übertrag</th>
-              <th>Auszahlung</th>
-              <th>Korrektur</th>
+              <th>Auszahlung (Std.)</th>
+              <th>Korrektur (Std.)</th>
               <th>Saldo</th>
               <th>Stundensatz inkl. Zulage</th>
               <th>Brutto</th>
@@ -225,7 +225,7 @@ export default function PayrollWorkspaceEnhancer() {
           </tbody>
         </table>
       </div>
-      <p className="payroll-footnote">Lohnvorbereitung, nicht Steuer-/Sozialversicherungsabrechnung. Netto wird aus der hochgeladenen Lohnabrechnung übernommen.</p>
+      <p className="payroll-footnote">Auszahlung/Korrektur werden in Stunden geführt. Lohnvorbereitung, nicht Steuer-/Sozialversicherungsabrechnung. Netto wird aus der hochgeladenen Lohnabrechnung übernommen.</p>
     </div>,
     target,
   );
