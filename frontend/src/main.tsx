@@ -10,6 +10,7 @@ import './theme.css';
 import './brand-refresh.css';
 import './people-lists.css';
 import './steuerzentrale-hardening.css';
+import './header-quick-access.css';
 import App from './App';
 import StoreComplianceLinks from './StoreComplianceLinks';
 import StoreLegalPage, { legalPageFromPath } from './StoreLegalPages';
@@ -17,6 +18,7 @@ import FriendlyDateTimePicker from './FriendlyDateTimePicker';
 import PayrollWorkspaceEnhancer from './PayrollWorkspaceEnhancer';
 import WorkflowCompletionEnhancer from './WorkflowCompletionEnhancer';
 import ApiHealthBanner from './ApiHealthBanner';
+import HeaderQuickAccess from './HeaderQuickAccess';
 import { installBerlinLocaleDefaults } from './berlinLocale';
 import { installOperationalFetchResilience } from './operationalFetchResilience';
 
@@ -34,6 +36,7 @@ function renderApp() {
       ) : (
         <>
           <App />
+          <HeaderQuickAccess />
           <StoreComplianceLinks />
           <FriendlyDateTimePicker />
           <PayrollWorkspaceEnhancer />
