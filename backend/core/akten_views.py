@@ -28,11 +28,14 @@ def _document_groups(documents, request):
 @api_view(['GET'])
 def worker_akte(request, pk):
     worker = get_object_or_404(WorkerProfile.objects.select_related('user'), pk=pk)
-    if not _manager(request.user) and not (request.user.role == User.Role.WORKER and worker.user_id == request.user.id):
+    own_worker = request.user.role == User.Role.WORKER and worker.user_id == request.user.id
+    if not _manager(request.user) and not own_worker:
         return Response({'detail': 'Keine Berechtigung für diese Mitarbeiterakte.'}, status=403)
 
     contracts = Contract.objects.filter(worker=worker).select_related('template', 'worker__user', 'client').prefetch_related('signatures').order_by('-updated_at')
     documents = Document.objects.filter(worker=worker).select_related('worker__user', 'client')
+    if own_worker:
+        documents = documents.exclude(visibility=Document.Visibility.ADMIN)
     payroll = PayrollStatement.objects.filter(worker=worker).select_related('worker__user').order_by('-period')
     shifts = Shift.objects.filter(worker=worker).select_related('worker__user', 'client', 'location', 'position').order_by('-starts_at')[:50]
 
@@ -57,11 +60,16 @@ def worker_akte(request, pk):
 @api_view(['GET'])
 def client_akte(request, pk):
     client = get_object_or_404(ClientCompany.objects.prefetch_related('contacts'), pk=pk)
-    if not _manager(request.user) and not (request.user.role == User.Role.CLIENT and client.contacts.filter(pk=request.user.pk).exists()):
+    own_client = request.user.role == User.Role.CLIENT and client.contacts.filter(pk=request.user.pk).exists()
+    if not _manager(request.user) and not own_client:
         return Response({'detail': 'Keine Berechtigung für diese Kundenakte.'}, status=403)
 
     contracts = Contract.objects.filter(client=client).select_related('template', 'worker__user', 'client').prefetch_related('signatures').order_by('-updated_at')
     documents = Document.objects.filter(client=client).select_related('worker__user', 'client')
+    if own_client:
+        if not client.contract_visibility_enabled:
+            contracts = contracts.none()
+        documents = documents.filter(visibility__in=[Document.Visibility.CLIENT, Document.Visibility.SHARED])
     orders = ClientOrder.objects.filter(client=client).select_related('client', 'location').order_by('-starts_at')
     locations = Location.objects.filter(client=client).order_by('name')
     shifts = Shift.objects.filter(client=client).select_related('worker__user', 'client', 'location', 'position').order_by('-starts_at')[:80]
