@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import premium_views, saml_views
+from . import premium_mutation_views, premium_views, saml_views
 
 urlpatterns = [
     path('premium/scheduling-policy/', premium_views.scheduling_policy),
@@ -22,6 +22,7 @@ urlpatterns = [
     path('premium/api-keys/', premium_views.api_keys),
     path('premium/api-keys/<uuid:pk>/', premium_views.api_key_revoke),
     path('premium/webhooks/', premium_views.webhooks),
+    path('premium/webhooks/<uuid:pk>/', premium_mutation_views.webhook_delete),
     path('premium/webhooks/<uuid:pk>/test/', premium_views.webhook_test),
     path('premium/integrations/', premium_views.integrations),
     path('premium/integrations/<uuid:pk>/sync/', premium_views.integration_sync),
