@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, akten_views, attendance_actions, attendance_views, automation_views, client_order_planning, contract_views, document_catalog_views, document_center_views, global_search_views, integration_views, live_admin_center, live_operations, native_operations, oauth_views, payroll_views, portal_views, searchable_views, shift_views, store_review_views, time_views, views
+from . import admin_center_views, advanced_views, akten_views, attendance_actions, attendance_views, automation_views, client_order_planning, contract_views, document_catalog_views, document_center_views, global_search_views, integration_views, live_admin_center, live_operations, native_operations, oauth_views, payroll_views, portal_views, push_views, searchable_views, shift_views, store_review_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -38,6 +38,9 @@ urlpatterns = [
     path('auth/activation/validate/', portal_views.activation_validate),
     path('auth/activation/complete/', portal_views.activation_complete),
     path('employee/home/', portal_views.employee_home),
+    path('push/devices/register/', push_views.register_push_device),
+    path('push/devices/unregister/', push_views.unregister_push_device),
+    path('push/status/', push_views.push_status),
     path('admin/exceptions/', live_admin_center.admin_exception_center),
     path('search/global/', global_search_views.global_search),
     path('document-center/', document_center_views.document_center),

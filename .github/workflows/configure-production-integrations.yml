@@ -43,6 +43,11 @@ jobs:
           GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
           APPLE_SIGNIN_KEY_ID: ${{ secrets.APPLE_SIGNIN_KEY_ID }}
           APPLE_SIGNIN_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_SIGNIN_PRIVATE_KEY_BASE64 }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_CREDENTIALS_JSON_BASE64: ${{ secrets.FIREBASE_CREDENTIALS_JSON_BASE64 }}
+          APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
+          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          APNS_PRIVATE_KEY_BASE64: ${{ secrets.APNS_PRIVATE_KEY_BASE64 }}
         run: |
           set -euo pipefail
           test -n "$HOST"
@@ -59,6 +64,22 @@ jobs:
             echo 'Apple Sign in secrets must be configured as a pair.' >&2
             exit 2
           fi
+          firebase_parts=0
+          [ -n "$FIREBASE_PROJECT_ID" ] && firebase_parts=$((firebase_parts+1))
+          [ -n "$FIREBASE_CREDENTIALS_JSON_BASE64" ] && firebase_parts=$((firebase_parts+1))
+          if [ "$firebase_parts" -ne 0 ] && [ "$firebase_parts" -ne 2 ]; then
+            echo 'Firebase push secrets must include project ID and service-account JSON.' >&2
+            exit 2
+          fi
+          apns_parts=0
+          [ -n "$APNS_TEAM_ID" ] && apns_parts=$((apns_parts+1))
+          [ -n "$APNS_KEY_ID" ] && apns_parts=$((apns_parts+1))
+          [ -n "$APNS_PRIVATE_KEY_BASE64" ] && apns_parts=$((apns_parts+1))
+          if [ "$apns_parts" -ne 0 ] && [ "$apns_parts" -ne 3 ]; then
+            echo 'APNs push secrets must include team ID, key ID and private key.' >&2
+            exit 2
+          fi
+          echo "Native push secrets: firebase=$([ "$firebase_parts" -eq 2 ] && echo ready || echo missing) apns=$([ "$apns_parts" -eq 3 ] && echo ready || echo missing)"
 
       - name: Sync integrations into production .env
         timeout-minutes: 15
@@ -71,6 +92,11 @@ jobs:
           GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
           APPLE_SIGNIN_KEY_ID: ${{ secrets.APPLE_SIGNIN_KEY_ID }}
           APPLE_SIGNIN_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_SIGNIN_PRIVATE_KEY_BASE64 }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_CREDENTIALS_JSON_BASE64: ${{ secrets.FIREBASE_CREDENTIALS_JSON_BASE64 }}
+          APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
+          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          APNS_PRIVATE_KEY_BASE64: ${{ secrets.APNS_PRIVATE_KEY_BASE64 }}
         run: |
           set -euo pipefail
           EMAIL_PASS_B64="$(printf '%s' "$APP_EMAIL_PASS" | base64 -w0)"
@@ -78,6 +104,9 @@ jobs:
           GOOGLE_ID_B64="$(printf '%s' "$GOOGLE_OAUTH_CLIENT_ID" | base64 -w0)"
           GOOGLE_SECRET_B64="$(printf '%s' "$GOOGLE_OAUTH_CLIENT_SECRET" | base64 -w0)"
           APPLE_KEY_ID_B64="$(printf '%s' "$APPLE_SIGNIN_KEY_ID" | base64 -w0)"
+          FIREBASE_PROJECT_ID_B64="$(printf '%s' "$FIREBASE_PROJECT_ID" | base64 -w0)"
+          APNS_TEAM_ID_B64="$(printf '%s' "$APNS_TEAM_ID" | base64 -w0)"
+          APNS_KEY_ID_B64="$(printf '%s' "$APNS_KEY_ID" | base64 -w0)"
 
           timeout 720s sshpass -e ssh \
             -o StrictHostKeyChecking=no \
@@ -85,7 +114,7 @@ jobs:
             -o ServerAliveInterval=15 \
             -o ServerAliveCountMax=3 \
             root@"$HOST" \
-            "EMAIL_PASS_B64='$EMAIL_PASS_B64' OPENAI_KEY_B64='$OPENAI_KEY_B64' GOOGLE_ID_B64='$GOOGLE_ID_B64' GOOGLE_SECRET_B64='$GOOGLE_SECRET_B64' APPLE_KEY_ID_B64='$APPLE_KEY_ID_B64' APPLE_PRIVATE_KEY_B64='$APPLE_SIGNIN_PRIVATE_KEY_BASE64' bash -s" <<'REMOTE'
+            "EMAIL_PASS_B64='$EMAIL_PASS_B64' OPENAI_KEY_B64='$OPENAI_KEY_B64' GOOGLE_ID_B64='$GOOGLE_ID_B64' GOOGLE_SECRET_B64='$GOOGLE_SECRET_B64' APPLE_KEY_ID_B64='$APPLE_KEY_ID_B64' APPLE_PRIVATE_KEY_B64='$APPLE_SIGNIN_PRIVATE_KEY_BASE64' FIREBASE_PROJECT_ID_B64='$FIREBASE_PROJECT_ID_B64' FIREBASE_CREDS_B64='$FIREBASE_CREDENTIALS_JSON_BASE64' APNS_TEAM_ID_B64='$APNS_TEAM_ID_B64' APNS_KEY_ID_B64='$APNS_KEY_ID_B64' APNS_PRIVATE_KEY_B64='$APNS_PRIVATE_KEY_BASE64' bash -s" <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
           test -f .env
@@ -95,11 +124,12 @@ jobs:
           export GOOGLE_OAUTH_ID_SECRET="$(printf '%s' "$GOOGLE_ID_B64" | base64 -d)"
           export GOOGLE_OAUTH_CLIENT_SECRET_VALUE="$(printf '%s' "$GOOGLE_SECRET_B64" | base64 -d)"
           export APPLE_SIGNIN_KEY_ID_VALUE="$(printf '%s' "$APPLE_KEY_ID_B64" | base64 -d)"
-          if [ -n "${APPLE_PRIVATE_KEY_B64:-}" ]; then
-            export APPLE_PRIVATE_KEY_SECRET="$(printf '%s' "$APPLE_PRIVATE_KEY_B64" | base64 -d)"
-          else
-            export APPLE_PRIVATE_KEY_SECRET=''
-          fi
+          export APPLE_PRIVATE_KEY_SECRET="$(printf '%s' "${APPLE_PRIVATE_KEY_B64:-}" | base64 -d 2>/dev/null || true)"
+          export FIREBASE_PROJECT_ID_VALUE="$(printf '%s' "$FIREBASE_PROJECT_ID_B64" | base64 -d)"
+          export FIREBASE_CREDENTIALS_VALUE="$(printf '%s' "${FIREBASE_CREDS_B64:-}" | base64 -d 2>/dev/null || true)"
+          export APNS_TEAM_ID_VALUE="$(printf '%s' "$APNS_TEAM_ID_B64" | base64 -d)"
+          export APNS_KEY_ID_VALUE="$(printf '%s' "$APNS_KEY_ID_B64" | base64 -d)"
+          export APNS_PRIVATE_KEY_VALUE="$(printf '%s' "${APNS_PRIVATE_KEY_B64:-}" | base64 -d 2>/dev/null || true)"
 
           python3 - <<'PY'
           import os
@@ -122,6 +152,8 @@ jobs:
               'APPLE_SERVICE_ID': 'de.aplussolution.workforce.web',
               'APPLE_TEAM_ID': '884MVA2MD5',
               'APPLE_OAUTH_REDIRECT_URI': 'https://solution.smarbiz.sbs/api/auth/oauth/apple/callback/',
+              'APNS_BUNDLE_ID': 'de.aplussolution.workforce',
+              'APNS_USE_SANDBOX': '0',
           }
 
           google_id = os.environ.get('GOOGLE_OAUTH_ID_SECRET', '').strip()
@@ -136,6 +168,20 @@ jobs:
               updates['APPLE_KEY_ID'] = apple_key_id
               updates['APPLE_PRIVATE_KEY'] = apple_private_key.replace('\r\n', '\n').replace('\n', '\\n')
               updates['APPLE_PRIVATE_KEY_PATH'] = ''
+
+          firebase_project = os.environ.get('FIREBASE_PROJECT_ID_VALUE', '').strip()
+          firebase_credentials = os.environ.get('FIREBASE_CREDENTIALS_VALUE', '').strip()
+          if firebase_project and firebase_credentials:
+              updates['FIREBASE_PROJECT_ID'] = firebase_project
+              updates['FIREBASE_CREDENTIALS_JSON'] = firebase_credentials.replace('\r\n', '\n').replace('\n', '\\n')
+
+          apns_team = os.environ.get('APNS_TEAM_ID_VALUE', '').strip()
+          apns_key = os.environ.get('APNS_KEY_ID_VALUE', '').strip()
+          apns_private = os.environ.get('APNS_PRIVATE_KEY_VALUE', '').strip()
+          if apns_team and apns_key and apns_private:
+              updates['APNS_TEAM_ID'] = apns_team
+              updates['APNS_KEY_ID'] = apns_key
+              updates['APNS_PRIVATE_KEY'] = apns_private.replace('\r\n', '\n').replace('\n', '\\n')
 
           remaining = dict(updates)
           output = []
@@ -168,6 +214,7 @@ jobs:
 
           docker compose exec -T backend python manage.py shell -c "from django.conf import settings; assert settings.OPENAI_API_KEY; assert settings.EMAIL_HOST == 'smtp.strato.de'; assert settings.EMAIL_HOST_USER == 'app@aplus-solution.de'; assert settings.COMPANY_ADDRESS; assert settings.GOOGLE_OAUTH_REDIRECT_URI.endswith('/google/callback/'); assert settings.APPLE_TEAM_ID == '884MVA2MD5'; assert settings.APPLE_SERVICE_ID == 'de.aplussolution.workforce.web'; assert settings.APPLE_OAUTH_REDIRECT_URI.endswith('/apple/callback/'); print('Production integration settings loaded')"
           docker compose exec -T backend python manage.py shell -c "from django.conf import settings; from core.oauth import apple_client_secret; assert settings.APPLE_KEY_ID; assert settings.APPLE_PRIVATE_KEY; token=apple_client_secret(); assert isinstance(token, str) and token.count('.') == 2; print('Apple Sign in client secret generation OK')"
+          docker compose exec -T backend python manage.py shell -c "from core.push_notifications import push_provider_status; print('Native push providers', push_provider_status())"
           docker compose exec -T backend python manage.py shell -c "from django.core.mail import get_connection; c=get_connection(); opened=c.open(); assert opened is not False; c.close(); print('STRATO SMTP authentication OK')"
           curl -fsS --max-time 20 https://solution.smarbiz.sbs/health/ >/dev/null
           REMOTE
