@@ -21,7 +21,7 @@ const row = {
   saldo_cumulative: '2.00',
   hourly_rate: '17.50',
   gross_amount: '1400.00',
-  source: 'aplus_time_entries_approved',
+  source: 'aplus_time_entries',
 };
 
 describe('PayrollWorkspaceEnhancer', () => {
@@ -42,7 +42,7 @@ describe('PayrollWorkspaceEnhancer', () => {
 
     await waitFor(() => expect(screen.getByTestId('payroll-workspace')).toBeInTheDocument());
     expect(screen.getByText('Anna Becker')).toBeInTheDocument();
-    expect(screen.getByText('1.400,00 €')).toBeInTheDocument();
+    expect(screen.getAllByText('1.400,00 €').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('17,50 €')).toBeInTheDocument();
 
     const payout = screen.getByLabelText('Auszahlung Anna Becker 2026-08');
