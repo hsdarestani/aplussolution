@@ -12,6 +12,7 @@ import './people-lists.css';
 import App from './App';
 import StoreComplianceLinks from './StoreComplianceLinks';
 import StoreLegalPage, { legalPageFromPath } from './StoreLegalPages';
+import FriendlyDateTimePicker from './FriendlyDateTimePicker';
 
 setupIonicReact({ mode: 'md' });
 
@@ -26,6 +27,7 @@ function renderApp() {
         <>
           <App />
           <StoreComplianceLinks />
+          <FriendlyDateTimePicker />
         </>
       )}
     </React.StrictMode>,
