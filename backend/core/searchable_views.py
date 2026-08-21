@@ -1,8 +1,11 @@
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from . import views
+from .client_order_planning import plan_client_order
+from .models import ClientOrder
 from .permissions import IsAdminOrManager
 
 
@@ -74,6 +77,32 @@ class WorkerViewSet(views.WorkerViewSet):
 class OrderViewSet(views.OrderViewSet):
     search_fields = ['title', 'description', 'client__name', 'client__customer_number', 'location__name', 'location__address']
     ordering_fields = ['starts_at', 'ends_at', 'created_at', 'updated_at', 'requested_staff', 'status']
+
+    def partial_update(self, request, *args, **kwargs):
+        requested_status = request.data.get('status')
+        if request.user.role == 'client' and requested_status is not None:
+            raise ValidationError('Der Auftragsstatus wird durch die Disposition verwaltet.')
+
+        if request.user.role in {'admin', 'manager'} and requested_status == ClientOrder.Status.CONFIRMED:
+            order = self.get_object()
+            try:
+                planned_order, shift, created = plan_client_order(
+                    order.pk,
+                    request,
+                    request.data.get('position'),
+                )
+            except ValueError as exc:
+                raise ValidationError(str(exc)) from exc
+            payload = self.get_serializer(planned_order).data
+            payload['planning'] = {
+                'created': created,
+                'shift_id': str(shift.id),
+                'required_count': shift.required_count,
+                'is_open': shift.is_open,
+            }
+            return Response(payload)
+
+        return super().partial_update(request, *args, **kwargs)
 
 
 class ContractViewSet(views.ContractViewSet):

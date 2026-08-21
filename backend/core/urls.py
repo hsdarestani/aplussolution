@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, contract_views, document_catalog_views, document_center_views, global_search_views, integration_views, live_admin_center, live_operations, native_operations, oauth_views, portal_views, searchable_views, shift_views, store_review_views, time_views, views
+from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, client_order_planning, contract_views, document_catalog_views, document_center_views, global_search_views, integration_views, live_admin_center, live_operations, native_operations, oauth_views, portal_views, searchable_views, shift_views, store_review_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -53,6 +53,7 @@ urlpatterns = [
     path('workers/portal-status/', portal_views.portal_statuses),
     path('workers/<uuid:pk>/invite/', portal_views.invite_worker),
     path('workers/bulk-invite/', portal_views.bulk_invite_workers),
+    path('orders/<uuid:pk>/confirm-and-plan/', client_order_planning.confirm_and_plan_order),
     path('setup/demo/', views.setup_demo),
     path('dashboard/', views.dashboard),
     path('integrations/wiw/status/', integration_views.wiw_status),
