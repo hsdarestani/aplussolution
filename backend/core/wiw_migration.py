@@ -14,6 +14,7 @@ DYNAMIC_RESOURCES = {'shifts', 'times', 'availabilities', 'requests'}
 HISTORY_START = date(2000, 1, 1)
 HISTORY_END = date(2100, 1, 1)
 FETCH_LIMIT = 1000
+MAX_DYNAMIC_WINDOW_DAYS = 366
 
 
 def _id_set(items, *keys):
@@ -27,6 +28,10 @@ def _id_set(items, *keys):
 
 def _utc_iso(value):
     return value.astimezone(datetime_timezone.utc).isoformat()
+
+
+def _range_param(value: date):
+    return datetime(value.year, value.month, value.day, tzinfo=datetime_timezone.utc).isoformat().replace('+00:00', 'Z')
 
 
 def _item_identity(resource, item):
@@ -71,16 +76,31 @@ def _fetch_static_resource(client, resource):
 
 
 def _fetch_dynamic_range(client, resource, start: date, end: date, depth=0):
-    """Fetch a complete date range, splitting when a response reaches the result cap or rejects a broad range."""
+    """Fetch a complete range without trusting WIW to honor very broad date windows.
+
+    WIW can return an empty response for an excessively broad range even when the
+    resource contains current rows. Split proactively into at-most-one-year windows,
+    then split further on API errors or when a window reaches the row safety cap.
+    """
     if end <= start:
         return []
-    params = {'start': start.isoformat(), 'end': end.isoformat(), 'limit': FETCH_LIMIT}
+
+    span_days = (end - start).days
+    if span_days > MAX_DYNAMIC_WINDOW_DAYS:
+        midpoint = start + timedelta(days=max(1, span_days // 2))
+        return _dedupe(
+            resource,
+            _fetch_dynamic_range(client, resource, start, midpoint, depth + 1)
+            + _fetch_dynamic_range(client, resource, midpoint, end, depth + 1),
+        )
+
+    params = {'start': _range_param(start), 'end': _range_param(end), 'limit': FETCH_LIMIT}
     try:
         rows = client.collection(resource, params=params, optional=False).items
     except WhenIWorkError:
-        if (end - start).days <= 1 or depth >= 20:
+        if span_days <= 1 or depth >= 24:
             raise
-        midpoint = start + timedelta(days=max(1, (end - start).days // 2))
+        midpoint = start + timedelta(days=max(1, span_days // 2))
         return _dedupe(
             resource,
             _fetch_dynamic_range(client, resource, start, midpoint, depth + 1)
@@ -89,17 +109,30 @@ def _fetch_dynamic_range(client, resource, start: date, end: date, depth=0):
 
     if len(rows) < FETCH_LIMIT:
         return rows
-    if (end - start).days <= 1 or depth >= 20:
+    if span_days <= 1 or depth >= 24:
         raise WhenIWorkError(
             f'WIW resource {resource} still reaches the {FETCH_LIMIT}-row safety limit for {start}–{end}; '
             'the final migration refuses to claim completeness.'
         )
-    midpoint = start + timedelta(days=max(1, (end - start).days // 2))
+    midpoint = start + timedelta(days=max(1, span_days // 2))
     return _dedupe(
         resource,
         _fetch_dynamic_range(client, resource, start, midpoint, depth + 1)
         + _fetch_dynamic_range(client, resource, midpoint, end, depth + 1),
     )
+
+
+def _assert_dynamic_probe_is_in_snapshot(client, resource, rows):
+    """Guard against a silent-empty range response using WIW's default/current view."""
+    probe = client.collection(resource, params={'limit': 50}, optional=False).items
+    probe_keys = {key for item in probe if (key := _item_identity(resource, item))}
+    snapshot_keys = {key for item in rows if (key := _item_identity(resource, item))}
+    missing = sorted(probe_keys - snapshot_keys)
+    if missing:
+        raise WhenIWorkError(
+            f'WIW resource {resource} returned current/default rows that were absent from the bounded history fetch: '
+            + ', '.join(missing[:20])
+        )
 
 
 def fetch_complete_wiw_snapshot(client):
@@ -108,7 +141,9 @@ def fetch_complete_wiw_snapshot(client):
     for resource in ('users', 'positions', 'locations', 'sites', 'shifts', 'times', 'availabilities', 'requests'):
         try:
             if resource in DYNAMIC_RESOURCES:
-                snapshot[resource] = _fetch_dynamic_range(client, resource, HISTORY_START, HISTORY_END)
+                rows = _fetch_dynamic_range(client, resource, HISTORY_START, HISTORY_END)
+                _assert_dynamic_probe_is_in_snapshot(client, resource, rows)
+                snapshot[resource] = rows
             else:
                 snapshot[resource] = _fetch_static_resource(client, resource)
         except WhenIWorkError as exc:
