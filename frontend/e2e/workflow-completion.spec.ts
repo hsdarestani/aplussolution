@@ -65,7 +65,7 @@ test('contract sign modal exposes the real drawing pad and keeps PDF download ac
     const url = route.request().url();
     if (url.endsWith('/auth/me/')) return route.fulfill({ json: { id: 'client', role: 'client', first_name: 'Klara', name: 'Klara', email: 'client@example.com' } });
     if (url.includes('/dashboard/')) return route.fulfill({ json: { active_orders: 0, upcoming_shifts: 0, contracts_to_sign: 1 } });
-    if (url.includes('/contracts/?')) return route.fulfill({ json: { results: [{ id: 'c1', title: 'ANÜ Sommerfest', template_name: 'Einzelarbeitnehmerüberlassungsvertrag', status: 'sent', client_name: 'Kunde GmbH', pdf: '/media/anue.pdf', signatures: [] }] } });
+    if (url.includes('/contracts/?')) return route.fulfill({ json: { results: [{ id: 'c1', title: 'ANÜ Sommerfest', template_name: 'Einzelarbeitnehmerüberlassungsvertrag', status: 'sent', client_name: 'Kunde GmbH', pdf: '/media/anue.pdf', signatures: [], readiness: { state: 'awaiting_signature', generation_allowed: false, send_allowed: false, document_current: true, blocking_issues: [], completed_signature_roles: [], pending_signature_roles: ['client'] } }] } });
     return route.fulfill({ json: { results: [] } });
   });
 
