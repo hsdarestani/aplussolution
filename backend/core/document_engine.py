@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import io
 import json
@@ -25,6 +26,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 from .document_catalog import CATALOG_BY_SLUG, DOCUMENT_CATALOG
 from .models import Contract, ContractSignature, ContractTemplate, EmployeeMasterData
+from .smart_pdf_overlay import SmartPdfOverlayError, analyse_pdf_template, render_smart_pdf_overlay
 
 
 class DocumentGenerationError(ValueError):
@@ -335,6 +337,7 @@ def fill_pdf_form(source_path, data, slug):
 
 
 def overlay_footer(source_path, data):
+    """Legacy fallback retained for old generated files; new contracts use SmartDocs layout."""
     reader = PdfReader(source_path)
     writer = PdfWriter()
     for index, page in enumerate(reader.pages):
@@ -355,6 +358,38 @@ def overlay_footer(source_path, data):
     output = io.BytesIO()
     writer.write(output)
     return output.getvalue()
+
+
+def smart_overlay_pdf(contract, source_path, data):
+    schema = copy.deepcopy(contract.template.schema or {})
+    fields = list(schema.get('fields') or [])
+    overlay = dict(schema.get('overlay') or {})
+    cached = overlay.get('smart_layout') if isinstance(overlay.get('smart_layout'), dict) else None
+    if not cached or cached.get('source_checksum') != contract.template.source_checksum:
+        cached = analyse_pdf_template(source_path, fields)
+        cached['source_checksum'] = contract.template.source_checksum
+        overlay['smart_layout'] = cached
+        schema['overlay'] = overlay
+        contract.template.schema = schema
+        contract.template.save(update_fields=['schema', 'updated_at'])
+    try:
+        pdf_bytes, layout = render_smart_pdf_overlay(
+            source_path,
+            fields,
+            data,
+            analysis=cached,
+            format_value=format_value,
+        )
+    except SmartPdfOverlayError as exc:
+        raise DocumentGenerationError(str(exc)) from exc
+    # Persist diagnostics too, so a bad template can be diagnosed from the admin API
+    # without guessing coordinates from the generated PDF.
+    overlay['smart_layout'] = {**layout, 'source_checksum': contract.template.source_checksum}
+    schema['overlay'] = overlay
+    if contract.template.schema != schema:
+        contract.template.schema = schema
+        contract.template.save(update_fields=['schema', 'updated_at'])
+    return pdf_bytes
 
 
 def render_html_pdf(contract, data):
@@ -388,7 +423,7 @@ def generate_contract_files(contract, validate=True):
         if slug in PDF_FIELD_MAP:
             pdf_bytes = fill_pdf_form(source_path, data, slug)
         else:
-            pdf_bytes = overlay_footer(source_path, data)
+            pdf_bytes = smart_overlay_pdf(contract, source_path, data)
     elif contract.template.source_format == ContractTemplate.SourceFormat.STATIC_PDF:
         pdf_bytes = Path(source_path).read_bytes()
     else:
