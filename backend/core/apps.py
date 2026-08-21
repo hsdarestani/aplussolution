@@ -8,6 +8,7 @@ class CoreConfig(AppConfig):
     def ready(self):
         from . import (  # noqa: F401
             attendance_models,
+            document_source_recovery,
             portal_models,
             premium_approval_models,
             premium_models,
