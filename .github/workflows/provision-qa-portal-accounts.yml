@@ -1,0 +1,129 @@
+name: Provision QA portal accounts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/provision-qa-portal-accounts.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Install SSH tooling
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass >/dev/null
+
+      - name: Create test portals and emit encrypted credentials
+        env:
+          HOST: ${{ secrets.HOST }}
+          PASS: ${{ secrets.PASS }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PORT="${SSH_PORT:-22}"
+          OUT="$(sshpass -p "$PASS" ssh -p "$PORT" -o StrictHostKeyChecking=no root@"$HOST" \
+            "cd /opt/aplussolution && docker compose exec -T backend python manage.py shell" <<'PY'
+          import json, secrets
+          from core.models import ClientCompany, EmployeeMasterData, User, WorkerProfile
+
+          worker_email = 'qa.worker.contracts@aplus-solution.de'
+          client_email = 'qa.client.contracts@aplus-solution.de'
+          worker_password = secrets.token_urlsafe(18)
+          client_password = secrets.token_urlsafe(18)
+
+          worker_user, _ = User.objects.get_or_create(email=worker_email)
+          worker_user.first_name = 'QA'
+          worker_user.last_name = 'Mitarbeiter'
+          worker_user.role = User.Role.WORKER
+          worker_user.is_active = True
+          worker_user.is_onboarded = True
+          worker_user.set_password(worker_password)
+          worker_user.save()
+
+          worker, _ = WorkerProfile.objects.get_or_create(
+              user=worker_user,
+              defaults={
+                  'employee_number': 'QA-MA-PORTAL',
+                  'employment_type': WorkerProfile.EmploymentType.MINI,
+                  'monthly_hours': '38.90',
+                  'tariff_hourly_rate': '15.00',
+                  'extra_allowance': '2.00',
+              },
+          )
+          worker.active = True
+          worker.save(update_fields=['active', 'updated_at'])
+          EmployeeMasterData.objects.get_or_create(
+              worker=worker,
+              defaults={
+                  'data': {
+                      'salutation': 'Herr',
+                      'street': 'Testweg 1',
+                      'postal_code': '60311',
+                      'city': 'Frankfurt am Main',
+                      'nationality': 'Deutsch',
+                      'iban': 'DE02120300000000202051',
+                      'signature_place': 'Frankfurt am Main',
+                  },
+                  'source_map': {},
+              },
+          )
+
+          client_user, _ = User.objects.get_or_create(email=client_email)
+          client_user.first_name = 'QA'
+          client_user.last_name = 'Kunde'
+          client_user.role = User.Role.CLIENT
+          client_user.is_active = True
+          client_user.is_onboarded = True
+          client_user.set_password(client_password)
+          client_user.save()
+
+          client, _ = ClientCompany.objects.get_or_create(
+              customer_number='QA-KD-PORTAL',
+              defaults={
+                  'name': 'QA Vertragskunde GmbH',
+                  'address': 'Teststraße 10, 60311 Frankfurt am Main',
+                  'contract_visibility_enabled': True,
+                  'notes': 'QA portal account for contract smoke tests.',
+              },
+          )
+          client.active = True
+          client.contract_visibility_enabled = True
+          client.save(update_fields=['active', 'contract_visibility_enabled', 'updated_at'])
+          client.contacts.add(client_user)
+
+          print('QA_JSON=' + json.dumps({
+              'worker': {'email': worker_email, 'password': worker_password},
+              'client': {'email': client_email, 'password': client_password},
+          }, separators=(',', ':')))
+          PY
+          )"
+          QA_JSON="$(printf '%s\n' "$OUT" | sed -n 's/^QA_JSON=//p' | tail -n 1)"
+          test -n "$QA_JSON"
+
+          cat > /tmp/qa-public.pem <<'PUB'
+          -----BEGIN PUBLIC KEY-----
+          MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAxXsWYX8FcCBzmF3sPLX8
+          Q15S7wcK1pEb/id0O1LGkbQo+B0tjrz9tmX2i4Zh2ovMx5hzFB6su8yAGb49Ii0B
+          TGqKrw4O1qMCWPRpzMPoO6c4XRb9IC1iCBwV4ITBntNXiVG/XGAuSZ8oNNvSPtTY
+          lNmg6w0oe9UlkBIAKchbgUwRcWajTUFm5preHmjdcFOzG4bQREpveqHeZtzbLO4u
+          11hpzx81t2eBFloH3/o2AdbY068UQNYEFTtfKnJ1A/m0REMeRb2NnFnF1eN8OmtW
+          1jESYXJWqvZDWSUu5fNqBfAOg/yEnspXPscovU9WwouMZ7kw7sJsjflSLyuwBZe9
+          ziil/d/pMrOzNzKG78M2FVcQD24UdSQWUPn25PIf39oh3kKCrMnfADesddPqdvjT
+          6rKaCSvpNj7ckxqUoMmF/sH3a3qnsjWOU+eLqQ4SLG0bFzZUaM9ihcuqj7ATe/vX
+          xf29+QsofaUPGNOLYBM87APpmYd2I/ZI2dH/sPxCHU/1jpMdO8UoID2l+24T9d28
+          nIbyGl24OsnFBycwRxvK+tOe3rtBc75QbOHApONB/5TA1Lbl6iUPYmKI2EhUavFb
+          C9Bp9o02ZhOSiI4LhjFrx0EgeAmkZFv+K4n1T054E2h+p+1KrpTOOd0d+WORZsQ8
+          DguqjLkH8W9JP7ihN3VUX00CAwEAAQ==
+          -----END PUBLIC KEY-----
+          PUB
+
+          CIPHER="$(printf '%s' "$QA_JSON" | openssl pkeyutl -encrypt -pubin -inkey /tmp/qa-public.pem -pkeyopt rsa_padding_mode:oaep | base64 -w0)"
+          echo "QA_CREDENTIALS_RSA_B64=$CIPHER"
