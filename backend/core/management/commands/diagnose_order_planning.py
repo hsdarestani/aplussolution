@@ -28,7 +28,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING(f'ORDER_API_PROBE skipped: no order titled {title!r}'))
             return
 
-        admin = User.objects.filter(role=User.Role.ADMIN, is_active=True).order_by('created_at').first()
+        admin = User.objects.filter(role=User.Role.ADMIN, is_active=True).order_by('date_joined', 'id').first()
         if not admin:
             raise CommandError('ORDER_API_PROBE failed: no active admin user found')
 
