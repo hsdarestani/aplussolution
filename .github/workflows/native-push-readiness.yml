@@ -1,0 +1,52 @@
+name: Native push readiness
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/native-push-readiness.yml'
+      - 'backend/core/push_*.py'
+      - 'frontend/src/NativePushRegistration.tsx'
+      - 'frontend/scripts/prepare-native.mjs'
+      - 'frontend/package.json'
+
+permissions:
+  contents: read
+
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report credential readiness without exposing secrets
+        env:
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_CREDENTIALS_JSON_BASE64: ${{ secrets.FIREBASE_CREDENTIALS_JSON_BASE64 }}
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+          APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
+          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          APNS_PRIVATE_KEY_BASE64: ${{ secrets.APNS_PRIVATE_KEY_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          present() { if [ -n "${1:-}" ]; then printf 'ready'; else printf 'missing'; fi; }
+          echo "firebase_project=$(present "$FIREBASE_PROJECT_ID")"
+          echo "firebase_server_credentials=$(present "$FIREBASE_CREDENTIALS_JSON_BASE64")"
+          echo "android_google_services=$(present "$GOOGLE_SERVICES_JSON_BASE64")"
+          echo "apns_team=$(present "$APNS_TEAM_ID")"
+          echo "apns_key=$(present "$APNS_KEY_ID")"
+          echo "apns_private_key=$(present "$APNS_PRIVATE_KEY_BASE64")"
+
+          missing=0
+          [ -n "$FIREBASE_PROJECT_ID" ] || missing=1
+          [ -n "$FIREBASE_CREDENTIALS_JSON_BASE64" ] || missing=1
+          [ -n "$GOOGLE_SERVICES_JSON_BASE64" ] || missing=1
+          [ -n "$APNS_TEAM_ID" ] || missing=1
+          [ -n "$APNS_KEY_ID" ] || missing=1
+          [ -n "$APNS_PRIVATE_KEY_BASE64" ] || missing=1
+
+          if [ "$missing" -eq 1 ]; then
+            echo 'native_push_store_release=blocked_by_missing_provider_credentials'
+            # Diagnostic only: CI remains green so code review can continue.
+          else
+            echo 'native_push_store_release=ready'
+          fi
