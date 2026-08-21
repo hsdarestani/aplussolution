@@ -195,6 +195,10 @@ jobs:
           fi
           if ! command -v docker >/dev/null 2>&1; then curl -fsSL https://get.docker.com | sh; fi
           docker compose pull db redis caddy || true
+          # Remove stale app-service containers before recreation. This avoids a
+          # Docker name-allocation race while preserving db/redis/caddy volumes.
+          docker compose rm -sf backend frontend celery celery-beat || true
+          docker rm -f aplussolution-backend-1 aplussolution-frontend-1 aplussolution-celery-1 aplussolution-celery-beat-1 >/dev/null 2>&1 || true
           docker compose up -d --build --remove-orphans
 
           backend_ready=0
@@ -214,6 +218,10 @@ jobs:
           docker compose exec -T backend python manage.py migrate --check
           docker compose exec -T backend python manage.py check
           docker compose exec -T backend python manage.py shell -c "from django.conf import settings; assert settings.WIW_SYNC_ENABLED is False; print('A+ Workforce source-of-truth mode OK')"
+          # Temporary rollback-only production probe. It exercises the exact
+          # Client Order -> Shift path against real QA data and prints the real
+          # production exception without persisting a Shift.
+          docker compose exec -T backend python manage.py diagnose_order_planning --title 'QA Client Order'
           curl -fsS --retry 10 --retry-delay 5 https://solution.smarbiz.sbs/health/ >/dev/null
           docker compose ps
           docker image prune -f
