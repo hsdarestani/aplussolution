@@ -235,7 +235,7 @@ export default function FriendlyDateTimePicker() {
     <IonModal
       isOpen={!!target}
       onDidDismiss={close}
-      cssClass="friendly-picker-modal"
+      className="friendly-picker-modal"
       initialBreakpoint={0.96}
       breakpoints={[0, 0.96, 1]}
       handleBehavior="cycle"
