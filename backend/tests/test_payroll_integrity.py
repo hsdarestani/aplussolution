@@ -73,9 +73,10 @@ def test_payroll_excludes_unapproved_time_and_includes_allowance(
     assert record.gross_amount == Decimal('140.00')
     assert len(record.raw_entries) == 1
     assert record.raw_entries[0]['approved'] is True
-    assert record.source == 'aplus_time_entries_approved'
+    assert record.source == 'aplus_time_entries'
 
     assert log.status == 'warning'
+    assert log.metadata['source'] == 'aplus_time_entries'
     assert log.metadata['closed_entries'] == 2
     assert log.metadata['approved_entries'] == 1
     assert log.metadata['excluded_unapproved_entries'] == 1
