@@ -222,7 +222,7 @@ def test_payroll_upload_roundtrip_accepts_real_pdf_and_rejects_fake_files(
         format='multipart',
     )
     assert created.status_code == 201
-    assert created.data['worker'] == str(worker.id)
+    assert str(created.data['worker']) == str(worker.id)
     assert created.data['gross_amount'] == '1240.50'
     assert created.data['net_amount'] == '998.10'
 
@@ -230,7 +230,7 @@ def test_payroll_upload_roundtrip_accepts_real_pdf_and_rejects_fake_files(
     assert worker_list.status_code == 200
     rows = worker_list.data.get('results', worker_list.data)
     assert len(rows) == 1
-    assert rows[0]['worker'] == str(worker.id)
+    assert str(rows[0]['worker']) == str(worker.id)
 
     fake_pdf = SimpleUploadedFile(
         'fake.pdf',
