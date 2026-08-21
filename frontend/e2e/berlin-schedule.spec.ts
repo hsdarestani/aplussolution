@@ -59,7 +59,17 @@ test('schedule always shows German business time and offers four planning views'
 
 test('planning views keep overflow inside the workspace on mobile', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 }); await page.clock.setFixedTime(fixedNow); await mockAdmin(page); await page.goto('/?view=schedule');
-  for (const key of ['week','month','timeline']) { await page.getByTestId(`schedule-view-${key}`).click(); await expect(page.locator(`.sv2-${key==='timeline'?'timeline':'week'}-wrap`).or(page.locator('.sv2-month-wrap')).first()).toBeVisible(); const overflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1); expect(overflow).toBeTruthy(); }
+  const views: Array<[string, string]> = [
+    ['week', 'schedule-week-view'],
+    ['month', 'schedule-month-view'],
+    ['timeline', 'schedule-timeline-view'],
+  ];
+  for (const [key, testId] of views) {
+    await page.getByTestId(`schedule-view-${key}`).click();
+    await expect(page.getByTestId(testId)).toBeVisible();
+    const noPageOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+    expect(noPageOverflow).toBeTruthy();
+  }
 });
 
 test('worker home always shows German business time regardless of device timezone', async ({ page }) => {
