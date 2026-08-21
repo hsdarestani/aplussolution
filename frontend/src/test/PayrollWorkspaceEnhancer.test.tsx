@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const apiMock = vi.fn();
@@ -40,16 +40,16 @@ describe('PayrollWorkspaceEnhancer', () => {
   it('renders monthly payroll values and saves payout/correction', async () => {
     render(<PayrollWorkspaceEnhancer />);
 
-    await waitFor(() => expect(screen.getByTestId('payroll-workspace')).toBeInTheDocument());
-    expect(screen.getByText('Anna Becker')).toBeInTheDocument();
-    expect(screen.getAllByText('1.400,00 €').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('17,50 €')).toBeInTheDocument();
+    const workspace = await screen.findByTestId('payroll-workspace');
+    expect(within(workspace).getByText('Anna Becker')).toBeInTheDocument();
+    expect(within(workspace).getAllByText(/1\.400,00/).length).toBeGreaterThanOrEqual(1);
+    expect(within(workspace).getByText(/17,50/)).toBeInTheDocument();
 
-    const payout = screen.getByLabelText('Auszahlung Anna Becker 2026-08');
-    const correction = screen.getByLabelText('Korrektur Anna Becker 2026-08');
+    const payout = within(workspace).getByLabelText('Auszahlung Anna Becker 2026-08');
+    const correction = within(workspace).getByLabelText('Korrektur Anna Becker 2026-08');
     fireEvent.change(payout, { target: { value: '1.00' } });
     fireEvent.change(correction, { target: { value: '-0.50' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+    fireEvent.click(within(workspace).getByRole('button', { name: 'Speichern' }));
 
     await waitFor(() => expect(apiMock).toHaveBeenCalledWith(
       'working-time/records/rec-1/',
