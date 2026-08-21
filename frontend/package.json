@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
+    "dev": "npm run prepare:build && vite --host 0.0.0.0",
     "prepare:build": "node scripts/prepare-build.mjs",
     "build": "npm run prepare:build && tsc && vite build",
     "preview": "vite preview",
@@ -35,7 +35,6 @@
     "@playwright/test": "^1.55.0",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
-    "@vitejs/plugin-react": "^4.7.0",
     "typescript": "^5.9.2",
     "vite": "^7.1.3",
     "vite-plugin-pwa": "^1.0.3",
