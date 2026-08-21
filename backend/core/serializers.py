@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from rest_framework import serializers
 from .models import *
 
@@ -64,6 +66,17 @@ class ClientOrderSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['created_by']
         extra_kwargs = {'client': {'required': False}}
+
+    def validate_attachment(self, uploaded):
+        if not uploaded:
+            return uploaded
+        if getattr(uploaded, 'size', 0) > 20 * 1024 * 1024:
+            raise serializers.ValidationError('Die Auftragsdatei darf maximal 20 MB groß sein.')
+        extension = Path(str(getattr(uploaded, 'name', '') or '')).suffix.lower()
+        allowed = {'.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.txt', '.png', '.jpg', '.jpeg'}
+        if extension not in allowed:
+            raise serializers.ValidationError('Erlaubt sind PDF, Word, Excel/CSV, Text und Bilder (JPG/PNG).')
+        return uploaded
 
 
 class AvailabilitySerializer(serializers.ModelSerializer):
