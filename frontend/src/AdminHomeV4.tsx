@@ -10,6 +10,7 @@ import {
   refreshOutline,
   syncOutline,
   timeOutline,
+  walletOutline,
 } from 'ionicons/icons';
 import { api } from './api';
 import './admin-home-v4.css';
@@ -51,6 +52,14 @@ const severityText: Record<string, string> = {
   warning: 'Warnung',
   info: 'Hinweis',
 };
+
+const priorityActions = [
+  { view: 'orders', label: 'Auftrag & AI', hint: 'Anfrage einlesen', icon: briefcaseOutline },
+  { view: 'schedule', label: 'Dienstplanung', hint: 'OpenShifts & Besetzung', icon: calendarOutline },
+  { view: 'time', label: 'Zeiterfassung', hint: 'Zeiten prüfen', icon: timeOutline },
+  { view: 'operations', label: 'Arbeitszeit & Lohn', hint: 'Saldo & Vorbereitung', icon: walletOutline },
+  { view: 'people', label: 'Personal & Kunden', hint: 'Stammdaten & Zugänge', icon: peopleOutline },
+];
 
 function dueText(value?: string) {
   if (!value) return '';
@@ -116,6 +125,23 @@ export default function AdminHomeV4({ navigate }: { navigate: Navigate }) {
           <IonIcon slot="start" icon={refreshOutline} />
           Aktualisieren
         </IonButton>
+      </section>
+
+      <section className="admin-priority-section" data-testid="admin-priority-actions" aria-label="Wichtigste tägliche Funktionen">
+        <div className="admin-priority-heading">
+          <div><small>SCHNELLZUGRIFF</small><h2>Tägliche Arbeit</h2></div>
+          <span>Die 5 wichtigsten Bereiche direkt erreichbar.</span>
+        </div>
+        <div className="admin-priority-actions">
+          {priorityActions.map((item, index) => (
+            <button type="button" key={item.view} onClick={() => navigate(item.view)} aria-label={item.label}>
+              <span className="admin-priority-index">{String(index + 1).padStart(2, '0')}</span>
+              <IonIcon icon={item.icon} />
+              <strong>{item.label}</strong>
+              <small>{item.hint}</small>
+            </button>
+          ))}
+        </div>
       </section>
 
       <div className="attention-summary">

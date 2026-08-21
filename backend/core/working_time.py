@@ -266,10 +266,10 @@ def sync_working_time(start: date, end: date, client=None) -> WorkingTimeSyncLog
             for month in iter_months(start, end):
                 existing = WorkingTimeAccountRecord.objects.filter(worker=worker, year_month=month).first()
                 ist = hours_by_key.get((str(worker.id), month), Decimal('0')).quantize(TWO)
-                difference = max(Decimal('0'), ist - monthly_limit).quantize(TWO)
+                difference = (ist - monthly_limit).quantize(TWO)
                 paid = existing.paid_hours if existing else Decimal('0')
                 manual = existing.manual_adjustment if existing else Decimal('0')
-                saldo = max(Decimal('0'), carry + difference + manual - paid).quantize(TWO)
+                saldo = (carry + difference + manual - paid).quantize(TWO)
                 gross = (ist * hourly_rate).quantize(TWO)
                 WorkingTimeAccountRecord.objects.update_or_create(
                     worker=worker,
@@ -309,13 +309,13 @@ def update_record(record: WorkingTimeAccountRecord, *, paid_hours=None, manual_a
         record.manual_adjustment = dec(manual_adjustment)
     previous = WorkingTimeAccountRecord.objects.filter(worker=record.worker, year_month__lt=record.year_month).order_by('-year_month').first()
     record.carryover_previous = previous.saldo_cumulative if previous else Decimal('0')
-    record.saldo_cumulative = max(Decimal('0'), record.carryover_previous + record.difference_hours + record.manual_adjustment - record.paid_hours).quantize(TWO)
+    record.saldo_cumulative = (record.carryover_previous + record.difference_hours + record.manual_adjustment - record.paid_hours).quantize(TWO)
     record.save(update_fields=['paid_hours', 'manual_adjustment', 'carryover_previous', 'saldo_cumulative', 'updated_at'])
     # Recalculate following months so a correction carries forward consistently.
     carry = record.saldo_cumulative
     for row in WorkingTimeAccountRecord.objects.filter(worker=record.worker, year_month__gt=record.year_month).order_by('year_month'):
         row.carryover_previous = carry
-        row.saldo_cumulative = max(Decimal('0'), carry + row.difference_hours + row.manual_adjustment - row.paid_hours).quantize(TWO)
+        row.saldo_cumulative = (carry + row.difference_hours + row.manual_adjustment - row.paid_hours).quantize(TWO)
         row.save(update_fields=['carryover_previous', 'saldo_cumulative', 'updated_at'])
         carry = row.saldo_cumulative
     return record

@@ -152,6 +152,21 @@ class PayrollStatementSerializer(serializers.ModelSerializer):
         model = PayrollStatement
         fields = '__all__'
 
+    def validate_document(self, uploaded):
+        name = str(getattr(uploaded, 'name', '') or '').lower()
+        content_type = str(getattr(uploaded, 'content_type', '') or '').lower()
+        if not name.endswith('.pdf'):
+            raise serializers.ValidationError('Lohnabrechnungen müssen als PDF hochgeladen werden.')
+        if content_type and content_type not in {'application/pdf', 'application/x-pdf'}:
+            raise serializers.ValidationError('Lohnabrechnungen müssen als PDF hochgeladen werden.')
+        position = uploaded.tell() if hasattr(uploaded, 'tell') else None
+        header = uploaded.read(5) if hasattr(uploaded, 'read') else b''
+        if position is not None and hasattr(uploaded, 'seek'):
+            uploaded.seek(position)
+        if header != b'%PDF-':
+            raise serializers.ValidationError('Die hochgeladene Datei ist keine gültige PDF-Datei.')
+        return uploaded
+
 
 class WorkerRatingSerializer(serializers.ModelSerializer):
     worker_name = serializers.CharField(source='worker.user.get_full_name', read_only=True)

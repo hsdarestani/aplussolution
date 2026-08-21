@@ -15,3 +15,6 @@ class CoreConfig(AppConfig):
             premium_tasks,
             shift_slots,
         )
+        from .smart_docx_integration import install_smart_docx_renderer
+
+        install_smart_docx_renderer()

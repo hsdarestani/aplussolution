@@ -512,10 +512,10 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
             for month in iter_months(start, end):
                 existing = WorkingTimeAccountRecord.objects.filter(worker=worker, year_month=month).first()
                 ist = hours_by_key.get((str(worker.id), month), Decimal('0')).quantize(TWO)
-                difference = max(Decimal('0'), ist - monthly_limit).quantize(TWO)
+                difference = (ist - monthly_limit).quantize(TWO)
                 paid = existing.paid_hours if existing else Decimal('0')
                 manual = existing.manual_adjustment if existing else Decimal('0')
-                saldo = max(Decimal('0'), carry + difference + manual - paid).quantize(TWO)
+                saldo = (carry + difference + manual - paid).quantize(TWO)
                 gross = (ist * hourly_rate).quantize(TWO)
                 WorkingTimeAccountRecord.objects.update_or_create(
                     worker=worker,

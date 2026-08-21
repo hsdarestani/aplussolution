@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, client_order_planning, contract_views, document_catalog_views, document_center_views, global_search_views, integration_views, live_admin_center, live_operations, native_operations, oauth_views, portal_views, searchable_views, shift_views, store_review_views, time_views, views
+from . import admin_center_views, advanced_views, attendance_actions, attendance_views, automation_views, client_order_planning, contract_views, document_catalog_views, document_center_views, global_search_views, integration_views, live_admin_center, live_operations, native_operations, oauth_views, payroll_views, portal_views, searchable_views, shift_views, store_review_views, time_views, views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -19,7 +19,7 @@ for prefix, view in [
     ('contract-templates', views.ContractTemplateViewSet),
     ('contracts', contract_views.ContractViewSet),
     ('documents', searchable_views.DocumentViewSet),
-    ('payroll', views.PayrollViewSet),
+    ('payroll', payroll_views.PayrollViewSet),
     ('ratings', views.RatingViewSet),
     ('conversations', views.ConversationViewSet),
 ]:
@@ -82,7 +82,7 @@ urlpatterns = [
     path('automation/orders/packages/', automation_views.order_packages),
     path('automation/orders/packages/<uuid:pk>/generate/', automation_views.order_generate),
     path('automation/orders/sync-packages/', automation_views.order_sync_packages),
-    path('working-time/settings/', automation_views.worktime_settings),
+    path('working-time/settings/', payroll_views.worktime_settings),
     path('working-time/sync/', automation_views.worktime_sync),
     path('working-time/records/', automation_views.worktime_records),
     path('working-time/records/<uuid:pk>/', automation_views.worktime_record_update),

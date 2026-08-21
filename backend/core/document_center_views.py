@@ -11,9 +11,10 @@ from .document_center import (
     install_template_source,
 )
 from .document_source import InvalidTemplateSource, validate_template_source
-from .models import Contract, User
+from .models import Contract, ContractTemplate, User
 from .permissions import IsAdminOrManager
 from .services import audit
+from .smart_pdf_overlay import analyse_pdf_template
 
 
 def _visible_contract(request, pk):
@@ -56,6 +57,26 @@ def upload_template_source(request, slug):
     try:
         validate_template_source(upload, catalog['source_format'])
         state = install_template_source(slug, upload, request.data.get('version'))
+        if catalog['source_format'] == ContractTemplate.SourceFormat.PDF_OVERLAY:
+            template = ContractTemplate.objects.get(slug=slug)
+            schema = dict(template.schema or {})
+            overlay = dict(schema.get('overlay') or {})
+            analysis = analyse_pdf_template(template.source_file.path, list(schema.get('fields') or []))
+            analysis['source_checksum'] = template.source_checksum
+            overlay['smart_layout'] = analysis
+            schema['overlay'] = overlay
+            template.schema = schema
+            template.save(update_fields=['schema', 'updated_at'])
+            state['smart_layout'] = {
+                'engine': analysis.get('engine'),
+                'matched_count': analysis.get('matched_count', 0),
+                'field_count': analysis.get('field_count', 0),
+                'candidate_count': analysis.get('candidate_count', 0),
+                'unmatched_fields': [
+                    row.get('field') for row in analysis.get('diagnostics', [])
+                    if row.get('status') == 'unmatched'
+                ],
+            }
     except (DocumentCenterError, InvalidTemplateSource) as exc:
         return Response({'detail': str(exc)}, status=400)
     audit(request, 'document_template.source_installed', request.user, {
@@ -63,6 +84,7 @@ def upload_template_source(request, slug):
         'filename': upload.name,
         'checksum': state['source_checksum'],
         'version': state['version'],
+        'smart_layout': state.get('smart_layout'),
     })
     return Response(state)
 
