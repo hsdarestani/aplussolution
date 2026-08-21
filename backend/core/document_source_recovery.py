@@ -198,10 +198,13 @@ def recover_document_sources(slugs=None) -> dict:
                 continue
             result['invalid'].append({'slug': slug, 'file': template.source_file.name})
 
-        if template.source_file or template.source_checksum:
+        # A stale FileField pointer is safe to detach, but its checksum is valuable
+        # installed metadata and must not be destroyed just because the database no
+        # longer knows where the persistent file lives. Successful recovery replaces
+        # it with the checksum of the bytes that were actually reconnected.
+        if template.source_file:
             template.source_file = None
-            template.source_checksum = ''
-            template.save(update_fields=['source_file', 'source_checksum', 'updated_at'])
+            template.save(update_fields=['source_file', 'updated_at'])
 
         manifest_path = _manifest_candidate(slug, catalog, manifest)
         if manifest_path is not None:
