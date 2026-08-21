@@ -25,11 +25,13 @@ def _repaired_schema(existing_schema, item):
     return schema
 
 
-def ensure_document_catalog():
-    """Create missing catalog templates and repair only malformed structural schema metadata.
+def ensure_document_catalog(recover_sources=True):
+    """Create missing catalog templates and repair malformed structural metadata.
 
-    Installed legal source files, checksums, template versions and any unrelated custom schema
-    metadata are intentionally left untouched.
+    Private legal source files live on the persistent media volume rather than in Git.
+    After a database reset their FileField pointers can disappear while the files remain.
+    When requested, recover those pointers deterministically from the persistent manifest
+    or from an unambiguous catalog filename match.
     """
     created = 0
     repaired = 0
@@ -57,4 +59,10 @@ def ensure_document_catalog():
             template.schema = _repaired_schema(template.schema, item)
             template.save(update_fields=['schema', 'updated_at'])
             repaired += 1
-    return {'created': created, 'repaired': repaired, 'total': len(DOCUMENT_CATALOG)}
+
+    result = {'created': created, 'repaired': repaired, 'total': len(DOCUMENT_CATALOG)}
+    if recover_sources:
+        from .document_source_recovery import recover_document_sources
+
+        result['sources'] = recover_document_sources()
+    return result
