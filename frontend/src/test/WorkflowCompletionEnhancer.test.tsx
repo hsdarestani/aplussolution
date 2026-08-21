@@ -39,7 +39,7 @@ describe('WorkflowCompletionEnhancer', () => {
     expect(await screen.findByTestId('akte-modal')).toBeInTheDocument();
     expect(screen.getByText('Arbeitsvertrag')).toBeInTheDocument();
     expect(screen.getByText('Nachweise')).toBeInTheDocument();
-    expect(screen.getByText('Lohnabrechnungen')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Lohnabrechnungen' })).toBeInTheDocument();
   });
 
   it('lets a client attach a function sheet to an existing order', async () => {
