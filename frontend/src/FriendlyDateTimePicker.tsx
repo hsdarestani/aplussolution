@@ -56,20 +56,19 @@ function fieldLabel(element: HTMLElement, kind: FriendlyPickerKind) {
 
 function enhanceNativeInput(input: HTMLInputElement, kind: FriendlyPickerKind) {
   if (!input.dataset.aplusPickerKind) input.dataset.aplusPickerKind = kind;
-  if (input.type !== 'text') input.type = 'text';
   input.readOnly = true;
   input.inputMode = 'none';
   input.autocomplete = 'off';
+  input.setAttribute('aria-haspopup', 'dialog');
   input.classList.add('aplus-friendly-native-picker');
 }
 
 function enhanceIonInput(element: HTMLElement, kind: FriendlyPickerKind) {
   if (!element.dataset.aplusPickerKind) element.dataset.aplusPickerKind = kind;
-  if (element.getAttribute('type') !== 'text') {
-    element.setAttribute('type', 'text');
-    try { (element as any).type = 'text'; } catch { /* Ionic property is best effort. */ }
-  }
+  element.setAttribute('readonly', '');
   element.setAttribute('inputmode', 'none');
+  element.setAttribute('aria-haspopup', 'dialog');
+  try { (element as any).readonly = true; } catch { /* Ionic property is best effort. */ }
   element.classList.add('aplus-friendly-ion-picker');
   const applyShadowState = () => {
     const native = element.shadowRoot?.querySelector('input') as HTMLInputElement | null;
@@ -168,6 +167,12 @@ export default function FriendlyDateTimePicker() {
       event.stopPropagation();
       openFromElement(element);
     };
+    const onClick = (event: Event) => {
+      const element = targetFromEvent(event);
+      if (!element) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
       const element = targetFromEvent(event);
@@ -178,11 +183,13 @@ export default function FriendlyDateTimePicker() {
     };
 
     document.addEventListener('pointerdown', onPointer, true);
+    document.addEventListener('click', onClick, true);
     document.addEventListener('keydown', onKey, true);
     return () => {
       observer.disconnect();
       window.cancelAnimationFrame(frame);
       document.removeEventListener('pointerdown', onPointer, true);
+      document.removeEventListener('click', onClick, true);
       document.removeEventListener('keydown', onKey, true);
     };
   }, []);
