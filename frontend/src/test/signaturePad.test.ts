@@ -12,7 +12,7 @@ describe('signaturePad', () => {
   beforeEach(() => {
     document.body.innerHTML = '<ion-textarea label="Signatur (Name handschriftlich eingeben)"></ion-textarea>';
     delete (window as any).__aplusSignaturePadInstalled;
-    (globalThis as any).ResizeObserver = ResizeObserverMock;
+    vi.stubGlobal('ResizeObserver', ResizeObserverMock);
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
       setTransform: vi.fn(),
       beginPath: vi.fn(),
