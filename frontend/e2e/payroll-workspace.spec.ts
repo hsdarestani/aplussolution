@@ -24,7 +24,7 @@ let payrollRow = {
   saldo_cumulative: '2.00',
   hourly_rate: '17.50',
   gross_amount: '1400.00',
-  source: 'aplus_time_entries_approved',
+  source: 'aplus_time_entries',
 };
 
 async function json(route: Route, body: unknown, status = 200) {
@@ -70,7 +70,7 @@ test('admin payroll workspace shows monthly figures and persists adjustments wit
   await page.goto('/?view=operations#arbeitszeitkonto');
   await expect(page.getByTestId('payroll-workspace')).toBeVisible();
   await expect(page.getByText('Anna Becker')).toBeVisible();
-  await expect(page.getByText('1.400,00 €')).toBeVisible();
+  await expect(page.getByText('1.400,00 €').first()).toBeVisible();
   await expect(page.getByText('17,50 €')).toBeVisible();
 
   await page.getByLabel('Auszahlung Anna Becker 2026-08').fill('1');
