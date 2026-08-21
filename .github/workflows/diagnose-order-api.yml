@@ -1,0 +1,54 @@
+name: Diagnose production order API
+on:
+  workflow_run:
+    workflows: ['Validate and deploy production']
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+  issues: write
+jobs:
+  probe:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prepare SSH authentication
+        env:
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_PASSWORD"
+          command -v ssh >/dev/null
+          command -v setsid >/dev/null
+          cat > /tmp/aplus-askpass.sh <<'ASKPASS'
+          #!/bin/sh
+          printf '%s\n' "$DEPLOY_PASSWORD"
+          ASKPASS
+          chmod 700 /tmp/aplus-askpass.sh
+      - name: Run rollback-only PATCH probe and publish result
+        env:
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
+          HOST: ${{ secrets.HOST }}
+          SSH_ASKPASS: /tmp/aplus-askpass.sh
+          SSH_ASKPASS_REQUIRE: force
+          DISPLAY: :0
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
+          output=$(setsid -w ssh -qT \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=10 \
+            -o ServerAliveCountMax=3 \
+            root@"$HOST" \
+            "cd /opt/aplussolution && docker compose exec -T backend python manage.py diagnose_order_planning --title 'QA Client Order'" 2>&1)
+          status=$?
+          printf '%s\n' "$output"
+          clipped=$(printf '%s' "$output" | tail -c 14000)
+          if [ "$status" -eq 0 ]; then result='SUCCESS'; else result='FAILED'; fi
+          body=$(printf 'Rollback-only production Order PATCH probe: **%s**\n\n```text\n%s\n```\n\nNo Order/Shift changes are persisted by this probe.' "$result" "$clipped")
+          gh api --method POST "repos/${{ github.repository }}/issues/84/comments" -f body="$body" >/dev/null
+          exit "$status"
