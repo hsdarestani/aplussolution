@@ -36,7 +36,7 @@ async function mockClientApi(page: Page, state: { ratingPost?: any } = {}) {
     const method = route.request().method();
 
     if (path === 'auth/me/') return json(route, client);
-    if (path === 'dashboard/') return json(route, { active_orders: 1, upcoming_shifts: 1, contracts_to_sign: 1 });
+    if (path === 'portal/client-dashboard/') return json(route, { role: 'client', active_orders: 1, upcoming_shifts: 1, contracts_to_sign: 1 });
 
     if (path === 'operations/') {
       return json(route, {
@@ -98,6 +98,7 @@ test('client portal keeps servicecenter, orders, documents and chat scoped to th
   await page.goto('/');
 
   await expect(page.getByText('QA Claudia Kunde').first()).toBeVisible();
+  await expect(page.getByText('Zu unterzeichnen')).toBeVisible();
 
   await openDesktopNav(page, 'Servicecenter');
   await expect(page.getByRole('heading', { name: 'Servicecenter' })).toBeVisible();
