@@ -55,6 +55,20 @@ def test_client_order_create_rejects_location_from_another_client(auth_client, c
     assert not ClientOrder.objects.filter(client=foreign_company, created_by__email='client@example.com').exists()
 
 
+def test_client_order_create_cannot_self_confirm_or_use_invalid_window(auth_client, company, location):
+    confirmed_payload = order_payload(location, title='Status Manipulation')
+    confirmed_payload['status'] = ClientOrder.Status.CONFIRMED
+    confirmed = auth_client.post('/api/orders/', confirmed_payload, format='json')
+    assert confirmed.status_code == 400, confirmed.data
+    assert not ClientOrder.objects.filter(client=company, title='Status Manipulation').exists()
+
+    invalid_payload = order_payload(location, title='Ungültiges Zeitfenster')
+    invalid_payload['ends_at'] = invalid_payload['starts_at']
+    invalid = auth_client.post('/api/orders/', invalid_payload, format='json')
+    assert invalid.status_code == 400, invalid.data
+    assert not ClientOrder.objects.filter(client=company, title='Ungültiges Zeitfenster').exists()
+
+
 def test_client_cannot_move_existing_order_to_foreign_client_or_location(auth_client, company, location, client_user):
     _foreign_user, foreign_company, foreign_location = make_foreign_client()
     start = timezone.now() + timedelta(days=4)
