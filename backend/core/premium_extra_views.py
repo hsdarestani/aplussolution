@@ -81,7 +81,7 @@ def decide_pickup_request(request, pk):
         user=row.worker.user,
         kind=f'pickup-{row.id}-{decision}',
         title='Schichtübernahme genehmigt' if decision == 'approved' else 'Schichtübernahme abgelehnt',
-        body=f'{row.shift.starts_at:%d.%m.%Y %H:%M}', action_url='/schedule',
+        body=f'{timezone.localtime(row.shift.starts_at):%d.%m.%Y %H:%M}', action_url='/schedule',
     )
     audit(request, f'premium.pickup.{decision}', row.shift, {'worker_id': str(row.worker_id), 'request_id': str(row.id)})
     return Response({'id': str(row.id), 'status': row.status})

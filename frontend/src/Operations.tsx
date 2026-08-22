@@ -36,10 +36,11 @@ import './operations.css';
 
 const unpack = (data: any): any[] => data?.results || data || [];
 const value = (event: any) => event.detail.value ?? '';
-const dateTime = (input?: string) => (input ? new Date(input).toLocaleString('de-DE') : '–');
-const dateOnly = (input?: string) => (input ? new Date(input).toLocaleDateString('de-DE') : '–');
+const dateTime = (input?: string) => (input ? new Date(input).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' }) : '–');
+const dateOnly = (input?: string) => (input ? new Date(input).toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' }) : '–');
 const isManager = (user: User) => ['admin', 'manager'].includes(user.role);
 const API = String(import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
+const berlinDateKey = (date = new Date()) => { const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date); const get=(type:string)=>parts.find(item=>item.type===type)?.value||''; return `${get('year')}-${get('month')}-${get('day')}`; };
 
 function Title({ title, text, action }: { title: string; text: string; action?: React.ReactNode }) {
   return (
@@ -186,7 +187,7 @@ export default function Operations({ user }: { user: User }) {
   const [availability, setAvailability] = useState<any>({ available: true });
   const [swap, setSwap] = useState<any>({});
   const [copyWeek, setCopyWeek] = useState<any>({});
-  const [report, setReport] = useState<any>({ month: new Date().toISOString().slice(0, 7) });
+  const [report, setReport] = useState<any>({ month: berlinDateKey().slice(0, 7) });
   const [templateFile, setTemplateFile] = useState<File>();
   const [swapTargets, setSwapTargets] = useState<Record<string, string>>({});
   const [wiwStatus, setWiwStatus] = useState<any>();
@@ -196,7 +197,7 @@ export default function Operations({ user }: { user: User }) {
   const [orderPackages, setOrderPackages] = useState<any[]>([]);
   const [workingTime, setWorkingTime] = useState<any>({ employees: [] });
   const [workingTimeRecords, setWorkingTimeRecords] = useState<any[]>([]);
-  const [workingTimeRange, setWorkingTimeRange] = useState<any>({ start: `${new Date().getFullYear()}-01-01`, end: new Date().toISOString().slice(0, 10) });
+  const [workingTimeRange, setWorkingTimeRange] = useState<any>({ start: `${berlinDateKey().slice(0,4)}-01-01`, end: berlinDateKey() });
 
   const load = async () => {
     const overview = await api('operations/');

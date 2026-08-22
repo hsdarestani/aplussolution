@@ -1,0 +1,49 @@
+name: Audit Berlin German Akten UX
+on:
+  push:
+    branches: [feature/berlin-german-akten]
+    paths:
+      - '.github/workflows/audit-berlin-german-akten.yml'
+permissions:
+  contents: read
+  issues: write
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/berlin-german-akten
+      - name: Audit source
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo '== FRONTEND DATE LOCALE CALLS =='
+            grep -RInE "toLocale(String|DateString|TimeString)\('de-DE'" frontend/src --include='*.ts' --include='*.tsx' || true
+            echo
+            echo '== FRONTEND INTL DATE FORMAT CALLS =='
+            grep -RIn "Intl.DateTimeFormat" frontend/src --include='*.ts' --include='*.tsx' || true
+            echo
+            echo '== CURRENT DATE VIA UTC ISO =='
+            grep -RIn "toISOString().slice(0, 10)" frontend/src --include='*.ts' --include='*.tsx' || true
+            echo
+            echo '== BACKEND DIRECT DATETIME FORMATTING =='
+            grep -RInE "starts_at:%|ends_at:%|strftime\(|isoformat\(\)" backend/core --include='*.py' | head -n 300 || true
+            echo
+            echo '== WORKING TIME BRUTTO CONTEXT =='
+            grep -RIn -C 35 "Monatskonten.*Brutto\|Brutto vorbereitet\|Auszahlung (Std.)" frontend/src || true
+            echo
+            echo '== ENGLISH VISIBLE TOKENS =='
+            grep -RInE ">[[:space:]]*(Overview|Order intake|Duty scheduling|Time recording|Staff & Customers|profile|Log out|Open|All|Month|Week|Locations)[[:space:]]*<" frontend/src --include='*.tsx' || true
+            echo
+            echo '== INDEX.HTML =='
+            cat frontend/index.html
+          } | tee /tmp/audit.txt
+      - name: Publish audit
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs=require('fs');
+            const output=fs.readFileSync('/tmp/audit.txt','utf8').slice(0,60000);
+            await github.rest.issues.update({owner:context.repo.owner,repo:context.repo.repo,issue_number:128,body:['App-wide source audit.','', '```text', output, '```','',`Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`].join('\n')});

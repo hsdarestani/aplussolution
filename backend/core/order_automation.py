@@ -488,8 +488,8 @@ def _employee_rows(package: ShiftImportPackage):
         rows.append([
             shift.worker.user.get_full_name() or shift.worker.user.email,
             birth_date or '–',
-            shift.starts_at.astimezone().strftime('%d.%m.%Y %H:%M'),
-            shift.ends_at.astimezone().strftime('%d.%m.%Y %H:%M'),
+            timezone.localtime(shift.starts_at).strftime('%d.%m.%Y %H:%M'),
+            timezone.localtime(shift.ends_at).strftime('%d.%m.%Y %H:%M'),
             shift.position.name,
         ])
     return rows

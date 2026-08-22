@@ -4,7 +4,7 @@ import { api, User } from './api';
 import './premium-operations.css';
 
 const unpack = (value: any): any[] => value?.results || value || [];
-const isoDate = (date = new Date()) => date.toISOString().slice(0, 10);
+const isoDate = (date = new Date()) => { const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date); const get=(type:string)=>parts.find(item=>item.type===type)?.value||''; return `${get('year')}-${get('month')}-${get('day')}`; };
 const addDays = (days: number) => { const date = new Date(); date.setDate(date.getDate() + days); return isoDate(date); };
 
 function SwitchControl({label,description,checked,onChange}:{label:string;description:string;checked:boolean;onChange:(value:boolean)=>void}) {

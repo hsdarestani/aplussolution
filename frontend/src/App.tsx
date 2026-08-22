@@ -56,6 +56,7 @@ import AdminHomeV4 from './AdminHomeV4';
 import GlobalSearch from './GlobalSearch';
 import ListToolbar from './ListToolbar';
 import DocumentCenterV5 from './DocumentCenterV5';
+import AktePage from './AktePage';
 
 type View =
   | 'dashboard'
@@ -69,7 +70,8 @@ type View =
   | 'ranking'
   | 'ratings'
   | 'profile'
-  | 'operations';
+  | 'operations'
+  | 'akte';
 
 const icons: Record<string, string> = {
   dashboard: homeOutline,
@@ -3153,7 +3155,7 @@ export default function App() {
     : ['dashboard', 'schedule', 'time', 'messages'];
   const mobilePrimaryItems = items.filter(([key]) => primaryViews.includes(key));
   const mobileMoreItems = items.filter(([key]) => !primaryViews.includes(key));
-  const currentLabel = view === 'profile' ? 'Profil' : items.find(([key]) => key === view)?.[1] || 'A+ Solution';
+  const currentLabel = view === 'profile' ? 'Profil' : view === 'akte' ? 'Digitale Akte' : items.find(([key]) => key === view)?.[1] || 'A+ Solution';
   const roleLabel: Record<string, string> = {
     admin: 'Administration',
     manager: 'Management',
@@ -3187,6 +3189,7 @@ export default function App() {
   else if (view === 'ratings') content = <Ratings user={user} />;
   else if (view === 'profile') content = <Profile user={user} />;
   else if (view === 'operations') content = <Operations user={user} />;
+  else if (view === 'akte') content = <AktePage user={user} />;
 
   return (
     <IonApp className="mobile-first-app-shell-v1">
@@ -3216,7 +3219,7 @@ export default function App() {
                 <div className="avatar">{user.name[0]}</div>
                 <div>
                   <b>{user.name}</b>
-                  <small>{user.role}</small>
+                  <small>{roleLabel[user.role] || user.role}</small>
                 </div>
               </div>
               <IonList lines="none">

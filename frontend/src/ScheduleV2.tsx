@@ -50,7 +50,7 @@ const shiftDateKey = (input:string) => {
   const values = Object.fromEntries(parts.filter(part=>part.type!=='literal').map(part=>[part.type,part.value]));
   return `${values.year}-${values.month}-${values.day}`;
 };
-const keyLabel = (key:string,options:Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('de-DE',options).format(keyToDate(key));
+const keyLabel = (key:string,options:Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('de-DE',{timeZone:BERLIN_TIME_ZONE,...options}).format(keyToDate(key));
 const statusInfo = (x:any) => {
   const open=x.status==='published'&&Number(x.open_count||0)>0;
   return {open,label:x.status==='draft'?'Entwurf':open?'Offen':'Voll',color:x.status==='draft'?'medium':open?'primary':'success'};

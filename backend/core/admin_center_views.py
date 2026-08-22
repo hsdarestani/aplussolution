@@ -412,7 +412,7 @@ def global_search(request):
     order_results = [
         _search_result(
             'order', order, order.title,
-            f'{order.client.name} · {order.starts_at:%d.%m.%Y %H:%M}',
+            f'{order.client.name} · {timezone.localtime(order.starts_at):%d.%m.%Y %H:%M}',
             'orders', status=order.status,
             meta={'client': order.client.name, 'starts_at': order.starts_at},
         ) for order in orders
@@ -430,7 +430,7 @@ def global_search(request):
         _search_result(
             'shift', shift,
             f'{shift.position.name} · {shift.client.name}',
-            f'{shift.location.name} · {shift.starts_at:%d.%m.%Y %H:%M}',
+            f'{shift.location.name} · {timezone.localtime(shift.starts_at):%d.%m.%Y %H:%M}',
             'schedule', status=shift.status,
             meta={'open_count': shift.open_count, 'filled_count': shift.filled_count, 'starts_at': shift.starts_at},
         ) for shift in shifts
