@@ -12,7 +12,8 @@ export type View =
   | 'ranking'
   | 'ratings'
   | 'profile'
-  | 'operations';
+  | 'operations'
+  | 'akte';
 
 const ROLE_VIEWS: Record<string, ReadonlySet<View>> = {
   admin: new Set<View>([
@@ -25,6 +26,7 @@ const ROLE_VIEWS: Record<string, ReadonlySet<View>> = {
     'people',
     'messages',
     'operations',
+    'akte',
   ]),
   manager: new Set<View>([
     'dashboard',
@@ -36,6 +38,7 @@ const ROLE_VIEWS: Record<string, ReadonlySet<View>> = {
     'people',
     'messages',
     'operations',
+    'akte',
   ]),
   worker: new Set<View>([
     'dashboard',
@@ -46,6 +49,7 @@ const ROLE_VIEWS: Record<string, ReadonlySet<View>> = {
     'documents',
     'messages',
     'ranking',
+    'akte',
   ]),
   client: new Set<View>([
     'dashboard',
@@ -56,6 +60,7 @@ const ROLE_VIEWS: Record<string, ReadonlySet<View>> = {
     'documents',
     'ratings',
     'messages',
+    'akte',
   ]),
 };
 
@@ -72,6 +77,7 @@ const KNOWN_VIEWS = new Set<View>([
   'ratings',
   'profile',
   'operations',
+  'akte',
 ]);
 
 function requestedView() {
@@ -82,6 +88,10 @@ function canonicalUrl(view: View) {
   const url = new URL(window.location.href);
   if (view === 'dashboard') url.searchParams.delete('view');
   else url.searchParams.set('view', view);
+  if (view !== 'akte') {
+    url.searchParams.delete('akte_kind');
+    url.searchParams.delete('akte_id');
+  }
   return `${url.pathname}${url.search}${url.hash}`;
 }
 

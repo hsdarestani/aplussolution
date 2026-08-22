@@ -3120,8 +3120,7 @@ function Legal({ deletePage = false }: { deletePage?: boolean }) {
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
-  const initialView = (() => { const value = new URLSearchParams(window.location.search).get('view') as View | null; return value || 'dashboard'; })();
-  const [view, setView] = useState<View>(initialView);
+  const [view, setView] = useState<View>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -3136,9 +3135,7 @@ export default function App() {
     } else {
       setReady(true);
     }
-    const syncView = () => { const value = new URLSearchParams(window.location.search).get('view') as View | null; setView(value || 'dashboard'); };
-    window.addEventListener('popstate', syncView);
-    return () => { window.removeEventListener('auth-lost', lost); window.removeEventListener('popstate', syncView); };
+    return () => window.removeEventListener('auth-lost', lost);
   }, []);
 
   if (location.pathname === '/aktivieren') return <IonApp><ActivationPage /></IonApp>;
@@ -3176,10 +3173,6 @@ export default function App() {
   const navigateTo = (next: View) => {
     setView(next);
     setMobileMenuOpen(false);
-    const url = new URL(window.location.href);
-    url.searchParams.set('view', next);
-    if (next !== 'akte') { url.searchParams.delete('akte_kind'); url.searchParams.delete('akte_id'); }
-    window.history.pushState({ view: next }, '', `${url.pathname}${url.search}${url.hash}`);
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
 
