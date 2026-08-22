@@ -60,3 +60,19 @@ def test_worker_cannot_read_conversation_they_do_not_participate_in(auth_worker,
 
     response = auth_worker.get(f'/api/conversations/{conversation.id}/')
     assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_worker_cannot_patch_conversation_participants(auth_worker, worker_user, manager_user, second_worker):
+    conversation = Conversation.objects.create(title='Disposition')
+    conversation.participants.add(worker_user, manager_user)
+
+    response = auth_worker.patch(
+        f'/api/conversations/{conversation.id}/',
+        {'participants': [str(second_worker.user_id)]},
+        format='json',
+    )
+
+    assert response.status_code == 403
+    conversation.refresh_from_db()
+    assert set(conversation.participants.values_list('id', flat=True)) == {worker_user.id, manager_user.id}
