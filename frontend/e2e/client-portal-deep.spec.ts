@@ -115,6 +115,7 @@ test('client portal keeps servicecenter, orders, documents and chat scoped to th
   await locationSelect.click();
   await expect(page.getByRole('radio', { name: 'QA Eigener Standort' })).toBeVisible();
   await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Abbrechen' }).click();
 
   await openDesktopNav(page, 'Dokumente');
   await expect(page.getByRole('heading', { name: /Dokumente/ })).toBeVisible();
@@ -141,13 +142,13 @@ test('client rating uses only completed assigned candidate and submits the bound
   const shiftSelect = page.locator('ion-select').filter({ hasText: 'Einsatz *' }).last();
   await shiftSelect.click();
   await page.getByRole('radio', { name: /Servicekraft/ }).click();
-  await page.getByRole('button', { name: 'OK' }).click();
+  await page.getByRole('button', { name: 'OK', exact: true }).click();
 
   const workerSelect = page.locator('ion-select').filter({ hasText: 'Mitarbeiter *' }).last();
   await workerSelect.click();
   await expect(page.getByRole('radio', { name: 'Anna Einsatz' })).toBeVisible();
   await page.getByRole('radio', { name: 'Anna Einsatz' }).click();
-  await page.getByRole('button', { name: 'OK' }).click();
+  await page.getByRole('button', { name: 'OK', exact: true }).click();
 
   await page.getByRole('button', { name: 'Speichern' }).click();
   await expect.poll(() => state.ratingPost).toBeTruthy();
