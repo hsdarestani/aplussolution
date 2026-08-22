@@ -118,7 +118,7 @@ test('client portal keeps servicecenter, orders, documents and chat scoped to th
   await page.getByRole('button', { name: 'Abbrechen' }).click();
 
   await openDesktopNav(page, 'Dokumente');
-  await expect(page.getByRole('heading', { name: /Dokumente/ })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Dokumente' })).toBeVisible();
   await expect(page.getByText('Einsatzinformation')).toBeVisible();
 
   await openDesktopNav(page, 'Nachrichten');
