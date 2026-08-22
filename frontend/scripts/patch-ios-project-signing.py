@@ -70,6 +70,7 @@ def patch_block(match: re.Match) -> str:
         "PRODUCT_BUNDLE_IDENTIFIER": os.environ["IOS_BUNDLE_ID"],
         "MARKETING_VERSION": os.environ["APP_VERSION_NAME"],
         "CURRENT_PROJECT_VERSION": os.environ["APP_BUILD_NUMBER"],
+        "IPHONEOS_DEPLOYMENT_TARGET": "15.0",
     }
     for key, value in settings.items():
         body = set_setting(body, key, value, indent)
@@ -86,4 +87,4 @@ if patched < 2:
     )
 
 project.write_text(text)
-print(f"Scoped manual App Store signing to the App target in {patched} Xcode configurations.")
+print(f"Scoped manual App Store signing and iOS 15 deployment target to the App target in {patched} Xcode configurations.")
