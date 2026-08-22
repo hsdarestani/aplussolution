@@ -1,0 +1,72 @@
+name: Deepen worker contract signing E2E
+
+on:
+  push:
+    branches: [qa/worker-portal-deep]
+    paths:
+      - '.github/workflows/patch-worker-contract-e2e.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: qa/worker-portal-deep
+      - name: Make contract signing test stateful
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('frontend/e2e/worker-portal-deep.spec.ts')
+          text = path.read_text()
+
+          old = "  correctionPending: boolean;\n  availabilities: any[];"
+          new = "  correctionPending: boolean;\n  contractSigned: boolean;\n  availabilities: any[];"
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('MockState contract marker missing.')
+
+          old = "    correctionPending: false,\n    availabilities: [],"
+          new = "    correctionPending: false,\n    contractSigned: false,\n    availabilities: [],"
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('MockState init contract marker missing.')
+
+          old = "            status: 'ready',\n            worker_name: worker.name,\n            client_name: '',\n            valid_from: new Date().toISOString().slice(0, 10),\n            valid_until: null,\n            signatures: [],"
+          new = "            status: state.contractSigned ? 'signed' : 'ready',\n            worker_name: worker.name,\n            client_name: '',\n            valid_from: new Date().toISOString().slice(0, 10),\n            valid_until: null,\n            signatures: state.contractSigned ? [{ id: 'sig-1', role: 'employee', signer_name: worker.name }] : [],"
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('Contract list mock marker missing.')
+
+          old = "      if (path === 'contracts/contract-worker-1/sign/' && method === 'POST') {\n        return json(route, { id: 'sig-1', role: 'employee' }, 201);\n      }"
+          new = "      if (path === 'contracts/contract-worker-1/sign/' && method === 'POST') {\n        state.contractSigned = true;\n        return json(route, { id: 'sig-1', role: 'employee', signer_name: worker.name }, 201);\n      }"
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('Contract sign mock marker missing.')
+
+          old_test = "    await expect(page.getByText('Arbeitsvertrag QA Mitarbeiter')).toBeVisible();\n    await expect(page.getByRole('button', { name: 'Unterschreiben' })).toBeVisible();\n    await expect(page.getByRole('button', { name: 'Neuer Vertrag' })).toHaveCount(0);\n    await expect(page.getByRole('button', { name: 'Stornieren' })).toHaveCount(0);\n    expect(forbiddenManagerFanout(state)).toEqual([]);"
+          new_test = "    await expect(page.getByText('Arbeitsvertrag QA Mitarbeiter')).toBeVisible();\n    await expect(page.getByRole('button', { name: 'Unterschreiben' })).toBeVisible();\n    await expect(page.getByRole('button', { name: 'Neuer Vertrag' })).toHaveCount(0);\n    await expect(page.getByRole('button', { name: 'Stornieren' })).toHaveCount(0);\n\n    await page.getByRole('button', { name: 'Unterschreiben' }).click();\n    await expect(page.getByRole('heading', { name: 'Vertrag unterzeichnen' })).toBeVisible();\n    await page.getByLabel('Vollständiger Name').fill(worker.name);\n    await page.getByLabel('Signatur (Name handschriftlich eingeben)').fill(worker.name);\n    await page.getByRole('button', { name: 'Verbindlich unterzeichnen' }).click();\n    await expect.poll(() => state.contractSigned).toBe(true);\n    await expect(page.getByRole('button', { name: 'Unterschreiben' })).toHaveCount(0);\n    await expect(page.getByText('Unterzeichnet')).toBeVisible();\n    expect(state.requests.some((r) => r.path === 'contracts/contract-worker-1/sign/' && r.method === 'POST')).toBe(true);\n    expect(forbiddenManagerFanout(state)).toEqual([]);"
+          if old_test in text:
+              text = text.replace(old_test, new_test, 1)
+          elif "await expect.poll(() => state.contractSigned).toBe(true);" not in text:
+              raise SystemExit('Contract E2E test marker missing.')
+
+          path.write_text(text)
+          PY
+      - name: Commit patch
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/e2e/worker-portal-deep.spec.ts
+          git commit -m 'test: verify worker contract signing end to end'
+          git push origin HEAD:qa/worker-portal-deep
