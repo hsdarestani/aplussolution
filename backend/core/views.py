@@ -758,6 +758,11 @@ class ConversationViewSet(BaseModelViewSet):
     queryset = Conversation.objects.prefetch_related('participants', 'messages__sender').all()
     serializer_class = ConversationSerializer
 
+    def get_permissions(self):
+        if getattr(self, 'action', None) in {'update', 'partial_update', 'destroy'}:
+            return [IsAdminOrManager()]
+        return super().get_permissions()
+
     def get_queryset(self):
         return self.queryset if self.request.user.role in {'admin', 'manager'} else self.queryset.filter(participants=self.request.user)
 
