@@ -32,20 +32,21 @@ def send_shift_reminders():
     for slot in slots:
         shift = slot.shift
         user = slot.worker.user
+        local_start = timezone.localtime(shift.starts_at)
         _, created = Notification.objects.get_or_create(
             user=user,
             kind=f'shift-24h-{slot.id}',
             defaults={
                 'action_url': '/schedule',
                 'title': 'Dein Einsatz beginnt morgen',
-                'body': f'{shift.starts_at:%d.%m.%Y %H:%M} – {shift.location.name} – {shift.position.name}',
+                'body': f'{local_start:%d.%m.%Y %H:%M} – {shift.location.name} – {shift.position.name}',
             },
         )
         count += int(created)
         if created and user.email:
             send_mail(
                 'A+ Solution: Dein Einsatz beginnt morgen',
-                f'{shift.starts_at:%d.%m.%Y %H:%M}\n{shift.location.name}\n{shift.position.name}',
+                f'{local_start:%d.%m.%Y %H:%M}\n{shift.location.name}\n{shift.position.name}',
                 settings.DEFAULT_FROM_EMAIL,
                 [user.email],
                 fail_silently=True,
