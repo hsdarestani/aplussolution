@@ -50,6 +50,10 @@ def test_client_servicecenter_counts_only_visible_documents_and_contracts(
     company.contract_visibility_enabled = False
     company.save(update_fields=['contract_visibility_enabled'])
 
+    dashboard = auth_client.get('/api/portal/client-dashboard/')
+    assert dashboard.status_code == 200
+    assert dashboard.data['contracts_to_sign'] == 0
+
     operations = auth_client.get('/api/operations/')
     assert operations.status_code == 200
     assert operations.data['documents'] == 1
