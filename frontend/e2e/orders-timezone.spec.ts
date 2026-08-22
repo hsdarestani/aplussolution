@@ -64,7 +64,7 @@ test.use({ timezoneId: 'Asia/Tehran' });
 test('orders render Europe/Berlin business time even on a Tehran device', async ({ page }) => {
   await mockAdminApi(page);
   await page.goto('/');
-  await page.getByText('Auftragseingang & AI', { exact: true }).first().click();
+  await page.getByText('Aufträge & AI', { exact: true }).first().click();
 
   const order = page.getByText('QA Client Order').locator('..');
   await expect(page.getByText('QA Client Order')).toBeVisible();
