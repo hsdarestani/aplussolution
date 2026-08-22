@@ -362,7 +362,7 @@ def swap_create(request):
     offered_to = None
     if request.data.get('offered_to'):
         try:
-            offered_to = WorkerProfile.objects.get(pk=request.data.get('offered_to'), active=True)
+            offered_to = WorkerProfile.objects.filter(active=True, user__is_active=True).exclude(user__email__iendswith='@sync.invalid').get(pk=request.data.get('offered_to'))
         except WorkerProfile.DoesNotExist:
             return Response({'detail': 'Zielmitarbeiter wurde nicht gefunden.'}, status=404)
         if offered_to.id == worker.id:

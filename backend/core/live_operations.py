@@ -114,7 +114,7 @@ def operations_overview(request):
         data.update({
             'current_worker_id': str(worker.id),
             'swap_candidates': [
-                {'id': str(candidate.id), 'name': candidate.user.get_full_name() or candidate.user.email}
+                {'id': str(candidate.id), 'name': candidate.user.get_full_name() or candidate.employee_number}
                 for candidate in _operational_workers().exclude(pk=worker.pk).select_related('user').order_by('user__first_name')
             ],
             'availabilities': AvailabilitySerializer(
