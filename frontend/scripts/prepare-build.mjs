@@ -176,6 +176,16 @@ if (appNext.includes(allRatingWorkers)) {
   throw new Error('Client rating worker picker marker changed; update prepare-build.mjs.');
 }
 
+// Client dashboard counters must use the privacy-safe endpoint so hidden client
+// contracts are not leaked indirectly through the "Zu unterzeichnen" count.
+const genericDashboardLoad = `  const load = () => api('dashboard/').then(setData);`;
+const roleAwareDashboardLoad = `  const load = () => api(user.role === 'client' ? 'portal/client-dashboard/' : 'dashboard/').then(setData);`;
+if (appNext.includes(genericDashboardLoad)) {
+  appNext = appNext.replace(genericDashboardLoad, roleAwareDashboardLoad);
+} else if (!appNext.includes("api(user.role === 'client' ? 'portal/client-dashboard/' : 'dashboard/')")) {
+  throw new Error('Client dashboard loader marker changed; update prepare-build.mjs.');
+}
+
 if (appNext !== appSource) {
   writeFileSync(appPath, appNext);
 }
