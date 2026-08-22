@@ -116,6 +116,13 @@ class TimeOffRequestSerializer(serializers.ModelSerializer):
         read_only_fields = ['decided_by']
         extra_kwargs = {'worker': {'required': False}}
 
+    def validate(self, attrs):
+        starts_on = attrs.get('starts_on', getattr(self.instance, 'starts_on', None))
+        ends_on = attrs.get('ends_on', getattr(self.instance, 'ends_on', None))
+        if starts_on and ends_on and ends_on < starts_on:
+            raise serializers.ValidationError({'ends_on': 'Ende muss am oder nach dem Beginn liegen.'})
+        return attrs
+
 
 class ShiftSwapRequestSerializer(serializers.ModelSerializer):
     class Meta:

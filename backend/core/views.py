@@ -563,6 +563,7 @@ class TimeOffViewSet(BaseModelViewSet):
         values = {}
         if self.request.user.role == 'worker':
             values['worker'] = self.request.user.worker_profile
+            values['status'] = TimeOffRequest.Status.PENDING
         obj = serializer.save(**values)
         audit(self.request, 'timeoff.created', obj)
 
