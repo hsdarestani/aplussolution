@@ -35,3 +35,30 @@ def employee_ranking(request):
             'user_detail': {'name': full_name},
         })
     return Response(rows)
+
+
+@api_view(['GET'])
+def message_recipients(request):
+    """Safe recipient picker for worker/client initiated conversations.
+
+    Non-manager portals may start a conversation with disposition/admin only.  Do not
+    expose e-mail addresses, phone numbers or the global user directory.
+    """
+    if request.user.role in {User.Role.ADMIN, User.Role.MANAGER}:
+        recipients = User.objects.filter(is_active=True).exclude(pk=request.user.pk)
+    elif request.user.role in {User.Role.WORKER, User.Role.CLIENT}:
+        recipients = User.objects.filter(
+            is_active=True,
+            role__in=[User.Role.ADMIN, User.Role.MANAGER],
+        )
+    else:
+        recipients = User.objects.none()
+
+    return Response([
+        {
+            'id': str(user.id),
+            'name': user.get_full_name().strip() or 'A+ Disposition',
+            'role': user.role,
+        }
+        for user in recipients.order_by('first_name', 'last_name', 'id')
+    ])
