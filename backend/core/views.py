@@ -563,6 +563,7 @@ class TimeOffViewSet(BaseModelViewSet):
         values = {}
         if self.request.user.role == 'worker':
             values['worker'] = self.request.user.worker_profile
+            values['status'] = TimeOffRequest.Status.PENDING
         obj = serializer.save(**values)
         audit(self.request, 'timeoff.created', obj)
 
@@ -703,9 +704,17 @@ class DocumentViewSet(BaseModelViewSet):
     def perform_create(self, serializer):
         values = {'uploaded_by': self.request.user}
         if self.request.user.role == 'worker':
-            values['worker'] = self.request.user.worker_profile
-        if self.request.user.role == 'client':
-            values['client'] = self.request.user.client_companies.first()
+            values.update(
+                worker=self.request.user.worker_profile,
+                client=None,
+                visibility=Document.Visibility.WORKER,
+            )
+        elif self.request.user.role == 'client':
+            values.update(
+                worker=None,
+                client=self.request.user.client_companies.first(),
+                visibility=Document.Visibility.CLIENT,
+            )
         obj = serializer.save(**values)
         audit(self.request, 'document.uploaded', obj)
 
@@ -750,10 +759,21 @@ class ConversationViewSet(BaseModelViewSet):
     queryset = Conversation.objects.prefetch_related('participants', 'messages__sender').all()
     serializer_class = ConversationSerializer
 
+    def get_permissions(self):
+        if getattr(self, 'action', None) in {'update', 'partial_update', 'destroy'}:
+            return [IsAdminOrManager()]
+        return super().get_permissions()
+
     def get_queryset(self):
         return self.queryset if self.request.user.role in {'admin', 'manager'} else self.queryset.filter(participants=self.request.user)
 
     def perform_create(self, serializer):
+        requested = list(serializer.validated_data.get('participants', []))
+        if self.request.user.role not in {'admin', 'manager'}:
+            if not requested:
+                raise ValidationError('Bitte die Disposition als Gesprächspartner auswählen.')
+            if any(person.role not in {'admin', 'manager'} for person in requested):
+                raise ValidationError('Mitarbeiter und Kunden können neue Unterhaltungen nur mit der Disposition starten.')
         conversation = serializer.save()
         conversation.participants.add(self.request.user)
         audit(self.request, 'conversation.created', conversation)

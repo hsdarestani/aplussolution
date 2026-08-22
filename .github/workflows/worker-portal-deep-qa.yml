@@ -1,0 +1,150 @@
+name: Worker portal deep QA
+
+on:
+  push:
+    branches:
+      - qa/worker-portal-deep
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: worker-portal-deep-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  worker-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+      - name: Run worker-relevant backend regression suite
+        id: backend
+        working-directory: backend
+        shell: bash
+        run: |
+          set +e
+          {
+            python manage.py check
+            pytest -q \
+              tests/test_auth_permissions.py \
+              tests/test_attendance_phase3.py \
+              tests/test_attendance_phase3_actions.py \
+              tests/test_direct_assignment_and_geofence.py \
+              tests/test_contract_lifecycle_serializer.py \
+              tests/test_document_center_phase5.py \
+              tests/test_worker_portal_ranking.py \
+              tests/test_worker_portal_messages.py \
+              tests/test_worker_portal_operations.py \
+              tests/test_worker_portal_documents.py \
+              tests/test_worker_portal_time_off.py
+          } 2>&1 | tee /tmp/worker-backend.log
+          rc=${PIPESTATUS[0]}
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          tail -n 160 /tmp/worker-backend.log > /tmp/worker-backend-tail.log
+          exit 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install --no-audit --no-fund --package-lock=false
+      - name: Build frontend
+        id: frontend
+        working-directory: frontend
+        shell: bash
+        run: |
+          set +e
+          npm run build 2>&1 | tee /tmp/worker-frontend.log
+          rc=${PIPESTATUS[0]}
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          tail -n 100 /tmp/worker-frontend.log > /tmp/worker-frontend-tail.log
+          exit 0
+      - name: Install Chromium
+        if: steps.frontend.outputs.rc == '0'
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run worker portal deep browser suite
+        if: steps.frontend.outputs.rc == '0'
+        id: browser
+        working-directory: frontend
+        shell: bash
+        run: |
+          set +e
+          npx playwright test e2e/worker-portal-deep.spec.ts 2>&1 | tee /tmp/worker-browser.log
+          rc=${PIPESTATUS[0]}
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          tail -n 220 /tmp/worker-browser.log > /tmp/worker-browser-tail.log
+          exit 0
+
+      - name: Publish QA result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BACKEND_RC: ${{ steps.backend.outputs.rc }}
+          FRONTEND_RC: ${{ steps.frontend.outputs.rc }}
+          BROWSER_RC: ${{ steps.browser.outputs.rc }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TITLE='Worker portal deep QA result'
+          BODY_FILE="$(mktemp)"
+          if [ "${BACKEND_RC:-1}" = "0" ] && [ "${FRONTEND_RC:-1}" = "0" ] && [ "${BROWSER_RC:-1}" = "0" ]; then STATUS='PASS'; else STATUS='FAIL'; fi
+          {
+            echo "Result: **$STATUS**"
+            echo
+            echo "Backend/Permissions: **$([ "${BACKEND_RC:-1}" = 0 ] && echo PASS || echo FAIL)**"
+            echo "Frontend build: **$([ "${FRONTEND_RC:-1}" = 0 ] && echo PASS || echo FAIL)**"
+            echo "Browser/Responsive: **$([ "${BROWSER_RC:-1}" = 0 ] && echo PASS || echo FAIL)**"
+            echo "Commit: \`$GITHUB_SHA\`"
+            echo
+            echo '### Backend tail'
+            echo '```text'
+            cat /tmp/worker-backend-tail.log 2>/dev/null || true
+            echo '```'
+            echo
+            echo '### Frontend build tail'
+            echo '```text'
+            cat /tmp/worker-frontend-tail.log 2>/dev/null || true
+            echo '```'
+            echo
+            echo '### Browser tail'
+            echo '```text'
+            cat /tmp/worker-browser-tail.log 2>/dev/null || true
+            echo '```'
+            echo
+            echo "Run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > "$BODY_FILE"
+          NUMBER="$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "$TITLE in:title" --json number,title --jq '.[] | select(.title == "Worker portal deep QA result") | .number' | head -n1)"
+          if [ -n "$NUMBER" ]; then
+            gh issue edit "$NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$BODY_FILE"
+            gh issue reopen "$NUMBER" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || true
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file "$BODY_FILE"
+          fi
+
+      - name: Fail workflow if QA failed
+        if: steps.backend.outputs.rc != '0' || steps.frontend.outputs.rc != '0' || steps.browser.outputs.rc != '0'
+        run: exit 1
+
+      - name: Upload Playwright report on failure
+        if: steps.browser.outputs.rc != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-portal-playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
+
+# Direct QA trigger after geolocation mock.

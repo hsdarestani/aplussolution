@@ -2073,7 +2073,7 @@ function Documents({ user }: { user: User }) {
   const [modal, setModal] = useState('');
   const [file, setFile] = useState<File>();
   const [payrollFile, setPayrollFile] = useState<File>();
-  const [form, setForm] = useState<any>({ folder: 'general', visibility: 'shared' });
+  const [form, setForm] = useState<any>({ folder: 'general', visibility: isManager(user) ? 'shared' : user.role === 'worker' ? 'worker' : 'client' });
   const [payrollForm, setPayrollForm] = useState<any>({});
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
@@ -2115,7 +2115,7 @@ function Documents({ user }: { user: User }) {
       await api('documents/', { method: 'POST', body: data });
       setModal('');
       setFile(undefined);
-      setForm({ folder: 'general', visibility: 'shared' });
+      setForm({ folder: 'general', visibility: isManager(user) ? 'shared' : user.role === 'worker' ? 'worker' : 'client' });
       await load();
       setToast('Dokument wurde hochgeladen.');
     } catch (reason: any) {
@@ -2273,6 +2273,7 @@ function Documents({ user }: { user: User }) {
           fill="outline"
           label="Sichtbarkeit"
           labelPlacement="floating"
+          disabled={!isManager(user)}
           value={form.visibility}
           onIonChange={(event) => setForm({ ...form, visibility: value(event) })}
         >
@@ -2695,10 +2696,8 @@ function Messages({ user }: { user: User }) {
     const list = unpack(conversations);
     setRows(list);
     if (!selected && list[0]) setSelected(list[0].id);
-    if (isManager(user)) {
-      const userData = await api('users/');
-      setUsers(unpack(userData));
-    }
+    const userData = await api(isManager(user) ? 'users/' : 'portal/message-recipients/');
+    setUsers(unpack(userData));
   };
 
   useEffect(() => {
@@ -2743,12 +2742,10 @@ function Messages({ user }: { user: User }) {
         title="Nachrichten"
         text="Direkte Kommunikation mit Mitarbeitern, Kunden und Disposition."
         action={
-          isManager(user) ? (
-            <IonButton onClick={() => setModal(true)}>
-              <IonIcon slot="start" icon={addOutline} />
-              Unterhaltung
-            </IonButton>
-          ) : undefined
+          <IonButton onClick={() => setModal(true)}>
+            <IonIcon slot="start" icon={addOutline} />
+            Unterhaltung
+          </IonButton>
         }
       />
 
@@ -2843,7 +2840,7 @@ function Messages({ user }: { user: User }) {
 function Ranking() {
   const [workers, setWorkers] = useState<any[]>([]);
   useEffect(() => {
-    api('workers/').then((data) =>
+    api('employee/ranking/').then((data) =>
       setWorkers(
         unpack(data)
           .filter((worker: any) => worker.active)

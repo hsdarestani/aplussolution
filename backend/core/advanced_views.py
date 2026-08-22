@@ -96,10 +96,10 @@ def _serialize_swap(obj):
         'shift_title': obj.shift.position.name if obj.shift_id else 'Schicht',
         'shift_starts_at': obj.shift.starts_at if obj.shift_id else None,
         'requested_by': str(obj.requested_by_id),
-        'requested_by_name': obj.requested_by.user.get_full_name() or obj.requested_by.user.email,
+        'requested_by_name': obj.requested_by.user.get_full_name() or obj.requested_by.employee_number,
         'offered_to': str(obj.offered_to_id) if obj.offered_to_id else None,
         'offered_to_name': (
-            obj.offered_to.user.get_full_name() or obj.offered_to.user.email
+            obj.offered_to.user.get_full_name() or obj.offered_to.employee_number
             if obj.offered_to_id
             else None
         ),
