@@ -54,11 +54,11 @@ const severityText: Record<string, string> = {
 };
 
 const priorityActions = [
-  { view: 'orders', label: 'Auftrag & AI', hint: 'Anfrage einlesen', icon: briefcaseOutline },
-  { view: 'schedule', label: 'Dienstplanung', hint: 'OpenShifts & Besetzung', icon: calendarOutline },
+  { view: 'schedule', label: 'Dienstplan', hint: 'OpenShifts & Besetzung', icon: calendarOutline },
   { view: 'time', label: 'Zeiterfassung', hint: 'Zeiten prüfen', icon: timeOutline },
-  { view: 'operations', label: 'Arbeitszeit & Lohn', hint: 'Saldo & Vorbereitung', icon: walletOutline },
+  { view: 'operations', label: 'Lohn & Anfragen', hint: 'Freigaben, Saldo & Berichte', icon: walletOutline },
   { view: 'people', label: 'Personal & Kunden', hint: 'Stammdaten & Zugänge', icon: peopleOutline },
+  { view: 'orders', label: 'Aufträge & AI', hint: 'Anfragen einlesen', icon: briefcaseOutline },
 ];
 
 function dueText(value?: string) {
