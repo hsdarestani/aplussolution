@@ -1,0 +1,58 @@
+name: Apply worker ranking QA patch
+
+on:
+  push:
+    branches: [qa/worker-portal-deep]
+    paths:
+      - '.github/workflows/patch-worker-ranking-qa.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: qa/worker-portal-deep
+      - name: Patch ranking frontend and deep test
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          app = Path('frontend/src/App.tsx')
+          text = app.read_text()
+          marker = "function Ranking() {\n  const [workers, setWorkers] = useState<any[]>([]);\n  useEffect(() => {\n    api('workers/').then((data) =>"
+          replacement = "function Ranking() {\n  const [workers, setWorkers] = useState<any[]>([]);\n  useEffect(() => {\n    api('employee/ranking/').then((data) =>"
+          if text.count(marker) != 1:
+              raise SystemExit(f'Expected exactly one Ranking API marker, found {text.count(marker)}')
+          app.write_text(text.replace(marker, replacement, 1))
+
+          spec = Path('frontend/e2e/worker-portal-deep.spec.ts')
+          text = spec.read_text()
+          old = "    if (path === 'workers/' || path.startsWith('workers/?')) return json(route, []);\n"
+          new = "    if (path === 'employee/ranking/') return json(route, [\n      { id: 'rank-2', employee_number: 'MA-002', ranking_points: 40, active: true, is_current_user: false, user_detail: { name: 'Lukas Schmidt' } },\n      { id: 'rank-1', employee_number: 'QA-MA-001', ranking_points: 25, active: true, is_current_user: true, user_detail: { name: worker.name } },\n    ]);\n    if (path === 'workers/' || path.startsWith('workers/?')) return json(route, []);\n"
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected one workers mock marker, found {text.count(old)}')
+          text = text.replace(old, new, 1)
+          old_test = "    await page.goto('/?view=ranking');\n    await expect(page.locator('body')).toContainText(/Ranking|Punkte|Mitarbeiter/i);\n\n    expect(forbiddenManagerFanout(state)).toEqual([]);"
+          new_test = "    const beforeRanking = state.requests.length;\n    await page.goto('/?view=ranking');\n    await expect(page.getByText('Lukas Schmidt')).toBeVisible();\n    await expect(page.getByText('40 Punkte')).toBeVisible();\n    const rankingRequests = state.requests.slice(beforeRanking);\n    expect(rankingRequests.some((r) => r.path === 'employee/ranking/')).toBe(true);\n    expect(rankingRequests.some((r) => r.path === 'workers/' || r.path.startsWith('workers/?'))).toBe(false);\n\n    expect(forbiddenManagerFanout(state)).toEqual([]);"
+          if text.count(old_test) != 1:
+              raise SystemExit(f'Expected one ranking test marker, found {text.count(old_test)}')
+          spec.write_text(text.replace(old_test, new_test, 1))
+          PY
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'No patch needed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/src/App.tsx frontend/e2e/worker-portal-deep.spec.ts
+          git commit -m 'fix: use safe employee ranking endpoint'
+          git push origin HEAD:qa/worker-portal-deep
