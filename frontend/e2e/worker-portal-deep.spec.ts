@@ -36,6 +36,7 @@ type MockState = {
   claimed: boolean;
   activeClock: boolean;
   correctionPending: boolean;
+  contractSigned: boolean;
   availabilities: any[];
   notificationsRead: boolean;
   requests: Array<{ path: string; method: string; body: string | null }>;
@@ -46,6 +47,7 @@ async function mockWorkerApi(page: Page): Promise<MockState> {
     claimed: false,
     activeClock: false,
     correctionPending: false,
+    contractSigned: false,
     availabilities: [],
     notificationsRead: false,
     requests: [],
@@ -172,18 +174,19 @@ async function mockWorkerApi(page: Page): Promise<MockState> {
             id: 'contract-worker-1',
             title: 'Arbeitsvertrag QA Mitarbeiter',
             kind: 'employee',
-            status: 'ready',
+            status: state.contractSigned ? 'signed' : 'ready',
             worker_name: worker.name,
             client_name: '',
             valid_from: new Date().toISOString().slice(0, 10),
             valid_until: null,
-            signatures: [],
+            signatures: state.contractSigned ? [{ id: 'sig-1', role: 'employee', signer_name: worker.name }] : [],
             pdf: null,
           },
         ]);
       }
       if (path === 'contracts/contract-worker-1/sign/' && method === 'POST') {
-        return json(route, { id: 'sig-1', role: 'employee' }, 201);
+        state.contractSigned = true;
+        return json(route, { id: 'sig-1', role: 'employee', signer_name: worker.name }, 201);
       }
     }
     if (path === 'contract-templates/') return json(route, []);
@@ -344,6 +347,16 @@ test.describe('Worker portal deep regression QA', () => {
     await expect(page.getByRole('button', { name: 'Unterschreiben' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Neuer Vertrag' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Stornieren' })).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Unterschreiben' }).click();
+    await expect(page.getByRole('heading', { name: 'Vertrag unterzeichnen' })).toBeVisible();
+    await page.getByLabel('Vollständiger Name').fill(worker.name);
+    await page.getByLabel('Signatur (Name handschriftlich eingeben)').fill(worker.name);
+    await page.getByRole('button', { name: 'Verbindlich unterzeichnen' }).click();
+    await expect.poll(() => state.contractSigned).toBe(true);
+    await expect(page.getByRole('button', { name: 'Unterschreiben' })).toHaveCount(0);
+    await expect(page.getByText('Unterzeichnet')).toBeVisible();
+    expect(state.requests.some((r) => r.path === 'contracts/contract-worker-1/sign/' && r.method === 'POST')).toBe(true);
     expect(forbiddenManagerFanout(state)).toEqual([]);
   });
 
