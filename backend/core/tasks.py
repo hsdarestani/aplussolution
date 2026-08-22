@@ -32,20 +32,21 @@ def send_shift_reminders():
     for slot in slots:
         shift = slot.shift
         user = slot.worker.user
+        local_start = timezone.localtime(shift.starts_at)
         _, created = Notification.objects.get_or_create(
             user=user,
             kind=f'shift-24h-{slot.id}',
             defaults={
                 'action_url': '/schedule',
                 'title': 'Dein Einsatz beginnt morgen',
-                'body': f'{shift.starts_at:%d.%m.%Y %H:%M} – {shift.location.name} – {shift.position.name}',
+                'body': f'{local_start:%d.%m.%Y %H:%M} – {shift.location.name} – {shift.position.name}',
             },
         )
         count += int(created)
         if created and user.email:
             send_mail(
                 'A+ Solution: Dein Einsatz beginnt morgen',
-                f'{shift.starts_at:%d.%m.%Y %H:%M}\n{shift.location.name}\n{shift.position.name}',
+                f'{local_start:%d.%m.%Y %H:%M}\n{shift.location.name}\n{shift.position.name}',
                 settings.DEFAULT_FROM_EMAIL,
                 [user.email],
                 fail_silently=True,
@@ -77,7 +78,7 @@ def process_wiw_webhook(self, event_id):
         run = WhenIWorkSynchronizer().sync(mode='incremental')
         event.processed_at = timezone.now()
         event.processing_error = ''
-        event.save(update_fields=['processed_at', 'processing_error', 'updated_at'])
+        event.save(update_fields=['processing_error', 'updated_at'])
         return {'event': str(event.id), 'sync': str(run.id), 'status': run.status}
     except Exception as exc:
         event.processing_error = str(exc)
