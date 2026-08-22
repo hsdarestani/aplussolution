@@ -42,6 +42,7 @@ jobs:
             tests/test_direct_assignment_and_geofence.py \
             tests/test_contract_lifecycle_serializer.py \
             tests/test_document_center_phase5.py \
+            tests/test_worker_portal_ranking.py \
             2>&1 | tee /tmp/worker-backend.log
           rc=${PIPESTATUS[0]}
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
