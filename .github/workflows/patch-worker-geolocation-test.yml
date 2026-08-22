@@ -1,0 +1,38 @@
+name: Patch worker geolocation QA
+
+on:
+  push:
+    branches: [qa/worker-portal-deep]
+    paths:
+      - '.github/workflows/patch-worker-geolocation-test.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: qa/worker-portal-deep
+      - name: Mock geolocation in worker browser QA
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('frontend/e2e/worker-portal-deep.spec.ts')
+          text = path.read_text()
+          old = "  await page.addInitScript(() => {\n    localStorage.setItem('access', 'worker-deep-access');\n    localStorage.setItem('refresh', 'worker-deep-refresh');\n  });"
+          new = "  await page.addInitScript(() => {\n    localStorage.setItem('access', 'worker-deep-access');\n    localStorage.setItem('refresh', 'worker-deep-refresh');\n    Object.defineProperty(navigator, 'geolocation', {\n      configurable: true,\n      value: {\n        getCurrentPosition: (success: PositionCallback) => success({\n          coords: {\n            latitude: 50.11,\n            longitude: 8.68,\n            accuracy: 5,\n            altitude: null,\n            altitudeAccuracy: null,\n            heading: null,\n            speed: null,\n          },\n          timestamp: Date.now(),\n        } as GeolocationPosition),\n        watchPosition: () => 1,\n        clearWatch: () => undefined,\n      },\n    });\n  });"
+          if old not in text:
+              raise SystemExit('worker addInitScript marker missing')
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Commit patch
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/e2e/worker-portal-deep.spec.ts
+          git commit -m 'test: mock geolocation for worker attendance QA'
+          git push origin HEAD:qa/worker-portal-deep
