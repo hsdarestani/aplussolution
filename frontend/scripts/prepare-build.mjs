@@ -69,6 +69,113 @@ if (appNext.includes(legacySignatureCondition)) {
   throw new Error('Contract signature action marker changed; update prepare-build.mjs.');
 }
 
+// Clients need their own scoped locations when creating an order. Managers still
+// receive the full master-data pair, while clients never load the global client list.
+const managerOnlyOrderMasterData = `    if (isManager(user)) {
+      const [clientData, locationData] = await Promise.all([api('clients/?ordering=name'), api('locations/')]);
+      setClients(unpack(clientData).filter((client: any) => client.active));
+      setLocations(unpack(locationData).filter((location: any) => location.active));
+    }`;
+const scopedOrderMasterData = `    if (isManager(user)) {
+      const [clientData, locationData] = await Promise.all([api('clients/?ordering=name'), api('locations/')]);
+      setClients(unpack(clientData).filter((client: any) => client.active));
+      setLocations(unpack(locationData).filter((location: any) => location.active));
+    } else if (user.role === 'client') {
+      const locationData = await api('locations/');
+      setLocations(unpack(locationData).filter((location: any) => location.active));
+    }`;
+if (appNext.includes(managerOnlyOrderMasterData)) {
+  appNext = appNext.replace(managerOnlyOrderMasterData, scopedOrderMasterData);
+} else if (!appNext.includes("else if (user.role === 'client') {\n      const locationData = await api('locations/');")) {
+  throw new Error('Client order location loading marker changed; update prepare-build.mjs.');
+}
+
+// Do not expose the broad worker directory to clients. Rating candidates are a
+// minimal backend-curated list of workers actually assigned to completed shifts
+// of this client, and already-rated assignments are removed server-side.
+const legacyRatingLoad = `  const load = async () => {
+    const [ratingData, workerData, shiftData] = await Promise.all([
+      api('ratings/'),
+      api('workers/'),
+      api('shifts/'),
+    ]);
+    setRows(unpack(ratingData));
+    setWorkers(unpack(workerData).filter((worker: any) => worker.active));
+    setShifts(unpack(shiftData));
+  };`;
+const safeRatingLoad = `  const load = async () => {
+    if (user.role === 'client') {
+      const [ratingData, candidateData] = await Promise.all([
+        api('ratings/'),
+        api('portal/rating-candidates/'),
+      ]);
+      const candidates = unpack(candidateData);
+      const workerMap = new Map<string, any>();
+      const shiftMap = new Map<string, any>();
+      candidates.forEach((candidate: any) => {
+        const current = workerMap.get(candidate.worker_id) || {
+          id: candidate.worker_id,
+          active: true,
+          user_detail: { name: candidate.worker_name },
+          shift_ids: [],
+        };
+        if (!current.shift_ids.includes(candidate.shift_id)) current.shift_ids.push(candidate.shift_id);
+        workerMap.set(candidate.worker_id, current);
+        if (!shiftMap.has(candidate.shift_id)) {
+          shiftMap.set(candidate.shift_id, {
+            id: candidate.shift_id,
+            position_name: candidate.position_name,
+            location_name: candidate.location_name,
+            starts_at: candidate.starts_at,
+            ends_at: candidate.ends_at,
+          });
+        }
+      });
+      setRows(unpack(ratingData));
+      setWorkers(Array.from(workerMap.values()));
+      setShifts(Array.from(shiftMap.values()));
+      return;
+    }
+    const [ratingData, workerData, shiftData] = await Promise.all([
+      api('ratings/'),
+      api('workers/'),
+      api('shifts/'),
+    ]);
+    setRows(unpack(ratingData));
+    setWorkers(unpack(workerData).filter((worker: any) => worker.active));
+    setShifts(unpack(shiftData));
+  };`;
+if (appNext.includes(legacyRatingLoad)) {
+  appNext = appNext.replace(legacyRatingLoad, safeRatingLoad);
+} else if (!appNext.includes("api('portal/rating-candidates/')")) {
+  throw new Error('Client rating loader marker changed; update prepare-build.mjs.');
+}
+
+const generalRatingOption = `          <IonSelectOption value="">Allgemeine Bewertung</IonSelectOption>`;
+const requiredShiftOption = `          <IonSelectOption value="" disabled>Einsatz auswählen</IonSelectOption>`;
+if (appNext.includes(generalRatingOption)) appNext = appNext.replace(generalRatingOption, requiredShiftOption);
+
+const ratingShiftLabel = `          label="Einsatz"`;
+if (appNext.includes(ratingShiftLabel)) appNext = appNext.replace(ratingShiftLabel, `          label="Einsatz *"`);
+
+const ratingShiftChange = `          onIonChange={(event) => setForm({ ...form, shift: value(event) })}`;
+const safeRatingShiftChange = `          onIonChange={(event) => setForm({ ...form, shift: value(event), worker: '' })}`;
+if (appNext.includes(ratingShiftChange)) appNext = appNext.replace(ratingShiftChange, safeRatingShiftChange);
+
+const allRatingWorkers = `          {workers.map((worker) => (`;
+const scopedRatingWorkers = `          {workers.filter((worker) => !form.shift || worker.shift_ids?.includes(form.shift)).map((worker) => (`;
+if (appNext.includes(allRatingWorkers)) {
+  // The first matching map inside Ratings is the employee picker. Restrict only
+  // that occurrence; manager document/payroll pickers remain untouched.
+  const ratingsStart = appNext.indexOf('function Ratings({ user }');
+  const workersMapIndex = appNext.indexOf(allRatingWorkers, ratingsStart);
+  if (workersMapIndex >= 0) {
+    appNext = appNext.slice(0, workersMapIndex) + scopedRatingWorkers + appNext.slice(workersMapIndex + allRatingWorkers.length);
+  }
+} else if (!appNext.includes('worker.shift_ids?.includes(form.shift)')) {
+  throw new Error('Client rating worker picker marker changed; update prepare-build.mjs.');
+}
+
 if (appNext !== appSource) {
   writeFileSync(appPath, appNext);
 }
