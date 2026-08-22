@@ -84,7 +84,7 @@ class OrderViewSet(views.OrderViewSet):
             raise ValidationError('Dem Benutzer ist kein aktiver Kunde zugeordnet.')
         return company
 
-    def _validate_client_relations(self, validated_data):
+    def _validate_client_relations(self, validated_data, instance=None):
         if self.request.user.role != User.Role.CLIENT:
             return None
         company = self._client_company()
@@ -94,19 +94,31 @@ class OrderViewSet(views.OrderViewSet):
         location = validated_data.get('location')
         if location is not None and location.client_id != company.pk:
             raise ValidationError({'location': 'Der Einsatzort gehört nicht zu deinem Kundenkonto.'})
+
+        starts_at = validated_data.get('starts_at', getattr(instance, 'starts_at', None))
+        ends_at = validated_data.get('ends_at', getattr(instance, 'ends_at', None))
+        if starts_at and ends_at and ends_at <= starts_at:
+            raise ValidationError({'ends_at': 'Das Ende muss nach dem Beginn liegen.'})
+
+        requested_staff = validated_data.get('requested_staff', getattr(instance, 'requested_staff', 1))
+        if requested_staff is not None and int(requested_staff) < 1:
+            raise ValidationError({'requested_staff': 'Mindestens eine Person muss angefragt werden.'})
         return company
 
     def perform_create(self, serializer):
         if self.request.user.role == User.Role.CLIENT:
+            requested_status = serializer.validated_data.get('status', ClientOrder.Status.NEW)
+            if requested_status != ClientOrder.Status.NEW:
+                raise ValidationError({'status': 'Neue Kundenaufträge starten immer im Status „Neu“.'})
             company = self._validate_client_relations(serializer.validated_data)
-            obj = serializer.save(created_by=self.request.user, client=company)
+            obj = serializer.save(created_by=self.request.user, client=company, status=ClientOrder.Status.NEW)
             views.audit(self.request, 'order.created', obj)
             return
         super().perform_create(serializer)
 
     def perform_update(self, serializer):
         if self.request.user.role == User.Role.CLIENT:
-            company = self._validate_client_relations(serializer.validated_data)
+            company = self._validate_client_relations(serializer.validated_data, serializer.instance)
             obj = serializer.save(client=company)
             views.audit(self.request, 'order.updated', obj)
             return
