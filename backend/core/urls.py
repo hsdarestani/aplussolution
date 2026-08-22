@@ -82,7 +82,7 @@ urlpatterns = [
     path('operations/copy-week/', native_operations.copy_week),
     path('operations/bulk-publish/', native_operations.bulk_publish),
     path('operations/notifications/read-all/', advanced_views.notifications_read_all),
-    path('operations/folders/', advanced_views.folder_summary),
+    path('operations/folders/', client_portal_views.folder_summary),
     path('operations/readiness/', advanced_views.readiness),
     path('operations/templates/import/', advanced_views.import_contract_templates),
     path('automation/orders/parse/', automation_views.order_parse),
