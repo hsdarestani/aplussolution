@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   diagnose:
@@ -29,19 +30,18 @@ jobs:
           set -euo pipefail
           timeout 180s env SSHPASS="$PASS" sshpass -e ssh \
             -o StrictHostKeyChecking=no -o ConnectTimeout=20 \
-            root@"$HOST" 'bash -s' <<'REMOTE'
+            root@"$HOST" 'bash -s' <<'REMOTE' | tee /tmp/hidden-shift.txt
           set -euo pipefail
           cd /opt/aplussolution
           docker compose exec -T backend python manage.py shell <<'PY'
-          from datetime import datetime, time, timezone as dt_timezone
+          from datetime import datetime, timezone as dt_timezone
           from zoneinfo import ZoneInfo
           from django.db.models import Count, Q
           from core.models import Shift
           from core.shift_slots import ShiftSlot
 
           berlin = ZoneInfo('Europe/Berlin')
-          day = datetime(2026, 8, 23, tzinfo=berlin)
-          start = day.astimezone(dt_timezone.utc)
+          start = datetime(2026, 8, 23, tzinfo=berlin).astimezone(dt_timezone.utc)
           end = datetime(2026, 8, 24, tzinfo=berlin).astimezone(dt_timezone.utc)
 
           qs = Shift.objects.select_related('location','position','client').annotate(
@@ -56,12 +56,10 @@ jobs:
           print('target_day_count=', len(targets))
           print('first_page_count=', len(first50))
           for s in targets:
-              local_start = s.starts_at.astimezone(berlin)
-              local_end = s.ends_at.astimezone(berlin) if s.ends_at else None
               print('TARGET', {
                   'id': str(s.id),
-                  'start_local': local_start.isoformat(),
-                  'end_local': local_end.isoformat() if local_end else None,
+                  'start_local': s.starts_at.astimezone(berlin).isoformat(),
+                  'end_local': s.ends_at.astimezone(berlin).isoformat() if s.ends_at else None,
                   'status': s.status,
                   'location': s.location.name if s.location else None,
                   'position': s.position.name if s.position else None,
@@ -89,3 +87,22 @@ jobs:
               })
           PY
           REMOTE
+      - name: Publish result
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const output = fs.readFileSync('/tmp/hidden-shift.txt','utf8').trim();
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 126,
+              body: [
+                'Temporary production diagnostic for the schedule/reminder mismatch.',
+                '',
+                '```text', output, '```',
+                '',
+                'No employee names, emails, credentials or tokens are included.',
+                `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              ].join('\n')
+            });
