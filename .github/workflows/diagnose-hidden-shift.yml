@@ -1,0 +1,91 @@
+name: Diagnose hidden production shift
+
+on:
+  push:
+    branches: [diagnose/hidden-shift-20260823]
+    paths:
+      - '.github/workflows/diagnose-hidden-shift.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install sshpass
+        run: |
+          if ! command -v sshpass >/dev/null 2>&1; then
+            sudo -n apt-get update -qq
+            sudo -n apt-get install -y -qq sshpass
+          fi
+      - name: Inspect production shift visibility
+        env:
+          HOST: ${{ secrets.HOST }}
+          PASS: ${{ secrets.PASS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 180s env SSHPASS="$PASS" sshpass -e ssh \
+            -o StrictHostKeyChecking=no -o ConnectTimeout=20 \
+            root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from datetime import datetime, time, timezone as dt_timezone
+          from zoneinfo import ZoneInfo
+          from django.db.models import Count, Q
+          from core.models import Shift
+          from core.shift_slots import ShiftSlot
+
+          berlin = ZoneInfo('Europe/Berlin')
+          day = datetime(2026, 8, 23, tzinfo=berlin)
+          start = day.astimezone(dt_timezone.utc)
+          end = datetime(2026, 8, 24, tzinfo=berlin).astimezone(dt_timezone.utc)
+
+          qs = Shift.objects.select_related('location','position','client').annotate(
+              filled_count=Count('slots', filter=Q(slots__status=ShiftSlot.Status.CLAIMED, slots__worker__isnull=False), distinct=True),
+              open_count=Count('slots', filter=Q(slots__status=ShiftSlot.Status.OPEN, slots__worker__isnull=True), distinct=True),
+          ).order_by('starts_at')
+          first50 = list(qs.values_list('id', flat=True)[:50])
+          targets = list(qs.filter(starts_at__gte=start, starts_at__lt=end))
+
+          print('total_shifts=', qs.count())
+          print('shifts_before_target_day=', qs.filter(starts_at__lt=start).count())
+          print('target_day_count=', len(targets))
+          print('first_page_count=', len(first50))
+          for s in targets:
+              local_start = s.starts_at.astimezone(berlin)
+              local_end = s.ends_at.astimezone(berlin) if s.ends_at else None
+              print('TARGET', {
+                  'id': str(s.id),
+                  'start_local': local_start.isoformat(),
+                  'end_local': local_end.isoformat() if local_end else None,
+                  'status': s.status,
+                  'location': s.location.name if s.location else None,
+                  'position': s.position.name if s.position else None,
+                  'filled_count': s.filled_count,
+                  'open_count': s.open_count,
+                  'required_count': s.required_count,
+                  'in_first_50': s.id in first50,
+                  'claimed_slots': s.slots.filter(status=ShiftSlot.Status.CLAIMED, worker__isnull=False).count(),
+              })
+
+          matches = qs.filter(
+              Q(location__name__icontains='Evangelische Akademie') |
+              Q(position__name__icontains='Serviceleitung')
+          ).filter(starts_at__gte=start, starts_at__lt=end)
+          print('matching_email_shift_count=', matches.count())
+          for s in matches:
+              print('MATCH', {
+                  'id': str(s.id),
+                  'start_local': s.starts_at.astimezone(berlin).isoformat(),
+                  'status': s.status,
+                  'location': s.location.name if s.location else None,
+                  'position': s.position.name if s.position else None,
+                  'in_first_50': s.id in first50,
+                  'slot_states': list(s.slots.values_list('status', flat=True)),
+              })
+          PY
+          REMOTE
