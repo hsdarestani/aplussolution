@@ -2695,10 +2695,8 @@ function Messages({ user }: { user: User }) {
     const list = unpack(conversations);
     setRows(list);
     if (!selected && list[0]) setSelected(list[0].id);
-    if (isManager(user)) {
-      const userData = await api('users/');
-      setUsers(unpack(userData));
-    }
+    const userData = await api(isManager(user) ? 'users/' : 'portal/message-recipients/');
+    setUsers(unpack(userData));
   };
 
   useEffect(() => {
@@ -2743,12 +2741,10 @@ function Messages({ user }: { user: User }) {
         title="Nachrichten"
         text="Direkte Kommunikation mit Mitarbeitern, Kunden und Disposition."
         action={
-          isManager(user) ? (
-            <IonButton onClick={() => setModal(true)}>
-              <IonIcon slot="start" icon={addOutline} />
-              Unterhaltung
-            </IonButton>
-          ) : undefined
+          <IonButton onClick={() => setModal(true)}>
+            <IonIcon slot="start" icon={addOutline} />
+            Unterhaltung
+          </IonButton>
         }
       />
 

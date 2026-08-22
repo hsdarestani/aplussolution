@@ -754,6 +754,12 @@ class ConversationViewSet(BaseModelViewSet):
         return self.queryset if self.request.user.role in {'admin', 'manager'} else self.queryset.filter(participants=self.request.user)
 
     def perform_create(self, serializer):
+        requested = list(serializer.validated_data.get('participants', []))
+        if self.request.user.role not in {'admin', 'manager'}:
+            if not requested:
+                raise ValidationError('Bitte die Disposition als Gesprächspartner auswählen.')
+            if any(person.role not in {'admin', 'manager'} for person in requested):
+                raise ValidationError('Mitarbeiter und Kunden können neue Unterhaltungen nur mit der Disposition starten.')
         conversation = serializer.save()
         conversation.participants.add(self.request.user)
         audit(self.request, 'conversation.created', conversation)

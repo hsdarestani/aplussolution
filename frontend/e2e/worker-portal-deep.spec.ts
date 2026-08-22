@@ -200,6 +200,13 @@ async function mockWorkerApi(page: Page): Promise<MockState> {
     }
     if (path === 'documents/' || path.startsWith('documents/?')) return json(route, []);
 
+    if (path === 'portal/message-recipients/') return json(route, [
+      { id: 'manager-1', name: 'A+ Disposition', role: 'manager' },
+    ]);
+    if (path === 'conversations/' && method === 'POST') {
+      const payload = JSON.parse(request.postData() || '{}');
+      return json(route, { id: 'conversation-worker-1', title: payload.title || 'Disposition', participants: payload.participants || [], participants_detail: [{ id: 'manager-1', name: 'A+ Disposition' }], messages: [] }, 201);
+    }
     if (path === 'conversations/') return json(route, []);
     if (path === 'users/') return json(route, []);
     if (path === 'employee/ranking/') return json(route, [
@@ -347,8 +354,13 @@ test.describe('Worker portal deep regression QA', () => {
     await page.goto('/?view=documents');
     await expect(page.locator('body')).toContainText(/Dokument|Lohn|Keine|Noch/i);
 
+    const beforeMessages = state.requests.length;
     await page.goto('/?view=messages');
     await expect(page.getByText('Noch keine Unterhaltungen.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Unterhaltung' })).toBeVisible();
+    const messageRequests = state.requests.slice(beforeMessages);
+    expect(messageRequests.some((r) => r.path === 'portal/message-recipients/')).toBe(true);
+    expect(messageRequests.some((r) => r.path === 'users/')).toBe(false);
 
     const beforeRanking = state.requests.length;
     await page.goto('/?view=ranking');
