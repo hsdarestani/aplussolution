@@ -4,7 +4,17 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from . import views
-from .models import Shift, User, WorkerRating
+from .models import (
+    ClientCompany,
+    ClientOrder,
+    Contract,
+    Document,
+    PayrollStatement,
+    Shift,
+    User,
+    WorkerProfile,
+    WorkerRating,
+)
 from .shift_slots import ShiftSlot
 
 
@@ -90,3 +100,55 @@ def client_rating_candidates(request):
                 'ends_at': shift.ends_at,
             })
     return Response(rows)
+
+
+@api_view(['GET'])
+def folder_summary(request):
+    """Servicecenter counters must obey the same visibility rules as the actual lists."""
+    user = request.user
+    if user.role in {User.Role.ADMIN, User.Role.MANAGER}:
+        workers = [{
+            'id': str(worker.id),
+            'name': worker.user.get_full_name() or worker.user.email,
+            'employee_number': worker.employee_number,
+            'documents': Document.objects.filter(worker=worker).count(),
+            'contracts': Contract.objects.filter(worker=worker).count(),
+            'payroll': PayrollStatement.objects.filter(worker=worker).count(),
+        } for worker in WorkerProfile.objects.filter(active=True).select_related('user')]
+        clients = [{
+            'id': str(client.id),
+            'name': client.name,
+            'customer_number': client.customer_number,
+            'documents': Document.objects.filter(client=client).count(),
+            'contracts': Contract.objects.filter(client=client).count(),
+            'orders': ClientOrder.objects.filter(client=client).count(),
+        } for client in ClientCompany.objects.filter(active=True)]
+        return Response({'workers': workers, 'clients': clients})
+
+    if user.role == User.Role.WORKER:
+        worker = user.worker_profile
+        return Response({'workers': [{
+            'id': str(worker.id),
+            'name': worker.user.get_full_name() or worker.user.email,
+            'employee_number': worker.employee_number,
+            'documents': Document.objects.filter(worker=worker).exclude(visibility=Document.Visibility.ADMIN).count(),
+            'contracts': Contract.objects.filter(worker=worker).count(),
+            'payroll': PayrollStatement.objects.filter(worker=worker).count(),
+        }], 'clients': []})
+
+    clients = [{
+        'id': str(client.id),
+        'name': client.name,
+        'customer_number': client.customer_number,
+        'documents': Document.objects.filter(
+            client=client,
+            visibility__in=[Document.Visibility.CLIENT, Document.Visibility.SHARED],
+        ).count(),
+        'contracts': (
+            Contract.objects.filter(client=client).count()
+            if client.contract_visibility_enabled
+            else 0
+        ),
+        'orders': ClientOrder.objects.filter(client=client).count(),
+    } for client in user.client_companies.filter(active=True)]
+    return Response({'workers': [], 'clients': clients})
