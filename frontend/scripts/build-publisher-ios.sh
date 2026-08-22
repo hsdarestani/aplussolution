@@ -21,13 +21,41 @@ npx cap sync ios
 node scripts/prepare-native.mjs ios
 
 # Force the exact user-approved icon into the native Xcode AppIcon set.
-# Do this directly instead of relying on a generator, because the iOS project is
-# recreated by Capacitor on every Publisher build.
+# App Store Connect rejects any large app icon that contains transparency/alpha
+# (ITMS-90717). Flatten the source onto an opaque white background first, then
+# resize that RGB PNG into every generated native icon slot.
 ICON_SOURCE="$FRONTEND/public/sicon.png"
 APP_ICON_SET="$FRONTEND/ios/App/App/Assets.xcassets/AppIcon.appiconset"
+FLAT_ICON_SOURCE="$(mktemp -t aplus-flat-appicon).png"
 test -f "$ICON_SOURCE"
 test -d "$APP_ICON_SET"
 test -f "$APP_ICON_SET/Contents.json"
+
+python3 - "$ICON_SOURCE" "$FLAT_ICON_SOURCE" <<'PY'
+import subprocess
+import sys
+
+try:
+    from PIL import Image
+except ImportError:
+    subprocess.check_call([
+        sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "Pillow"
+    ])
+    from PIL import Image
+
+source_path, output_path = sys.argv[1], sys.argv[2]
+with Image.open(source_path) as image:
+    rgba = image.convert("RGBA")
+    opaque = Image.new("RGB", rgba.size, (255, 255, 255))
+    opaque.paste(rgba, mask=rgba.getchannel("A"))
+    opaque.save(output_path, "PNG", optimize=True)
+PY
+trap 'rm -f "$FLAT_ICON_SOURCE"' EXIT
+
+if sips -g hasAlpha "$FLAT_ICON_SOURCE" | grep -qi 'hasAlpha: yes'; then
+  echo "Flattened App Store icon still contains alpha." >&2
+  exit 1
+fi
 
 ICON_COUNT=0
 while IFS= read -r -d '' ICON_FILE; do
@@ -35,7 +63,11 @@ while IFS= read -r -d '' ICON_FILE; do
   HEIGHT="$(sips -g pixelHeight "$ICON_FILE" | awk '/pixelHeight:/ {print $2}')"
   test -n "$WIDTH"
   test -n "$HEIGHT"
-  sips -z "$HEIGHT" "$WIDTH" "$ICON_SOURCE" --out "$ICON_FILE" >/dev/null
+  sips -z "$HEIGHT" "$WIDTH" "$FLAT_ICON_SOURCE" --out "$ICON_FILE" >/dev/null
+  if sips -g hasAlpha "$ICON_FILE" | grep -qi 'hasAlpha: yes'; then
+    echo "Native AppIcon still contains alpha: $ICON_FILE" >&2
+    exit 1
+  fi
   ICON_COUNT=$((ICON_COUNT + 1))
 done < <(find "$APP_ICON_SET" -type f -name '*.png' -print0)
 
@@ -44,8 +76,8 @@ if [ "$ICON_COUNT" -lt 1 ]; then
   exit 1
 fi
 
-echo "Replaced $ICON_COUNT native AppIcon PNG file(s) from public/sicon.png."
-echo "Source icon SHA256: $(shasum -a 256 "$ICON_SOURCE" | awk '{print $1}')"
+echo "Replaced $ICON_COUNT native AppIcon PNG file(s) with opaque icons from public/sicon.png."
+echo "Opaque source icon SHA256: $(shasum -a 256 "$FLAT_ICON_SOURCE" | awk '{print $1}')"
 find "$APP_ICON_SET" -type f -name '*.png' -maxdepth 1 -print -exec shasum -a 256 {} \;
 
 # Configure signing only on the generated App target. Passing the provisioning
