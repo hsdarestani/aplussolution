@@ -56,6 +56,7 @@ import AdminHomeV4 from './AdminHomeV4';
 import GlobalSearch from './GlobalSearch';
 import ListToolbar from './ListToolbar';
 import DocumentCenterV5 from './DocumentCenterV5';
+import AktePage from './AktePage';
 
 type View =
   | 'dashboard'
@@ -69,7 +70,8 @@ type View =
   | 'ranking'
   | 'ratings'
   | 'profile'
-  | 'operations';
+  | 'operations'
+  | 'akte';
 
 const icons: Record<string, string> = {
   dashboard: homeOutline,
@@ -3118,7 +3120,8 @@ function Legal({ deletePage = false }: { deletePage?: boolean }) {
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
-  const [view, setView] = useState<View>('dashboard');
+  const initialView = (() => { const value = new URLSearchParams(window.location.search).get('view') as View | null; return value || 'dashboard'; })();
+  const [view, setView] = useState<View>(initialView);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -3133,7 +3136,9 @@ export default function App() {
     } else {
       setReady(true);
     }
-    return () => window.removeEventListener('auth-lost', lost);
+    const syncView = () => { const value = new URLSearchParams(window.location.search).get('view') as View | null; setView(value || 'dashboard'); };
+    window.addEventListener('popstate', syncView);
+    return () => { window.removeEventListener('auth-lost', lost); window.removeEventListener('popstate', syncView); };
   }, []);
 
   if (location.pathname === '/aktivieren') return <IonApp><ActivationPage /></IonApp>;
@@ -3153,7 +3158,7 @@ export default function App() {
     : ['dashboard', 'schedule', 'time', 'messages'];
   const mobilePrimaryItems = items.filter(([key]) => primaryViews.includes(key));
   const mobileMoreItems = items.filter(([key]) => !primaryViews.includes(key));
-  const currentLabel = view === 'profile' ? 'Profil' : items.find(([key]) => key === view)?.[1] || 'A+ Solution';
+  const currentLabel = view === 'profile' ? 'Profil' : view === 'akte' ? 'Digitale Akte' : items.find(([key]) => key === view)?.[1] || 'A+ Solution';
   const roleLabel: Record<string, string> = {
     admin: 'Administration',
     manager: 'Management',
@@ -3171,6 +3176,10 @@ export default function App() {
   const navigateTo = (next: View) => {
     setView(next);
     setMobileMenuOpen(false);
+    const url = new URL(window.location.href);
+    url.searchParams.set('view', next);
+    if (next !== 'akte') { url.searchParams.delete('akte_kind'); url.searchParams.delete('akte_id'); }
+    window.history.pushState({ view: next }, '', `${url.pathname}${url.search}${url.hash}`);
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
 
@@ -3187,6 +3196,7 @@ export default function App() {
   else if (view === 'ratings') content = <Ratings user={user} />;
   else if (view === 'profile') content = <Profile user={user} />;
   else if (view === 'operations') content = <Operations user={user} />;
+  else if (view === 'akte') content = <AktePage user={user} />;
 
   return (
     <IonApp className="mobile-first-app-shell-v1">
@@ -3216,7 +3226,7 @@ export default function App() {
                 <div className="avatar">{user.name[0]}</div>
                 <div>
                   <b>{user.name}</b>
-                  <small>{user.role}</small>
+                  <small>{roleLabel[user.role] || user.role}</small>
                 </div>
               </div>
               <IonList lines="none">

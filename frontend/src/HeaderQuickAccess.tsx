@@ -85,6 +85,7 @@ function formatDate(value?: string) {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
+    timeZone: 'Europe/Berlin',
     hour: value.includes('T') ? '2-digit' : undefined,
     minute: value.includes('T') ? '2-digit' : undefined,
   }).format(parsed);
@@ -348,16 +349,14 @@ export default function HeaderQuickAccess() {
   };
 
   const openAkte = async (choice: PersonChoice) => {
-    setAkteLoading(true);
-    setError('');
-    try {
-      const path = choice.kind === 'worker' ? `workers/${choice.id}/akte/` : `clients/${choice.id}/akte/`;
-      setAkte(await api<AkteData>(path));
-    } catch (reason: any) {
-      setError(reason?.message || 'Akte konnte nicht geladen werden.');
-    } finally {
-      setAkteLoading(false);
-    }
+    setPanel(null);
+    const url = new URL(window.location.href);
+    url.pathname = '/';
+    url.searchParams.set('view', 'akte');
+    url.searchParams.set('akte_kind', choice.kind);
+    url.searchParams.set('akte_id', choice.id);
+    window.history.pushState({ view: 'akte' }, '', `${url.pathname}${url.search}${url.hash}`);
+    window.dispatchEvent(new PopStateEvent('popstate'));
   };
 
   const readAll = async () => {

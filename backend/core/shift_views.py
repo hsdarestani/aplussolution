@@ -210,7 +210,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                     kind=f'shift-admin-assigned-{slot.id}',
                     defaults={
                         'title': 'Neue Schicht zugeteilt',
-                        'body': f'{shift.starts_at:%d.%m.%Y %H:%M} – {shift.location.name}',
+                        'body': f'{timezone.localtime(shift.starts_at):%d.%m.%Y %H:%M} – {shift.location.name}',
                         'action_url': '/schedule',
                     },
                 )
@@ -243,7 +243,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                     for admin in User.objects.filter(role__in=[User.Role.ADMIN, User.Role.MANAGER], is_active=True):
                         Notification.objects.create(
                             user=admin, kind=f'pickup-request-{pickup.id}', title='Schichtübernahme prüfen',
-                            body=f'{request.user.get_full_name() or request.user.email} · {shift.starts_at:%d.%m.%Y %H:%M} · {shift.location.name}',
+                            body=f'{request.user.get_full_name() or request.user.email} · {timezone.localtime(shift.starts_at):%d.%m.%Y %H:%M} · {shift.location.name}',
                             action_url='/operations',
                         )
                     audit(request, 'shift.pickup_requested', shift, {'request_id': str(pickup.id)})

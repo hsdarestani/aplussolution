@@ -526,7 +526,7 @@ def swap_decide(request, pk):
             user=obj.offered_to.user,
             kind=f'shift-swap-assigned-{obj.id}',
             title='Schichttausch bestätigt',
-            body=f'{obj.shift.starts_at:%d.%m.%Y %H:%M} · {obj.shift.position.name}',
+            body=f'{timezone.localtime(obj.shift.starts_at):%d.%m.%Y %H:%M} · {obj.shift.position.name}',
             action_url='/schedule',
         )
     audit(request, 'shift_swap.decided', obj, {'status': obj.status})

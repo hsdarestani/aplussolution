@@ -550,7 +550,7 @@ def bulk_publish(request):
                 kind=f'shift-published-{shift.id}',
                 defaults={
                     'title': 'Neue Schicht veröffentlicht',
-                    'body': f'{shift.starts_at:%d.%m.%Y %H:%M}',
+                    'body': f'{timezone.localtime(shift.starts_at):%d.%m.%Y %H:%M}',
                     'action_url': '/schedule',
                 },
             )
@@ -594,8 +594,8 @@ def export_timesheets(request):
         rows.append([
             entry.worker.employee_number,
             entry.worker.user.get_full_name() or entry.worker.user.email,
-            entry.clock_in.astimezone().strftime('%d.%m.%Y %H:%M'),
-            entry.clock_out.astimezone().strftime('%d.%m.%Y %H:%M') if entry.clock_out else '',
+            timezone.localtime(entry.clock_in).strftime('%d.%m.%Y %H:%M'),
+            timezone.localtime(entry.clock_out).strftime('%d.%m.%Y %H:%M') if entry.clock_out else '',
             entry.worked_minutes,
             'Ja' if entry.approved else 'Nein',
             entry.shift.position.name if entry.shift_id else '',
@@ -623,8 +623,8 @@ def export_schedule(request):
         starts_at__lt=_aware_start(date_to + timedelta(days=1)),
     ).select_related('worker__user', 'client', 'location', 'position').order_by('starts_at')
     rows = [[
-        shift.starts_at.astimezone().strftime('%d.%m.%Y %H:%M'),
-        shift.ends_at.astimezone().strftime('%d.%m.%Y %H:%M'),
+        timezone.localtime(shift.starts_at).strftime('%d.%m.%Y %H:%M'),
+        timezone.localtime(shift.ends_at).strftime('%d.%m.%Y %H:%M'),
         shift.client.name,
         shift.location.name,
         shift.position.name,

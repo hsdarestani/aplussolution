@@ -36,8 +36,8 @@ import './operations.css';
 
 const unpack = (data: any): any[] => data?.results || data || [];
 const value = (event: any) => event.detail.value ?? '';
-const dateTime = (input?: string) => (input ? new Date(input).toLocaleString('de-DE') : '–');
-const dateOnly = (input?: string) => (input ? new Date(input).toLocaleDateString('de-DE') : '–');
+const dateTime = (input?: string) => (input ? new Date(input).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' }) : '–');
+const dateOnly = (input?: string) => (input ? new Date(input).toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' }) : '–');
 const isManager = (user: User) => ['admin', 'manager'].includes(user.role);
 const API = String(import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
 
@@ -196,7 +196,7 @@ export default function Operations({ user }: { user: User }) {
   const [orderPackages, setOrderPackages] = useState<any[]>([]);
   const [workingTime, setWorkingTime] = useState<any>({ employees: [] });
   const [workingTimeRecords, setWorkingTimeRecords] = useState<any[]>([]);
-  const [workingTimeRange, setWorkingTimeRange] = useState<any>({ start: `${new Date().getFullYear()}-01-01`, end: new Date().toISOString().slice(0, 10) });
+  const [workingTimeRange, setWorkingTimeRange] = useState<any>({ start: `${berlinDateKey().slice(0,4)}-01-01`, end: berlinDateKey() });
 
   const load = async () => {
     const overview = await api('operations/');
