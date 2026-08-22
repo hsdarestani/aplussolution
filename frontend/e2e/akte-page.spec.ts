@@ -47,7 +47,7 @@ test('Digital Akte keeps its own route and back navigation clears record paramet
   await expect(page).toHaveURL(/akte_id=worker-akte-1/);
   await expect(page.getByTestId('akte-page')).toBeVisible();
 
-  await page.getByRole('button',{name:'Personal & Kunden'}).click();
+  await page.getByRole('button',{name:'← Personal & Kunden',exact:true}).click();
   await expect(page).toHaveURL(/view=people/);
   await expect(page).not.toHaveURL(/akte_id=/);
 });
