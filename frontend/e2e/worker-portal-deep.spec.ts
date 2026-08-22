@@ -56,6 +56,25 @@ async function mockWorkerApi(page: Page): Promise<MockState> {
   await page.addInitScript(() => {
     localStorage.setItem('access', 'worker-deep-access');
     localStorage.setItem('refresh', 'worker-deep-refresh');
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: {
+        getCurrentPosition: (success: PositionCallback) => success({
+          coords: {
+            latitude: 50.11,
+            longitude: 8.68,
+            accuracy: 5,
+            altitude: null,
+            altitudeAccuracy: null,
+            heading: null,
+            speed: null,
+          },
+          timestamp: Date.now(),
+        } as GeolocationPosition),
+        watchPosition: () => 1,
+        clearWatch: () => undefined,
+      },
+    });
   });
 
   await page.route('**/api/**', async (route) => {
