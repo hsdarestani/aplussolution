@@ -346,9 +346,11 @@ test.describe('Worker portal deep regression QA', () => {
 
     const beforeMessages = state.requests.length;
     await page.goto('/?view=messages');
-    await expect(page.getByRole('button', { name: 'Unterhaltung' })).toBeVisible();
+    const startConversation = page.getByRole('button', { name: 'Unterhaltung' });
+    await expect(startConversation).toBeVisible();
+    await startConversation.click();
+    await expect.poll(() => state.requests.slice(beforeMessages).some((r) => r.path === 'portal/message-recipients/')).toBe(true);
     const messageRequests = state.requests.slice(beforeMessages);
-    expect(messageRequests.some((r) => r.path === 'portal/message-recipients/')).toBe(true);
     expect(messageRequests.some((r) => r.path === 'users/')).toBe(false);
 
     const beforeRanking = state.requests.length;
