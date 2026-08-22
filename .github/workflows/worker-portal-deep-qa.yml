@@ -1,0 +1,37 @@
+name: Worker portal deep QA
+
+on:
+  push:
+    branches:
+      - qa/worker-portal-deep
+  workflow_dispatch:
+
+concurrency:
+  group: worker-portal-deep-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install --no-audit --no-fund --package-lock=false
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run worker portal deep suite
+        working-directory: frontend
+        run: npx playwright test e2e/worker-portal-deep.spec.ts
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-portal-playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
