@@ -703,9 +703,17 @@ class DocumentViewSet(BaseModelViewSet):
     def perform_create(self, serializer):
         values = {'uploaded_by': self.request.user}
         if self.request.user.role == 'worker':
-            values['worker'] = self.request.user.worker_profile
-        if self.request.user.role == 'client':
-            values['client'] = self.request.user.client_companies.first()
+            values.update(
+                worker=self.request.user.worker_profile,
+                client=None,
+                visibility=Document.Visibility.WORKER,
+            )
+        elif self.request.user.role == 'client':
+            values.update(
+                worker=None,
+                client=self.request.user.client_companies.first(),
+                visibility=Document.Visibility.CLIENT,
+            )
         obj = serializer.save(**values)
         audit(self.request, 'document.uploaded', obj)
 

@@ -2073,7 +2073,7 @@ function Documents({ user }: { user: User }) {
   const [modal, setModal] = useState('');
   const [file, setFile] = useState<File>();
   const [payrollFile, setPayrollFile] = useState<File>();
-  const [form, setForm] = useState<any>({ folder: 'general', visibility: 'shared' });
+  const [form, setForm] = useState<any>({ folder: 'general', visibility: isManager(user) ? 'shared' : user.role === 'worker' ? 'worker' : 'client' });
   const [payrollForm, setPayrollForm] = useState<any>({});
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
@@ -2115,7 +2115,7 @@ function Documents({ user }: { user: User }) {
       await api('documents/', { method: 'POST', body: data });
       setModal('');
       setFile(undefined);
-      setForm({ folder: 'general', visibility: 'shared' });
+      setForm({ folder: 'general', visibility: isManager(user) ? 'shared' : user.role === 'worker' ? 'worker' : 'client' });
       await load();
       setToast('Dokument wurde hochgeladen.');
     } catch (reason: any) {
@@ -2273,6 +2273,7 @@ function Documents({ user }: { user: User }) {
           fill="outline"
           label="Sichtbarkeit"
           labelPlacement="floating"
+          disabled={!isManager(user)}
           value={form.visibility}
           onIonChange={(event) => setForm({ ...form, visibility: value(event) })}
         >
