@@ -199,6 +199,15 @@ async function mockWorkerApi(page: Page): Promise<MockState> {
             valid_from: new Date().toISOString().slice(0, 10),
             valid_until: null,
             signatures: state.contractSigned ? [{ id: 'sig-1', role: 'employee', signer_name: worker.name }] : [],
+            readiness: {
+              state: state.contractSigned ? 'signed' : 'ready_to_sign',
+              blocking_issues: [],
+              generation_allowed: false,
+              send_allowed: false,
+              pending_signature_roles: state.contractSigned ? [] : ['employee'],
+              completed_signature_roles: state.contractSigned ? ['employee'] : [],
+              document_current: true,
+            },
             pdf: null,
           },
         ]);
@@ -341,8 +350,22 @@ test.describe('Worker portal deep regression QA', () => {
     await page.getByRole('button', { name: 'Eintragen' }).click();
     await expect(page.getByRole('heading', { name: 'Verfügbarkeit eintragen' })).toBeVisible();
 
-    await page.getByLabel('Beginn').fill('2026-08-24T09:00');
-    await page.getByLabel('Ende').fill('2026-08-24T18:00');
+    const setDateTime = async (label: string, next: string) => {
+      const field = page.locator(`ion-input[label=\"${label}\"]`);
+      await field.click();
+      const picker = page.locator('ion-modal.friendly-picker-modal');
+      await expect(picker).toBeVisible();
+      const datetime = picker.locator('ion-datetime[presentation=\"date-time\"]');
+      await datetime.evaluate((element: any, value) => {
+        element.value = value;
+        element.dispatchEvent(new CustomEvent('ionChange', { detail: { value }, bubbles: true, composed: true }));
+      }, next);
+      await picker.getByRole('button', { name: 'Übernehmen' }).click();
+      await expect(picker).not.toBeVisible();
+      await expect.poll(async () => field.evaluate((element: any) => String(element.value || ''))).toBe(next);
+    };
+    await setDateTime('Beginn', '2026-08-24T09:00');
+    await setDateTime('Ende', '2026-08-24T18:00');
     await page.getByLabel('Hinweis').fill('QA verfügbar');
     await page.getByRole('button', { name: 'Speichern' }).click();
     await expect.poll(() => state.availabilities.length).toBe(1);
