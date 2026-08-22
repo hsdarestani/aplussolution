@@ -163,7 +163,6 @@ test_path = "frontend/e2e/app-shell.spec.ts"
 p = Path(test_path)
 t = p.read_text()
 t = t.replace("filter({ hasText: 'Plan' })", "filter({ hasText: 'Dienstplan' })")
-t = t.replace("moreMenu.getByRole('button', { name: 'Meine Verträge', exact: true })", "moreMenu.getByRole('button', { name: 'Meine Verträge', exact: true })")
 t = t.replace("moreMenu.getByRole('button', { name: 'Dokumente & Lohn', exact: true })", "moreMenu.getByRole('button', { name: 'Dokumente', exact: true })", 1)
 t = t.replace("moreMenu.getByRole('button', { name: 'Mehr / Steuerzentrale', exact: true })", "moreMenu.getByRole('button', { name: 'Anfragen, Berichte & Verwaltung', exact: true })")
 t = t.replace("moreMenu.getByRole('button', { name: 'Dokumente & Lohn', exact: true })", "moreMenu.getByRole('button', { name: 'Lohn & Dokumente', exact: true })")
@@ -198,8 +197,7 @@ t = t.replace(old_desktop, new_desktop, 1)
 # Add a worker desktop order check to ensure future feature additions do not scramble the learned IA.
 end_anchor = """    await expectNoHorizontalPageOverflow(page);
   });
-});
-"""
+});"""
 worker_test = """    await expectNoHorizontalPageOverflow(page);
   });
 
@@ -221,8 +219,7 @@ worker_test = """    await expectNoHorizontalPageOverflow(page);
       'Profil',
     ]);
   });
-});
-"""
+});"""
 if end_anchor not in t:
     raise SystemExit('desktop describe closing anchor not found')
 t = t.replace(end_anchor, worker_test, 1)
