@@ -4,7 +4,7 @@ import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 
-from core.models import Conversation, Document, Message, Notification, TimeEntry, WorkerRating
+from core.models import Conversation, Document, Message, Notification, Shift, TimeEntry, WorkerRating
 
 
 @pytest.mark.django_db
@@ -44,8 +44,21 @@ def test_message_creates_notification(api_client, admin_user, worker_user):
 
 
 @pytest.mark.django_db
-def test_client_rating_updates_ranking(auth_client, client_user, worker_user, company):
-    response = auth_client.post('/api/ratings/', {'worker': str(worker_user.worker_profile.id), 'score': 4, 'punctuality': 5, 'quality': 4, 'teamwork': 5}, format='json')
+def test_client_rating_updates_ranking(auth_client, client_user, worker_user, company, shift):
+    now = timezone.now()
+    shift.starts_at = now - timedelta(hours=3)
+    shift.ends_at = now - timedelta(hours=1)
+    shift.status = Shift.Status.COMPLETED
+    shift.save(update_fields=['starts_at', 'ends_at', 'status', 'updated_at'])
+
+    response = auth_client.post('/api/ratings/', {
+        'worker': str(worker_user.worker_profile.id),
+        'shift': str(shift.id),
+        'score': 4,
+        'punctuality': 5,
+        'quality': 4,
+        'teamwork': 5,
+    }, format='json')
     assert response.status_code == 201
     worker_user.worker_profile.refresh_from_db()
     assert worker_user.worker_profile.ranking_points == 40
