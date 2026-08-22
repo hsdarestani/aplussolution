@@ -40,6 +40,7 @@ const dateTime = (input?: string) => (input ? new Date(input).toLocaleString('de
 const dateOnly = (input?: string) => (input ? new Date(input).toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' }) : '–');
 const isManager = (user: User) => ['admin', 'manager'].includes(user.role);
 const API = String(import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
+const berlinDateKey = (date = new Date()) => { const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date); const get=(type:string)=>parts.find(item=>item.type===type)?.value||''; return `${get('year')}-${get('month')}-${get('day')}`; };
 
 function Title({ title, text, action }: { title: string; text: string; action?: React.ReactNode }) {
   return (
@@ -186,7 +187,7 @@ export default function Operations({ user }: { user: User }) {
   const [availability, setAvailability] = useState<any>({ available: true });
   const [swap, setSwap] = useState<any>({});
   const [copyWeek, setCopyWeek] = useState<any>({});
-  const [report, setReport] = useState<any>({ month: new Date().toISOString().slice(0, 7) });
+  const [report, setReport] = useState<any>({ month: berlinDateKey().slice(0, 7) });
   const [templateFile, setTemplateFile] = useState<File>();
   const [swapTargets, setSwapTargets] = useState<Record<string, string>>({});
   const [wiwStatus, setWiwStatus] = useState<any>();
