@@ -9,4 +9,5 @@ urlpatterns = [
     path('premium/worker-locations/', premium_extra_views.worker_location_memberships),
     path('premium/schedule-timezone/', premium_extra_views.schedule_timezone),
     path('employee/ranking/', worker_portal_views.employee_ranking),
+    path('portal/message-recipients/', worker_portal_views.message_recipients),
 ]
