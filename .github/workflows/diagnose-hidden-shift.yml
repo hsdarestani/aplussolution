@@ -21,7 +21,7 @@ jobs:
             sudo -n apt-get update -qq
             sudo -n apt-get install -y -qq sshpass
           fi
-      - name: Inspect production shift visibility
+      - name: Verify production schedule API
         env:
           HOST: ${{ secrets.HOST }}
           PASS: ${{ secrets.PASS }}
@@ -36,55 +36,31 @@ jobs:
           docker compose exec -T backend python manage.py shell <<'PY'
           from datetime import datetime, timezone as dt_timezone
           from zoneinfo import ZoneInfo
-          from django.db.models import Count, Q
-          from core.models import Shift
-          from core.shift_slots import ShiftSlot
+          from django.conf import settings
+          from rest_framework.test import APIClient
+          from core.models import Shift, User
 
           berlin = ZoneInfo('Europe/Berlin')
           start = datetime(2026, 8, 23, tzinfo=berlin).astimezone(dt_timezone.utc)
           end = datetime(2026, 8, 24, tzinfo=berlin).astimezone(dt_timezone.utc)
+          target_ids = {str(x) for x in Shift.objects.filter(starts_at__gte=start, starts_at__lt=end).values_list('id', flat=True)}
 
-          qs = Shift.objects.select_related('location','position','client').annotate(
-              filled_count=Count('slots', filter=Q(slots__status=ShiftSlot.Status.CLAIMED, slots__worker__isnull=False), distinct=True),
-              open_count=Count('slots', filter=Q(slots__status=ShiftSlot.Status.OPEN, slots__worker__isnull=True), distinct=True),
-          ).order_by('starts_at')
-          first50 = list(qs.values_list('id', flat=True)[:50])
-          targets = list(qs.filter(starts_at__gte=start, starts_at__lt=end))
+          admin = User.objects.filter(role__in=[User.Role.ADMIN, User.Role.MANAGER], is_active=True).first()
+          client = APIClient()
+          client.force_authenticate(admin)
+          response = client.get('/api/shifts/?ordering=starts_at', HTTP_HOST='solution.smarbiz.sbs')
+          payload = response.data
+          rows = payload.get('results', payload) if isinstance(payload, dict) else payload
+          response_ids = {str(row.get('id')) for row in rows}
 
-          print('total_shifts=', qs.count())
-          print('shifts_before_target_day=', qs.filter(starts_at__lt=start).count())
-          print('target_day_count=', len(targets))
-          print('first_page_count=', len(first50))
-          for s in targets:
-              print('TARGET', {
-                  'id': str(s.id),
-                  'start_local': s.starts_at.astimezone(berlin).isoformat(),
-                  'end_local': s.ends_at.astimezone(berlin).isoformat() if s.ends_at else None,
-                  'status': s.status,
-                  'location': s.location.name if s.location else None,
-                  'position': s.position.name if s.position else None,
-                  'filled_count': s.filled_count,
-                  'open_count': s.open_count,
-                  'required_count': s.required_count,
-                  'in_first_50': s.id in first50,
-                  'claimed_slots': s.slots.filter(status=ShiftSlot.Status.CLAIMED, worker__isnull=False).count(),
-              })
-
-          matches = qs.filter(
-              Q(location__name__icontains='Evangelische Akademie') |
-              Q(position__name__icontains='Serviceleitung')
-          ).filter(starts_at__gte=start, starts_at__lt=end)
-          print('matching_email_shift_count=', matches.count())
-          for s in matches:
-              print('MATCH', {
-                  'id': str(s.id),
-                  'start_local': s.starts_at.astimezone(berlin).isoformat(),
-                  'status': s.status,
-                  'location': s.location.name if s.location else None,
-                  'position': s.position.name if s.position else None,
-                  'in_first_50': s.id in first50,
-                  'slot_states': list(s.slots.values_list('status', flat=True)),
-              })
+          print('pagination_class=', settings.REST_FRAMEWORK.get('DEFAULT_PAGINATION_CLASS'))
+          print('api_status=', response.status_code)
+          print('api_reported_count=', payload.get('count') if isinstance(payload, dict) else len(rows))
+          print('api_rows_received=', len(rows))
+          print('production_total_shifts=', Shift.objects.count())
+          print('target_day_count=', len(target_ids))
+          print('target_day_rows_present_in_api=', len(target_ids & response_ids))
+          print('all_target_day_rows_visible=', target_ids.issubset(response_ids))
           PY
           REMOTE
       - name: Publish result
@@ -98,7 +74,7 @@ jobs:
               repo: context.repo.repo,
               issue_number: 126,
               body: [
-                'Temporary production diagnostic for the schedule/reminder mismatch.',
+                'Post-deploy production verification for the schedule/reminder mismatch.',
                 '',
                 '```text', output, '```',
                 '',
