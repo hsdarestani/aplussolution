@@ -129,16 +129,23 @@ def operations_overview(request):
             'upcoming_shifts': ShiftSerializer(upcoming, many=True).data,
         })
     else:
-        companies = user.client_companies.all()
+        companies = user.client_companies.filter(active=True)
         company_ids = {str(pk) for pk in companies.values_list('pk', flat=True)}
         client_findings = slots._schedule_findings()['coverage_gaps']
+        visible_contracts = Contract.objects.filter(
+            client__in=companies,
+            client__contract_visibility_enabled=True,
+        )
+        visible_documents = Document.objects.filter(
+            client__in=companies,
+            visibility__in=[Document.Visibility.CLIENT, Document.Visibility.SHARED],
+        )
         data.update({
             'coverage_gaps': [item for item in client_findings if item.get('client') in company_ids],
-            'contracts_due': Contract.objects.filter(
-                client__in=companies,
+            'contracts_due': visible_contracts.filter(
                 ends_on__range=(timezone.localdate(), timezone.localdate() + timedelta(days=30)),
             ).count(),
-            'documents': Document.objects.filter(client__in=companies).count(),
+            'documents': visible_documents.count(),
             'open_orders': ClientOrder.objects.filter(
                 client__in=companies,
                 status__in=[ClientOrder.Status.NEW, ClientOrder.Status.PLANNING, ClientOrder.Status.CONFIRMED],
