@@ -332,7 +332,7 @@ test.describe('Worker portal deep regression QA', () => {
     await page.getByRole('button', { name: 'Verbindlich unterzeichnen' }).click();
     await expect.poll(() => state.contractSigned).toBe(true);
     await expect(page.getByRole('button', { name: 'Unterschreiben' })).toHaveCount(0);
-    await expect(page.getByText('Unterzeichnet')).toBeVisible();
+    await expect(page.locator('ion-badge').filter({ hasText: 'Unterzeichnet' })).toBeVisible();
     expect(state.requests.some((r) => r.path === 'contracts/contract-worker-1/sign/' && r.method === 'POST')).toBe(true);
     expect(forbiddenManagerFanout(state)).toEqual([]);
   });
