@@ -19,17 +19,20 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo '== TIME FORMAT CALLS WITHOUT EXPLICIT BERLIN ON SAME LINE =='
+            echo '== FRONTEND DATE LOCALE CALLS =='
             grep -RInE "toLocale(String|DateString|TimeString)\('de-DE'" frontend/src --include='*.ts' --include='*.tsx' || true
             echo
-            echo '== INTL DATE FORMAT CALLS =='
+            echo '== FRONTEND INTL DATE FORMAT CALLS =='
             grep -RIn "Intl.DateTimeFormat" frontend/src --include='*.ts' --include='*.tsx' || true
             echo
             echo '== CURRENT DATE VIA UTC ISO =='
             grep -RIn "toISOString().slice(0, 10)" frontend/src --include='*.ts' --include='*.tsx' || true
             echo
+            echo '== BACKEND DIRECT DATETIME FORMATTING =='
+            grep -RInE "starts_at:%|ends_at:%|strftime\(|isoformat\(\)" backend/core --include='*.py' | head -n 300 || true
+            echo
             echo '== WORKING TIME BRUTTO CONTEXT =='
-            grep -RIn -C 18 "Monatskonten.*Brutto\|Brutto vorbereitet\|AUSZAHLUNG (STD.)\|Auszahlung (Std.)" frontend/src || true
+            grep -RIn -C 35 "Monatskonten.*Brutto\|Brutto vorbereitet\|Auszahlung (Std.)" frontend/src || true
             echo
             echo '== ENGLISH VISIBLE TOKENS =='
             grep -RInE ">[[:space:]]*(Overview|Order intake|Duty scheduling|Time recording|Staff & Customers|profile|Log out|Open|All|Month|Week|Locations)[[:space:]]*<" frontend/src --include='*.tsx' || true
