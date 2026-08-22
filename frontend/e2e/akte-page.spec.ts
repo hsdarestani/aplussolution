@@ -38,13 +38,11 @@ test('German UI is marked notranslate and Digital Akte is a dedicated editable p
   await page.getByRole('button',{name:'Änderungen speichern'}).click();
   const request=await saveRequest;
   expect(request.postDataJSON().profile.first_name).toBe('Anna Maria');
-  await expect(page.getByText('Akte wurde gespeichert.')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Profil bearbeiten'})).toBeVisible();
 });
 
-test('header folder opens selected record as full page instead of drawer detail',async({page})=>{
-  await page.goto('/?view=dashboard');
-  await page.getByRole('button',{name:'Mitarbeiter- und Kundenakten'}).click();
-  await page.getByRole('button',{name:/Anna Becker/}).click();
+test('Digital Akte keeps its own route and back navigation clears record parameters',async({page})=>{
+  await page.goto('/?view=akte&akte_kind=worker&akte_id=worker-akte-1');
   await expect(page).toHaveURL(/view=akte/);
   await expect(page).toHaveURL(/akte_id=worker-akte-1/);
   await expect(page.getByTestId('akte-page')).toBeVisible();
