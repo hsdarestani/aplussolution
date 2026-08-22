@@ -202,6 +202,10 @@ async function mockWorkerApi(page: Page): Promise<MockState> {
 
     if (path === 'conversations/') return json(route, []);
     if (path === 'users/') return json(route, []);
+    if (path === 'employee/ranking/') return json(route, [
+      { id: 'rank-2', employee_number: 'MA-002', ranking_points: 40, active: true, is_current_user: false, user_detail: { name: 'Lukas Schmidt' } },
+      { id: 'rank-1', employee_number: 'QA-MA-001', ranking_points: 25, active: true, is_current_user: true, user_detail: { name: worker.name } },
+    ]);
     if (path === 'workers/' || path.startsWith('workers/?')) return json(route, []);
     if (path === 'notifications/' || path.startsWith('notifications/?')) return json(route, []);
 
@@ -346,8 +350,13 @@ test.describe('Worker portal deep regression QA', () => {
     await page.goto('/?view=messages');
     await expect(page.getByText('Noch keine Unterhaltungen.')).toBeVisible();
 
+    const beforeRanking = state.requests.length;
     await page.goto('/?view=ranking');
-    await expect(page.locator('body')).toContainText(/Ranking|Punkte|Mitarbeiter/i);
+    await expect(page.getByText('Lukas Schmidt')).toBeVisible();
+    await expect(page.getByText('40 Punkte')).toBeVisible();
+    const rankingRequests = state.requests.slice(beforeRanking);
+    expect(rankingRequests.some((r) => r.path === 'employee/ranking/')).toBe(true);
+    expect(rankingRequests.some((r) => r.path === 'workers/' || r.path.startsWith('workers/?'))).toBe(false);
 
     expect(forbiddenManagerFanout(state)).toEqual([]);
   });

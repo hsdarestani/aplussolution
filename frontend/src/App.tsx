@@ -2843,7 +2843,7 @@ function Messages({ user }: { user: User }) {
 function Ranking() {
   const [workers, setWorkers] = useState<any[]>([]);
   useEffect(() => {
-    api('workers/').then((data) =>
+    api('employee/ranking/').then((data) =>
       setWorkers(
         unpack(data)
           .filter((worker: any) => worker.active)
