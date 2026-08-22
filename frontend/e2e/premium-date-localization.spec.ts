@@ -37,7 +37,7 @@ test('Workforce Pro keeps German planning dates while APIs receive ISO dates', a
   });
 
   await page.goto('/');
-  await page.getByText('Mehr / Steuerzentrale', { exact: true }).click();
+  await page.getByText('Anfragen, Berichte & Verwaltung', { exact: true }).click();
   const premium = page.getByTestId('premium-operations-panel');
   await expect(premium).toBeVisible();
 

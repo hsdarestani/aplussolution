@@ -185,7 +185,7 @@ test.describe('Phase 6 mobile QA', () => {
     await expect(page.locator('aside')).toBeHidden();
     await expectNoHorizontalPageOverflow(page);
 
-    await page.locator('.mobile-tabbar button').filter({ hasText: 'Plan' }).click();
+    await page.locator('.mobile-tabbar button').filter({ hasText: 'Dienstplan' }).click();
     await expect(page.getByRole('heading', { name: 'Schichten' })).toBeVisible();
     await expect(page.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Main Suites Frankfurt', { exact: true }).first()).toBeVisible();
@@ -208,7 +208,7 @@ test.describe('Phase 6 mobile QA', () => {
     await expect(page.getByRole('heading', { name: 'Weitere Bereiche' })).toBeVisible();
     const moreMenu = page.locator('.mobile-menu-grid');
     await expect(moreMenu.getByRole('button', { name: 'Meine Verträge', exact: true })).toBeVisible();
-    await expect(moreMenu.getByRole('button', { name: 'Dokumente & Lohn', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Dokumente', exact: true })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: 'Ranking', exact: true })).toBeVisible();
   });
 
@@ -265,8 +265,8 @@ test.describe('Phase 6 mobile QA', () => {
     await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
     const moreMenu = page.locator('.mobile-menu-grid');
     await expect(moreMenu.getByRole('button', { name: 'Verträge & ANÜ', exact: true })).toBeVisible();
-    await expect(moreMenu.getByRole('button', { name: 'Dokumente & Lohn', exact: true })).toBeVisible();
-    await expect(moreMenu.getByRole('button', { name: 'Mehr / Steuerzentrale', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Lohn & Dokumente', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Anfragen, Berichte & Verwaltung', exact: true })).toBeVisible();
   });
 
   test('client sees a client-scoped schedule without manager controls or manager API fan-out', async ({ page }) => {
@@ -282,7 +282,7 @@ test.describe('Phase 6 mobile QA', () => {
     await expect(page.locator('.mobile-tabbar button')).toHaveCount(4);
     await expectNoHorizontalPageOverflow(page);
 
-    await page.locator('.mobile-tabbar button').filter({ hasText: 'Plan' }).click();
+    await page.locator('.mobile-tabbar button').filter({ hasText: 'Dienstplan' }).click();
     await expect(page.getByRole('heading', { name: 'Einsätze', exact: true })).toBeVisible();
     await expect(page.getByText('Geplante Einsätze und aktueller Besetzungsstatus für Ihre Aufträge.')).toBeVisible();
     await expect(page.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
@@ -314,9 +314,42 @@ test.describe('Phase 6 desktop smoke', () => {
     await expect(page.locator('.mobile-tabbar')).toBeHidden();
     await expect(page.getByTestId('admin-exception-center')).toBeVisible();
 
+    const adminNav = page.locator('aside ion-list ion-item ion-label');
+    await expect(adminNav).toHaveText([
+      'Übersicht',
+      'Dienstplan',
+      'Zeiterfassung',
+      'Lohn & Dokumente',
+      'Nachrichten',
+      'Anfragen, Berichte & Verwaltung',
+      'Personal & Kunden',
+      'Aufträge & AI',
+      'Verträge & ANÜ',
+      'Profil',
+    ]);
+
     await page.getByRole('button', { name: 'Öffnen' }).first().click();
     await expect(page.getByRole('heading', { name: 'Personalbedarf & Schichten' })).toBeVisible();
     await expect(page.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
     await expectNoHorizontalPageOverflow(page);
+  });
+
+  test('worker desktop keeps the familiar schedule-attendance-chat-requests structure', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await mockApi(page, worker);
+    await page.goto('/');
+
+    const workerNav = page.locator('aside ion-list ion-item ion-label');
+    await expect(workerNav).toHaveText([
+      'Start',
+      'Mein Dienstplan',
+      'Zeiterfassung',
+      'Nachrichten',
+      'Anfragen',
+      'Dokumente',
+      'Meine Verträge',
+      'Ranking',
+      'Profil',
+    ]);
   });
 });

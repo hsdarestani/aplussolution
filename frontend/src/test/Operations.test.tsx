@@ -54,7 +54,7 @@ describe('Operations integrations', () => {
     const worker = { ...admin, role: 'worker' };
     apiMock.mockImplementation((path: string) => Promise.resolve(path === 'operations/' ? { notifications: [], availabilities: [], swaps: [], upcoming_shifts: [] } : { workers: [], clients: [] }));
     render(<Operations user={worker as any} />);
-    await waitFor(() => expect(screen.getByText('Verfügbarkeit & Tausch')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Anfragen')).toBeInTheDocument());
     expect(screen.queryByTestId('wiw-integration-panel')).not.toBeInTheDocument();
   });
 });

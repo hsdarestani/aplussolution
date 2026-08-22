@@ -34,7 +34,7 @@ test('admin start exposes Ashkan priorities 1-5 directly on mobile and desktop',
     const priorities = page.getByTestId('admin-priority-actions');
     await expect(priorities).toBeVisible();
     await expect(priorities.getByRole('button')).toHaveCount(5);
-    for (const label of ['Auftrag & AI', 'Dienstplanung', 'Zeiterfassung', 'Arbeitszeit & Lohn', 'Personal & Kunden']) {
+    for (const label of ['Dienstplan', 'Zeiterfassung', 'Lohn & Anfragen', 'Personal & Kunden', 'Aufträge & AI']) {
       await expect(priorities.getByRole('button', { name: label, exact: true })).toBeAttached();
     }
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

@@ -398,14 +398,14 @@ export default function Operations({ user }: { user: User }) {
   }
 
   const pageTitle = isManager(user)
-    ? 'Steuerzentrale'
+    ? 'Anfragen, Berichte & Verwaltung'
     : user.role === 'worker'
-      ? 'Verfügbarkeit & Tausch'
+      ? 'Anfragen'
       : 'Servicecenter';
   const pageText = isManager(user)
-    ? 'Planungsqualität, Berichte, Akten, Erinnerungen und Release-Bereitschaft.'
+    ? 'Freigaben, Schichttausch, Planungsqualität, Berichte und Verwaltung an einem Ort.'
     : user.role === 'worker'
-      ? 'Verfügbarkeiten pflegen, Schichten tauschen und Benachrichtigungen verfolgen.'
+      ? 'Verfügbarkeit pflegen, Schichten tauschen und Benachrichtigungen verfolgen.'
       : 'Einsatzabdeckung, Vertragsfristen, Dokumente und Benachrichtigungen.';
 
   return (

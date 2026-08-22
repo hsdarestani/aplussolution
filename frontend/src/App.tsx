@@ -89,36 +89,39 @@ const icons: Record<string, string> = {
 };
 
 const nav: Record<string, [View, string][]> = {
+  // Familiar workflow order inspired by the structure Ashkan and the team already know:
+  // Übersicht -> Dienstplan -> Zeiterfassung -> Lohn/Dokumente -> Chat -> Anfragen -> Stammdaten.
+  // A+ specific modules remain available afterwards instead of changing the learned daily workflow.
   admin: [
     ['dashboard', 'Übersicht'],
-    ['orders', 'Auftragseingang & AI'],
-    ['schedule', 'Dienstplanung'],
+    ['schedule', 'Dienstplan'],
     ['time', 'Zeiterfassung'],
-    ['people', 'Personal & Kunden'],
-    ['contracts', 'Verträge & ANÜ'],
-    ['documents', 'Dokumente & Lohn'],
+    ['documents', 'Lohn & Dokumente'],
     ['messages', 'Nachrichten'],
-    ['operations', 'Mehr / Steuerzentrale'],
+    ['operations', 'Anfragen, Berichte & Verwaltung'],
+    ['people', 'Personal & Kunden'],
+    ['orders', 'Aufträge & AI'],
+    ['contracts', 'Verträge & ANÜ'],
   ],
   manager: [
     ['dashboard', 'Übersicht'],
-    ['orders', 'Auftragseingang & AI'],
-    ['schedule', 'Dienstplanung'],
+    ['schedule', 'Dienstplan'],
     ['time', 'Zeiterfassung'],
-    ['people', 'Personal & Kunden'],
-    ['contracts', 'Verträge & ANÜ'],
-    ['documents', 'Dokumente & Lohn'],
+    ['documents', 'Lohn & Dokumente'],
     ['messages', 'Nachrichten'],
-    ['operations', 'Mehr / Steuerzentrale'],
+    ['operations', 'Anfragen, Berichte & Verwaltung'],
+    ['people', 'Personal & Kunden'],
+    ['orders', 'Aufträge & AI'],
+    ['contracts', 'Verträge & ANÜ'],
   ],
   worker: [
     ['dashboard', 'Start'],
     ['schedule', 'Mein Dienstplan'],
-    ['time', 'Arbeitszeitkonto'],
-    ['operations', 'Verfügbarkeit & Tausch'],
-    ['contracts', 'Meine Verträge'],
-    ['documents', 'Dokumente & Lohn'],
+    ['time', 'Zeiterfassung'],
     ['messages', 'Nachrichten'],
+    ['operations', 'Anfragen'],
+    ['documents', 'Dokumente'],
+    ['contracts', 'Meine Verträge'],
     ['ranking', 'Ranking'],
   ],
   client: [
@@ -3151,7 +3154,7 @@ export default function App() {
 
   const items = nav[user.role] || nav.worker;
   const primaryViews: View[] = isManager(user)
-    ? ['orders', 'schedule', 'time', 'people']
+    ? ['dashboard', 'schedule', 'time', 'messages']
     : ['dashboard', 'schedule', 'time', 'messages'];
   const mobilePrimaryItems = items.filter(([key]) => primaryViews.includes(key));
   const mobileMoreItems = items.filter(([key]) => !primaryViews.includes(key));
@@ -3165,7 +3168,7 @@ export default function App() {
   const mobileLabels: Partial<Record<View, string>> = {
     dashboard: 'Start',
     orders: 'Aufträge',
-    schedule: 'Plan',
+    schedule: 'Dienstplan',
     time: 'Zeit',
     people: 'Personal',
     messages: 'Chat',

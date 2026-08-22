@@ -44,10 +44,10 @@ async function fulfillCommon(route: any, degradedWorkingTime = false) {
   return route.fulfill({ json: { results: [], path } });
 }
 
-async function openSteuerzentrale(page: any) {
+async function openOperations(page: any) {
   await page.goto('/');
-  await page.getByText('Mehr / Steuerzentrale', { exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Steuerzentrale' })).toBeVisible();
+  await page.getByText('Anfragen, Berichte & Verwaltung', { exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Anfragen, Berichte & Verwaltung' })).toBeVisible();
 }
 
 async function expectWorkforceProControlsVisible(page: any) {
@@ -72,14 +72,14 @@ async function expectWorkforceProControlsVisible(page: any) {
 }
 
 test('KPI cards stay visible and German timestamps use Europe/Berlin', async ({ page }) => {
-  await installAdmin(page); await page.route(apiBase, (route) => fulfillCommon(route)); await openSteuerzentrale(page);
+  await installAdmin(page); await page.route(apiBase, (route) => fulfillCommon(route)); await openOperations(page);
   const cards = page.locator('.operations-stats ion-card');
   await expect(cards).toHaveCount(5); await expect(cards.nth(0)).toContainText('Planungsrisiken'); await expect(cards.nth(0)).toContainText('0'); await expect(cards.nth(1)).toContainText('Offene Tauschanfragen'); await expect(cards.nth(1)).toContainText('2'); await expect(cards.nth(2)).toContainText('Ungeprüfte Zeiten'); await expect(cards.nth(2)).toContainText('3'); await expect(cards.nth(3)).toContainText('Verträge ≤ 30 Tage'); await expect(cards.nth(3)).toContainText('4'); await expect(cards.nth(4)).toContainText('Geplante Lohnkosten'); await expect(cards.nth(4)).toContainText(/1[.\s]234,50\s*€/);
   for (let index = 0; index < 5; index += 1) { const content = cards.nth(index).locator('ion-card-content'); await expect(content).toBeVisible(); const style = await content.evaluate((element) => { const computed = getComputedStyle(element); return { visibility: computed.visibility, opacity: computed.opacity, color: computed.color }; }); expect(style.visibility).toBe('visible'); expect(Number(style.opacity)).toBeGreaterThan(0); expect(style.color).not.toBe('rgba(0, 0, 0, 0)'); }
   await expect(page.getByText(/2\.1\.2026.*00:30/)).toBeVisible(); await expect(page.getByText('8/8 installiert')).toBeVisible(); await expectWorkforceProControlsVisible(page);
 });
 
-test('one auxiliary 503 no longer breaks the whole Steuerzentrale', async ({ page }) => {
-  await installAdmin(page); await page.route(apiBase, (route) => fulfillCommon(route, true)); await openSteuerzentrale(page);
+test('one auxiliary 503 no longer breaks the whole operations center', async ({ page }) => {
+  await installAdmin(page); await page.route(apiBase, (route) => fulfillCommon(route, true)); await openOperations(page);
   await expect(page.getByTestId('working-time-panel')).toBeVisible(); await expect(page.getByText('Arbeitszeitkonto', { exact: true })).toBeVisible(); await expect(page.getByText('Ein Teil der Daten ist vorübergehend nicht erreichbar.')).toBeVisible(); await expect(page.getByText(/Arbeitszeitkonto: neutraler Fallback wird angezeigt/)).toBeVisible(); await expect(page.getByText('8/8 installiert')).toBeVisible(); await expectWorkforceProControlsVisible(page);
 });
