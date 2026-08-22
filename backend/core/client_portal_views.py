@@ -58,6 +58,31 @@ class ClientSafeRatingViewSet(views.RatingViewSet):
 
 
 @api_view(['GET'])
+def client_dashboard(request):
+    """Client dashboard counters follow the same tenant and visibility rules as detail lists."""
+    if request.user.role != User.Role.CLIENT:
+        raise PermissionDenied('Diese Übersicht ist nur im Kundenportal verfügbar.')
+    companies = request.user.client_companies.filter(active=True)
+    now = timezone.now()
+    return Response({
+        'role': request.user.role,
+        'active_orders': ClientOrder.objects.filter(
+            client__in=companies,
+            status__in=[ClientOrder.Status.NEW, ClientOrder.Status.PLANNING, ClientOrder.Status.CONFIRMED],
+        ).count(),
+        'upcoming_shifts': Shift.objects.filter(
+            client__in=companies,
+            starts_at__gte=now,
+        ).exclude(status=Shift.Status.CANCELLED).count(),
+        'contracts_to_sign': Contract.objects.filter(
+            client__in=companies,
+            client__contract_visibility_enabled=True,
+            status__in=[Contract.Status.READY, Contract.Status.SENT],
+        ).count(),
+    })
+
+
+@api_view(['GET'])
 def client_rating_candidates(request):
     """Minimal worker data for ratings: only people assigned to this client's past shifts."""
     if request.user.role != User.Role.CLIENT:
