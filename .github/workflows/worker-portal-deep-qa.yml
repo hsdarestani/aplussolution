@@ -6,6 +6,10 @@ on:
       - qa/worker-portal-deep
   workflow_dispatch:
 
+permissions:
+  contents: read
+  issues: write
+
 concurrency:
   group: worker-portal-deep-${{ github.ref }}
   cancel-in-progress: true
@@ -26,8 +30,48 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
       - name: Run worker portal deep suite
+        id: qa
         working-directory: frontend
-        run: npx playwright test e2e/worker-portal-deep.spec.ts
+        shell: bash
+        run: |
+          set +e
+          npx playwright test e2e/worker-portal-deep.spec.ts 2>&1 | tee /tmp/worker-qa.log
+          rc=${PIPESTATUS[0]}
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          tail -n 180 /tmp/worker-qa.log > /tmp/worker-qa-tail.log
+          exit 0
+      - name: Publish QA result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RC: ${{ steps.qa.outputs.rc }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TITLE='Worker portal deep QA result'
+          BODY_FILE="$(mktemp)"
+          if [ "${RC:-1}" = "0" ]; then STATUS='PASS'; else STATUS='FAIL'; fi
+          {
+            echo "Result: **$STATUS**"
+            echo
+            echo "Commit: \`$GITHUB_SHA\`"
+            echo
+            echo '```text'
+            cat /tmp/worker-qa-tail.log 2>/dev/null || true
+            echo '```'
+            echo
+            echo "Run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > "$BODY_FILE"
+          NUMBER="$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "$TITLE in:title" --json number,title --jq '.[] | select(.title == "Worker portal deep QA result") | .number' | head -n1)"
+          if [ -n "$NUMBER" ]; then
+            gh issue edit "$NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$BODY_FILE"
+            gh issue reopen "$NUMBER" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || true
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file "$BODY_FILE"
+          fi
+      - name: Fail workflow if QA failed
+        if: steps.qa.outputs.rc != '0'
+        run: exit 1
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4
