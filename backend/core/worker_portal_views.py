@@ -20,6 +20,7 @@ def employee_ranking(request):
         WorkerProfile.objects.select_related('user')
         .filter(active=True, user__is_active=True)
         .exclude(user__email__iendswith='@sync.invalid')
+        .exclude(employee_number__startswith='STORE-REVIEW-')
         .order_by('-ranking_points', 'user__last_name', 'user__first_name', 'employee_number')
     )
 
@@ -41,7 +42,7 @@ def employee_ranking(request):
 def message_recipients(request):
     """Safe recipient picker for worker/client initiated conversations.
 
-    Non-manager portals may start a conversation with disposition/admin only.  Do not
+    Non-manager portals may start a conversation with disposition/admin only. Do not
     expose e-mail addresses, phone numbers or the global user directory.
     """
     if request.user.role in {User.Role.ADMIN, User.Role.MANAGER}:
