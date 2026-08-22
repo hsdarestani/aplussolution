@@ -38,6 +38,7 @@ urlpatterns = [
     path('auth/activation/validate/', portal_views.activation_validate),
     path('auth/activation/complete/', portal_views.activation_complete),
     path('employee/home/', portal_views.employee_home),
+    path('portal/client-dashboard/', client_portal_views.client_dashboard),
     path('portal/message-recipients/', worker_portal_views.message_recipients),
     path('portal/rating-candidates/', client_portal_views.client_rating_candidates),
     path('employee/ranking/', worker_portal_views.employee_ranking),
