@@ -82,7 +82,7 @@ function FriendlyDateTime({label,value,onChange}:{label:string;value?:string;onC
 export default function ScheduleV2({user}:{user:User}) {
   const [rows,setRows]=useState<any[]>([]), [clients,setClients]=useState<any[]>([]), [locations,setLocations]=useState<any[]>([]), [positions,setPositions]=useState<any[]>([]), [workers,setWorkers]=useState<any[]>([]);
   const [tab,setTab]=useState(user.role==='worker'?'available':'open'), [search,setSearch]=useState(''), [modal,setModal]=useState(false), [editing,setEditing]=useState<string>(), [busy,setBusy]=useState(false), [toast,setToast]=useState('');
-  const [form,setForm]=useState<any>({required_count:1,break_minutes:0,publish_now:true,workers:[]});
+  const [form,setForm]=useState<any>({required_count:1,break_minutes:0,publish_now:true,confirmation_required:false,workers:[]});
   const [releaseTarget,setReleaseTarget]=useState<any>();
   const [view,setView]=useState<ScheduleView>('list');
   const [anchor,setAnchor]=useState(berlinDate());
@@ -128,7 +128,7 @@ export default function ScheduleV2({user}:{user:User}) {
   const timelineLocations=useMemo(()=>Array.from(new Set(visible.filter(x=>weekDays.includes(shiftDateKey(x.starts_at))).map(x=>x.location_name||'Ohne Einsatzort'))).sort(),[visible,weekDays]);
 
   async function act(path:string,msg:string){setBusy(true);try{await api(path,{method:'POST',body:'{}'});setToast(msg);await load();}catch(e:any){setToast(e.message);}finally{setBusy(false);}}
-  function create(){setEditing(undefined);setForm({required_count:1,break_minutes:0,publish_now:true,workers:[]});setModal(true);}
+  function create(){setEditing(undefined);setForm({required_count:1,break_minutes:0,publish_now:true,confirmation_required:false,workers:[]});setModal(true);}
   function edit(x:any){setEditing(x.id);setForm({...x,workers:(x.assigned_workers||[]).map((worker:any)=>worker.id),starts_at:x.starts_at?.slice(0,16),ends_at:x.ends_at?.slice(0,16),publish_now:x.status==='published'});setModal(true);}
   function setShiftDateTime(field:'starts_at'|'ends_at',next:string){setForm((current:any)=>{const updated={...current,[field]:next};if(field==='starts_at'&&next){const start=wallClockMs(next);const currentEnd=current.ends_at?wallClockMs(current.ends_at):undefined;if(!currentEnd||currentEnd<=start)updated.ends_at=fromWallClockMs(start+4*60*60*1000);}return updated;});}
   async function save(){
@@ -139,7 +139,7 @@ export default function ScheduleV2({user}:{user:User}) {
       const assignedWorkers=Array.isArray(form.workers)?form.workers.filter(Boolean):[]; const requiredCount=Math.max(1,Number(form.required_count||1));
       if(assignedWorkers.length>requiredCount) throw new Error('Mehr Mitarbeiter ausgewählt als benötigte Plätze.');
       const baseStatus=assignedWorkers.length===requiredCount?'draft':form.publish_now?'published':'draft';
-      const p:any={client:form.client,location:form.location,position:form.position,starts_at:form.starts_at,ends_at:form.ends_at,break_minutes:Number(form.break_minutes||0),required_count:requiredCount,notes:form.notes||'',status:baseStatus};
+      const p:any={client:form.client,location:form.location,position:form.position,starts_at:form.starts_at,ends_at:form.ends_at,break_minutes:Number(form.break_minutes||0),required_count:requiredCount,confirmation_required:!!form.confirmation_required,notes:form.notes||'',status:baseStatus};
       const saved:any=await api(editing?`shifts/${editing}/`:'shifts/',{method:editing?'PATCH':'POST',body:JSON.stringify(p)}); if(!editing) createdId=String(saved.id);
       await api(`shifts/${saved.id}/assign/`,{method:'POST',body:JSON.stringify({workers:assignedWorkers,publish_remaining:!!form.publish_now})}); createdId=undefined; setModal(false); setToast(assignedWorkers.length?`${assignedWorkers.length} Mitarbeiter direkt zugewiesen.`:'Personalbedarf gespeichert.'); await load();
     }catch(e:any){if(createdId){try{await api(`shifts/${createdId}/`,{method:'DELETE'});}catch{} await load();}setToast(e.message);}finally{setBusy(false);}
@@ -161,6 +161,7 @@ export default function ScheduleV2({user}:{user:User}) {
       setAiOpen(false);setOrderText('');setParsedOrder(undefined);await load();setToast(`${result.created_count||0} Personalplatz/-plätze als OpenShift erstellt.`);
     }catch(e:any){setToast(e.message);}finally{setBusy(false);}
   }
+  async function setConfirmation(item:any,status:'pending'|'confirmed'|'rejected',slotId?:string){setBusy(true);try{await api(`shifts/${item.id}/confirmation/`,{method:'POST',body:JSON.stringify({status,...(slotId?{slot_id:slotId}:{})})});setToast(status==='confirmed'?'Schicht bestätigt.':status==='rejected'?'Schicht abgelehnt.':'Bestätigung erneut angefordert.');await load();}catch(e:any){setToast(e.message);}finally{setBusy(false);}}
   function confirmRelease(){const id=releaseTarget?.id;setReleaseTarget(undefined);if(id) void act(`shifts/${id}/release/`,'Schicht freigegeben.');}
   function navigate(direction:number){if(view==='month')setAnchor(addKeyMonths(anchor,direction));else if(view==='day')setAnchor(addKeyDays(anchor,direction));else setAnchor(addKeyDays(anchor,7*direction));}
   const openItem=(item:any)=>{if(isManager(user))edit(item);};
@@ -193,12 +194,27 @@ export default function ScheduleV2({user}:{user:User}) {
     if(!assigned.length) return <span>Noch nicht besetzt</span>;
     return <span className="sv2-worker-names">{assigned.map((worker:any,index:number)=><React.Fragment key={worker.id||worker.name}>{index>0&&<span className="sv2-name-separator">, </span>}{renderAkteLink('worker',worker.id,worker.name||worker.employee_number||'Mitarbeiter')}</React.Fragment>)}</span>;
   };
+  const confirmationLabel=(status:string)=>status==='pending'?'Ausstehend':status==='rejected'?'Abgelehnt':'Bestätigt';
+  const confirmationColor=(status:string)=>status==='pending'?'warning':status==='rejected'?'danger':'success';
+  const renderConfirmationPanel=(item:any,compact=false)=>{
+    if(!item.confirmation_required) return null;
+    const assigned=item.assigned_workers||[];
+    const targets=isManager(user)?assigned:assigned.filter((worker:any)=>worker.is_me);
+    if(!targets.length) return <div className="sv2-confirmation-panel"><small>Bestätigung erforderlich · noch keine Zuweisung</small></div>;
+    return <div className={`sv2-confirmation-panel ${compact?'compact':''}`} data-testid="shift-confirmations">{targets.map((worker:any)=><div className="sv2-confirmation-row" key={worker.slot_id||worker.id}>
+      <span className="sv2-confirmation-person">{isManager(user)?worker.name:'Meine Bestätigung'}</span>
+      <IonBadge color={confirmationColor(worker.confirmation_status)}>{confirmationLabel(worker.confirmation_status)}</IonBadge>
+      {workerView&&worker.is_me&&worker.confirmation_status==='pending'&&<span className="sv2-confirmation-actions"><IonButton size="small" disabled={busy} onClick={event=>{event.stopPropagation();void setConfirmation(item,'confirmed');}}>Bestätigen</IonButton><IonButton size="small" fill="outline" color="danger" disabled={busy} onClick={event=>{event.stopPropagation();void setConfirmation(item,'rejected');}}>Ablehnen</IonButton></span>}
+      {isManager(user)&&!compact&&<span className="sv2-confirmation-actions admin"><IonButton size="small" fill="clear" disabled={busy||worker.confirmation_status==='pending'} onClick={event=>{event.stopPropagation();void setConfirmation(item,'pending',worker.slot_id);}}>Ausstehend</IonButton><IonButton size="small" fill="clear" color="success" disabled={busy||worker.confirmation_status==='confirmed'} onClick={event=>{event.stopPropagation();void setConfirmation(item,'confirmed',worker.slot_id);}}>Bestätigt</IonButton><IonButton size="small" fill="clear" color="danger" disabled={busy||worker.confirmation_status==='rejected'} onClick={event=>{event.stopPropagation();void setConfirmation(item,'rejected',worker.slot_id);}}>Abgelehnt</IonButton></span>}
+    </div>)}</div>;
+  };
   const renderShiftDetails=(item:any,compact=false)=><div className={`sv2-event-details ${compact?'compact':''}`} data-testid="shift-card-details">
     <div className="sv2-event-line" data-field="client"><IonIcon icon={businessOutline}/><span className="sv2-field-copy"><small>Kunde</small>{renderAkteLink('client',item.client,item.client_name||'Ohne Kunde')}</span></div>
     <div className="sv2-event-line" data-field="location"><IonIcon icon={locationOutline}/><span className="sv2-field-copy"><small>Standort</small><span>{item.location_name||'Ohne Einsatzort'}</span></span></div>
     <div className="sv2-event-line" data-field="workers"><IonIcon icon={peopleOutline}/><span className="sv2-field-copy"><small>Mitarbeiter</small>{renderWorkerNames(item)}</span></div>
     <div className="sv2-event-line" data-field="time"><IonIcon icon={timeOutline}/><span className="sv2-field-copy"><small>Start–Ende</small><span>{tm(item.starts_at)}–{tm(item.ends_at)}</span></span></div>
     <div className="sv2-event-line sv2-profile-line" data-field="profile"><IonIcon icon={personCircleOutline}/><span className="sv2-field-copy"><small>Profilbild</small>{renderWorkerAvatars(item,compact)}</span></div>
+    {renderConfirmationPanel(item,compact)}
   </div>;
   const renderMini=(item:any,compact=false)=>{const status=statusInfo(item);const canOpen=isManager(user);return <article style={clientStyle(item)} className={`sv2-event ${compact?'compact':''}`} key={item.id} role={canOpen?'button':undefined} tabIndex={canOpen?0:undefined} onClick={()=>openItem(item)} onKeyDown={event=>{if(canOpen&&(event.key==='Enter'||event.key===' ')){event.preventDefault();openItem(item);}}}><div className="sv2-event-head"><strong>{item.position_name||'Einsatz'}</strong><span>{status.label}</span></div>{renderShiftDetails(item,compact)}</article>;};
 
@@ -244,7 +260,7 @@ export default function ScheduleV2({user}:{user:User}) {
       <IonInput fill="outline" type="number" min="1" label="Benötigte Mitarbeiter *" labelPlacement="floating" value={form.required_count} onIonInput={e=>setForm({...form,required_count:Math.max(Number(val(e)||1),(form.workers||[]).length)})}/><IonInput fill="outline" type="number" min="0" label="Pause (Min.)" labelPlacement="floating" value={form.break_minutes} onIonInput={e=>setForm({...form,break_minutes:val(e)})}/>
       <IonSelect className="full" multiple interface="alert" fill="outline" label="Mitarbeiter direkt zuweisen (optional)" labelPlacement="floating" value={form.workers||[]} onIonChange={e=>{const selected=Array.isArray(val(e))?val(e):[];setForm({...form,workers:selected,required_count:Math.max(Number(form.required_count||1),selected.length)});}}>{workers.map(worker=><IonSelectOption key={worker.id} value={worker.id}>{workerLabel(worker)} · {worker.employee_number}</IonSelectOption>)}</IonSelect>
       {(form.workers||[]).length>0&&<div className="full sv2-assignment-note">{(form.workers||[]).length} von {form.required_count||1} Plätzen werden direkt zugewiesen. Freie Restplätze können als OpenShift veröffentlicht werden.</div>}
-      <IonTextarea className="full" fill="outline" label="Hinweise für Mitarbeiter" labelPlacement="floating" value={form.notes} onIonInput={e=>setForm({...form,notes:val(e)})}/><label className="sv2-toggle full">{(form.workers||[]).length>0?'Restliche freie Plätze als OpenShift veröffentlichen':'Direkt als OpenShift veröffentlichen'} <IonToggle checked={!!form.publish_now} onIonChange={e=>setForm({...form,publish_now:e.detail.checked})}/></label>
+      <IonTextarea className="full" fill="outline" label="Hinweise für Mitarbeiter" labelPlacement="floating" value={form.notes} onIonInput={e=>setForm({...form,notes:val(e)})}/><label className="sv2-toggle full">Bestätigung durch zugewiesene Mitarbeiter erforderlich <IonToggle checked={!!form.confirmation_required} onIonChange={e=>setForm({...form,confirmation_required:e.detail.checked})}/></label><label className="sv2-toggle full">{(form.workers||[]).length>0?'Restliche freie Plätze als OpenShift veröffentlichen':'Direkt als OpenShift veröffentlichen'} <IonToggle checked={!!form.publish_now} onIonChange={e=>setForm({...form,publish_now:e.detail.checked})}/></label>
     </div><div className="sv2-modal-actions"><IonButton fill="outline" onClick={()=>setModal(false)}>Abbrechen</IonButton><IonButton disabled={busy} onClick={()=>void save()}>Speichern</IonButton></div></div></IonModal>
 
     <IonModal isOpen={aiOpen} onDidDismiss={()=>{setAiOpen(false);setParsedOrder(undefined);}}><div className="sv2-modal" data-testid="schedule-ai-intake"><div className="sv2-modal-head"><div><small>DIENSTPLAN · AI</small><h2>Personalbedarf mit AI erfassen</h2></div><IonButton fill="clear" onClick={()=>setAiOpen(false)}>Schließen</IonButton></div><div className="sv2-form">

@@ -274,8 +274,8 @@ export default function FriendlyDateTimePicker() {
               presentation={presentation}
               preferWheel={target.kind === 'time'}
               value={draft}
-              min={target.min ? toIonDatetimeValue(target.kind, target.min) : undefined}
-              max={target.max ? toIonDatetimeValue(target.kind, target.max) : undefined}
+              min={target.min ? toIonDatetimeValue(target.kind, target.min) : target.kind === 'date' || target.kind === 'month' ? '1900-01-01' : target.kind === 'datetime-local' ? '1900-01-01T00:00' : undefined}
+              max={target.max ? toIonDatetimeValue(target.kind, target.max) : target.kind === 'date' || target.kind === 'month' ? '2100-12-31' : target.kind === 'datetime-local' ? '2100-12-31T23:59' : undefined}
               minuteValues={minutes}
               onIonChange={(event) => setDraft(String(Array.isArray(event.detail.value) ? event.detail.value[0] || '' : event.detail.value || ''))}
             />

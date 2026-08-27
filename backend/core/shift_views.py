@@ -68,6 +68,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
             audit(self.request, 'staffing_demand.created', obj, {'required_count': obj.required_count})
 
     def perform_update(self, serializer):
+        previous_confirmation_required = bool(serializer.instance.confirmation_required)
         with transaction.atomic():
             obj = serializer.save(worker=None)
             ensure_slots(obj)
@@ -76,8 +77,30 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                 if not obj.published_at:
                     obj.published_at = timezone.now()
                     obj.save(update_fields=['published_at', 'updated_at'])
+            if previous_confirmation_required != bool(obj.confirmation_required):
+                now = timezone.now()
+                for slot in claimed_slots(obj).select_related('worker__user'):
+                    if obj.confirmation_required:
+                        slot.confirmation_status = ShiftSlot.ConfirmationStatus.PENDING
+                        slot.confirmation_requested_at = now
+                        slot.confirmation_decided_at = None
+                        Notification.objects.create(
+                            user=slot.worker.user,
+                            kind=f'shift-confirmation-required-{slot.id}-{int(now.timestamp())}',
+                            title='Schicht bestätigen',
+                            body=f'{timezone.localtime(obj.starts_at):%d.%m.%Y %H:%M} – {obj.location.name}',
+                            action_url='/schedule',
+                        )
+                    else:
+                        slot.confirmation_status = ShiftSlot.ConfirmationStatus.CONFIRMED
+                        slot.confirmation_requested_at = None
+                        slot.confirmation_decided_at = now
+                    slot.save(update_fields=['confirmation_status', 'confirmation_requested_at', 'confirmation_decided_at', 'updated_at'])
             refresh_shift_state(obj)
-            audit(self.request, 'staffing_demand.updated', obj, {'required_count': obj.required_count})
+            audit(self.request, 'staffing_demand.updated', obj, {
+                'required_count': obj.required_count,
+                'confirmation_required': obj.confirmation_required,
+            })
 
     def _list_response(self, qs):
         page = self.paginate_queryset(qs)
@@ -171,7 +194,10 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                     slot.status = ShiftSlot.Status.OPEN
                     slot.source = 'admin_release'
                     slot.released_at = timezone.now()
-                    slot.save(update_fields=['worker', 'status', 'source', 'released_at', 'updated_at'])
+                    slot.confirmation_status = ShiftSlot.ConfirmationStatus.CONFIRMED
+                    slot.confirmation_requested_at = None
+                    slot.confirmation_decided_at = None
+                    slot.save(update_fields=['worker', 'status', 'source', 'released_at', 'confirmation_status', 'confirmation_requested_at', 'confirmation_decided_at', 'updated_at'])
 
             newly_assigned = []
             for worker in desired_workers:
@@ -187,9 +213,16 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                 slot.worker = worker
                 slot.status = ShiftSlot.Status.CLAIMED
                 slot.source = 'admin_assignment'
-                slot.claimed_at = timezone.now()
+                now = timezone.now()
+                slot.claimed_at = now
                 slot.released_at = None
-                slot.save(update_fields=['worker', 'status', 'source', 'claimed_at', 'released_at', 'updated_at'])
+                slot.confirmation_status = (
+                    ShiftSlot.ConfirmationStatus.PENDING if shift.confirmation_required
+                    else ShiftSlot.ConfirmationStatus.CONFIRMED
+                )
+                slot.confirmation_requested_at = now if shift.confirmation_required else None
+                slot.confirmation_decided_at = None if shift.confirmation_required else now
+                slot.save(update_fields=['worker', 'status', 'source', 'claimed_at', 'released_at', 'confirmation_status', 'confirmation_requested_at', 'confirmation_decided_at', 'updated_at'])
                 newly_assigned.append((slot, worker))
 
             free_count = open_slots(shift).count()
@@ -209,7 +242,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                     user=worker.user,
                     kind=f'shift-admin-assigned-{slot.id}',
                     defaults={
-                        'title': 'Neue Schicht zugeteilt',
+                        'title': 'Schicht bestätigen' if shift.confirmation_required else 'Neue Schicht zugeteilt',
                         'body': f'{timezone.localtime(shift.starts_at):%d.%m.%Y %H:%M} – {shift.location.name}',
                         'action_url': '/schedule',
                     },
@@ -220,6 +253,78 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
             })
 
         return Response(self.get_serializer(self.base_queryset().get(pk=shift.pk)).data)
+
+    @action(detail=True, methods=['post'])
+    def confirmation(self, request, pk=None):
+        next_status = str(request.data.get('status', '')).strip().lower()
+        allowed = {
+            ShiftSlot.ConfirmationStatus.PENDING,
+            ShiftSlot.ConfirmationStatus.CONFIRMED,
+            ShiftSlot.ConfirmationStatus.REJECTED,
+        }
+        if next_status not in allowed:
+            return Response({'detail': 'status muss pending, confirmed oder rejected sein.'}, status=400)
+
+        with transaction.atomic():
+            shift = Shift.objects.select_for_update().select_related('location', 'position').get(pk=pk)
+            if not shift.confirmation_required:
+                return Response({'detail': 'Für diese Schicht ist keine Bestätigung erforderlich.'}, status=400)
+
+            if request.user.role == User.Role.WORKER:
+                if next_status == ShiftSlot.ConfirmationStatus.PENDING:
+                    return Response({'detail': 'Mitarbeiter können nur bestätigen oder ablehnen.'}, status=400)
+                slot = ShiftSlot.objects.select_for_update().select_related('worker__user').filter(
+                    shift=shift, worker=request.user.worker_profile, status=ShiftSlot.Status.CLAIMED
+                ).first()
+                if not slot:
+                    return Response({'detail': 'Keine zugewiesene Schicht gefunden.'}, status=404)
+                actor_is_worker = True
+            elif request.user.role in {User.Role.ADMIN, User.Role.MANAGER}:
+                slot_id = str(request.data.get('slot_id', '')).strip()
+                slot = ShiftSlot.objects.select_for_update().select_related('worker__user').filter(
+                    pk=slot_id, shift=shift, status=ShiftSlot.Status.CLAIMED, worker__isnull=False
+                ).first()
+                if not slot:
+                    return Response({'detail': 'Zuweisung wurde nicht gefunden.'}, status=404)
+                actor_is_worker = False
+            else:
+                return Response({'detail': 'Keine Berechtigung für Schichtbestätigungen.'}, status=403)
+
+            now = timezone.now()
+            slot.confirmation_status = next_status
+            if next_status == ShiftSlot.ConfirmationStatus.PENDING:
+                slot.confirmation_requested_at = now
+                slot.confirmation_decided_at = None
+            else:
+                slot.confirmation_requested_at = slot.confirmation_requested_at or now
+                slot.confirmation_decided_at = now
+            slot.save(update_fields=['confirmation_status', 'confirmation_requested_at', 'confirmation_decided_at', 'updated_at'])
+
+            label = slot.get_confirmation_status_display()
+            if actor_is_worker:
+                for admin in User.objects.filter(role__in=[User.Role.ADMIN, User.Role.MANAGER], is_active=True):
+                    Notification.objects.create(
+                        user=admin,
+                        kind=f'shift-confirmation-response-{slot.id}-{next_status}-{int(now.timestamp())}',
+                        title=f'Schicht {label.lower()}',
+                        body=f'{slot.worker.user.get_full_name() or slot.worker.user.email} · {timezone.localtime(shift.starts_at):%d.%m.%Y %H:%M} · {shift.location.name}',
+                        action_url='/schedule',
+                    )
+            else:
+                Notification.objects.create(
+                    user=slot.worker.user,
+                    kind=f'shift-confirmation-admin-{slot.id}-{next_status}-{int(now.timestamp())}',
+                    title='Schichtbestätigung aktualisiert',
+                    body=f'{label} · {timezone.localtime(shift.starts_at):%d.%m.%Y %H:%M} · {shift.location.name}',
+                    action_url='/schedule',
+                )
+            audit(request, 'shift.confirmation_changed', shift, {
+                'slot': str(slot.id),
+                'worker': str(slot.worker_id),
+                'status': next_status,
+            })
+
+        return Response(self.get_serializer(self.base_queryset().get(pk=pk)).data)
 
     @action(detail=True, methods=['post'])
     def claim(self, request, pk=None):

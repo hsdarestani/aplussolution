@@ -28,9 +28,15 @@ class ShiftApiSerializer(serializers.ModelSerializer):
             workers.append(
                 {
                     'id': str(slot.worker_id),
+                    'slot_id': str(slot.id),
                     'name': slot.worker.user.get_full_name() or slot.worker.user.email,
                     'employee_number': slot.worker.employee_number,
                     'avatar': avatar,
+                    'confirmation_status': slot.confirmation_status,
+                    'confirmation_label': slot.get_confirmation_status_display(),
+                    'confirmation_requested_at': slot.confirmation_requested_at,
+                    'confirmation_decided_at': slot.confirmation_decided_at,
+                    'is_me': bool(request and request.user.is_authenticated and slot.worker.user_id == request.user.id),
                 }
             )
         return workers
@@ -40,5 +46,5 @@ class ShiftApiSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'order', 'order_title', 'client', 'client_name', 'location', 'location_name',
             'position', 'position_name', 'starts_at', 'ends_at', 'break_minutes', 'status', 'notes',
-            'required_count', 'open_count', 'filled_count', 'assigned_workers',
+            'required_count', 'confirmation_required', 'open_count', 'filled_count', 'assigned_workers',
         ]
