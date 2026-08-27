@@ -21,7 +21,7 @@ jobs:
       - name: Validate frontend
         working-directory: frontend
         run: |
-          npm ci
+          npm install --no-audit --no-fund
           npm test
           npm run build
       - name: Commit clean Phase 5 implementation
