@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, akten_views, attendance_actions, attendance_views, automation_views, client_order_planning, client_portal_views, contract_views, document_catalog_views, document_center_views, global_search_views, integration_views, live_admin_center, live_operations, native_operations, oauth_views, payroll_views, portal_views, push_views, searchable_views, shift_views, store_review_views, time_views, views, worker_portal_views
+from . import admin_center_views, advanced_views, akten_views, announcement_api, attendance_actions, attendance_views, automation_views, client_order_planning, client_portal_views, contract_views, document_catalog_views, document_center_views, global_search_views, integration_views, live_admin_center, live_operations, native_operations, oauth_views, payroll_views, portal_views, push_views, searchable_views, shift_views, store_review_views, time_views, views, worker_portal_views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -21,6 +21,7 @@ for prefix, view in [
     ('documents', searchable_views.DocumentViewSet),
     ('payroll', payroll_views.PayrollViewSet),
     ('ratings', client_portal_views.ClientSafeRatingViewSet),
+    ('announcements', announcement_api.AnnouncementViewSet),
     ('conversations', views.ConversationViewSet),
 ]:
     router.register(prefix, view)

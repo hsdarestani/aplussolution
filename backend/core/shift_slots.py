@@ -12,6 +12,11 @@ class ShiftSlot(TimestampedModel):
         CLAIMED = 'claimed', 'Übernommen'
         CANCELLED = 'cancelled', 'Storniert'
 
+    class ConfirmationStatus(models.TextChoices):
+        PENDING = 'pending', 'Ausstehend'
+        CONFIRMED = 'confirmed', 'Bestätigt'
+        REJECTED = 'rejected', 'Abgelehnt'
+
     shift = models.ForeignKey(Shift, on_delete=models.CASCADE, related_name='slots')
     worker = models.ForeignKey(WorkerProfile, on_delete=models.SET_NULL, related_name='shift_slots', blank=True, null=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
@@ -19,6 +24,9 @@ class ShiftSlot(TimestampedModel):
     wiw_shift_id = models.CharField(max_length=80, unique=True, blank=True, null=True)
     claimed_at = models.DateTimeField(blank=True, null=True)
     released_at = models.DateTimeField(blank=True, null=True)
+    confirmation_status = models.CharField(max_length=20, choices=ConfirmationStatus.choices, default=ConfirmationStatus.CONFIRMED)
+    confirmation_requested_at = models.DateTimeField(blank=True, null=True)
+    confirmation_decided_at = models.DateTimeField(blank=True, null=True)
 
     class Meta:
         app_label = 'core'

@@ -188,6 +188,7 @@ class Shift(TimestampedModel):
     is_open = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
     required_count = models.PositiveIntegerField(default=1)
+    confirmation_required = models.BooleanField(default=False)
     published_at = models.DateTimeField(blank=True, null=True)
     wiw_shift_id = models.CharField(max_length=80, unique=True, blank=True, null=True)
     wiw_payload = models.JSONField(default=dict, blank=True)
@@ -411,6 +412,29 @@ class Notification(TimestampedModel):
     kind = models.CharField(max_length=120, default='general')
     action_url = models.CharField(max_length=500, blank=True)
     read_at = models.DateTimeField(blank=True, null=True)
+
+
+class Announcement(TimestampedModel):
+    title = models.CharField(max_length=200, default='Mitteilung')
+    body = models.TextField(blank=True)
+    attachment = models.FileField(upload_to='announcements/%Y/%m/', blank=True, null=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='sent_announcements')
+    recipients = models.ManyToManyField(User, through='AnnouncementRecipient', related_name='received_announcements')
+    sent_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['-sent_at', '-created_at']
+
+
+class AnnouncementRecipient(TimestampedModel):
+    announcement = models.ForeignKey(Announcement, on_delete=models.CASCADE, related_name='recipient_links')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='announcement_links')
+    notification = models.ForeignKey(Notification, on_delete=models.SET_NULL, null=True, blank=True, related_name='announcement_links')
+    read_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        unique_together = ('announcement', 'user')
+        ordering = ['created_at']
 
 
 class AuditLog(TimestampedModel):

@@ -29,7 +29,8 @@ import {
   briefcaseOutline,
   businessOutline,
   calendarOutline,
-  chatbubblesOutline,
+  megaphoneOutline,
+  sendOutline,
   checkmarkOutline,
   cloudUploadOutline,
   createOutline,
@@ -40,7 +41,6 @@ import {
   peopleOutline,
   personAddOutline,
   refreshOutline,
-  sendOutline,
   settingsOutline,
   starOutline,
   stopwatchOutline,
@@ -84,7 +84,7 @@ const icons: Record<string, string> = {
   documents: cloudUploadOutline,
   orders: briefcaseOutline,
   people: peopleOutline,
-  messages: chatbubblesOutline,
+  messages: megaphoneOutline,
   ranking: starOutline,
   ratings: starOutline,
   profile: peopleOutline,
@@ -94,14 +94,14 @@ const icons: Record<string, string> = {
 
 const nav: Record<string, [View, string][]> = {
   // Familiar workflow order inspired by the structure Ashkan and the team already know:
-  // Übersicht -> Dienstplan -> Zeiterfassung -> Lohn/Dokumente -> Chat -> Anfragen -> Stammdaten.
+  // Übersicht -> Dienstplan -> Zeiterfassung -> Lohn/Dokumente -> Mitteilungen -> Anfragen -> Stammdaten.
   // A+ specific modules remain available afterwards instead of changing the learned daily workflow.
   admin: [
     ['dashboard', 'Übersicht'],
     ['schedule', 'Dienstplan'],
     ['time', 'Zeiterfassung'],
     ['documents', 'Lohn & Dokumente'],
-    ['messages', 'Nachrichten'],
+    ['messages', 'Mitteilungen'],
     ['operations', 'Anfragen, Berichte & Verwaltung'],
     ['people', 'Personal & Kunden'],
     ['settings', 'Einstellungen'],
@@ -112,7 +112,7 @@ const nav: Record<string, [View, string][]> = {
     ['schedule', 'Dienstplan'],
     ['time', 'Zeiterfassung'],
     ['documents', 'Lohn & Dokumente'],
-    ['messages', 'Nachrichten'],
+    ['messages', 'Mitteilungen'],
     ['operations', 'Anfragen, Berichte & Verwaltung'],
     ['people', 'Personal & Kunden'],
     ['settings', 'Einstellungen'],
@@ -122,7 +122,7 @@ const nav: Record<string, [View, string][]> = {
     ['dashboard', 'Start'],
     ['schedule', 'Mein Dienstplan'],
     ['time', 'Zeiterfassung'],
-    ['messages', 'Nachrichten'],
+    ['messages', 'Mitteilungen'],
     ['operations', 'Anfragen'],
     ['documents', 'Dokumente'],
     ['contracts', 'Meine Verträge'],
@@ -136,7 +136,7 @@ const nav: Record<string, [View, string][]> = {
     ['contracts', 'Verträge & Signatur'],
     ['documents', 'Dokumente'],
     ['ratings', 'Mitarbeiter bewerten'],
-    ['messages', 'Nachrichten'],
+    ['messages', 'Mitteilungen'],
   ],
 };
 
@@ -2599,55 +2599,83 @@ function Orders({ user }: { user: User }) {
   );
 }
 
-function Messages({ user }: { user: User }) {
+function Announcements({ user }: { user: User }) {
   const [rows, setRows] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [selected, setSelected] = useState<string>();
-  const [body, setBody] = useState('');
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState<any>({ participants: [] });
+  const [form, setForm] = useState<any>({ title: '', body: '', recipients: [], all_recipients: true, attachment: null });
+  const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
 
+  const manager = isManager(user);
+  const recipientCandidates = useMemo(
+    () => users.filter((person: any) => person.is_active !== false && ['worker', 'client'].includes(person.role) && !String(person.email || '').endsWith('@sync.invalid')),
+    [users],
+  );
+
   const load = async () => {
-    const conversations = await api('conversations/');
-    const list = unpack(conversations);
-    setRows(list);
-    if (!selected && list[0]) setSelected(list[0].id);
-    const userData = await api(isManager(user) ? 'users/' : 'portal/message-recipients/');
-    setUsers(unpack(userData));
+    try {
+      if (manager) {
+        const [announcementData, userData] = await Promise.all([api('announcements/'), api('users/')]);
+        const list = unpack(announcementData);
+        setRows(list);
+        setUsers(unpack(userData));
+        setSelected((current) => current && list.some((item: any) => item.id === current) ? current : list[0]?.id);
+      } else {
+        const announcementData = await api('announcements/');
+        const list = unpack(announcementData);
+        setRows(list);
+        setSelected((current) => current && list.some((item: any) => item.id === current) ? current : list[0]?.id);
+      }
+    } catch (reason: any) {
+      setToast(reason.message);
+    }
   };
 
   useEffect(() => {
     void load();
   }, []);
 
-  async function create() {
+  async function sendAnnouncement() {
+    if (!form.body?.trim() && !form.attachment) {
+      setToast('Bitte Text oder einen Anhang hinzufügen.');
+      return;
+    }
+    if (!form.all_recipients && !(form.recipients || []).length) {
+      setToast('Bitte mindestens einen Empfänger auswählen.');
+      return;
+    }
+    setBusy(true);
     try {
-      const result: any = await api('conversations/', {
-        method: 'POST',
-        body: JSON.stringify(form),
-      });
+      const payload = new FormData();
+      payload.append('title', form.title?.trim() || 'Mitteilung');
+      payload.append('body', form.body || '');
+      payload.append('all_recipients', form.all_recipients ? 'true' : 'false');
+      (form.recipients || []).forEach((id: string) => payload.append('recipient_ids', id));
+      if (form.attachment) payload.append('attachment', form.attachment);
+      const result: any = await api('announcements/', { method: 'POST', body: payload });
       setModal(false);
-      setForm({ participants: [] });
+      setForm({ title: '', body: '', recipients: [], all_recipients: true, attachment: null });
       await load();
       setSelected(result.id);
-      setToast('Unterhaltung wurde erstellt.');
+      setToast(`Mitteilung an ${result.recipient_count || 0} Empfänger versendet. Push wurde ausgelöst.`);
     } catch (reason: any) {
       setToast(reason.message);
+    } finally {
+      setBusy(false);
     }
   }
 
-  async function send() {
-    if (!selected || !body.trim()) return;
-    try {
-      await api(`conversations/${selected}/post_message/`, {
-        method: 'POST',
-        body: JSON.stringify({ body }),
-      });
-      setBody('');
-      await load();
-    } catch (reason: any) {
-      setToast(reason.message);
+  async function choose(item: any) {
+    setSelected(item.id);
+    if (!manager && !item.is_read) {
+      try {
+        await api(`announcements/${item.id}/read/`, { method: 'POST', body: '{}' });
+        setRows((current) => current.map((row) => row.id === item.id ? { ...row, is_read: true } : row));
+      } catch {
+        // Reading the Mitteilung is still possible if the acknowledgement request is temporarily offline.
+      }
     }
   }
 
@@ -2656,98 +2684,64 @@ function Messages({ user }: { user: User }) {
   return (
     <>
       <Title
-        title="Nachrichten"
-        text="Direkte Kommunikation mit Mitarbeitern, Kunden und Disposition."
-        action={
-          <IonButton onClick={() => setModal(true)}>
+        title="Mitteilungen"
+        text={manager ? 'Einweg-Mitteilungen an Mitarbeiter und Kunden – inklusive Datei, Push und Versandhistorie.' : 'Mitteilungen der A+ Solution Administration. Antworten sind nicht erforderlich.'}
+        action={manager ? (
+          <IonButton data-testid="announcement-create" onClick={() => setModal(true)}>
             <IonIcon slot="start" icon={addOutline} />
-            Unterhaltung
+            Neue Mitteilung
           </IonButton>
-        }
+        ) : undefined}
       />
 
-      <div className="messenger">
-        <div className="conversation-list">
-          {rows.map((conversation) => (
-            <button
-              className={conversation.id === selected ? 'active' : ''}
-              key={conversation.id}
-              onClick={() => setSelected(conversation.id)}
-            >
-              <b>{conversation.title || 'Unterhaltung'}</b>
-              <small>
-                {conversation.participants_detail?.map((person: any) => person.name).join(', ')}
-              </small>
+      <div className="columns" data-testid="announcements-view">
+        <div className="panel">
+          <div className="section-head"><div><h3>{manager ? 'Versandhistorie' : 'Posteingang'}</h3><p>{rows.length} Mitteilungen</p></div></div>
+          {rows.map((item) => (
+            <button type="button" className={`row announcement-row ${item.id === selected ? 'active' : ''}`} key={item.id} onClick={() => void choose(item)}>
+              <IonIcon icon={megaphoneOutline} />
+              <div className="grow">
+                <b>{item.title || 'Mitteilung'}</b>
+                <p>{String(item.body || 'Mit Anhang').slice(0, 100)}</p>
+                <small>{dateTime(item.sent_at)} · {item.created_by_name}</small>
+              </div>
+              {manager ? <IonBadge>{item.recipient_count} Empfänger</IonBadge> : !item.is_read ? <IonBadge color="primary">Neu</IonBadge> : <IonBadge color="medium">Gelesen</IonBadge>}
             </button>
           ))}
-          {!rows.length && <Empty>Noch keine Unterhaltungen.</Empty>}
+          {!rows.length && <Empty>Noch keine Mitteilungen.</Empty>}
         </div>
-        <div className="chat-panel">
+
+        <div className="panel">
           {active ? (
-            <>
-              <div className="chat-head">
-                <h3>{active.title || 'Unterhaltung'}</h3>
-                <p>{active.participants_detail?.map((person: any) => person.name).join(', ')}</p>
+            <div data-testid="announcement-detail">
+              <div className="section-head">
+                <div><small>MITTEILUNG</small><h3>{active.title || 'Mitteilung'}</h3><p>{dateTime(active.sent_at)} · {active.created_by_name}</p></div>
+                {manager && <IonBadge color="success">{active.read_count}/{active.recipient_count} gelesen</IonBadge>}
               </div>
-              <div className="messages">
-                {active.messages?.map((message: any) => (
-                  <div className={`message ${message.sender === user.id ? 'mine' : ''}`} key={message.id}>
-                    <small>{message.sender_detail?.name}</small>
-                    <p>{message.body}</p>
-                    <span>{dateTime(message.created_at)}</span>
-                  </div>
-                ))}
-                {!active.messages?.length && <Empty>Noch keine Nachrichten.</Empty>}
-              </div>
-              <div className="message-compose">
-                <IonTextarea
-                  fill="outline"
-                  autoGrow
-                  placeholder="Nachricht schreiben …"
-                  value={body}
-                  onIonInput={(event) => setBody(String(value(event)))}
-                />
-                <IonButton onClick={send}>
-                  <IonIcon icon={sendOutline} />
-                </IonButton>
-              </div>
-            </>
-          ) : (
-            <Empty>Unterhaltung auswählen.</Empty>
-          )}
+              <p style={{ whiteSpace: 'pre-wrap', lineHeight: 1.65 }}>{active.body || 'Diese Mitteilung enthält einen Anhang.'}</p>
+              {active.attachment && <p><a href={active.attachment} target="_blank" rel="noreferrer">Anhang öffnen / herunterladen</a></p>}
+              {manager && active.recipients_detail?.length > 0 && (
+                <div className="panel subtle-panel">
+                  <b>Empfänger</b>
+                  <p>{active.recipients_detail.map((person: any) => `${person.name}${person.read_at ? ' ✓' : ''}`).join(' · ')}</p>
+                </div>
+              )}
+              {!manager && <small>Diese Mitteilung ist einseitig. Bei organisatorischen Rückfragen bitte die Disposition über den vorgesehenen Kontaktweg erreichen.</small>}
+            </div>
+          ) : <Empty>Mitteilung auswählen.</Empty>}
         </div>
       </div>
 
-      <FormModal
-        open={modal}
-        title="Neue Unterhaltung"
-        onClose={() => setModal(false)}
-        onSave={create}
-      >
-        <IonInput
-          fill="outline"
-          label="Titel"
-          labelPlacement="floating"
-          value={form.title}
-          onIonInput={(event) => setForm({ ...form, title: value(event) })}
-        />
-        <IonSelect
-          multiple
-          fill="outline"
-          label="Teilnehmer"
-          labelPlacement="floating"
-          value={form.participants}
-          onIonChange={(event) => setForm({ ...form, participants: value(event) })}
-        >
-          {users
-            .filter((person) => person.id !== user.id)
-            .map((person) => (
-              <IonSelectOption value={person.id} key={person.id}>
-                {person.name} · {person.role}
-              </IonSelectOption>
-            ))}
-        </IonSelect>
-      </FormModal>
+      {manager && <FormModal open={modal} title="Neue Mitteilung" onClose={() => setModal(false)} onSave={sendAnnouncement} busy={busy} saveLabel="Versenden">
+        <IonInput fill="outline" label="Titel" labelPlacement="floating" value={form.title} onIonInput={(event) => setForm({ ...form, title: value(event) })} />
+        <IonTextarea fill="outline" autoGrow label="Text" labelPlacement="floating" value={form.body} onIonInput={(event) => setForm({ ...form, body: value(event) })} />
+        <label className="field-check">Alle Mitarbeiter & Kunden <IonToggle checked={!!form.all_recipients} onIonChange={(event) => setForm({ ...form, all_recipients: event.detail.checked })} /></label>
+        {!form.all_recipients && <IonSelect multiple fill="outline" label="Empfänger" labelPlacement="floating" value={form.recipients} onIonChange={(event) => setForm({ ...form, recipients: value(event) })}>
+          {recipientCandidates.map((person: any) => <IonSelectOption value={person.id} key={person.id}>{person.name || person.email} · {person.role === 'worker' ? 'Mitarbeiter' : 'Kunde'}</IonSelectOption>)}
+        </IonSelect>}
+        <label className="file-field">Bild / Datei (optional, max. 20 MB)<input type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt" onChange={(event) => setForm({ ...form, attachment: event.target.files?.[0] || null })} /></label>
+        <small>Beim Versand wird für jeden Empfänger automatisch eine In-App Notification erstellt und – falls auf dem Gerät eingerichtet – per Push zugestellt.</small>
+      </FormModal>}
 
       <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={() => setToast('')} />
     </>
@@ -3116,7 +3110,7 @@ export default function App() {
     time: 'Zeit',
     people: 'Personal',
     settings: 'Setup',
-    messages: 'Chat',
+    messages: 'Mitteilungen',
   };
   const navigateTo = (next: View) => {
     setView(next);
@@ -3133,7 +3127,7 @@ export default function App() {
   else if (view === 'orders') content = <Orders user={user} />;
   else if (view === 'people') content = <People user={user} />;
   else if (view === 'settings') content = <Settings user={user} />;
-  else if (view === 'messages') content = <Messages user={user} />;
+  else if (view === 'messages') content = <Announcements user={user} />;
   else if (view === 'ranking') content = <Ranking />;
   else if (view === 'ratings') content = <Ratings user={user} />;
   else if (view === 'profile') content = <Profile user={user} />;

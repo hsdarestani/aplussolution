@@ -115,9 +115,14 @@ def claim_shift(shift_id, worker: WorkerProfile, bypass_approval=False) -> Shift
     slot.worker = worker
     slot.status = ShiftSlot.Status.CLAIMED
     slot.source = 'approved_pickup' if bypass_approval else 'worker_claim'
-    slot.claimed_at = timezone.now()
+    now = timezone.now()
+    slot.claimed_at = now
     slot.released_at = None
-    slot.save(update_fields=['worker', 'status', 'source', 'claimed_at', 'released_at', 'updated_at'])
+    # Claiming an OpenShift is itself an explicit acceptance.
+    slot.confirmation_status = ShiftSlot.ConfirmationStatus.CONFIRMED
+    slot.confirmation_requested_at = now if shift.confirmation_required else None
+    slot.confirmation_decided_at = now
+    slot.save(update_fields=['worker', 'status', 'source', 'claimed_at', 'released_at', 'confirmation_status', 'confirmation_requested_at', 'confirmation_decided_at', 'updated_at'])
     refresh_shift_state(shift)
     return slot
 
@@ -134,7 +139,10 @@ def release_shift(shift_id, worker: WorkerProfile) -> ShiftSlot:
     slot.status = ShiftSlot.Status.OPEN
     slot.source = 'worker_release'
     slot.released_at = timezone.now()
-    slot.save(update_fields=['worker', 'status', 'source', 'released_at', 'updated_at'])
+    slot.confirmation_status = ShiftSlot.ConfirmationStatus.CONFIRMED
+    slot.confirmation_requested_at = None
+    slot.confirmation_decided_at = None
+    slot.save(update_fields=['worker', 'status', 'source', 'released_at', 'confirmation_status', 'confirmation_requested_at', 'confirmation_decided_at', 'updated_at'])
     if shift.status not in {Shift.Status.CANCELLED, Shift.Status.COMPLETED}:
         shift.status = Shift.Status.PUBLISHED
         shift.published_at = shift.published_at or timezone.now()
