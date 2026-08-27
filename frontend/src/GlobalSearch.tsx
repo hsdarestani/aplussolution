@@ -10,6 +10,7 @@ import {
   searchOutline,
 } from 'ionicons/icons';
 import { api } from './api';
+import { openAkte } from './entityNavigation';
 import './global-search.css';
 
 type Result = {
@@ -96,10 +97,14 @@ export default function GlobalSearch({ onNavigate }: { onNavigate: (view: any) =
   }, [open, query]);
 
   const select = (result: Result) => {
-    sessionStorage.setItem('aplus:focus', JSON.stringify({ view: result.view, id: result.id, type: result.type, query }));
     setOpen(false);
     setQuery('');
     setData(undefined);
+    if (result.type === 'worker' || result.type === 'client') {
+      openAkte(result.type, result.id);
+      return;
+    }
+    sessionStorage.setItem('aplus:focus', JSON.stringify({ view: result.view, id: result.id, type: result.type, query }));
     onNavigate(result.view);
   };
 

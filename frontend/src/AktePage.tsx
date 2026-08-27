@@ -100,7 +100,7 @@ export default function AktePage({ user }: { user: User }) {
 
   const summary = useMemo(() => Object.entries(data?.summary || {}), [data]);
   const back = () => {
-    const url = new URL(window.location.href); url.searchParams.set('view', 'people'); url.searchParams.delete('akte_kind'); url.searchParams.delete('akte_id');
+    const url = new URL(window.location.href); url.searchParams.set('view', 'people'); url.searchParams.set('people_kind', kind === 'client' ? 'clients' : 'workers'); url.searchParams.delete('akte_kind'); url.searchParams.delete('akte_id');
     window.history.pushState({ view: 'people' }, '', `${url.pathname}${url.search}`); window.dispatchEvent(new PopStateEvent('popstate'));
   };
 

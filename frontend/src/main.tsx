@@ -23,9 +23,11 @@ import HeaderQuickAccess from './HeaderQuickAccess';
 import NativePushRegistration from './NativePushRegistration';
 import { installBerlinLocaleDefaults } from './berlinLocale';
 import { installOperationalFetchResilience } from './operationalFetchResilience';
+import { installSignaturePad } from './signaturePad';
 
 installBerlinLocaleDefaults();
 installOperationalFetchResilience();
+installSignaturePad();
 setupIonicReact({ mode: 'md' });
 
 function renderApp() {

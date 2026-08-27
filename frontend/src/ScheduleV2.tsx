@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { IonAlert, IonBadge, IonButton, IonIcon, IonInput, IonLabel, IonModal, IonSearchbar, IonSegment, IonSegmentButton, IonSelect, IonSelectOption, IonTextarea, IonToast, IonToggle } from '@ionic/react';
-import { addOutline, briefcaseOutline, checkmarkCircleOutline, locationOutline, refreshOutline, timeOutline } from 'ionicons/icons';
+import { addOutline, briefcaseOutline, businessOutline, checkmarkCircleOutline, locationOutline, peopleOutline, personCircleOutline, refreshOutline, timeOutline } from 'ionicons/icons';
 import { api, User } from './api';
+import { akteHref, openAkte, AkteKind } from './entityNavigation';
 import './schedule-v2.css';
 
 const unpack = (x:any):any[] => x?.results || x || [];
@@ -171,19 +172,35 @@ export default function ScheduleV2({user}:{user:User}) {
   const searchPlaceholder=clientView?'Einsatz, Ort oder Position suchen …':'Kunde, Ort oder Position suchen …';
   const rangeTitle=view==='month'?keyLabel(monthStart,{month:'long',year:'numeric'}):view==='day'?keyLabel(anchor,{weekday:'long',day:'2-digit',month:'long',year:'numeric'}):`${keyLabel(weekStart,{day:'2-digit',month:'short'})} – ${keyLabel(addKeyDays(weekStart,6),{day:'2-digit',month:'short',year:'numeric'})}`;
 
+  const renderAkteLink=(kind:AkteKind,id:string|undefined,label:string)=>{
+    if(!isManager(user)||!id) return <span>{label}</span>;
+    return <a className="sv2-entity-link" href={akteHref(kind,id)} onClick={event=>{event.preventDefault();event.stopPropagation();openAkte(kind,id);}}>{label}</a>;
+  };
   const renderWorkerAvatars=(item:any,compact=false)=>{
     const assigned=item.assigned_workers||[];
-    if(!assigned.length) return null;
+    if(!assigned.length) return <span className="sv2-no-profile">Noch kein Profilbild</span>;
     const limit=compact?4:8;
-    return <div className={`sv2-worker-avatars ${compact?'compact':''}`} aria-label="Zugewiesene Mitarbeiter">
-      {assigned.slice(0,limit).map((worker:any)=><span className="sv2-worker-avatar" key={worker.id||worker.name} title={worker.name} aria-label={worker.name}>
-        <span>{workerInitials(worker)}</span>{worker.avatar&&<img src={worker.avatar} alt="" loading="lazy" onError={e=>{e.currentTarget.style.display='none';}}/>}
-      </span>)}
+    return <div className={`sv2-worker-avatars ${compact?'compact':''}`} aria-label="Profilbilder der zugewiesenen Mitarbeiter">
+      {assigned.slice(0,limit).map((worker:any)=>{
+        const content=<><span>{workerInitials(worker)}</span>{worker.avatar&&<img src={worker.avatar} alt="" loading="lazy" onError={e=>{e.currentTarget.style.display='none';}}/>}</>;
+        return isManager(user)&&worker.id?<a className="sv2-worker-avatar" href={akteHref('worker',worker.id)} key={worker.id||worker.name} title={`${worker.name} · Akte öffnen`} aria-label={`${worker.name} · Akte öffnen`} onClick={event=>{event.preventDefault();event.stopPropagation();openAkte('worker',worker.id);}}>{content}</a>:<span className="sv2-worker-avatar" key={worker.id||worker.name} title={worker.name} aria-label={worker.name}>{content}</span>;
+      })}
       {assigned.length>limit&&<span className="sv2-worker-more" title={`${assigned.length-limit} weitere Mitarbeiter`}>+{assigned.length-limit}</span>}
     </div>;
   };
-  const renderClientLabel=(item:any)=><span className="sv2-client-label"><i/>{item.client_name||'Ohne Kunde'}</span>;
-  const renderMini=(item:any,compact=false)=>{const status=statusInfo(item);return <button type="button" style={clientStyle(item)} className={`sv2-event ${compact?'compact':''}`} key={item.id} onClick={()=>openItem(item)}><span className={`sv2-event-dot ${status.label.toLowerCase()}`}/><b>{tm(item.starts_at)}–{tm(item.ends_at)} · {item.position_name}</b><small>{renderClientLabel(item)} <span>· {item.filled_count||0}/{item.required_count||1}</span></small>{renderWorkerAvatars(item,compact)}</button>;};
+  const renderWorkerNames=(item:any)=>{
+    const assigned=item.assigned_workers||[];
+    if(!assigned.length) return <span>Noch nicht besetzt</span>;
+    return <span className="sv2-worker-names">{assigned.map((worker:any,index:number)=><React.Fragment key={worker.id||worker.name}>{index>0&&<span className="sv2-name-separator">, </span>}{renderAkteLink('worker',worker.id,worker.name||worker.employee_number||'Mitarbeiter')}</React.Fragment>)}</span>;
+  };
+  const renderShiftDetails=(item:any,compact=false)=><div className={`sv2-event-details ${compact?'compact':''}`} data-testid="shift-card-details">
+    <div className="sv2-event-line" data-field="client"><IonIcon icon={businessOutline}/><span className="sv2-field-copy"><small>Kunde</small>{renderAkteLink('client',item.client,item.client_name||'Ohne Kunde')}</span></div>
+    <div className="sv2-event-line" data-field="location"><IonIcon icon={locationOutline}/><span className="sv2-field-copy"><small>Standort</small><span>{item.location_name||'Ohne Einsatzort'}</span></span></div>
+    <div className="sv2-event-line" data-field="workers"><IonIcon icon={peopleOutline}/><span className="sv2-field-copy"><small>Mitarbeiter</small>{renderWorkerNames(item)}</span></div>
+    <div className="sv2-event-line" data-field="time"><IonIcon icon={timeOutline}/><span className="sv2-field-copy"><small>Start–Ende</small><span>{tm(item.starts_at)}–{tm(item.ends_at)}</span></span></div>
+    <div className="sv2-event-line sv2-profile-line" data-field="profile"><IonIcon icon={personCircleOutline}/><span className="sv2-field-copy"><small>Profilbild</small>{renderWorkerAvatars(item,compact)}</span></div>
+  </div>;
+  const renderMini=(item:any,compact=false)=>{const status=statusInfo(item);const canOpen=isManager(user);return <article style={clientStyle(item)} className={`sv2-event ${compact?'compact':''}`} key={item.id} role={canOpen?'button':undefined} tabIndex={canOpen?0:undefined} onClick={()=>openItem(item)} onKeyDown={event=>{if(canOpen&&(event.key==='Enter'||event.key===' ')){event.preventDefault();openItem(item);}}}><div className="sv2-event-head"><strong>{item.position_name||'Einsatz'}</strong><span>{status.label}</span></div>{renderShiftDetails(item,compact)}</article>;};
 
   return <div className="sv2">
     <div className="sv2-title"><div><small>{eyebrow}</small><h1>{title}</h1><p>{intro}</p></div>{isManager(user)&&<div className="button-group"><IonButton data-testid="schedule-create-manual" onClick={create}><IonIcon slot="start" icon={addOutline}/>Manuell</IonButton><IonButton data-testid="schedule-create-ai" fill="outline" onClick={()=>{setParsedOrder(undefined);setOrderText('');setAiOpen(true);}}><IonIcon slot="start" icon={briefcaseOutline}/>AI</IonButton></div>}</div>
@@ -207,7 +224,7 @@ export default function ScheduleV2({user}:{user:User}) {
 
     {view==='list'&&<div className="sv2-list">{visible.map((x:any)=>{const mine=workerView&&tab==='mine';const status=statusInfo(x);const assigned=x.assigned_workers||[];return <article style={clientStyle(x)} className={`sv2-card ${mine?'mine':''}`} key={x.id}>
       <div className="sv2-date"><b>{berlinDay(x.starts_at)}</b><span>{berlinMonth(x.starts_at)}</span></div>
-      <div className="sv2-body"><small>{renderClientLabel(x)}</small><h3>{x.position_name}</h3><p><IonIcon icon={timeOutline}/> {tm(x.starts_at)}–{tm(x.ends_at)} · {x.break_minutes||0} Min.</p><p><IonIcon icon={locationOutline}/> {x.location_name}</p>{assigned.length>0&&<div className="sv2-list-assignees"><b>Zugewiesen</b>{renderWorkerAvatars(x)}</div>}<div className="sv2-meter"><span style={{width:`${Math.min(100,(Number(x.filled_count||0)/Number(x.required_count||1))*100)}%`}}/></div><em>{x.filled_count||0}/{x.required_count||1} besetzt · {x.open_count||0} frei</em></div>
+      <div className="sv2-body"><div className="sv2-list-head"><h3>{x.position_name||'Einsatz'}</h3><span>{x.break_minutes||0} Min. Pause</span></div>{renderShiftDetails(x)}<div className="sv2-meter"><span style={{width:`${Math.min(100,(Number(x.filled_count||0)/Number(x.required_count||1))*100)}%`}}/></div><em>{x.filled_count||0}/{x.required_count||1} besetzt · {x.open_count||0} frei</em></div>
       <div className="sv2-side"><IonBadge color={status.color}>{status.label}</IonBadge>{workerView&&!mine&&status.open&&<IonButton disabled={busy} onClick={()=>void act(`shifts/${x.id}/claim/`,'Schicht übernommen.')}><IonIcon slot="start" icon={checkmarkCircleOutline}/>Übernehmen</IonButton>}{workerView&&mine&&<IonButton fill="outline" color="medium" disabled={busy} onClick={()=>setReleaseTarget(x)}>Freigeben</IonButton>}{isManager(user)&&x.status==='draft'&&Number(x.open_count||0)>0&&<IonButton size="small" onClick={()=>void act(`shifts/${x.id}/publish/`,'OpenShift veröffentlicht.')}>Veröffentlichen</IonButton>}{isManager(user)&&<IonButton size="small" fill="clear" onClick={()=>edit(x)}>Bearbeiten</IonButton>}</div>
     </article>})}{!visible.length&&<div className="sv2-empty"><h3>Keine passenden Einsätze</h3><p>Suche oder Filter ändern.</p></div>}</div>}
 
