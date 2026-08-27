@@ -19,6 +19,21 @@ jobs:
           ref: feature/phase6-confirmations-mitteilungen
       - name: Apply Phase 6 source changes
         run: python scripts/apply_phase6.py
+      - name: Preserve send icon still used outside legacy Chat
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('frontend/src/App.tsx')
+          text = p.read_text(encoding='utf-8')
+          if 'sendOutline' not in text:
+              raise SystemExit('sendOutline is no longer used; remove this compatibility guard')
+          if '  sendOutline,' not in text:
+              marker = '  megaphoneOutline,'
+              if text.count(marker) != 1:
+                  raise SystemExit(f'expected one megaphone import marker, found {text.count(marker)}')
+              text = text.replace(marker, marker + '\n  sendOutline,', 1)
+              p.write_text(text, encoding='utf-8')
+          PY
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -56,7 +71,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm scripts/apply_phase6.py .github/workflows/phase6-implement.yml
+          git rm scripts/apply_phase6.py .github/workflows/phase6-implement.yml .github/workflows/phase6-send-icon-fix.yml
           git add backend frontend
           git commit -m 'Phase 6: add confirmations and one-way Mitteilungen'
           git push origin HEAD:feature/phase6-confirmations-mitteilungen
