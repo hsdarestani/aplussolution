@@ -13,7 +13,7 @@ const shift = {
 const housekeepingShift = {
   id: 'shift-berlin-2', client: 'client-2', client_name: 'Grand Hotel', position: 'position-2', position_name: 'Housekeeping', location: 'location-2', location_name: 'Grand Hotel Frankfurt',
   starts_at: '2026-08-21T15:00:00+02:00', ends_at: '2026-08-21T19:00:00+02:00', break_minutes: 15, status: 'published',
-  required_count: 1, filled_count: 1, open_count: 0, assigned_workers: [{ id: 'worker-2', name: 'QA Leon Fischer' }],
+  required_count: 2, filled_count: 1, open_count: 1, assigned_workers: [{ id: 'worker-2', name: 'QA Leon Fischer' }],
 };
 
 async function mockAdmin(page: Page) {
