@@ -6,6 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from .models import Shift, TimeEntry
+from .permissions import IsAdminOrManager
 from .services import audit
 from .views import TimeEntryViewSet as LegacyTimeEntryViewSet, geofence_error
 
@@ -75,4 +76,15 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
         entry.clock_out_lng = request.data.get('lng')
         entry.save(update_fields=['clock_out', 'clock_out_lat', 'clock_out_lng', 'updated_at'])
         audit(request, 'time.clock_out', entry)
+        return Response(self.get_serializer(entry).data)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
+    def approve(self, request, pk=None):
+        entry = self.get_object()
+        if entry.wiw_time_id:
+            return Response({'detail': 'Importierte WIW-Arbeitszeiten sind historische, schreibgeschützte Nachweise.'}, status=400)
+        entry.approved = True
+        entry.approved_by = request.user
+        entry.save(update_fields=['approved', 'approved_by', 'updated_at'])
+        audit(request, 'time.approved', entry)
         return Response(self.get_serializer(entry).data)

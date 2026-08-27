@@ -62,6 +62,10 @@ def _operational_time_entries():
     )
 
 
+def _is_imported_wiw_entry(entry):
+    return bool(str(getattr(entry, 'wiw_time_id', '') or '').strip())
+
+
 @api_view(['GET'])
 def employee_attendance_home(request):
     if request.user.role != User.Role.WORKER:
@@ -113,7 +117,10 @@ def employee_attendance_home(request):
 
     corrections = TimeEntryCorrection.objects.select_related(
         'entry', 'requested_by__user'
-    ).filter(requested_by=worker).order_by('-created_at')[:20]
+    ).filter(
+        requested_by=worker,
+        entry__wiw_time_id__isnull=True,
+    ).order_by('-created_at')[:20]
 
     return Response({
         'active_entry': TimeEntrySerializer(active, context={'request': request}).data if active else None,
@@ -134,6 +141,8 @@ def request_time_correction(request, entry_id):
     entry = TimeEntry.objects.select_related('worker__user').filter(pk=entry_id, worker=worker).first()
     if not entry:
         return Response({'detail': 'Zeiteintrag wurde nicht gefunden.'}, status=404)
+    if _is_imported_wiw_entry(entry):
+        return Response({'detail': 'Importierte WIW-Arbeitszeiten sind historische, schreibgeschützte Nachweise.'}, status=400)
     if entry.clock_out is None:
         return Response({'detail': 'Eine laufende Zeiterfassung kann noch nicht korrigiert werden.'}, status=400)
     if TimeEntryCorrection.objects.filter(entry=entry, status=TimeEntryCorrection.Status.PENDING).exists():
@@ -205,6 +214,8 @@ def decide_time_correction(request, pk):
     ).first()
     if not correction:
         return Response({'detail': 'Offene Korrekturanfrage wurde nicht gefunden.'}, status=404)
+    if _is_imported_wiw_entry(correction.entry):
+        return Response({'detail': 'Importierte WIW-Arbeitszeiten sind historische, schreibgeschützte Nachweise.'}, status=400)
 
     decision = request.data.get('status')
     if decision not in {TimeEntryCorrection.Status.APPROVED, TimeEntryCorrection.Status.REJECTED}:

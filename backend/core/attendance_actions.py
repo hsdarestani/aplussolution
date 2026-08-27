@@ -26,6 +26,8 @@ def close_running_entry(request, pk):
     entry = TimeEntry.objects.select_related('worker__user', 'shift').filter(pk=pk, clock_out__isnull=True).first()
     if not entry:
         return Response({'detail': 'Laufende Zeiterfassung wurde nicht gefunden.'}, status=404)
+    if entry.wiw_time_id:
+        return Response({'detail': 'Importierte WIW-Arbeitszeiten sind historische, schreibgeschützte Nachweise.'}, status=400)
     reason = str(request.data.get('reason') or '').strip()
     if len(reason) < 5:
         return Response({'detail': 'Bitte dokumentiere kurz, warum der laufende Eintrag beendet wird.'}, status=400)
