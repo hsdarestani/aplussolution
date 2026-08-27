@@ -1,0 +1,34 @@
+name: Apply phase 1 safe validation follow-up
+
+on:
+  push:
+    branches: [feature/phase1-workforce-cleanup]
+    paths:
+      - scripts/relax_phase1_position_validation.py
+      - .github/workflows/phase1-followup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/phase1-workforce-cleanup
+          fetch-depth: 0
+      - name: Apply safe validation patch
+        run: python scripts/relax_phase1_position_validation.py
+      - name: Remove temporary patch files
+        run: |
+          rm scripts/relax_phase1_position_validation.py
+          rm .github/workflows/phase1-followup.yml
+      - name: Commit follow-up
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Keep phase 1 position normalization legacy-safe'
+          git push origin HEAD:feature/phase1-workforce-cleanup
