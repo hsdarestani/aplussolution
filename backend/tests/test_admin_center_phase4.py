@@ -83,7 +83,7 @@ def test_admin_exception_center_collects_actionable_work(auth_admin, worker_user
         created_by=admin_user,
     )
     IntegrationSyncRun.objects.create(
-        provider='wiw',
+        provider='personio',
         status=IntegrationSyncRun.Status.FAILED,
         mode='incremental',
         errors=[{'error': 'API nicht erreichbar'}],
@@ -215,10 +215,33 @@ def test_phase4_exception_center_ignores_imported_wiw_time_audit_rows(auth_admin
 
 
 @pytest.mark.django_db
-def test_phase4_global_search_hides_migration_only_worker_profiles(auth_admin, worker_user):
+def test_phase4_global_search_and_documents_hide_migration_only_worker_profiles(auth_admin, worker_user):
     worker_user.email = 'anna.phase4@sync.invalid'
     worker_user.save(update_fields=['email'])
+    EmployeeMasterData.objects.create(
+        worker=worker_user.worker_profile,
+        completeness=10,
+        missing_fields=['iban', 'tax_identification_number'],
+    )
 
-    response = auth_admin.get('/api/search/global/?q=Anna&limit=10')
+    search = auth_admin.get('/api/search/global/?q=Anna&limit=10')
+    assert search.status_code == 200
+    assert all(item['id'] != str(worker_user.worker_profile.id) for item in search.data['results'] if item['type'] == 'worker')
+
+    exceptions = auth_admin.get('/api/admin/exceptions/?category=documents&limit=200')
+    assert exceptions.status_code == 200
+    assert all(item['object_id'] != str(worker_user.worker_profile.id) for item in exceptions.data['results'])
+
+
+@pytest.mark.django_db
+def test_phase4_ignores_old_wiw_failures_once_wiw_sync_is_disabled(auth_admin):
+    failed = IntegrationSyncRun.objects.create(
+        provider='wiw',
+        status=IntegrationSyncRun.Status.FAILED,
+        mode='final_full',
+        errors=[{'error': 'Historical cutover attempt failed before the successful import.'}],
+    )
+
+    response = auth_admin.get('/api/admin/exceptions/?category=integrations&limit=200')
     assert response.status_code == 200
-    assert all(item['id'] != str(worker_user.worker_profile.id) for item in response.data['results'] if item['type'] == 'worker')
+    assert all(item['object_id'] != str(failed.id) for item in response.data['results'])
