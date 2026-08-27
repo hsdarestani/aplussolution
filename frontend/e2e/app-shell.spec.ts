@@ -323,7 +323,7 @@ test.describe('Phase 6 desktop smoke', () => {
       'Nachrichten',
       'Anfragen, Berichte & Verwaltung',
       'Personal & Kunden',
-      'Aufträge & AI',
+      'Einstellungen',
       'Verträge & ANÜ',
       'Profil',
     ]);

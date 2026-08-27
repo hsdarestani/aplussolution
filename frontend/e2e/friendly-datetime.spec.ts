@@ -31,7 +31,7 @@ test('shift form replaces browser date/time interaction with the global friendly
   await page.goto('/?view=schedule');
 
   await expect(page.getByRole('heading', { name: 'Personalbedarf & Schichten' })).toBeVisible();
-  await page.getByRole('button', { name: 'Personalbedarf' }).click();
+  await page.getByTestId('schedule-create-manual').click();
 
   const start = page.getByTestId('datetime-beginn');
   const end = page.getByTestId('datetime-ende');
