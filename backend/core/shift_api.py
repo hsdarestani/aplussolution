@@ -13,18 +13,27 @@ class ShiftApiSerializer(serializers.ModelSerializer):
     assigned_workers = serializers.SerializerMethodField()
 
     def get_assigned_workers(self, obj):
+        request = self.context.get('request')
         slots = obj.slots.filter(
             status=ShiftSlot.Status.CLAIMED,
             worker__isnull=False,
         ).select_related('worker__user').order_by('created_at')
-        return [
-            {
-                'id': str(slot.worker_id),
-                'name': slot.worker.user.get_full_name() or slot.worker.user.email,
-                'employee_number': slot.worker.employee_number,
-            }
-            for slot in slots
-        ]
+        workers = []
+        for slot in slots:
+            avatar = ''
+            if slot.worker.user.avatar:
+                avatar = slot.worker.user.avatar.url
+                if request:
+                    avatar = request.build_absolute_uri(avatar)
+            workers.append(
+                {
+                    'id': str(slot.worker_id),
+                    'name': slot.worker.user.get_full_name() or slot.worker.user.email,
+                    'employee_number': slot.worker.employee_number,
+                    'avatar': avatar,
+                }
+            )
+        return workers
 
     class Meta:
         model = Shift

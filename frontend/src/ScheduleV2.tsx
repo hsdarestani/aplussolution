@@ -55,7 +55,18 @@ const statusInfo = (x:any) => {
   const open=x.status==='published'&&Number(x.open_count||0)>0;
   return {open,label:x.status==='draft'?'Entwurf':open?'Offen':'Voll',color:x.status==='draft'?'medium':open?'primary':'success'};
 };
-type ScheduleView = 'list'|'week'|'month'|'timeline';
+const clientKey = (item:any) => String(item?.client || item?.client_name || 'ohne-kunde');
+const workerInitials = (worker:any) => String(worker?.name || worker?.employee_number || 'MA').trim().split(/\s+/).slice(0,2).map((part:string)=>part[0]||'').join('').toUpperCase() || 'MA';
+const serviceText = (item:any) => `${item?.position_name||''} ${item?.order_title||''} ${item?.client_name||''} ${item?.location_name||''}`.toLocaleLowerCase('de-DE');
+type ScheduleView = 'list'|'day'|'week'|'month'|'timeline';
+type ServiceFilter = 'all'|'service'|'hotel'|'housekeeping';
+const matchesServiceFilter = (item:any, filter:ServiceFilter) => {
+  if(filter==='all') return true;
+  const text=serviceText(item);
+  if(filter==='housekeeping') return /house\s*keeping|zimmerreinigung|zimmermädchen|roomboy|reinigung/.test(text);
+  if(filter==='hotel') return /hotel|hotellerie|rezeption|reception|front\s*office/.test(text);
+  return /service|servicekraft|kellner|kellnerin|gastronomie|bankett|banquet/.test(text);
+};
 
 function FriendlyDateTime({label,value,onChange}:{label:string;value?:string;onChange:(next:string)=>void}) {
   const parts=splitDateTime(value);
@@ -74,6 +85,7 @@ export default function ScheduleV2({user}:{user:User}) {
   const [releaseTarget,setReleaseTarget]=useState<any>();
   const [view,setView]=useState<ScheduleView>('list');
   const [anchor,setAnchor]=useState(berlinDate());
+  const [serviceFilter,setServiceFilter]=useState<ServiceFilter>('all');
 
   async function load() {
     const q=search.trim()?`&search=${encodeURIComponent(search.trim())}`:'';
@@ -84,15 +96,27 @@ export default function ScheduleV2({user}:{user:User}) {
   }
   useEffect(()=>{void load();},[tab]);
 
+  const clientHueMap=useMemo(()=>{
+    const keys=Array.from(new Set(rows.map(clientKey))).sort();
+    return new Map(keys.map((key,index)=>[key,(18+index*137.508)%360]));
+  },[rows]);
+  const clientStyle=(item:any)=>({'--sv2-client-hue':String(clientHueMap.get(clientKey(item))??215)} as React.CSSProperties);
+
   const visible=useMemo(()=>rows.filter((x:any)=>{
+    if(!matchesServiceFilter(x,serviceFilter)) return false;
     if(user.role==='client') return true;
     if(!isManager(user)||tab==='all') return true;
     if(x.ends_at && new Date(x.ends_at).getTime()<Date.now()) return false;
     if(tab==='draft') return x.status==='draft';
     if(tab==='filled') return x.status!=='draft'&&Number(x.open_count||0)===0;
     return x.status==='published'&&Number(x.open_count||0)>0;
-  }),[rows,tab,user]);
+  }),[rows,tab,user,serviceFilter]);
 
+  const clientLegend=useMemo(()=>{
+    const map=new Map<string,any>();
+    for(const item of visible) if(!map.has(clientKey(item))) map.set(clientKey(item),item);
+    return Array.from(map.values()).sort((a,b)=>String(a.client_name||'').localeCompare(String(b.client_name||''),'de'));
+  },[visible]);
   const weekStart=startOfWeekKey(anchor);
   const weekDays=useMemo(()=>Array.from({length:7},(_,index)=>addKeyDays(weekStart,index)),[weekStart]);
   const monthStart=useMemo(()=>{const date=keyToDate(anchor);date.setUTCDate(1);return keyFromDate(date);},[anchor]);
@@ -119,7 +143,7 @@ export default function ScheduleV2({user}:{user:User}) {
     }catch(e:any){if(createdId){try{await api(`shifts/${createdId}/`,{method:'DELETE'});}catch{} await load();}setToast(e.message);}finally{setBusy(false);}
   }
   function confirmRelease(){const id=releaseTarget?.id;setReleaseTarget(undefined);if(id) void act(`shifts/${id}/release/`,'Schicht freigegeben.');}
-  function navigate(direction:number){if(view==='month')setAnchor(addKeyMonths(anchor,direction));else setAnchor(addKeyDays(anchor,7*direction));}
+  function navigate(direction:number){if(view==='month')setAnchor(addKeyMonths(anchor,direction));else if(view==='day')setAnchor(addKeyDays(anchor,direction));else setAnchor(addKeyDays(anchor,7*direction));}
   const openItem=(item:any)=>{if(isManager(user))edit(item);};
 
   const workerView=user.role==='worker'; const clientView=user.role==='client';
@@ -127,27 +151,49 @@ export default function ScheduleV2({user}:{user:User}) {
   const title=workerView?'Schichten':clientView?'Einsätze':'Personalbedarf & Schichten';
   const intro=workerView?'Freie Einsätze finden und eigene Schichten verwalten.':clientView?'Geplante Einsätze und aktueller Besetzungsstatus für Ihre Aufträge.':'Kundenbedarf erstellen, Mitarbeiter direkt zuweisen oder Restplätze als OpenShift veröffentlichen.';
   const searchPlaceholder=clientView?'Einsatz, Ort oder Position suchen …':'Kunde, Ort, Position oder Auftrag suchen …';
-  const rangeTitle=view==='month'?keyLabel(monthStart,{month:'long',year:'numeric'}):`${keyLabel(weekStart,{day:'2-digit',month:'short'})} – ${keyLabel(addKeyDays(weekStart,6),{day:'2-digit',month:'short',year:'numeric'})}`;
+  const rangeTitle=view==='month'?keyLabel(monthStart,{month:'long',year:'numeric'}):view==='day'?keyLabel(anchor,{weekday:'long',day:'2-digit',month:'long',year:'numeric'}):`${keyLabel(weekStart,{day:'2-digit',month:'short'})} – ${keyLabel(addKeyDays(weekStart,6),{day:'2-digit',month:'short',year:'numeric'})}`;
 
-  const renderMini=(item:any,compact=false)=>{const status=statusInfo(item);return <button type="button" className={`sv2-event ${compact?'compact':''}`} key={item.id} onClick={()=>openItem(item)}><span className={`sv2-event-dot ${status.label.toLowerCase()}`}/><b>{tm(item.starts_at)} {item.position_name}</b><small>{item.client_name} · {item.filled_count||0}/{item.required_count||1}</small></button>;};
+  const renderWorkerAvatars=(item:any,compact=false)=>{
+    const assigned=item.assigned_workers||[];
+    if(!assigned.length) return null;
+    const limit=compact?4:8;
+    return <div className={`sv2-worker-avatars ${compact?'compact':''}`} aria-label="Zugewiesene Mitarbeiter">
+      {assigned.slice(0,limit).map((worker:any)=><span className="sv2-worker-avatar" key={worker.id||worker.name} title={worker.name} aria-label={worker.name}>
+        <span>{workerInitials(worker)}</span>{worker.avatar&&<img src={worker.avatar} alt="" loading="lazy" onError={e=>{e.currentTarget.style.display='none';}}/>}
+      </span>)}
+      {assigned.length>limit&&<span className="sv2-worker-more" title={`${assigned.length-limit} weitere Mitarbeiter`}>+{assigned.length-limit}</span>}
+    </div>;
+  };
+  const renderClientLabel=(item:any)=><span className="sv2-client-label"><i/>{item.client_name||'Ohne Kunde'}</span>;
+  const renderMini=(item:any,compact=false)=>{const status=statusInfo(item);return <button type="button" style={clientStyle(item)} className={`sv2-event ${compact?'compact':''}`} key={item.id} onClick={()=>openItem(item)}><span className={`sv2-event-dot ${status.label.toLowerCase()}`}/><b>{tm(item.starts_at)} {item.position_name}</b><small>{renderClientLabel(item)} <span>· {item.filled_count||0}/{item.required_count||1}</span></small>{renderWorkerAvatars(item,compact)}</button>;};
 
   return <div className="sv2">
     <div className="sv2-title"><div><small>{eyebrow}</small><h1>{title}</h1><p>{intro}</p></div>{isManager(user)&&<IonButton onClick={create}><IonIcon slot="start" icon={addOutline}/>Personalbedarf</IonButton>}</div>
     <div className="sv2-search"><IonSearchbar value={search} debounce={350} placeholder={searchPlaceholder} onIonInput={e=>setSearch(String(val(e)))} onIonChange={()=>void load()}/><IonButton fill="outline" onClick={()=>void load()}><IonIcon slot="icon-only" icon={refreshOutline}/></IonButton></div>
     {workerView?<IonSegment scrollable value={tab} onIonChange={e=>setTab(String(val(e)))}><IonSegmentButton value="available"><IonLabel>Verfügbare Schichten</IonLabel></IonSegmentButton><IonSegmentButton value="mine"><IonLabel>Meine Schichten</IonLabel></IonSegmentButton></IonSegment>:isManager(user)?<IonSegment scrollable value={tab} onIonChange={e=>setTab(String(val(e)))}><IonSegmentButton value="open"><IonLabel>Offen</IonLabel></IonSegmentButton><IonSegmentButton value="filled"><IonLabel>Voll besetzt</IonLabel></IonSegmentButton><IonSegmentButton value="draft"><IonLabel>Entwürfe</IonLabel></IonSegmentButton><IonSegmentButton value="all"><IonLabel>Alle</IonLabel></IonSegmentButton></IonSegment>:null}
 
+    <div className="sv2-service-filter" data-testid="schedule-service-filter" role="group" aria-label="Bereich filtern">
+      {([['all','Alle'],['service','Service'],['hotel','Hotel'],['housekeeping','Housekeeping']] as [ServiceFilter,string][]).map(([key,label])=><button type="button" key={key} className={serviceFilter===key?'active':''} aria-pressed={serviceFilter===key} data-testid={`schedule-filter-${key}`} onClick={()=>setServiceFilter(key)}>{label}</button>)}
+    </div>
+
+    {clientLegend.length>0&&<div className="sv2-client-legend" data-testid="schedule-client-legend" aria-label="Kundenfarben">
+      {clientLegend.map(item=><span key={clientKey(item)} style={clientStyle(item)}><i/>{item.client_name||'Ohne Kunde'}</span>)}
+    </div>}
+
     <div className="sv2-view-toolbar" data-testid="schedule-view-toolbar">
       <div className="sv2-view-switch" role="group" aria-label="Planungsansicht">
-        {([['list','Liste'],['week','Woche'],['month','Monat'],['timeline','Einsatzorte']] as [ScheduleView,string][]).map(([key,label])=><button type="button" key={key} data-testid={`schedule-view-${key}`} aria-pressed={view===key} className={view===key?'active':''} onClick={()=>setView(key)}>{label}</button>)}
+        {([['list','Liste'],['day','Tag'],['week','Woche'],['month','Monat'],['timeline','Einsatzorte']] as [ScheduleView,string][]).map(([key,label])=><button type="button" key={key} data-testid={`schedule-view-${key}`} aria-pressed={view===key} className={view===key?'active':''} onClick={()=>setView(key)}>{label}</button>)}
       </div>
       {view!=='list'&&<div className="sv2-date-nav"><button type="button" aria-label="Vorheriger Zeitraum" onClick={()=>navigate(-1)}>‹</button><button type="button" className="sv2-range-title" onClick={()=>setAnchor(berlinDate())}>{rangeTitle}</button><button type="button" aria-label="Nächster Zeitraum" onClick={()=>navigate(1)}>›</button><button type="button" className="today" onClick={()=>setAnchor(berlinDate())}>Heute</button></div>}
     </div>
 
-    {view==='list'&&<div className="sv2-list">{visible.map((x:any)=>{const mine=workerView&&tab==='mine';const status=statusInfo(x);const assigned=x.assigned_workers||[];return <article className={`sv2-card ${mine?'mine':''}`} key={x.id}>
+    {view==='list'&&<div className="sv2-list">{visible.map((x:any)=>{const mine=workerView&&tab==='mine';const status=statusInfo(x);const assigned=x.assigned_workers||[];return <article style={clientStyle(x)} className={`sv2-card ${mine?'mine':''}`} key={x.id}>
       <div className="sv2-date"><b>{berlinDay(x.starts_at)}</b><span>{berlinMonth(x.starts_at)}</span></div>
-      <div className="sv2-body"><small>{x.client_name}</small><h3>{x.position_name}</h3><p><IonIcon icon={timeOutline}/> {tm(x.starts_at)}–{tm(x.ends_at)} · {x.break_minutes||0} Min.</p><p><IonIcon icon={locationOutline}/> {x.location_name}</p>{assigned.length>0&&<p><b>Zugewiesen:</b> {assigned.map((worker:any)=>worker.name).join(', ')}</p>}<div className="sv2-meter"><span style={{width:`${Math.min(100,(Number(x.filled_count||0)/Number(x.required_count||1))*100)}%`}}/></div><em>{x.filled_count||0}/{x.required_count||1} besetzt · {x.open_count||0} frei</em></div>
+      <div className="sv2-body"><small>{renderClientLabel(x)}</small><h3>{x.position_name}</h3><p><IonIcon icon={timeOutline}/> {tm(x.starts_at)}–{tm(x.ends_at)} · {x.break_minutes||0} Min.</p><p><IonIcon icon={locationOutline}/> {x.location_name}</p>{assigned.length>0&&<div className="sv2-list-assignees"><b>Zugewiesen</b>{renderWorkerAvatars(x)}</div>}<div className="sv2-meter"><span style={{width:`${Math.min(100,(Number(x.filled_count||0)/Number(x.required_count||1))*100)}%`}}/></div><em>{x.filled_count||0}/{x.required_count||1} besetzt · {x.open_count||0} frei</em></div>
       <div className="sv2-side"><IonBadge color={status.color}>{status.label}</IonBadge>{workerView&&!mine&&status.open&&<IonButton disabled={busy} onClick={()=>void act(`shifts/${x.id}/claim/`,'Schicht übernommen.')}><IonIcon slot="start" icon={checkmarkCircleOutline}/>Übernehmen</IonButton>}{workerView&&mine&&<IonButton fill="outline" color="medium" disabled={busy} onClick={()=>setReleaseTarget(x)}>Freigeben</IonButton>}{isManager(user)&&x.status==='draft'&&Number(x.open_count||0)>0&&<IonButton size="small" onClick={()=>void act(`shifts/${x.id}/publish/`,'OpenShift veröffentlicht.')}>Veröffentlichen</IonButton>}{isManager(user)&&<IonButton size="small" fill="clear" onClick={()=>edit(x)}>Bearbeiten</IonButton>}</div>
     </article>})}{!visible.length&&<div className="sv2-empty"><h3>Keine passenden Einsätze</h3><p>Suche oder Filter ändern.</p></div>}</div>}
+
+    {view==='day'&&<div className="sv2-day-wrap" data-testid="schedule-day-view"><div className="sv2-single-day"><header><div><small>{keyLabel(anchor,{weekday:'long'})}</small><h2>{keyLabel(anchor,{day:'2-digit',month:'long',year:'numeric'})}</h2></div><span>{(rowsByDay[anchor]||[]).length} Einsätze</span></header><div className="sv2-single-day-events">{(rowsByDay[anchor]||[]).map(item=>renderMini(item))}{!(rowsByDay[anchor]||[]).length&&<div className="sv2-no-events">Keine Einsätze an diesem Tag.</div>}</div></div></div>}
 
     {view==='week'&&<div className="sv2-week-wrap" data-testid="schedule-week-view"><div className="sv2-week-grid">{weekDays.map(key=><section className={`sv2-week-day ${key===berlinDate()?'is-today':''}`} key={key}><header><b>{keyLabel(key,{weekday:'short'})}</b><span>{keyLabel(key,{day:'2-digit',month:'2-digit'})}</span></header><div className="sv2-day-events">{(rowsByDay[key]||[]).map(item=>renderMini(item))}{!(rowsByDay[key]||[]).length&&<small className="sv2-no-events">Keine Einsätze</small>}</div></section>)}</div></div>}
 
