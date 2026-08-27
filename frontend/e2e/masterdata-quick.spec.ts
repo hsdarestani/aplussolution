@@ -41,6 +41,7 @@ async function mockApi(page: Page) {
   });
 }
 
+// Phase 1 intentionally moved master-data administration out of Personal & Kunden.
 test('settings owns locations and positions after Personal & Kunden cleanup', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockApi(page);
