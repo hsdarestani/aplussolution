@@ -93,7 +93,7 @@ async function openDesktopNav(page: Page, label: string) {
   await page.getByText(label, { exact: true }).first().click();
 }
 
-test('client portal keeps servicecenter, orders, documents and chat scoped to the client', async ({ page }) => {
+test('client portal keeps servicecenter, orders, documents and Mitteilungen scoped to the client', async ({ page }) => {
   await mockClientApi(page);
   await page.goto('/');
 
@@ -121,13 +121,12 @@ test('client portal keeps servicecenter, orders, documents and chat scoped to th
   await expect(page.getByRole('heading', { level: 1, name: 'Dokumente' })).toBeVisible();
   await expect(page.getByText('Einsatzinformation')).toBeVisible();
 
-  await openDesktopNav(page, 'Nachrichten');
-  await expect(page.getByRole('heading', { name: 'Nachrichten' })).toBeVisible();
-  await page.getByRole('button', { name: 'Unterhaltung' }).click();
-  const participants = page.locator('ion-select').filter({ hasText: 'Teilnehmer' }).last();
-  await participants.click();
-  await expect(page.getByRole('checkbox', { name: /A\+ Disposition/ })).toBeVisible();
-  await expect(page.getByText(/worker@example|client@example/i)).toHaveCount(0);
+  await openDesktopNav(page, 'Mitteilungen');
+  await expect(page.getByRole('heading', { name: 'Mitteilungen' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Posteingang' })).toBeVisible();
+  await expect(page.getByTestId('announcements-view')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Unterhaltung' })).toHaveCount(0);
+  await expect(page.getByTestId('announcement-create')).toHaveCount(0);
 });
 
 test('client rating uses only completed assigned candidate and submits the bound shift', async ({ page }) => {

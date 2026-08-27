@@ -337,7 +337,7 @@ test.describe('Worker portal deep regression QA', () => {
     expect(forbiddenManagerFanout(state)).toEqual([]);
   });
 
-  test('documents, messages and ranking avoid privileged API fan-out', async ({ page }) => {
+  test('documents, Mitteilungen and ranking avoid privileged API fan-out', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const state = await mockWorkerApi(page);
 
@@ -346,12 +346,13 @@ test.describe('Worker portal deep regression QA', () => {
 
     const beforeMessages = state.requests.length;
     await page.goto('/?view=messages');
-    const startConversation = page.getByRole('button', { name: 'Unterhaltung' });
-    await expect(startConversation).toBeVisible();
-    await startConversation.click();
-    await expect.poll(() => state.requests.slice(beforeMessages).some((r) => r.path === 'portal/message-recipients/')).toBe(true);
+    await expect(page.getByRole('heading', { name: 'Mitteilungen' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Posteingang' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Unterhaltung' })).toHaveCount(0);
+    await expect.poll(() => state.requests.slice(beforeMessages).some((r) => r.path === 'announcements/')).toBe(true);
     const messageRequests = state.requests.slice(beforeMessages);
     expect(messageRequests.some((r) => r.path === 'users/')).toBe(false);
+    expect(messageRequests.some((r) => r.path === 'portal/message-recipients/')).toBe(false);
 
     const beforeRanking = state.requests.length;
     await page.goto('/?view=ranking');
