@@ -2320,6 +2320,9 @@ function Orders({ user }: { user: User }) {
     } else if (user.role === 'client') {
       const locationData = await api('locations/');
       setLocations(unpack(locationData).filter((location: any) => location.active));
+    } else if (user.role === 'client') {
+      const locationData = await api('locations/');
+      setLocations(unpack(locationData).filter((location: any) => location.active));
     }
   };
 
