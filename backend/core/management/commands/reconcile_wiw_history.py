@@ -17,6 +17,9 @@ class Command(BaseCommand):
         try:
             with transaction.atomic():
                 migration = build_wiw_migration_report(apply_full_sync=True)
+                sync_status = (migration.get('sync') or {}).get('status')
+                if sync_status != 'success':
+                    raise RuntimeError(f'WIW final history import status is {sync_status or "missing"}, expected success.')
                 if not migration.get('cutover_ready'):
                     incomplete = [name for name, row in migration.get('resources', {}).items() if not row.get('complete')]
                     raise RuntimeError('WIW history is incomplete: ' + ', '.join(incomplete))
