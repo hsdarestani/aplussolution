@@ -13,6 +13,7 @@ export type View =
   | 'ratings'
   | 'profile'
   | 'operations'
+  | 'settings'
   | 'akte';
 
 const ROLE_VIEWS: Record<string, ReadonlySet<View>> = {
@@ -26,6 +27,7 @@ const ROLE_VIEWS: Record<string, ReadonlySet<View>> = {
     'people',
     'messages',
     'operations',
+    'settings',
     'akte',
   ]),
   manager: new Set<View>([
@@ -38,6 +40,7 @@ const ROLE_VIEWS: Record<string, ReadonlySet<View>> = {
     'people',
     'messages',
     'operations',
+    'settings',
     'akte',
   ]),
   worker: new Set<View>([
@@ -77,6 +80,7 @@ const KNOWN_VIEWS = new Set<View>([
   'ratings',
   'profile',
   'operations',
+  'settings',
   'akte',
 ]);
 
