@@ -1,0 +1,27 @@
+name: Align datetime regressions
+
+on:
+  push:
+    branches: [feature/phase7-completion-sweep]
+    paths:
+      - scripts/align_datetime_regressions.py
+      - .github/workflows/align-datetime-regressions.yml
+
+permissions:
+  contents: write
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/phase7-completion-sweep
+      - run: python scripts/align_datetime_regressions.py
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm scripts/align_datetime_regressions.py .github/workflows/align-datetime-regressions.yml
+          git add frontend/e2e/contracts-actions-mobile.spec.ts frontend/e2e/worker-portal-deep.spec.ts
+          git commit -m 'Align datetime regression tests with requested UX'
+          git push origin HEAD:feature/phase7-completion-sweep
