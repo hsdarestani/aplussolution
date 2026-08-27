@@ -6,6 +6,7 @@ on:
       - feature/phase7-completion-sweep
     paths:
       - scripts/phase7_completion_frontend_patch.py
+      - .github/workflows/apply-phase7-completion-frontend.yml
 
 permissions:
   contents: write
