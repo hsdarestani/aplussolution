@@ -16,8 +16,9 @@ test('Phase 5 uses the exact shared shift-card information order in every calend
   expect(time).toBeLessThan(profile);
   expect(source).toContain('{renderShiftDetails(x)}');
   expect(source).toContain('renderShiftDetails(item,compact)');
-  expect(source).toContain("openAkte('client'");
-  expect(source).toContain("openAkte('worker'");
+  expect(source).toContain("renderAkteLink('client'");
+  expect(source).toContain("renderAkteLink('worker'");
+  expect(source).toContain('openAkte(kind,id)');
 });
 
 test('Phase 5 separates Mitarbeiter and Kunden folders and names open digital files', async () => {
