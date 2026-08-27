@@ -38,3 +38,7 @@
     scrollbar-color: #cbd5e1 transparent;
   }
 }
+
+
+/* Phase 5 — explicit digital-file switcher. */
+.people-kind-filter{display:inline-flex;gap:4px;padding:4px;margin:0 0 12px;background:#eef3fb;border:1px solid #dce4f2;border-radius:14px}.people-kind-filter button{appearance:none;border:0;background:transparent;color:#475467;display:inline-flex;align-items:center;gap:7px;padding:9px 13px;border-radius:10px;font:700 13px/1.2 inherit;cursor:pointer}.people-kind-filter button.active{background:#fff;color:#155eef;box-shadow:0 1px 5px rgba(15,35,70,.12)}.people-kind-filter button span{min-width:22px;padding:2px 6px;border-radius:999px;background:#e8eef9;color:#475467;font-size:10px}.people-kind-filter button.active span{background:#eaf0ff;color:#155eef}.people-directory-columns{grid-template-columns:minmax(0,1fr)!important}.entity-name-link{display:inline-block;color:#101828;font-weight:800;text-decoration:none;border-bottom:1px dashed #9db1d9}.entity-name-link:hover{color:#155eef;border-bottom-style:solid}@media(max-width:700px){.people-kind-filter{display:flex;width:100%}.people-kind-filter button{flex:1;justify-content:center}}

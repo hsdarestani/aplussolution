@@ -84,9 +84,11 @@ const scopedOrderMasterData = `    if (isManager(user)) {
       const locationData = await api('locations/');
       setLocations(unpack(locationData).filter((location: any) => location.active));
     }`;
-if (appNext.includes(managerOnlyOrderMasterData)) {
+if (appNext.includes(scopedOrderMasterData)) {
+  // Already scoped in source; keep prepare:build idempotent.
+} else if (appNext.includes(managerOnlyOrderMasterData)) {
   appNext = appNext.replace(managerOnlyOrderMasterData, scopedOrderMasterData);
-} else if (!appNext.includes("else if (user.role === 'client') {\n      const locationData = await api('locations/');")) {
+} else {
   throw new Error('Client order location loading marker changed; update prepare-build.mjs.');
 }
 

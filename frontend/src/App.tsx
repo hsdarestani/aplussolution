@@ -58,6 +58,7 @@ import ListToolbar from './ListToolbar';
 import DocumentCenterV5 from './DocumentCenterV5';
 import AktePage from './AktePage';
 import Settings from './Settings';
+import { akteHref, openAkte } from './entityNavigation';
 
 type View =
   | 'dashboard'
@@ -142,7 +143,9 @@ const nav: Record<string, [View, string][]> = {
 const unpack = (data: any): any[] => data?.results || data || [];
 const value = (event: any) => event.detail.value ?? '';
 const isManager = (user: User) => ['admin', 'manager'].includes(user.role);
-const dateTime = (input?: string) => (input ? new Date(input).toLocaleString('de-DE') : '–');
+const BUSINESS_TIME_ZONE = 'Europe/Berlin';
+const dateTime = (input?: string) =>
+  input ? new Date(input).toLocaleString('de-DE', { timeZone: BUSINESS_TIME_ZONE }) : '–';
 const dateOnly = (input?: string) => (input ? new Date(input).toLocaleDateString('de-DE') : '–');
 const statusText: Record<string, string> = {
   draft: 'Entwurf',
@@ -380,7 +383,7 @@ function Dashboard({
   const [toast, setToast] = useState('');
   const [credentials, setCredentials] = useState<any>();
 
-  const load = () => api('dashboard/').then(setData);
+  const load = () => api(user.role === 'client' ? 'portal/client-dashboard/' : 'dashboard/').then(setData);
   useEffect(() => {
     void load();
   }, []);
@@ -530,6 +533,7 @@ function People({ user }: { user: User }) {
   const [csvType, setCsvType] = useState('workers');
   const [listQuery, setListQuery] = useState('');
   const [listSort, setListSort] = useState('name');
+  const [peopleKind, setPeopleKind] = useState<'workers' | 'clients'>(() => new URLSearchParams(window.location.search).get('people_kind') === 'clients' ? 'clients' : 'workers');
 
   const [workerForm, setWorkerForm] = useState<any>({
     employment_type: 'minijob',
@@ -647,76 +651,38 @@ function People({ user }: { user: User }) {
         }
       />
 
+      <div className="people-kind-filter" data-testid="people-kind-filter" role="group" aria-label="Akte filtern">
+        <button type="button" className={peopleKind === 'workers' ? 'active' : ''} aria-pressed={peopleKind === 'workers'} onClick={() => { setPeopleKind('workers'); const url = new URL(window.location.href); url.searchParams.set('people_kind', 'workers'); window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}`); }}><IonIcon icon={peopleOutline}/>Mitarbeiter <span>{workers.filter((worker) => worker.active).length}</span></button>
+        <button type="button" className={peopleKind === 'clients' ? 'active' : ''} aria-pressed={peopleKind === 'clients'} onClick={() => { setPeopleKind('clients'); const url = new URL(window.location.href); url.searchParams.set('people_kind', 'clients'); window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}`); }}><IonIcon icon={businessOutline}/>Kunden <span>{clients.filter((client) => client.active).length}</span></button>
+      </div>
+
       <ListToolbar
         query={listQuery}
         onQuery={setListQuery}
-        placeholder="Mitarbeiter oder Kunden suchen …"
+        placeholder={peopleKind === 'workers' ? 'Mitarbeiter suchen …' : 'Kunden suchen …'}
         sort={listSort}
         onSort={setListSort}
         sortOptions={[{ value: 'name', label: 'Nach Name' }, { value: 'number', label: 'Nach Nummer' }]}
-        count={workers.length + clients.filter((client) => client.active).length}
+        count={peopleKind === 'workers' ? workers.length : clients.filter((client) => client.active).length}
       />
 
-      <div className="columns">
-        <div className="panel">
-          <div className="section-head">
-            <div>
-              <h3>Mitarbeiter</h3>
-              <p>{workers.filter((worker) => worker.active).length} aktive Profile</p>
-            </div>
-          </div>
-          {workers.length ? (
-            workers.map((worker) => (
-              <div className={`row ${worker.active ? '' : 'muted-row'}`} key={worker.id}>
-                <div className="avatar">{worker.user_detail?.name?.[0] || 'M'}</div>
-                <div className="grow">
-                  <b>{worker.user_detail?.name || worker.user_detail?.email}</b>
-                  <p>
-                    {worker.employee_number} · {worker.employment_type} · {worker.user_detail?.email}
-                  </p>
-                </div>
-                <strong>{worker.ranking_points} P.</strong>
-                {isManager(user) && worker.active && (
-                  <IonButton fill="clear" color="danger" onClick={() => archive('workers', worker.id)}>
-                    Deaktivieren
-                  </IonButton>
-                )}
-              </div>
-            ))
-          ) : (
-            <Empty>Noch keine Mitarbeiter. Über „Mitarbeiter“ legst du das erste Profil an.</Empty>
-          )}
-        </div>
-
-        <div className="panel">
-          <div className="section-head">
-            <div>
-              <h3>Kunden</h3>
-              <p>{clients.filter((client) => client.active).length} aktive Unternehmen</p>
-            </div>
-          </div>
-          {clients.filter((client) => client.active).length ? (
-            clients.filter((client) => client.active).map((client) => (
-              <div className={`row ${client.active ? '' : 'muted-row'}`} key={client.id}>
-                <div className="avatar">{client.name?.[0] || 'K'}</div>
-                <div className="grow">
-                  <b>{client.name}</b>
-                  <p>
-                    {client.customer_number}
-                    {client.contacts_detail?.[0]?.email ? ` · ${client.contacts_detail[0].email}` : ''}
-                  </p>
-                </div>
-                {isManager(user) && client.active && (
-                  <IonButton fill="clear" color="danger" onClick={() => archive('clients', client.id)}>
-                    Deaktivieren
-                  </IonButton>
-                )}
-              </div>
-            ))
-          ) : (
-            <Empty>Noch keine Kundenunternehmen angelegt.</Empty>
-          )}
-        </div>
+      <div className="columns people-directory-columns">
+        {peopleKind === 'workers' ? <div className="panel" data-testid="people-workers-list">
+          <div className="section-head"><div><h3>Mitarbeiter</h3><p>{workers.filter((worker) => worker.active).length} aktive Profile</p></div></div>
+          {workers.length ? workers.map((worker) => <div className={`row ${worker.active ? '' : 'muted-row'}`} key={worker.id}>
+            <div className="avatar">{worker.user_detail?.name?.[0] || 'M'}</div>
+            <div className="grow"><a className="entity-name-link" href={akteHref('worker', worker.id)} onClick={(event) => { event.preventDefault(); openAkte('worker', worker.id); }}>{worker.user_detail?.name || worker.user_detail?.email}</a><p>{worker.employee_number} · {worker.employment_type} · {worker.user_detail?.email}</p></div>
+            <strong>{worker.ranking_points} P.</strong>
+            {isManager(user) && worker.active && <IonButton fill="clear" color="danger" onClick={() => archive('workers', worker.id)}>Deaktivieren</IonButton>}
+          </div>) : <Empty>Noch keine Mitarbeiter. Über „Mitarbeiter“ legst du das erste Profil an.</Empty>}
+        </div> : <div className="panel" data-testid="people-clients-list">
+          <div className="section-head"><div><h3>Kunden</h3><p>{clients.filter((client) => client.active).length} aktive Unternehmen</p></div></div>
+          {clients.filter((client) => client.active).length ? clients.filter((client) => client.active).map((client) => <div className="row" key={client.id}>
+            <div className="avatar">{client.name?.[0] || 'K'}</div>
+            <div className="grow"><a className="entity-name-link" href={akteHref('client', client.id)} onClick={(event) => { event.preventDefault(); openAkte('client', client.id); }}>{client.name}</a><p>{client.customer_number}{client.contacts_detail?.[0]?.email ? ` · ${client.contacts_detail[0].email}` : ''}</p></div>
+            {isManager(user) && client.active && <IonButton fill="clear" color="danger" onClick={() => archive('clients', client.id)}>Deaktivieren</IonButton>}
+          </div>) : <Empty>Noch keine Kundenunternehmen angelegt.</Empty>}
+        </div>}
       </div>
 
       <FormModal
@@ -1847,12 +1813,22 @@ function Contracts({ user }: { user: User }) {
             )}
             {isManager(user) && (
               <div className="row-actions">
-                {contract.status === 'draft' && (
+                {contract.readiness?.generation_allowed && (
                   <IonButton size="small" fill="outline" onClick={() => contractAction(contract.id, 'generate_pdf')}>
                     PDF erstellen
                   </IonButton>
                 )}
-                {['draft', 'ready'].includes(contract.status) && (
+                {contract.status === 'draft' && contract.readiness && !contract.readiness.generation_allowed && (
+                  <IonButton
+                    size="small"
+                    fill="outline"
+                    disabled
+                    title={(contract.readiness.blocking_issues || []).map((issue: any) => issue.label).join(' · ') || 'Dokument ist noch nicht erzeugbar.'}
+                  >
+                    PDF nicht bereit
+                  </IonButton>
+                )}
+                {contract.readiness?.send_allowed && (
                   <IonButton size="small" onClick={() => contractAction(contract.id, 'send')}>
                     <IonIcon slot="start" icon={sendOutline} />
                     Versenden
@@ -1870,7 +1846,7 @@ function Contracts({ user }: { user: User }) {
                 )}
               </div>
             )}
-            {(['client', 'worker'].includes(user.role) || isManager(user)) && ['ready', 'sent'].includes(contract.status) && !contract.signatures?.some((item: any) => item.role === (isManager(user) ? 'employer' : user.role === 'worker' ? 'employee' : 'client')) && (
+            {(['client', 'worker'].includes(user.role) || isManager(user)) && ['ready', 'sent'].includes(contract.status) && contract.readiness?.pending_signature_roles?.includes(isManager(user) ? 'employer' : user.role === 'worker' ? 'employee' : 'client') && (
               <IonButton size="small" onClick={() => setSelected(contract)}>
                 {isManager(user) ? 'Als Arbeitgeber unterschreiben' : 'Unterschreiben'}
               </IonButton>
@@ -2340,6 +2316,9 @@ function Orders({ user }: { user: User }) {
     if (isManager(user)) {
       const [clientData, locationData] = await Promise.all([api('clients/?ordering=name'), api('locations/')]);
       setClients(unpack(clientData).filter((client: any) => client.active));
+      setLocations(unpack(locationData).filter((location: any) => location.active));
+    } else if (user.role === 'client') {
+      const locationData = await api('locations/');
       setLocations(unpack(locationData).filter((location: any) => location.active));
     }
   };
@@ -2822,6 +2801,38 @@ function Ratings({ user }: { user: User }) {
   const [toast, setToast] = useState('');
 
   const load = async () => {
+    if (user.role === 'client') {
+      const [ratingData, candidateData] = await Promise.all([
+        api('ratings/'),
+        api('portal/rating-candidates/'),
+      ]);
+      const candidates = unpack(candidateData);
+      const workerMap = new Map<string, any>();
+      const shiftMap = new Map<string, any>();
+      candidates.forEach((candidate: any) => {
+        const current = workerMap.get(candidate.worker_id) || {
+          id: candidate.worker_id,
+          active: true,
+          user_detail: { name: candidate.worker_name },
+          shift_ids: [],
+        };
+        if (!current.shift_ids.includes(candidate.shift_id)) current.shift_ids.push(candidate.shift_id);
+        workerMap.set(candidate.worker_id, current);
+        if (!shiftMap.has(candidate.shift_id)) {
+          shiftMap.set(candidate.shift_id, {
+            id: candidate.shift_id,
+            position_name: candidate.position_name,
+            location_name: candidate.location_name,
+            starts_at: candidate.starts_at,
+            ends_at: candidate.ends_at,
+          });
+        }
+      });
+      setRows(unpack(ratingData));
+      setWorkers(Array.from(workerMap.values()));
+      setShifts(Array.from(shiftMap.values()));
+      return;
+    }
     const [ratingData, workerData, shiftData] = await Promise.all([
       api('ratings/'),
       api('workers/'),
@@ -2893,7 +2904,7 @@ function Ratings({ user }: { user: User }) {
           value={form.worker}
           onIonChange={(event) => setForm({ ...form, worker: value(event) })}
         >
-          {workers.map((worker) => (
+          {workers.filter((worker) => !form.shift || worker.shift_ids?.includes(form.shift)).map((worker) => (
             <IonSelectOption value={worker.id} key={worker.id}>
               {worker.user_detail?.name}
             </IonSelectOption>
@@ -2901,12 +2912,12 @@ function Ratings({ user }: { user: User }) {
         </IonSelect>
         <IonSelect
           fill="outline"
-          label="Einsatz"
+          label="Einsatz *"
           labelPlacement="floating"
           value={form.shift}
-          onIonChange={(event) => setForm({ ...form, shift: value(event) })}
+          onIonChange={(event) => setForm({ ...form, shift: value(event), worker: '' })}
         >
-          <IonSelectOption value="">Allgemeine Bewertung</IonSelectOption>
+          <IonSelectOption value="" disabled>Einsatz auswählen</IonSelectOption>
           {shifts.map((shift) => (
             <IonSelectOption value={shift.id} key={shift.id}>
               {shift.position_name} · {dateTime(shift.starts_at)}
