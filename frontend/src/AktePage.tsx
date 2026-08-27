@@ -42,6 +42,8 @@ function fileLink(href?: string, label = 'Öffnen') {
 }
 
 const text = (value: any) => value == null || value === '' ? '–' : String(value);
+const unpack = (value:any):any[] => value?.results || value || [];
+const scheduleGroupOptions:[string,string][]=[['service','Service'],['front_office','Front Office'],['housekeeping','Housekeeping']];
 const manager = (user: User) => user.role === 'admin' || user.role === 'manager';
 
 export default function AktePage({ user }: { user: User }) {
@@ -55,6 +57,7 @@ export default function AktePage({ user }: { user: User }) {
   const [message, setMessage] = useState('');
   const [profile, setProfile] = useState<any>({});
   const [master, setMaster] = useState<any>({});
+  const [clients,setClients]=useState<any[]>([]);
 
   const load = async () => {
     if (!id) { setMessage('Keine Akte ausgewählt.'); setLoading(false); return; }
@@ -69,7 +72,7 @@ export default function AktePage({ user }: { user: User }) {
           first_name: result.profile?.user_detail?.first_name || '', last_name: result.profile?.user_detail?.last_name || '',
           email: result.profile?.user_detail?.email || '', phone: result.profile?.user_detail?.phone || '', employee_number: result.profile?.employee_number || '',
           employment_type: result.profile?.employment_type || 'minijob', monthly_hours: result.profile?.monthly_hours || '', tariff_hourly_rate: result.profile?.tariff_hourly_rate || '',
-          extra_allowance: result.profile?.extra_allowance || 0, ranking_points: result.profile?.ranking_points || 0, active: result.profile?.active !== false,
+          extra_allowance: result.profile?.extra_allowance || 0, ranking_points: result.profile?.ranking_points || 0, active: result.profile?.active !== false, open_shift_client_ids: result.profile?.open_shift_client_ids || [], schedule_groups: result.profile?.schedule_groups || [],
         });
         setMaster(result.master_data?.data || {});
       } else {
@@ -85,6 +88,7 @@ export default function AktePage({ user }: { user: User }) {
   };
 
   useEffect(() => { void load(); }, [id, kind]);
+  useEffect(()=>{if(kind==='worker'&&manager(user))void api('clients/?ordering=name').then(result=>setClients(unpack(result).filter((item:any)=>item.active!==false))).catch(()=>setClients([]));},[kind,user.role]);
 
   async function save() {
     if (!manager(user) || !id) return;
@@ -130,6 +134,8 @@ export default function AktePage({ user }: { user: User }) {
             <IonInput fill="outline" label="Telefon" labelPlacement="floating" value={profile.phone} onIonInput={e=>setProfile({...profile,phone:e.detail.value})}/>
             <IonInput fill="outline" label="Personalnummer" labelPlacement="floating" value={profile.employee_number} onIonInput={e=>setProfile({...profile,employee_number:e.detail.value})}/>
             <IonSelect fill="outline" label="Beschäftigungsart" labelPlacement="floating" value={profile.employment_type} onIonChange={e=>setProfile({...profile,employment_type:e.detail.value})}><IonSelectOption value="minijob">Minijob</IonSelectOption><IonSelectOption value="teilzeit">Teilzeit</IonSelectOption><IonSelectOption value="vollzeit">Vollzeit</IonSelectOption><IonSelectOption value="student">Studentische Aushilfe</IonSelectOption></IonSelect>
+            <IonSelect multiple interface="alert" fill="outline" label="OpenShifts sichtbar für Kunden" labelPlacement="floating" value={profile.open_shift_client_ids||[]} onIonChange={e=>setProfile({...profile,open_shift_client_ids:Array.isArray(e.detail.value)?e.detail.value:[]})}>{clients.map(client=><IonSelectOption key={client.id} value={client.id}>{client.name}</IonSelectOption>)}</IonSelect>
+            <IonSelect multiple interface="alert" fill="outline" label="Zeitplan-Gruppen" labelPlacement="floating" value={profile.schedule_groups||[]} onIonChange={e=>setProfile({...profile,schedule_groups:Array.isArray(e.detail.value)?e.detail.value:[]})}>{scheduleGroupOptions.map(([key,label])=><IonSelectOption key={key} value={key}>{label}</IonSelectOption>)}</IonSelect>
             <IonInput type="number" fill="outline" label="Sollstunden / Monat" labelPlacement="floating" value={profile.monthly_hours} onIonInput={e=>setProfile({...profile,monthly_hours:e.detail.value})}/>
             <IonInput type="number" fill="outline" label="Tariflicher Stundenlohn" labelPlacement="floating" value={profile.tariff_hourly_rate} onIonInput={e=>setProfile({...profile,tariff_hourly_rate:e.detail.value})}/>
             <IonInput type="number" fill="outline" label="Übertarifliche Zulage" labelPlacement="floating" value={profile.extra_allowance} onIonInput={e=>setProfile({...profile,extra_allowance:e.detail.value})}/>
@@ -157,7 +163,7 @@ export default function AktePage({ user }: { user: User }) {
       ) : (
         data.kind === 'worker' ? <div className="akte-detail-grid">
           <div><span>Name</span><b>{text(data.profile?.user_detail?.name)}</b></div><div><span>E-Mail</span><b>{text(data.profile?.user_detail?.email)}</b></div><div><span>Telefon</span><b>{text(data.profile?.user_detail?.phone)}</b></div><div><span>Personalnummer</span><b>{text(data.profile?.employee_number)}</b></div>
-          <div><span>Beschäftigung</span><b>{text(data.profile?.employment_type)}</b></div><div><span>Sollstunden / Monat</span><b>{text(data.profile?.monthly_hours)}</b></div><div><span>Stundenlohn</span><b>{text(data.profile?.tariff_hourly_rate)} €</b></div><div><span>Zulage</span><b>{text(data.profile?.extra_allowance)} €</b></div>
+          <div><span>Beschäftigung</span><b>{text(data.profile?.employment_type)}</b></div><div><span>OpenShift-Kunden</span><b>{(data.profile?.open_shift_client_ids||[]).length?`${(data.profile.open_shift_client_ids||[]).length} ausgewählt`:'Alle'}</b></div><div><span>Zeitplan</span><b>{(data.profile?.schedule_groups||[]).map((key:string)=>scheduleGroupOptions.find(([id])=>id===key)?.[1]||key).join(', ')||'Alle'}</b></div><div><span>Sollstunden / Monat</span><b>{text(data.profile?.monthly_hours)}</b></div><div><span>Stundenlohn</span><b>{text(data.profile?.tariff_hourly_rate)} €</b></div><div><span>Zulage</span><b>{text(data.profile?.extra_allowance)} €</b></div>
           {Object.entries(data.master_data?.data || {}).map(([key,val]) => <div key={key}><span>{key.replaceAll('_',' ')}</span><b>{text(val)}</b></div>)}
         </div> : <div className="akte-detail-grid">
           <div><span>Firma</span><b>{text(data.profile?.name)}</b></div><div><span>Kundennummer</span><b>{text(data.profile?.customer_number)}</b></div><div><span>USt-IdNr.</span><b>{text(data.profile?.vat_id)}</b></div><div><span>Anschrift</span><b>{text(data.profile?.address)}</b></div>

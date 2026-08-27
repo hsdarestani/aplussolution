@@ -3,6 +3,7 @@ import { IonButton, IonIcon, IonInput, IonModal, IonSelect, IonSelectOption, Ion
 import { addOutline, locationOutline, trashOutline } from 'ionicons/icons';
 import { api, User } from './api';
 import PortalAccessPanel from './PortalAccessPanel';
+import { enrichLocationPayload } from './locationPicker';
 
 const unpack=(data:any):any[]=>data?.results||data||[];
 const value=(event:any)=>event.detail.value??'';
@@ -22,7 +23,7 @@ export default function Settings({user}:{user:User}){
   useEffect(()=>{void load();},[]);
 
   async function submit(path:string,payload:any,done:()=>void){
-    setBusy(true);try{await api(path,{method:'POST',body:JSON.stringify(payload)});done();setModal('');await load();setToast('Einstellung wurde gespeichert.');}catch(e:any){setToast(e.message);}finally{setBusy(false);}
+    setBusy(true);try{const finalPayload=path==='locations/'?await enrichLocationPayload(payload):payload;await api(path,{method:'POST',body:JSON.stringify(finalPayload)});done();setModal('');await load();setToast('Einstellung wurde gespeichert.');}catch(e:any){setToast(e.message);}finally{setBusy(false);}
   }
   async function remove(kind:'locations'|'positions',id:string){
     if(!window.confirm('Diesen Stammdatensatz wirklich löschen?'))return;

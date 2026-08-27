@@ -87,6 +87,7 @@ function enhanceElement(element: HTMLElement) {
   const currentKind = pickerKindFromType(element.getAttribute('type'));
   const kind = storedKind || currentKind;
   if (!kind) return;
+  if (kind === 'datetime-local' || kind === 'time') return;
   if (isIonInput(element)) enhanceIonInput(element, kind);
   else if (element instanceof HTMLInputElement) enhanceNativeInput(element, kind);
 }
@@ -277,7 +278,7 @@ export default function FriendlyDateTimePicker() {
               min={target.min ? toIonDatetimeValue(target.kind, target.min) : undefined}
               max={target.max ? toIonDatetimeValue(target.kind, target.max) : undefined}
               minuteValues={minutes}
-              onIonChange={(event) => setDraft(String(Array.isArray(event.detail.value) ? event.detail.value[0] || '' : event.detail.value || ''))}
+              onIonChange={(event) => { const next=String(Array.isArray(event.detail.value) ? event.detail.value[0] || '' : event.detail.value || ''); if(target.kind==='date'&&next){emitValue(target.element,normalizePickerOutput(target.kind,next));close();}else setDraft(next); }}
             />
           )}
         </div>
