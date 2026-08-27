@@ -1,0 +1,69 @@
+name: Phase 6 E2E alignment
+
+on:
+  push:
+    branches:
+      - feature/phase6-confirmations-mitteilungen-final
+
+permissions:
+  contents: write
+
+jobs:
+  align:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/phase6-confirmations-mitteilungen-final
+      - name: Align legacy Chat tests with Mitteilungen
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'missing expected block in {path}: {old[:80]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          p = Path('frontend/e2e/app-shell.spec.ts')
+          text = p.read_text(encoding='utf-8')
+          count = text.count("      'Nachrichten',")
+          if count != 2:
+              raise SystemExit(f'expected two legacy Nachrichten nav expectations, found {count}')
+          text = text.replace("      'Nachrichten',", "      'Mitteilungen',")
+          text = text.replace('worker desktop keeps the familiar schedule-attendance-chat-requests structure', 'worker desktop keeps the familiar schedule-attendance-mitteilungen-requests structure')
+          p.write_text(text, encoding='utf-8')
+
+          replace_once(
+              'frontend/e2e/client-portal-deep.spec.ts',
+              "test('client portal keeps servicecenter, orders, documents and chat scoped to the client', async ({ page }) => {",
+              "test('client portal keeps servicecenter, orders, documents and Mitteilungen scoped to the client', async ({ page }) => {",
+          )
+          replace_once(
+              'frontend/e2e/client-portal-deep.spec.ts',
+              "  await openDesktopNav(page, 'Nachrichten');\n  await expect(page.getByRole('heading', { name: 'Nachrichten' })).toBeVisible();\n  await page.getByRole('button', { name: 'Unterhaltung' }).click();\n  const participants = page.locator('ion-select').filter({ hasText: 'Teilnehmer' }).last();\n  await participants.click();\n  await expect(page.getByRole('checkbox', { name: /A\\+ Disposition/ })).toBeVisible();\n  await expect(page.getByText(/worker@example|client@example/i)).toHaveCount(0);",
+              "  await openDesktopNav(page, 'Mitteilungen');\n  await expect(page.getByRole('heading', { name: 'Mitteilungen' })).toBeVisible();\n  await expect(page.getByRole('heading', { name: 'Posteingang' })).toBeVisible();\n  await expect(page.getByTestId('announcements-view')).toBeVisible();\n  await expect(page.getByRole('button', { name: 'Unterhaltung' })).toHaveCount(0);\n  await expect(page.getByTestId('announcement-create')).toHaveCount(0);",
+          )
+
+          replace_once(
+              'frontend/e2e/worker-portal-deep.spec.ts',
+              "  test('documents, messages and ranking avoid privileged API fan-out', async ({ page }) => {",
+              "  test('documents, Mitteilungen and ranking avoid privileged API fan-out', async ({ page }) => {",
+          )
+          replace_once(
+              'frontend/e2e/worker-portal-deep.spec.ts',
+              "    const beforeMessages = state.requests.length;\n    await page.goto('/?view=messages');\n    const startConversation = page.getByRole('button', { name: 'Unterhaltung' });\n    await expect(startConversation).toBeVisible();\n    await startConversation.click();\n    await expect.poll(() => state.requests.slice(beforeMessages).some((r) => r.path === 'portal/message-recipients/')).toBe(true);\n    const messageRequests = state.requests.slice(beforeMessages);\n    expect(messageRequests.some((r) => r.path === 'users/')).toBe(false);",
+              "    const beforeMessages = state.requests.length;\n    await page.goto('/?view=messages');\n    await expect(page.getByRole('heading', { name: 'Mitteilungen' })).toBeVisible();\n    await expect(page.getByRole('heading', { name: 'Posteingang' })).toBeVisible();\n    await expect(page.getByRole('button', { name: 'Unterhaltung' })).toHaveCount(0);\n    await expect.poll(() => state.requests.slice(beforeMessages).some((r) => r.path === 'announcements/')).toBe(true);\n    const messageRequests = state.requests.slice(beforeMessages);\n    expect(messageRequests.some((r) => r.path === 'users/')).toBe(false);\n    expect(messageRequests.some((r) => r.path === 'portal/message-recipients/')).toBe(false);",
+          )
+          PY
+      - name: Commit aligned tests and remove temporary workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/phase6-e2e-alignment.yml
+          git add frontend/e2e/app-shell.spec.ts frontend/e2e/client-portal-deep.spec.ts frontend/e2e/worker-portal-deep.spec.ts
+          git commit -m 'Align Phase 6 E2E with one-way Mitteilungen'
+          git push origin HEAD:feature/phase6-confirmations-mitteilungen-final
