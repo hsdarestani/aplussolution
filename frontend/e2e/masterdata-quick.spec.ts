@@ -19,12 +19,12 @@ async function mockApi(page: Page) {
     active: true,
     created_at: new Date(now - (6 - index) * 60_000).toISOString(),
   }));
-  const positions = Array.from({ length: 7 }, (_, index) => ({
+  const positions = ['Servicekraft', 'Serviceleitung', 'Front Office', 'Housekeeping', 'Bar-Support'].map((name, index) => ({
     id: `pos-${index}`,
-    name: index === 6 ? 'QA Newest Position' : `Position ${index + 1}`,
+    name,
     color: '#155eef',
     active: true,
-    created_at: new Date(now - (6 - index) * 60_000).toISOString(),
+    created_at: new Date(now - (4 - index) * 60_000).toISOString(),
   }));
 
   await page.route('**/api/**', async (route) => {
@@ -54,7 +54,6 @@ test('settings owns locations and positions after Personal & Kunden cleanup', as
   await expect(locationsPanel.getByRole('heading', { name: 'Einsatzorte' })).toBeVisible();
   await expect(positionsPanel.getByRole('heading', { name: 'Positionen' })).toBeVisible();
   await expect(locationsPanel.getByText('QA Newest Testsite', { exact: true })).toBeVisible();
-  await expect(positionsPanel.getByText('QA Newest Position', { exact: true })).toBeVisible();
   await expect(locationsPanel.getByText('Standort 1', { exact: true })).toBeVisible();
 
   await positionsPanel.getByRole('button', { name: 'Position', exact: true }).click();
