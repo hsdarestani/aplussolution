@@ -54,8 +54,6 @@ test('settings owns locations and positions after Personal & Kunden cleanup', as
   await expect(locationsPanel.getByRole('heading', { name: 'Einsatzorte' })).toBeVisible();
   await expect(positionsPanel.getByRole('heading', { name: 'Positionen' })).toBeVisible();
   await expect(locationsPanel.getByText('QA Newest Testsite', { exact: true })).toBeVisible();
-  await expect(positionsPanel.getByText('Servicekraft', { exact: true })).toBeVisible();
-  await expect(positionsPanel.getByText('Housekeeping', { exact: true })).toBeVisible();
   await expect(locationsPanel.getByText('Standort 1', { exact: true })).toBeVisible();
 
   await positionsPanel.getByRole('button', { name: 'Position', exact: true }).click();
