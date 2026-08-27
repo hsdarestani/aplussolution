@@ -72,6 +72,10 @@ test('admin payroll workspace shows monthly figures and persists adjustments wit
   await expect(workspace).toBeVisible();
   await expect(page.getByText('Anna Becker')).toBeVisible();
   await expect(page.getByText('1.400,00 €').first()).toBeVisible();
+
+  // Mobile payroll cards are intentionally compact. Expand the employee card before
+  // checking the hourly rate and edit controls that live inside the details section.
+  await workspace.getByRole('button', { name: 'Details & Bearbeiten', exact: true }).click();
   await expect(page.getByText('17,50 €')).toBeVisible();
 
   await page.getByLabel('Auszahlung Anna Becker 2026-08').fill('1');
