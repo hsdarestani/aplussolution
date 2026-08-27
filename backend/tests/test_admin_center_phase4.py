@@ -188,3 +188,37 @@ def test_searchable_admin_lists_support_search_and_ordering(auth_admin, worker_u
     order_response = auth_admin.get('/api/orders/?search=Messeauftrag&ordering=-starts_at')
     assert order_response.status_code == 200
     assert any(item['id'] == str(order.id) for item in order_response.data['results'])
+
+
+@pytest.mark.django_db
+def test_phase4_exception_center_ignores_imported_wiw_time_audit_rows(auth_admin, worker_user, shift):
+    now = timezone.now()
+    entry = TimeEntry.objects.create(
+        worker=worker_user.worker_profile,
+        shift=shift,
+        clock_in=now - timedelta(days=10, hours=5),
+        clock_out=now - timedelta(days=10, hours=1),
+        approved=False,
+        wiw_time_id='wiw-phase4-readonly-1',
+    )
+    correction = TimeEntryCorrection.objects.create(
+        entry=entry,
+        requested_by=worker_user.worker_profile,
+        requested_clock_in=entry.clock_in - timedelta(minutes=30),
+        reason='Legacy correction linked to imported history.',
+    )
+
+    response = auth_admin.get('/api/admin/exceptions/?category=attendance&limit=200')
+    assert response.status_code == 200
+    assert all(item['object_id'] != str(entry.id) for item in response.data['results'])
+    assert all(item['object_id'] != str(correction.id) for item in response.data['results'])
+
+
+@pytest.mark.django_db
+def test_phase4_global_search_hides_migration_only_worker_profiles(auth_admin, worker_user):
+    worker_user.email = 'anna.phase4@sync.invalid'
+    worker_user.save(update_fields=['email'])
+
+    response = auth_admin.get('/api/search/global/?q=Anna&limit=10')
+    assert response.status_code == 200
+    assert all(item['id'] != str(worker_user.worker_profile.id) for item in response.data['results'] if item['type'] == 'worker')
