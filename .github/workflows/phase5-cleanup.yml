@@ -1,0 +1,40 @@
+name: Phase 5 cleanup
+
+on:
+  push:
+    branches:
+      - feature/phase5-calendar-navigation
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/phase5-calendar-navigation
+          fetch-depth: 0
+      - name: Remove validation side effects
+        run: |
+          git checkout a01d9eddf9b2263bf14e39df4df77c2b6cbaf460 -- frontend/src/FriendlyDateTimePicker.tsx frontend/src/PremiumOperations.tsx frontend/src/main.tsx frontend/src/premium-operations.css
+          git rm -f frontend/package-lock.json
+      - name: Validate only Phase 5 sources
+        working-directory: frontend
+        run: |
+          npm install --package-lock=false --no-audit --no-fund
+          npm test
+          npx tsc --noEmit
+          npx vite build
+          npx playwright test e2e/phase5-calendar-navigation.spec.ts
+      - name: Commit clean diff
+        run: |
+          git checkout a01d9eddf9b2263bf14e39df4df77c2b6cbaf460 -- frontend/src/FriendlyDateTimePicker.tsx frontend/src/PremiumOperations.tsx frontend/src/main.tsx frontend/src/premium-operations.css
+          rm -f frontend/package-lock.json
+          rm .github/workflows/phase5-cleanup.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Keep Phase 5 diff scoped to calendar and navigation'
+          git push origin HEAD:feature/phase5-calendar-navigation
