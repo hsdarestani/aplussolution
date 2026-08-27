@@ -27,7 +27,8 @@ def _next_customer_number(index: int) -> str:
 def _ensure_canonical_clients():
     targets = {}
     for index, name in enumerate(CANONICAL_CLIENTS, start=1):
-        target = ClientCompany.objects.filter(name__iexact=name).first()
+        matches = ClientCompany.objects.filter(name__iexact=name)
+        target = matches.exclude(customer_number__startswith='WIW-').first() or matches.first()
         if target is None:
             target = ClientCompany.objects.create(name=name, customer_number=_next_customer_number(index), active=True)
         elif target.name != name or not target.active:
@@ -107,12 +108,15 @@ def reconcile_wiw_history_scope():
         if canonical:
             target = client_targets[canonical]
             if source.pk != target.pk:
-                for key, amount in _relink_client(source, target).items():
+                relinked = _relink_client(source, target)
+                for key, amount in relinked.items():
                     counts[key] += amount
-                if source.active:
+                was_active = source.active
+                if was_active:
                     source.active = False
                     source.save(update_fields=['active', 'updated_at'])
-                counts['clients_merged'] += 1
+                if was_active or any(relinked.values()):
+                    counts['clients_merged'] += 1
             continue
         if source.active:
             source.active = False
@@ -125,11 +129,14 @@ def reconcile_wiw_history_scope():
         if canonical:
             target = position_targets[canonical]
             if source.pk != target.pk:
-                counts['shifts_position_relinked'] += Shift.objects.filter(position=source).update(position=target)
-                if source.active:
+                relinked = Shift.objects.filter(position=source).update(position=target)
+                counts['shifts_position_relinked'] += relinked
+                was_active = source.active
+                if was_active:
                     source.active = False
                     source.save(update_fields=['active', 'updated_at'])
-                counts['positions_merged'] += 1
+                if was_active or relinked:
+                    counts['positions_merged'] += 1
             continue
         if source.active:
             source.active = False
