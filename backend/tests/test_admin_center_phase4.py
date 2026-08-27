@@ -234,7 +234,8 @@ def test_phase4_global_search_and_documents_hide_migration_only_worker_profiles(
 
 
 @pytest.mark.django_db
-def test_phase4_ignores_old_wiw_failures_once_wiw_sync_is_disabled(auth_admin):
+def test_phase4_ignores_old_wiw_failures_once_wiw_sync_is_disabled(auth_admin, settings):
+    settings.WIW_SYNC_ENABLED = False
     failed = IntegrationSyncRun.objects.create(
         provider='wiw',
         status=IntegrationSyncRun.Status.FAILED,
