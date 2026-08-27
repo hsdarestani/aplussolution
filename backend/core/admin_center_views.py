@@ -25,6 +25,7 @@ from .shift_slots import ShiftSlot
 
 MANAGER_ROLES = {User.Role.ADMIN, User.Role.MANAGER}
 SEVERITY_ORDER = {'critical': 0, 'warning': 1, 'info': 2}
+SYNTHETIC_MIGRATION_EMAIL_SUFFIX = '@sync.invalid'
 
 
 def _manager_required(request):
@@ -99,6 +100,8 @@ def _exception_center_items(now):
             shift__status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
             shift__starts_at__lte=now - timedelta(minutes=15),
             shift__ends_at__gte=now - timedelta(hours=12),
+        ).exclude(
+            worker__user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX,
         ).select_related(
             'worker__user', 'shift__client', 'shift__location', 'shift__position'
         ).order_by('-shift__starts_at')[:120]
@@ -136,6 +139,8 @@ def _exception_center_items(now):
     ).exclude(
         slots__status=ShiftSlot.Status.CLAIMED,
         slots__worker__isnull=False,
+    ).exclude(
+        worker__user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX,
     ).select_related('worker__user', 'client', 'location', 'position').distinct().order_by('-starts_at')[:80]
     legacy_pairs = set(
         TimeEntry.objects.filter(shift_id__in=[shift.id for shift in late_legacy]).values_list('shift_id', 'worker_id')
@@ -162,7 +167,10 @@ def _exception_center_items(now):
         ))
 
     for correction in TimeEntryCorrection.objects.filter(
-        status=TimeEntryCorrection.Status.PENDING
+        status=TimeEntryCorrection.Status.PENDING,
+        entry__wiw_time_id__isnull=True,
+    ).exclude(
+        requested_by__user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX,
     ).select_related('requested_by__user', 'entry').order_by('created_at')[:60]:
         items.append(_exception(
             'attendance',
@@ -178,6 +186,9 @@ def _exception_center_items(now):
     for entry in TimeEntry.objects.filter(
         approved=False,
         clock_out__isnull=False,
+        wiw_time_id__isnull=True,
+    ).exclude(
+        worker__user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX,
     ).select_related('worker__user', 'shift__position').order_by('clock_out')[:60]:
         age_hours = (now - entry.clock_out).total_seconds() / 3600 if entry.clock_out else 0
         items.append(_exception(
@@ -388,7 +399,9 @@ def global_search(request):
         per_group = 5
 
     worker_q = Q(user__first_name__icontains=query) | Q(user__last_name__icontains=query) | Q(user__email__icontains=query) | Q(employee_number__icontains=query)
-    workers = WorkerProfile.objects.filter(worker_q).select_related('user').order_by('-active', 'user__last_name')[:per_group]
+    workers = WorkerProfile.objects.filter(worker_q).exclude(
+        user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX,
+    ).select_related('user').order_by('-active', 'user__last_name')[:per_group]
     worker_results = [
         _search_result(
             'worker', worker,
