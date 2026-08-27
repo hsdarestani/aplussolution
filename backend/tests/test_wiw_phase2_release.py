@@ -21,6 +21,16 @@ def test_phase2_production_script_uses_single_process_maintenance_mode_and_resto
     assert 'WIW Phase 2 preflight OK' not in script
 
 
+def test_phase2_stops_live_backend_before_any_temporary_django_process():
+    script = (ROOT / 'scripts' / 'production_wiw_phase2_resync.sh').read_text(encoding='utf-8')
+    stop_index = script.index('docker compose stop backend celery celery-beat')
+    first_run_index = script.index('docker compose run --rm --no-deps -T backend python manage.py')
+    backup_index = script.index('pg_dump')
+    reconciliation_index = script.index('python manage.py reconcile_wiw_history --compact')
+    assert stop_index < first_run_index < backup_index < reconciliation_index
+    assert 'docker compose exec -T backend python manage.py shell' not in script
+
+
 def test_phase2_completion_marker_is_written_only_after_public_health_check():
     script = (ROOT / 'scripts' / 'production_wiw_phase2_resync.sh').read_text(encoding='utf-8')
     health_index = script.index('https://solution.smarbiz.sbs/health/')
