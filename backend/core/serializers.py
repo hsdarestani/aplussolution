@@ -2,6 +2,7 @@ from pathlib import Path
 
 from rest_framework import serializers
 from .models import *
+from .workforce_scope import CANONICAL_POSITIONS, canonical_position_name
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -55,6 +56,18 @@ class PositionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Position
         fields = '__all__'
+
+    def validate_name(self, value):
+        canonical = canonical_position_name(value)
+        if not canonical:
+            allowed = ', '.join(CANONICAL_POSITIONS)
+            raise serializers.ValidationError(f'Aktuell sind nur diese Positionen vorgesehen: {allowed}.')
+        qs = Position.objects.filter(name__iexact=canonical)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError('Diese Position ist bereits vorhanden.')
+        return canonical
 
 
 class ClientOrderSerializer(serializers.ModelSerializer):

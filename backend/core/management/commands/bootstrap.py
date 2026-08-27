@@ -147,7 +147,7 @@ class Command(BaseCommand):
             )
         )
 
-        for name in ['Servicekraft', 'Hostess', 'Eventhelfer', 'Lagerhelfer', 'Inventurhelfer', 'Promoter', 'Logistiker']:
-            Position.objects.get_or_create(name=name)
+        for name in ['Servicekraft', 'Serviceleitung', 'Front Office', 'Housekeeping', 'Bar-Support']:
+            Position.objects.update_or_create(name=name, defaults={'active': True})
         result = seed_document_catalog()
         self.stdout.write(self.style.SUCCESS(f'Grunddaten sind bereit. Dokumentkatalog: {result}'))
