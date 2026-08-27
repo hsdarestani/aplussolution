@@ -225,18 +225,15 @@ function forbiddenManagerFanout(state: MockState) {
   return state.requests.filter((request) => forbidden.some((prefix) => request.path.startsWith(prefix)));
 }
 
-async function setFriendlyDateTime(page: Page, label: string, next: string) {
+async function setEditableDateTime(page: Page, label: string, next: string) {
   const field = page.locator(`ion-input[label="${label}"]`);
-  await field.click();
-  const picker = page.locator('ion-modal.friendly-picker-modal');
-  await expect(picker).toBeVisible();
-  const datetime = picker.locator('ion-datetime[presentation="date-time"]');
-  await datetime.evaluate((element: any, value) => {
+  await expect(field).toBeVisible();
+  await expect(field).not.toHaveAttribute('readonly', '');
+  await field.evaluate((element: any, value) => {
     element.value = value;
+    element.dispatchEvent(new CustomEvent('ionInput', { detail: { value }, bubbles: true, composed: true }));
     element.dispatchEvent(new CustomEvent('ionChange', { detail: { value }, bubbles: true, composed: true }));
   }, next);
-  await picker.getByRole('button', { name: 'Übernehmen' }).click();
-  await expect(picker).not.toBeVisible();
   await expect.poll(async () => field.evaluate((element: any) => String(element.value || ''))).toBe(next);
 }
 
@@ -290,13 +287,13 @@ test.describe('Worker portal deep regression QA', () => {
     expect(forbiddenManagerFanout(state)).toEqual([]);
   });
 
-  test('availability and notifications work through the friendly picker', async ({ page }) => {
+  test('availability uses directly editable date-time fields and notifications remain worker-scoped', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const state = await mockWorkerApi(page);
     await page.goto('/?view=operations');
     await page.getByRole('button', { name: 'Eintragen' }).click();
-    await setFriendlyDateTime(page, 'Beginn', '2026-08-24T09:00');
-    await setFriendlyDateTime(page, 'Ende', '2026-08-24T18:00');
+    await setEditableDateTime(page, 'Beginn', '2026-08-24T09:00');
+    await setEditableDateTime(page, 'Ende', '2026-08-24T18:00');
     await page.getByLabel('Hinweis').fill('QA verfügbar');
     await page.getByRole('button', { name: 'Speichern' }).click();
     await expect.poll(() => state.availabilities.length).toBe(1);

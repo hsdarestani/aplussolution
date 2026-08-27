@@ -124,6 +124,6 @@ test('contract date picker explicitly supports years beyond 2027', async ({ page
     element.value = '2035-12-31';
     element.dispatchEvent(new CustomEvent('ionChange', { detail: { value: '2035-12-31' }, bubbles: true, composed: true }));
   });
-  await picker.getByRole('button', { name: 'Übernehmen' }).click();
+  await expect(picker).not.toBeVisible();
   await expect.poll(async () => endDate.evaluate((element: any) => String(element.value || ''))).toBe('2035-12-31');
 });
