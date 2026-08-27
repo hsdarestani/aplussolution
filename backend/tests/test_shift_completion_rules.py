@@ -34,7 +34,7 @@ def test_native_shift_api_overrides_manual_break_with_automatic_rule(auth_admin,
 
 @pytest.mark.django_db
 def test_worker_open_shifts_respect_client_and_zeitplan_preferences(
-    auth_admin, auth_worker, worker_user, company, location, position, client_user
+    auth_worker, worker_user, company, location, position
 ):
     other_company = company.__class__.objects.create(name='Anderer Kunde', customer_number='KD-VIS-2')
     other_location = location.__class__.objects.create(client=other_company, name='Anderer Standort', address='Test 2')
@@ -55,8 +55,11 @@ def test_worker_open_shifts_respect_client_and_zeitplan_preferences(
         starts_at=start + timedelta(days=1), ends_at=start + timedelta(days=1, hours=7), status=Shift.Status.PUBLISHED,
         required_count=1, schedule_groups=['service'],
     )
-    for shift in (allowed, blocked_group, blocked_client):
-        shift.ensure_slots()
+
+    # Native ShiftSlot capacity is created by the Shift post-save signal.
+    assert allowed.slots.filter(status='open').exists()
+    assert blocked_group.slots.filter(status='open').exists()
+    assert blocked_client.slots.filter(status='open').exists()
 
     worker = worker_user.worker_profile
     worker.open_shift_client_ids = [str(company.id)]
