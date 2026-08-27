@@ -48,12 +48,13 @@ test('settings owns locations and positions after Personal & Kunden cleanup', as
   await page.goto('/?view=settings');
 
   await expect(page.getByRole('heading', { name: 'Einstellungen' })).toBeVisible();
-  const settingsContent = page.locator('main, ion-content').last();
-  await expect(settingsContent.getByText('QA Newest Testsite', { exact: true })).toBeVisible();
-  await expect(settingsContent.getByText('QA Newest Position', { exact: true })).toBeVisible();
-  await expect(settingsContent.getByText('Standort 1', { exact: true })).toBeVisible();
+  const locationsPanel = page.getByRole('heading', { name: 'Einsatzorte' }).locator('xpath=../..');
+  const positionsPanel = page.getByRole('heading', { name: 'Positionen' }).locator('xpath=../..');
+  await expect(locationsPanel.getByText('QA Newest Testsite', { exact: true })).toBeVisible();
+  await expect(positionsPanel.getByText('QA Newest Position', { exact: true })).toBeVisible();
+  await expect(locationsPanel.getByText('Standort 1', { exact: true })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Position', exact: true }).click();
+  await positionsPanel.getByRole('button', { name: 'Position', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Position anlegen' })).toBeVisible();
   await expect(page.locator('ion-input[type="color"]')).toBeVisible();
 });
