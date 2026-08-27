@@ -165,7 +165,7 @@ export default function ScheduleV2({user}:{user:User}) {
     </div>;
   };
   const renderClientLabel=(item:any)=><span className="sv2-client-label"><i/>{item.client_name||'Ohne Kunde'}</span>;
-  const renderMini=(item:any,compact=false)=>{const status=statusInfo(item);return <button type="button" style={clientStyle(item)} className={`sv2-event ${compact?'compact':''}`} key={item.id} onClick={()=>openItem(item)}><span className={`sv2-event-dot ${status.label.toLowerCase()}`}/><b>{tm(item.starts_at)} {item.position_name}</b><small>{renderClientLabel(item)} <span>· {item.filled_count||0}/{item.required_count||1}</span></small>{renderWorkerAvatars(item,compact)}</button>;};
+  const renderMini=(item:any,compact=false)=>{const status=statusInfo(item);return <button type="button" style={clientStyle(item)} className={`sv2-event ${compact?'compact':''}`} key={item.id} onClick={()=>openItem(item)}><span className={`sv2-event-dot ${status.label.toLowerCase()}`}/><b>{tm(item.starts_at)}–{tm(item.ends_at)} · {item.position_name}</b><small>{renderClientLabel(item)} <span>· {item.filled_count||0}/{item.required_count||1}</span></small>{renderWorkerAvatars(item,compact)}</button>;};
 
   return <div className="sv2">
     <div className="sv2-title"><div><small>{eyebrow}</small><h1>{title}</h1><p>{intro}</p></div>{isManager(user)&&<IonButton onClick={create}><IonIcon slot="start" icon={addOutline}/>Personalbedarf</IonButton>}</div>
