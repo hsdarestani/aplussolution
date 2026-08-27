@@ -1,0 +1,48 @@
+name: Phase 5 remove legacy duplicate
+
+on:
+  push:
+    branches:
+      - feature/phase5-calendar-navigation
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/phase5-calendar-navigation
+      - name: Remove duplicated client location branch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('frontend/src/App.tsx')
+          text = path.read_text(encoding='utf-8')
+          block = """    } else if (user.role === 'client') {
+                const locationData = await api('locations/');
+                setLocations(unpack(locationData).filter((location: any) => location.active));
+              } else if (user.role === 'client') {
+                const locationData = await api('locations/');
+                setLocations(unpack(locationData).filter((location: any) => location.active));
+              }
+          """
+          replacement = """    } else if (user.role === 'client') {
+                const locationData = await api('locations/');
+                setLocations(unpack(locationData).filter((location: any) => location.active));
+              }
+          """
+          if text.count(block) != 1:
+              raise SystemExit(f'expected one duplicated client block, found {text.count(block)}')
+          path.write_text(text.replace(block, replacement, 1), encoding='utf-8')
+          PY
+      - name: Commit clean source and remove temporary workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/phase5-remove-legacy-duplicate.yml
+          git add frontend/src/App.tsx
+          git commit -m 'Remove duplicated client order location branch'
+          git push origin HEAD:feature/phase5-calendar-navigation
