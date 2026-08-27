@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
 
+# Revalidate the complete Phase 6 source patch after router hardening.
 jobs:
   implement:
     runs-on: ubuntu-latest
