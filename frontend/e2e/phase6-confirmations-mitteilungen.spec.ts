@@ -24,7 +24,10 @@ test('Phase 6 replaces Chat UI with one-way Mitteilungen, file upload, audience 
   expect(app).toContain('Bild / Datei');
   expect(app).toContain('Versandhistorie');
   expect(app).toContain('Push wurde ausgelöst');
+  expect(app).toContain('data-testid="announcements-view"');
+  expect(app).toContain('data-testid="announcement-create"');
   expect(app).not.toContain("api('conversations/')");
+  expect(app).not.toContain('portal/message-recipients/');
   expect(app).not.toContain('Neue Unterhaltung');
   expect(app).not.toContain("messages: 'Chat'");
 });
