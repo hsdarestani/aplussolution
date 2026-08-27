@@ -11,6 +11,15 @@ def test_phase2_production_script_has_valid_bash_syntax():
     assert result.returncode == 0, result.stderr
 
 
+def test_phase2_production_script_pauses_background_workers_and_restores_them():
+    script = (ROOT / 'scripts' / 'production_wiw_phase2_resync.sh').read_text(encoding='utf-8')
+    assert 'docker compose stop celery celery-beat' in script
+    assert 'trap resume_background_services EXIT' in script
+    assert 'docker compose up -d celery celery-beat' in script
+    assert 'reconcile_wiw_history --compact' in script
+    assert 'WIW Phase 2 preflight OK' not in script
+
+
 def test_phase2_workflow_runs_only_after_successful_main_deploy():
     workflow = (ROOT / '.github' / 'workflows' / 'wiw-phase2.yml').read_text(encoding='utf-8')
     assert 'workflow_run:' in workflow
