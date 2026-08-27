@@ -1,6 +1,7 @@
 import json
 
 from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
 
 from core.wiw_migration import build_wiw_migration_report
 from core.wiw_scope_reconciliation import reconcile_wiw_history_scope
@@ -14,20 +15,17 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         try:
-            migration = build_wiw_migration_report(apply_full_sync=True)
-        except Exception as exc:
-            raise CommandError(f'WIW history sync failed: {exc}') from exc
+            with transaction.atomic():
+                migration = build_wiw_migration_report(apply_full_sync=True)
+                if not migration.get('cutover_ready'):
+                    incomplete = [name for name, row in migration.get('resources', {}).items() if not row.get('complete')]
+                    raise RuntimeError('WIW history is incomplete: ' + ', '.join(incomplete))
 
-        if not migration.get('cutover_ready'):
-            incomplete = [name for name, row in migration.get('resources', {}).items() if not row.get('complete')]
-            raise CommandError('WIW history is incomplete; scope reconciliation aborted: ' + ', '.join(incomplete))
-
-        try:
-            scope = reconcile_wiw_history_scope()
+                scope = reconcile_wiw_history_scope()
+                if not scope.get('valid'):
+                    raise RuntimeError('WIW scope reconciliation did not produce the expected active client/position scope.')
         except Exception as exc:
-            raise CommandError(f'WIW scope reconciliation failed: {exc}') from exc
-        if not scope.get('valid'):
-            raise CommandError('WIW scope reconciliation did not produce the expected active client/position scope.')
+            raise CommandError(f'WIW Phase 2 reconciliation failed: {exc}') from exc
 
         report = {
             'source': 'when_i_work',
