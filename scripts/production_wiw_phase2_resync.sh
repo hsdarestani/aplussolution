@@ -36,37 +36,32 @@ DB_NAME="$(docker compose exec -T db printenv POSTGRES_DB | tr -d '\r')"
 : "${DB_USER:?POSTGRES_USER missing}"
 : "${DB_NAME:?POSTGRES_DB missing}"
 
-# Capture the exact production state before the maintenance window starts.
-docker compose exec -T backend python manage.py shell -c "from core.models import ClientCompany,Location,Position,Shift,TimeEntry; print({'clients':ClientCompany.objects.count(),'active_clients':ClientCompany.objects.filter(active=True).count(),'locations':Location.objects.count(),'active_locations':Location.objects.filter(active=True).count(),'positions':Position.objects.count(),'active_positions':Position.objects.filter(active=True).count(),'shifts':Shift.objects.count(),'wiw_shifts':Shift.objects.exclude(wiw_shift_id__isnull=True).exclude(wiw_shift_id='').count(),'times':TimeEntry.objects.count(),'wiw_times':TimeEntry.objects.exclude(wiw_time_id__isnull=True).exclude(wiw_time_id='').count()})" | tee "$COUNTS_BEFORE"
+# IMPORTANT: stop Gunicorn/Celery before starting *any* extra Django process.
+# The previous maintenance-mode attempt still ran the pre-count through the live
+# three-worker backend and was OOM-killed before it reached the stop command.
+docker compose stop backend celery celery-beat >/dev/null 2>&1 || true
+APP_SERVICES_PAUSED=1
+echo "Backend and background workers paused before Phase 2 Django processes."
 
-# Full SQL backup is the rollback boundary. The reconciliation command itself is
-# transactional, but keeping a verified backup gives us an independent recovery
-# path before any production write is attempted.
+# Capture the exact pre-write state from a single short-lived Django container.
+docker compose run --rm --no-deps -T backend python manage.py shell -c "from core.models import ClientCompany,Location,Position,Shift,TimeEntry; print({'clients':ClientCompany.objects.count(),'active_clients':ClientCompany.objects.filter(active=True).count(),'locations':Location.objects.count(),'active_locations':Location.objects.filter(active=True).count(),'positions':Position.objects.count(),'active_positions':Position.objects.filter(active=True).count(),'shifts':Shift.objects.count(),'wiw_shifts':Shift.objects.exclude(wiw_shift_id__isnull=True).exclude(wiw_shift_id='').count(),'times':TimeEntry.objects.count(),'wiw_times':TimeEntry.objects.exclude(wiw_time_id__isnull=True).exclude(wiw_time_id='').count()})" | tee "$COUNTS_BEFORE"
+
+# Full SQL backup is the independent rollback boundary. Nothing has written to
+# the database yet; the application remains paused while pg_dump runs.
 docker compose exec -T db pg_dump -U "$DB_USER" -d "$DB_NAME" | gzip -9 > "$DB_BACKUP"
 test -s "$DB_BACKUP"
 sha256sum "$DB_BACKUP" > "$DB_CHECKSUM"
 chmod 600 "$DB_BACKUP" "$DB_CHECKSUM" "$COUNTS_BEFORE"
 echo "Phase 2 production backup ready: $DB_BACKUP"
 
-# The host killed reconcile_wiw_history with exit 137 even after Celery was
-# stopped. The remaining memory pressure came from the live Gunicorn backend
-# (three workers) plus the temporary management-command process. Enter a short
-# maintenance window: stop backend + workers, leave DB/Redis/frontend/Caddy up,
-# and run exactly one short-lived backend container for reconciliation. The EXIT
-# trap always restores the application services if anything fails.
-docker compose stop backend celery celery-beat >/dev/null 2>&1 || true
-APP_SERVICES_PAUSED=1
-echo "Backend and background workers paused for memory-safe WIW Phase 2 reconciliation."
-
+# Run the transactional import/reconciliation as the only Django process on the host.
 docker compose run --rm --no-deps -T backend python manage.py reconcile_wiw_history --compact | tee "$REPORT_FILE"
 
-# Verify the committed production state from another single-process container,
-# while Gunicorn and Celery are still stopped so verification cannot reintroduce
-# the same memory-pressure failure mode.
+# Verify the committed production state in a fresh single-process container while
+# Gunicorn/Celery remain stopped, avoiding the same memory-pressure failure mode.
 docker compose run --rm --no-deps -T backend python manage.py shell -c "from django.conf import settings; from core.models import ClientCompany,Location,Position,Shift,TimeEntry; from core.workforce_scope import CANONICAL_CLIENTS,CANONICAL_POSITIONS; clients=set(ClientCompany.objects.filter(active=True).values_list('name',flat=True)); positions=set(Position.objects.filter(active=True).values_list('name',flat=True)); assert clients==set(CANONICAL_CLIENTS),(clients,set(CANONICAL_CLIENTS)); assert positions==set(CANONICAL_POSITIONS),(positions,set(CANONICAL_POSITIONS)); assert not Location.objects.filter(active=True,client__active=False).exists(); assert settings.WIW_SYNC_ENABLED is False; print({'active_clients':sorted(clients),'active_positions':sorted(positions),'shifts':Shift.objects.count(),'wiw_shifts':Shift.objects.exclude(wiw_shift_id__isnull=True).exclude(wiw_shift_id='').count(),'times':TimeEntry.objects.count(),'wiw_times':TimeEntry.objects.exclude(wiw_time_id__isnull=True).exclude(wiw_time_id='').count(),'wiw_sync_enabled':settings.WIW_SYNC_ENABLED})" | tee "$COUNTS_AFTER"
 
-# Restore the normal application and prove the public health endpoint is back
-# before writing the completion marker.
+# Restore the normal application and prove public health before the completion marker.
 docker compose up -d backend celery celery-beat >/dev/null
 APP_SERVICES_PAUSED=0
 curl -fsS --retry 18 --retry-delay 5 https://solution.smarbiz.sbs/health/ >/dev/null
