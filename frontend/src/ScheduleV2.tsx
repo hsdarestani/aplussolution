@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { IonAlert, IonBadge, IonButton, IonIcon, IonInput, IonLabel, IonModal, IonSearchbar, IonSegment, IonSegmentButton, IonSelect, IonSelectOption, IonTextarea, IonToast, IonToggle } from '@ionic/react';
-import { addOutline, checkmarkCircleOutline, locationOutline, refreshOutline, timeOutline } from 'ionicons/icons';
+import { addOutline, briefcaseOutline, checkmarkCircleOutline, locationOutline, refreshOutline, timeOutline } from 'ionicons/icons';
 import { api, User } from './api';
 import './schedule-v2.css';
 
@@ -79,20 +79,21 @@ function FriendlyDateTime({label,value,onChange}:{label:string;value?:string;onC
 }
 
 export default function ScheduleV2({user}:{user:User}) {
-  const [rows,setRows]=useState<any[]>([]), [clients,setClients]=useState<any[]>([]), [locations,setLocations]=useState<any[]>([]), [positions,setPositions]=useState<any[]>([]), [orders,setOrders]=useState<any[]>([]), [workers,setWorkers]=useState<any[]>([]);
+  const [rows,setRows]=useState<any[]>([]), [clients,setClients]=useState<any[]>([]), [locations,setLocations]=useState<any[]>([]), [positions,setPositions]=useState<any[]>([]), [workers,setWorkers]=useState<any[]>([]);
   const [tab,setTab]=useState(user.role==='worker'?'available':'open'), [search,setSearch]=useState(''), [modal,setModal]=useState(false), [editing,setEditing]=useState<string>(), [busy,setBusy]=useState(false), [toast,setToast]=useState('');
   const [form,setForm]=useState<any>({required_count:1,break_minutes:0,publish_now:true,workers:[]});
   const [releaseTarget,setReleaseTarget]=useState<any>();
   const [view,setView]=useState<ScheduleView>('list');
   const [anchor,setAnchor]=useState(berlinDate());
   const [serviceFilter,setServiceFilter]=useState<ServiceFilter>('all');
+  const [aiOpen,setAiOpen]=useState(false), [orderText,setOrderText]=useState(''), [parsedOrder,setParsedOrder]=useState<any>();
 
   async function load() {
     const q=search.trim()?`&search=${encodeURIComponent(search.trim())}`:'';
     if(user.role==='worker') { const endpoint=tab==='mine'?'shifts/mine/':'shifts/available/'; setRows(unpack(await api(`${endpoint}?ordering=starts_at${q}`))); return; }
     if(user.role==='client') { setRows(unpack(await api(`shifts/?ordering=starts_at${q}`))); return; }
-    const [s,c,l,p,o,w]=await Promise.all([api(`shifts/?ordering=starts_at${q}`),api('clients/'),api('locations/'),api('positions/'),api('orders/'),api('workers/?ordering=user__last_name')]);
-    setRows(unpack(s)); setClients(unpack(c)); setLocations(unpack(l)); setPositions(unpack(p)); setOrders(unpack(o)); setWorkers(unpack(w).filter((item:any)=>item.active!==false&&!isSyntheticWorker(item)));
+    const [s,c,l,p,w]=await Promise.all([api(`shifts/?ordering=starts_at${q}`),api('clients/'),api('locations/'),api('positions/'),api('workers/?ordering=user__last_name')]);
+    setRows(unpack(s)); setClients(unpack(c).filter((item:any)=>item.active!==false)); setLocations(unpack(l).filter((item:any)=>item.active!==false)); setPositions(unpack(p).filter((item:any)=>item.active!==false)); setWorkers(unpack(w).filter((item:any)=>item.active!==false&&!isSyntheticWorker(item)));
   }
   useEffect(()=>{void load();},[tab]);
 
@@ -137,10 +138,27 @@ export default function ScheduleV2({user}:{user:User}) {
       const assignedWorkers=Array.isArray(form.workers)?form.workers.filter(Boolean):[]; const requiredCount=Math.max(1,Number(form.required_count||1));
       if(assignedWorkers.length>requiredCount) throw new Error('Mehr Mitarbeiter ausgewählt als benötigte Plätze.');
       const baseStatus=assignedWorkers.length===requiredCount?'draft':form.publish_now?'published':'draft';
-      const p:any={client:form.client,location:form.location,position:form.position,order:form.order||null,starts_at:form.starts_at,ends_at:form.ends_at,break_minutes:Number(form.break_minutes||0),required_count:requiredCount,notes:form.notes||'',status:baseStatus};
+      const p:any={client:form.client,location:form.location,position:form.position,starts_at:form.starts_at,ends_at:form.ends_at,break_minutes:Number(form.break_minutes||0),required_count:requiredCount,notes:form.notes||'',status:baseStatus};
       const saved:any=await api(editing?`shifts/${editing}/`:'shifts/',{method:editing?'PATCH':'POST',body:JSON.stringify(p)}); if(!editing) createdId=String(saved.id);
       await api(`shifts/${saved.id}/assign/`,{method:'POST',body:JSON.stringify({workers:assignedWorkers,publish_remaining:!!form.publish_now})}); createdId=undefined; setModal(false); setToast(assignedWorkers.length?`${assignedWorkers.length} Mitarbeiter direkt zugewiesen.`:'Personalbedarf gespeichert.'); await load();
     }catch(e:any){if(createdId){try{await api(`shifts/${createdId}/`,{method:'DELETE'});}catch{} await load();}setToast(e.message);}finally{setBusy(false);}
+  }
+
+  async function parseAiOrder(){
+    if(!orderText.trim()){setToast('Bitte zuerst den Text der Kundenanfrage einfügen.');return;}
+    setBusy(true);
+    try{
+      const result:any=await api('automation/orders/parse/',{method:'POST',body:JSON.stringify({text:orderText})});
+      setParsedOrder(result);setToast(`${result.shifts?.length||0} Schicht(en) erkannt. Bitte kurz prüfen.`);
+    }catch(e:any){setToast(e.message);}finally{setBusy(false);}
+  }
+  async function approveAiOrder(){
+    if(!parsedOrder)return void parseAiOrder();
+    setBusy(true);
+    try{
+      const result:any=await api('automation/orders/approve/',{method:'POST',body:JSON.stringify({parsed:parsedOrder,raw_text:orderText})});
+      setAiOpen(false);setOrderText('');setParsedOrder(undefined);await load();setToast(`${result.created_count||0} Personalplatz/-plätze als OpenShift erstellt.`);
+    }catch(e:any){setToast(e.message);}finally{setBusy(false);}
   }
   function confirmRelease(){const id=releaseTarget?.id;setReleaseTarget(undefined);if(id) void act(`shifts/${id}/release/`,'Schicht freigegeben.');}
   function navigate(direction:number){if(view==='month')setAnchor(addKeyMonths(anchor,direction));else if(view==='day')setAnchor(addKeyDays(anchor,direction));else setAnchor(addKeyDays(anchor,7*direction));}
@@ -150,7 +168,7 @@ export default function ScheduleV2({user}:{user:User}) {
   const eyebrow=workerView?'MEINE ARBEIT':clientView?'KUNDENPORTAL':'PERSONALPLANUNG';
   const title=workerView?'Schichten':clientView?'Einsätze':'Personalbedarf & Schichten';
   const intro=workerView?'Freie Einsätze finden und eigene Schichten verwalten.':clientView?'Geplante Einsätze und aktueller Besetzungsstatus für Ihre Aufträge.':'Kundenbedarf erstellen, Mitarbeiter direkt zuweisen oder Restplätze als OpenShift veröffentlichen.';
-  const searchPlaceholder=clientView?'Einsatz, Ort oder Position suchen …':'Kunde, Ort, Position oder Auftrag suchen …';
+  const searchPlaceholder=clientView?'Einsatz, Ort oder Position suchen …':'Kunde, Ort oder Position suchen …';
   const rangeTitle=view==='month'?keyLabel(monthStart,{month:'long',year:'numeric'}):view==='day'?keyLabel(anchor,{weekday:'long',day:'2-digit',month:'long',year:'numeric'}):`${keyLabel(weekStart,{day:'2-digit',month:'short'})} – ${keyLabel(addKeyDays(weekStart,6),{day:'2-digit',month:'short',year:'numeric'})}`;
 
   const renderWorkerAvatars=(item:any,compact=false)=>{
@@ -168,7 +186,7 @@ export default function ScheduleV2({user}:{user:User}) {
   const renderMini=(item:any,compact=false)=>{const status=statusInfo(item);return <button type="button" style={clientStyle(item)} className={`sv2-event ${compact?'compact':''}`} key={item.id} onClick={()=>openItem(item)}><span className={`sv2-event-dot ${status.label.toLowerCase()}`}/><b>{tm(item.starts_at)}–{tm(item.ends_at)} · {item.position_name}</b><small>{renderClientLabel(item)} <span>· {item.filled_count||0}/{item.required_count||1}</span></small>{renderWorkerAvatars(item,compact)}</button>;};
 
   return <div className="sv2">
-    <div className="sv2-title"><div><small>{eyebrow}</small><h1>{title}</h1><p>{intro}</p></div>{isManager(user)&&<IonButton onClick={create}><IonIcon slot="start" icon={addOutline}/>Personalbedarf</IonButton>}</div>
+    <div className="sv2-title"><div><small>{eyebrow}</small><h1>{title}</h1><p>{intro}</p></div>{isManager(user)&&<div className="button-group"><IonButton data-testid="schedule-create-manual" onClick={create}><IonIcon slot="start" icon={addOutline}/>Manuell</IonButton><IonButton data-testid="schedule-create-ai" fill="outline" onClick={()=>{setParsedOrder(undefined);setOrderText('');setAiOpen(true);}}><IonIcon slot="start" icon={briefcaseOutline}/>AI</IonButton></div>}</div>
     <div className="sv2-search"><IonSearchbar value={search} debounce={350} placeholder={searchPlaceholder} onIonInput={e=>setSearch(String(val(e)))} onIonChange={()=>void load()}/><IonButton fill="outline" onClick={()=>void load()}><IonIcon slot="icon-only" icon={refreshOutline}/></IonButton></div>
     {workerView?<IonSegment scrollable value={tab} onIonChange={e=>setTab(String(val(e)))}><IonSegmentButton value="available"><IonLabel>Verfügbare Schichten</IonLabel></IonSegmentButton><IonSegmentButton value="mine"><IonLabel>Meine Schichten</IonLabel></IonSegmentButton></IonSegment>:isManager(user)?<IonSegment scrollable value={tab} onIonChange={e=>setTab(String(val(e)))}><IonSegmentButton value="open"><IonLabel>Offen</IonLabel></IonSegmentButton><IonSegmentButton value="filled"><IonLabel>Voll besetzt</IonLabel></IonSegmentButton><IonSegmentButton value="draft"><IonLabel>Entwürfe</IonLabel></IonSegmentButton><IonSegmentButton value="all"><IonLabel>Alle</IonLabel></IonSegmentButton></IonSegment>:null}
 
@@ -203,7 +221,6 @@ export default function ScheduleV2({user}:{user:User}) {
 
     <IonModal isOpen={modal} onDidDismiss={()=>setModal(false)}><div className="sv2-modal"><div className="sv2-modal-head"><h2>{editing?'Personalbedarf bearbeiten':'Personalbedarf anlegen'}</h2><IonButton fill="clear" onClick={()=>setModal(false)}>Schließen</IonButton></div><div className="sv2-form">
       <IonSelect fill="outline" label="Kunde *" labelPlacement="floating" value={form.client} onIonChange={e=>setForm({...form,client:val(e)})}>{clients.map(x=><IonSelectOption key={x.id} value={x.id}>{x.name}</IonSelectOption>)}</IonSelect>
-      <IonSelect fill="outline" label="Auftrag" labelPlacement="floating" value={form.order} onIonChange={e=>setForm({...form,order:val(e)})}><IonSelectOption value="">Ohne Auftrag</IonSelectOption>{orders.filter(x=>!form.client||x.client===form.client).map(x=><IonSelectOption key={x.id} value={x.id}>{x.title}</IonSelectOption>)}</IonSelect>
       <IonSelect fill="outline" label="Einsatzort *" labelPlacement="floating" value={form.location} onIonChange={e=>setForm({...form,location:val(e)})}>{locations.filter(x=>!form.client||!x.client||x.client===form.client).map(x=><IonSelectOption key={x.id} value={x.id}>{x.name}</IonSelectOption>)}</IonSelect>
       <IonSelect fill="outline" label="Position *" labelPlacement="floating" value={form.position} onIonChange={e=>setForm({...form,position:val(e)})}>{positions.map(x=><IonSelectOption key={x.id} value={x.id}>{x.name}</IonSelectOption>)}</IonSelect>
       <FriendlyDateTime label="Beginn" value={form.starts_at} onChange={next=>setShiftDateTime('starts_at',next)}/><FriendlyDateTime label="Ende" value={form.ends_at} onChange={next=>setShiftDateTime('ends_at',next)}/>
@@ -212,6 +229,11 @@ export default function ScheduleV2({user}:{user:User}) {
       {(form.workers||[]).length>0&&<div className="full sv2-assignment-note">{(form.workers||[]).length} von {form.required_count||1} Plätzen werden direkt zugewiesen. Freie Restplätze können als OpenShift veröffentlicht werden.</div>}
       <IonTextarea className="full" fill="outline" label="Hinweise für Mitarbeiter" labelPlacement="floating" value={form.notes} onIonInput={e=>setForm({...form,notes:val(e)})}/><label className="sv2-toggle full">{(form.workers||[]).length>0?'Restliche freie Plätze als OpenShift veröffentlichen':'Direkt als OpenShift veröffentlichen'} <IonToggle checked={!!form.publish_now} onIonChange={e=>setForm({...form,publish_now:e.detail.checked})}/></label>
     </div><div className="sv2-modal-actions"><IonButton fill="outline" onClick={()=>setModal(false)}>Abbrechen</IonButton><IonButton disabled={busy} onClick={()=>void save()}>Speichern</IonButton></div></div></IonModal>
+
+    <IonModal isOpen={aiOpen} onDidDismiss={()=>{setAiOpen(false);setParsedOrder(undefined);}}><div className="sv2-modal" data-testid="schedule-ai-intake"><div className="sv2-modal-head"><div><small>DIENSTPLAN · AI</small><h2>Personalbedarf mit AI erfassen</h2></div><IonButton fill="clear" onClick={()=>setAiOpen(false)}>Schließen</IonButton></div><div className="sv2-form">
+      <IonTextarea className="full" autoGrow fill="outline" label="Text aus Kunden-E-Mail / Anfrage" labelPlacement="floating" value={orderText} onIonInput={e=>{setOrderText(String(val(e)));setParsedOrder(undefined);}}/>
+      {parsedOrder&&<div className="full sv2-assignment-note"><b>{parsedOrder.request_id||'Anfrage erkannt'}</b><p>Bitte die erkannten Schichten kurz prüfen:</p>{parsedOrder.shifts?.map((item:any,index:number)=><div key={index}>{item.date} · {item.start_time}–{item.end_time} · {item.count}× {item.role} · {item.site_text||item.location_text}</div>)}</div>}
+    </div><div className="sv2-modal-actions"><IonButton fill="outline" onClick={()=>setAiOpen(false)}>Abbrechen</IonButton><IonButton disabled={busy} onClick={()=>void(parsedOrder?approveAiOrder():parseAiOrder())}>{parsedOrder?'Prüfen & OpenShifts erstellen':'Mit AI analysieren'}</IonButton></div></div></IonModal>
     <IonAlert isOpen={!!releaseTarget} onDidDismiss={()=>setReleaseTarget(undefined)} header="Schicht freigeben?" message={releaseTarget?`${releaseTarget.position_name || 'Diese Schicht'} wird wieder für andere Mitarbeiter verfügbar.`:''} buttons={[{text:'Abbrechen',role:'cancel'},{text:'Freigeben',role:'destructive',handler:confirmRelease}]}/>
     <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={()=>setToast('')}/>
   </div>;

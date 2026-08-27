@@ -19,12 +19,12 @@ async function mockApi(page: Page) {
     active: true,
     created_at: new Date(now - (6 - index) * 60_000).toISOString(),
   }));
-  const positions = Array.from({ length: 7 }, (_, index) => ({
+  const positions = ['Servicekraft', 'Serviceleitung', 'Front Office', 'Housekeeping', 'Bar-Support'].map((name, index) => ({
     id: `pos-${index}`,
-    name: index === 6 ? 'QA Newest Position' : `Position ${index + 1}`,
+    name,
     color: '#155eef',
     active: true,
-    created_at: new Date(now - (6 - index) * 60_000).toISOString(),
+    created_at: new Date(now - (4 - index) * 60_000).toISOString(),
   }));
 
   await page.route('**/api/**', async (route) => {
@@ -41,23 +41,22 @@ async function mockApi(page: Page) {
   });
 }
 
-test('master data quick access surfaces new records and uses a color picker', async ({ page }) => {
+// Phase 1 intentionally moved master-data administration out of Personal & Kunden.
+test('settings owns locations and positions after Personal & Kunden cleanup', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockApi(page);
-  await page.goto('/?view=people');
+  await page.goto('/?view=settings');
 
-  await expect(page.getByRole('heading', { name: 'Personal & Kunden' })).toBeVisible();
-  const panel = page.getByTestId('masterdata-quick-panel');
-  await expect(panel).toBeVisible();
-  await expect(panel.getByText('QA Newest Testsite', { exact: true })).toBeVisible();
-  await expect(panel.getByText('QA Newest Position', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Einstellungen' })).toBeVisible();
+  const masterDataPanels = page.locator('.master-data > .panel');
+  const locationsPanel = masterDataPanels.nth(0);
+  const positionsPanel = masterDataPanels.nth(1);
+  await expect(locationsPanel.getByRole('heading', { name: 'Einsatzorte' })).toBeVisible();
+  await expect(positionsPanel.getByRole('heading', { name: 'Positionen' })).toBeVisible();
+  await expect(locationsPanel.getByText('QA Newest Testsite', { exact: true })).toBeVisible();
+  await expect(locationsPanel.getByText('Standort 1', { exact: true })).toBeVisible();
 
-  const showAll = panel.getByRole('button', { name: 'Alle 7 anzeigen' }).first();
-  await expect(showAll).toBeVisible();
-  await showAll.click();
-  await expect(panel.getByText('Standort 1', { exact: true })).toBeVisible();
-
-  await panel.getByRole('button', { name: 'Position anlegen', exact: true }).click();
+  await positionsPanel.getByRole('button', { name: 'Position', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Position anlegen' })).toBeVisible();
-  await expect(page.getByLabel('Farbe auswählen')).toBeVisible();
+  await expect(page.locator('ion-input[type="color"]')).toBeVisible();
 });

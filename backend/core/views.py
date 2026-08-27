@@ -23,6 +23,7 @@ from .permissions import IsAdminOrManager
 from .services import audit, sign_contract
 from .document_engine import DocumentGenerationError, contract_data, generate_contract_files, generate_worker_packet, validate_required_fields
 from . import oauth
+from .workforce_scope import canonical_client_name
 
 
 def scoped(qs, user, worker_field='worker', client_field='client'):
@@ -130,6 +131,11 @@ def create_client_account(data):
     name = str(data.get('name', '')).strip()
     if not name:
         raise ValueError('Firmenname ist erforderlich.')
+    canonical_name = canonical_client_name(name)
+    if canonical_name:
+        name = canonical_name
+        if ClientCompany.objects.filter(name__iexact=name).exists():
+            raise ValueError('Dieser Kunde ist bereits vorhanden.')
     customer_number = str(data.get('customer_number') or next_number(ClientCompany, 'customer_number', 'KD'))
     if ClientCompany.objects.filter(customer_number=customer_number).exists():
         raise ValueError('Diese Kundennummer ist bereits vorhanden.')

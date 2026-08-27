@@ -47,6 +47,7 @@ const fixedNow = new Date('2026-08-21T08:00:00Z');
 test('schedule keeps Berlin time and offers five planning views with customer colors and staff avatars', async ({ page }) => {
   await page.clock.setFixedTime(fixedNow); await mockAdmin(page); await page.goto('/?view=schedule');
   await expect(page.getByRole('heading', { name: 'Personalbedarf & Schichten' })).toBeVisible();
+  await expect(page.getByTestId('schedule-create-manual')).toBeVisible(); await expect(page.getByTestId('schedule-create-ai')).toBeVisible();
   const shiftCard = page.locator('.sv2-card').filter({ hasText: 'QA Servicekraft' }).first();
   await expect(shiftCard).toContainText('10:00–14:00'); await expect(shiftCard).toContainText('1/2 besetzt · 1 frei'); await expect(shiftCard).not.toContainText('11:30–15:30'); await expect(shiftCard.locator('.sv2-date b')).toHaveText('21');
   await expect(shiftCard.locator('.sv2-worker-avatar').first()).toHaveAttribute('title', 'QA Mina Berger');
@@ -96,4 +97,16 @@ test('worker home always shows German business time regardless of device timezon
   await expect(page.getByRole('heading', { name: 'QA Leon Fischer' })).toBeVisible();
   const nextShift = page.locator('.next-shift-card').filter({ hasText: 'QA Servicekraft' }).first(); await expect(nextShift).toContainText('10:00–14:00'); await expect(nextShift).not.toContainText('11:30–15:30');
   const openShift = page.locator('.available-mini').filter({ hasText: 'QA Servicekraft' }).first(); await expect(openShift).toContainText('10:00'); await expect(openShift).not.toContainText('11:30');
+});
+
+
+test('manager creates workforce demand through Manuell or AI without Auftrag field', async ({ page }) => {
+  await page.clock.setFixedTime(fixedNow); await mockAdmin(page); await page.goto('/?view=schedule');
+  await page.getByTestId('schedule-create-manual').click();
+  await expect(page.getByRole('heading', { name: 'Personalbedarf anlegen' })).toBeVisible();
+  await expect(page.getByText('Auftrag', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Schließen' }).click();
+  await page.getByTestId('schedule-create-ai').click();
+  await expect(page.getByTestId('schedule-ai-intake')).toBeVisible();
+  await expect(page.getByText('Personalbedarf mit AI erfassen')).toBeVisible();
 });

@@ -41,6 +41,7 @@ import {
   personAddOutline,
   refreshOutline,
   sendOutline,
+  settingsOutline,
   starOutline,
   stopwatchOutline,
   trashOutline,
@@ -51,12 +52,12 @@ import ScheduleV2 from './ScheduleV2';
 import AttendanceV3 from './AttendanceV3';
 import ActivationPage from './ActivationPage';
 import EmployeeHome from './EmployeeHome';
-import PortalAccessPanel from './PortalAccessPanel';
 import AdminHomeV4 from './AdminHomeV4';
 import GlobalSearch from './GlobalSearch';
 import ListToolbar from './ListToolbar';
 import DocumentCenterV5 from './DocumentCenterV5';
 import AktePage from './AktePage';
+import Settings from './Settings';
 
 type View =
   | 'dashboard'
@@ -71,6 +72,7 @@ type View =
   | 'ratings'
   | 'profile'
   | 'operations'
+  | 'settings'
   | 'akte';
 
 const icons: Record<string, string> = {
@@ -86,6 +88,7 @@ const icons: Record<string, string> = {
   ratings: starOutline,
   profile: peopleOutline,
   operations: refreshOutline,
+  settings: settingsOutline,
 };
 
 const nav: Record<string, [View, string][]> = {
@@ -100,7 +103,7 @@ const nav: Record<string, [View, string][]> = {
     ['messages', 'Nachrichten'],
     ['operations', 'Anfragen, Berichte & Verwaltung'],
     ['people', 'Personal & Kunden'],
-    ['orders', 'Aufträge & AI'],
+    ['settings', 'Einstellungen'],
     ['contracts', 'Verträge & ANÜ'],
   ],
   manager: [
@@ -111,7 +114,7 @@ const nav: Record<string, [View, string][]> = {
     ['messages', 'Nachrichten'],
     ['operations', 'Anfragen, Berichte & Verwaltung'],
     ['people', 'Personal & Kunden'],
-    ['orders', 'Aufträge & AI'],
+    ['settings', 'Einstellungen'],
     ['contracts', 'Verträge & ANÜ'],
   ],
   worker: [
@@ -439,7 +442,6 @@ function Dashboard({
       </div>
       {isManager(user) && (
         <div className="button-group priority-actions">
-          <IonButton onClick={() => navigate('orders')}><IonIcon slot="start" icon={briefcaseOutline} />Auftrag & AI</IonButton>
           <IonButton fill="outline" onClick={() => navigate('schedule')}><IonIcon slot="start" icon={calendarOutline} />Dienstplan</IonButton>
           <IonButton fill="outline" onClick={() => navigate('time')}><IonIcon slot="start" icon={stopwatchOutline} />Zeiterfassung</IonButton>
           <IonButton fill="outline" onClick={() => navigate('people')}><IonIcon slot="start" icon={peopleOutline} />Personal</IonButton>
@@ -628,7 +630,7 @@ function People({ user }: { user: User }) {
     <>
       <Title
         title="Personal & Kunden"
-        text="Benutzerkonten, digitale Akten und zentrale Stammdaten."
+        text="Mitarbeiter- und Kundenprofile zentral verwalten."
         action={
           isManager(user) ? (
             <div className="button-group">
@@ -640,15 +642,10 @@ function People({ user }: { user: User }) {
                 <IonIcon slot="start" icon={businessOutline} />
                 Kunde
               </IonButton>
-              <IonButton fill="outline" onClick={() => setModal('csv')}>
-                CSV-Import
-              </IonButton>
             </div>
           ) : undefined
         }
       />
-
-      {isManager(user) && <PortalAccessPanel />}
 
       <ListToolbar
         query={listQuery}
@@ -657,7 +654,7 @@ function People({ user }: { user: User }) {
         sort={listSort}
         onSort={setListSort}
         sortOptions={[{ value: 'name', label: 'Nach Name' }, { value: 'number', label: 'Nach Nummer' }]}
-        count={workers.length + clients.length}
+        count={workers.length + clients.filter((client) => client.active).length}
       />
 
       <div className="columns">
@@ -698,8 +695,8 @@ function People({ user }: { user: User }) {
               <p>{clients.filter((client) => client.active).length} aktive Unternehmen</p>
             </div>
           </div>
-          {clients.length ? (
-            clients.map((client) => (
+          {clients.filter((client) => client.active).length ? (
+            clients.filter((client) => client.active).map((client) => (
               <div className={`row ${client.active ? '' : 'muted-row'}`} key={client.id}>
                 <div className="avatar">{client.name?.[0] || 'K'}</div>
                 <div className="grow">
@@ -719,70 +716,6 @@ function People({ user }: { user: User }) {
           ) : (
             <Empty>Noch keine Kundenunternehmen angelegt.</Empty>
           )}
-        </div>
-      </div>
-
-      <div className="columns master-data">
-        <div className="panel">
-          <div className="section-head">
-            <div>
-              <h3>Einsatzorte</h3>
-              <p>Adressen und GPS-Geofences.</p>
-            </div>
-            {isManager(user) && (
-              <IonButton fill="outline" size="small" onClick={() => setModal('location')}>
-                <IonIcon slot="start" icon={addOutline} />
-                Standort
-              </IonButton>
-            )}
-          </div>
-          {locations.map((location) => (
-            <div className="row" key={location.id}>
-              <IonIcon icon={locationOutline} />
-              <div className="grow">
-                <b>{location.name}</b>
-                <p>
-                  {location.client_name || 'Ohne Kunde'} · {location.address}
-                </p>
-              </div>
-              <IonBadge>{location.geofence_radius_m} m</IonBadge>
-              {isManager(user) && (
-                <IonButton fill="clear" color="danger" onClick={() => remove('locations', location.id)}>
-                  <IonIcon icon={trashOutline} />
-                </IonButton>
-              )}
-            </div>
-          ))}
-          {!locations.length && <Empty>Noch keine Einsatzorte.</Empty>}
-        </div>
-
-        <div className="panel">
-          <div className="section-head">
-            <div>
-              <h3>Positionen</h3>
-              <p>Funktionen für Schichten und Verträge.</p>
-            </div>
-            {isManager(user) && (
-              <IonButton fill="outline" size="small" onClick={() => setModal('position')}>
-                <IonIcon slot="start" icon={addOutline} />
-                Position
-              </IonButton>
-            )}
-          </div>
-          <div className="chips">
-            {positions.map((position) => (
-              <div className="position-chip" key={position.id}>
-                <span style={{ background: position.color }} />
-                {position.name}
-                {isManager(user) && (
-                  <button onClick={() => remove('positions', position.id)} aria-label="Löschen">
-                    ×
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-          {!positions.length && <Empty>Noch keine Positionen.</Empty>}
         </div>
       </div>
 
@@ -3171,6 +3104,7 @@ export default function App() {
     schedule: 'Dienstplan',
     time: 'Zeit',
     people: 'Personal',
+    settings: 'Setup',
     messages: 'Chat',
   };
   const navigateTo = (next: View) => {
@@ -3187,6 +3121,7 @@ export default function App() {
   else if (view === 'documents') content = <Documents user={user} />;
   else if (view === 'orders') content = <Orders user={user} />;
   else if (view === 'people') content = <People user={user} />;
+  else if (view === 'settings') content = <Settings user={user} />;
   else if (view === 'messages') content = <Messages user={user} />;
   else if (view === 'ranking') content = <Ranking />;
   else if (view === 'ratings') content = <Ratings user={user} />;
