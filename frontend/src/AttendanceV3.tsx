@@ -337,7 +337,7 @@ export default function AttendanceV3({ user }: { user: User }) {
           <div className="attendance-row" key={entry.id}>
             <div className="attendance-person"><b>{dateOnly(entry.clock_in)}</b><small>{entry.shift_title || 'Arbeitszeit'}</small></div>
             <div className="attendance-change"><span>{dateTime(entry.clock_in)} – {dateTime(entry.clock_out)}</span><b>{durationLabel(entry.clock_in, entry.clock_out)} Std.</b></div>
-            {pendingByEntry.has(entry.id) ? <IonBadge color="warning">Korrektur offen</IonBadge> : (
+            {entry.wiw_time_id ? <IonBadge color="medium">WIW-Historie · schreibgeschützt</IonBadge> : pendingByEntry.has(entry.id) ? <IonBadge color="warning">Korrektur offen</IonBadge> : (
               <IonButton size="small" fill="outline" onClick={() => setCorrection({ entry, clock_in: toInput(entry.clock_in), clock_out: toInput(entry.clock_out), reason: '' })}>Korrektur</IonButton>
             )}
           </div>
