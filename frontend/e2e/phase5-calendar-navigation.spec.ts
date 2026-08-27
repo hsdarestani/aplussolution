@@ -37,6 +37,9 @@ test('Phase 5 separates Mitarbeiter and Kunden folders and names open digital fi
 
 test('Phase 5 prepare-build keeps client order location scoping idempotent', async () => {
   const prepare = readFileSync(resolve(process.cwd(), 'scripts/prepare-build.mjs'), 'utf8');
+  const app = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8');
+  const scopedBranch = "} else if (user.role === 'client') {\n      const locationData = await api('locations/');";
   expect(prepare).toContain('if (appNext.includes(scopedOrderMasterData))');
   expect(prepare).toContain('Already scoped in source; keep prepare:build idempotent.');
+  expect(app.split(scopedBranch).length - 1).toBe(1);
 });
