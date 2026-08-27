@@ -34,3 +34,9 @@ test('Phase 5 separates Mitarbeiter and Kunden folders and names open digital fi
   expect(search).toContain('openAkte(result.type, result.id)');
   expect(akte).toContain("url.searchParams.set('people_kind', kind === 'client' ? 'clients' : 'workers')");
 });
+
+test('Phase 5 prepare-build keeps client order location scoping idempotent', async () => {
+  const prepare = readFileSync(resolve(process.cwd(), 'scripts/prepare-build.mjs'), 'utf8');
+  expect(prepare).toContain('if (appNext.includes(scopedOrderMasterData))');
+  expect(prepare).toContain('Already scoped in source; keep prepare:build idempotent.');
+});
