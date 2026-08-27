@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.conf import settings
 from django.db.models import Count, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -202,7 +203,8 @@ def _exception_center_items(now):
             meta={'worker_id': str(entry.worker_id), 'worked_minutes': entry.worked_minutes},
         ))
 
-    # Contracts: signature/action and deadlines.
+    # Contracts: signature/action and deadlines. Migration-only worker shells are audit helpers,
+    # never people who should create a new operational contract exception.
     today = timezone.localdate()
     due_date = today + timedelta(days=30)
     contracts = Contract.objects.filter(
@@ -211,6 +213,9 @@ def _exception_center_items(now):
             ends_on__range=(today, due_date),
             status__in=[Contract.Status.READY, Contract.Status.SENT, Contract.Status.SIGNED],
         )
+    ).exclude(
+        worker__isnull=False,
+        worker__user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX,
     ).select_related('worker__user', 'client', 'template').order_by('ends_on', 'created_at')[:100]
     for contract in contracts:
         subject = (
@@ -242,8 +247,13 @@ def _exception_center_items(now):
                 meta={'days_remaining': days, 'status': contract.status},
             ))
 
-    # Personnel/document readiness: incomplete digital employee files.
-    workers = list(WorkerProfile.objects.filter(active=True).select_related('user').order_by('user__last_name')[:250])
+    # Personnel/document readiness: only real active workers belong in the exception inbox.
+    workers = list(
+        WorkerProfile.objects.filter(active=True)
+        .exclude(user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX)
+        .select_related('user')
+        .order_by('user__last_name')[:250]
+    )
     master_by_worker = {
         row.worker_id: row
         for row in EmployeeMasterData.objects.filter(worker__in=workers)
@@ -268,11 +278,15 @@ def _exception_center_items(now):
             },
         ))
 
-    # Integration failures should be actionable, but not dominate the screen forever.
-    for run in IntegrationSyncRun.objects.filter(
+    # Integration failures should be actionable, but WIW is intentionally disabled after
+    # the cutover. Old failed WIW runs must not keep the dashboard red for 14 days.
+    failed_integrations = IntegrationSyncRun.objects.filter(
         status=IntegrationSyncRun.Status.FAILED,
         started_at__gte=now - timedelta(days=14),
-    ).order_by('-started_at')[:20]:
+    )
+    if not settings.WIW_SYNC_ENABLED:
+        failed_integrations = failed_integrations.exclude(provider='wiw')
+    for run in failed_integrations.order_by('-started_at')[:20]:
         error = ''
         if run.errors:
             last = run.errors[-1]
@@ -288,9 +302,11 @@ def _exception_center_items(now):
             meta={'provider': run.provider, 'mode': run.mode},
         ))
 
-    for request in TimeOffRequest.objects.filter(status=TimeOffRequest.Status.PENDING).select_related(
-        'worker__user'
-    ).order_by('created_at')[:40]:
+    for request in TimeOffRequest.objects.filter(
+        status=TimeOffRequest.Status.PENDING,
+    ).exclude(
+        worker__user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX,
+    ).select_related('worker__user').order_by('created_at')[:40]:
         items.append(_exception(
             'requests',
             'info',
@@ -302,9 +318,11 @@ def _exception_center_items(now):
             meta={'worker_id': str(request.worker_id)},
         ))
 
-    for swap in ShiftSwapRequest.objects.filter(status=ShiftSwapRequest.Status.PENDING).select_related(
-        'requested_by__user', 'shift__position'
-    ).order_by('created_at')[:40]:
+    for swap in ShiftSwapRequest.objects.filter(
+        status=ShiftSwapRequest.Status.PENDING,
+    ).exclude(
+        requested_by__user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX,
+    ).select_related('requested_by__user', 'shift__position').order_by('created_at')[:40]:
         items.append(_exception(
             'requests',
             'info',
@@ -450,7 +468,10 @@ def global_search(request):
     ]
 
     contract_q = Q(title__icontains=query) | Q(worker__user__first_name__icontains=query) | Q(worker__user__last_name__icontains=query) | Q(worker__user__email__icontains=query) | Q(client__name__icontains=query) | Q(template__name__icontains=query)
-    contracts = Contract.objects.filter(contract_q).select_related('worker__user', 'client', 'template').order_by('-created_at')[:per_group]
+    contracts = Contract.objects.filter(contract_q).exclude(
+        worker__isnull=False,
+        worker__user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX,
+    ).select_related('worker__user', 'client', 'template').order_by('-created_at')[:per_group]
     contract_results = []
     for contract in contracts:
         subject = (
