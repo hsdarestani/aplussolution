@@ -320,7 +320,7 @@ test.describe('Phase 6 desktop smoke', () => {
       'Dienstplan',
       'Zeiterfassung',
       'Lohn & Dokumente',
-      'Nachrichten',
+      'Mitteilungen',
       'Anfragen, Berichte & Verwaltung',
       'Personal & Kunden',
       'Einstellungen',
@@ -334,7 +334,7 @@ test.describe('Phase 6 desktop smoke', () => {
     await expectNoHorizontalPageOverflow(page);
   });
 
-  test('worker desktop keeps the familiar schedule-attendance-chat-requests structure', async ({ page }) => {
+  test('worker desktop keeps the familiar schedule-attendance-mitteilungen-requests structure', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1000 });
     await mockApi(page, worker);
     await page.goto('/');
@@ -344,7 +344,7 @@ test.describe('Phase 6 desktop smoke', () => {
       'Start',
       'Mein Dienstplan',
       'Zeiterfassung',
-      'Nachrichten',
+      'Mitteilungen',
       'Anfragen',
       'Dokumente',
       'Meine Verträge',
