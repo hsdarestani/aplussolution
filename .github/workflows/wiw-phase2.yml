@@ -1,0 +1,60 @@
+name: WIW Phase 2 history reconciliation
+
+on:
+  workflow_run:
+    workflows: ["Validate and deploy production"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aplus-wiw-phase2-production
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - name: Prepare password SSH authentication
+        timeout-minutes: 1
+        env:
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_PASSWORD"
+          command -v ssh >/dev/null
+          command -v setsid >/dev/null
+          cat > /tmp/aplus-askpass.sh <<'ASKPASS'
+          #!/bin/sh
+          printf '%s\n' "$DEPLOY_PASSWORD"
+          ASKPASS
+          chmod 700 /tmp/aplus-askpass.sh
+
+      - name: Run verified one-time Phase 2 history reconciliation
+        timeout-minutes: 65
+        env:
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
+          HOST: ${{ secrets.HOST }}
+          SSH_ASKPASS: /tmp/aplus-askpass.sh
+          SSH_ASKPASS_REQUIRE: force
+          DISPLAY: :0
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$DEPLOY_PASSWORD"
+          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
+          setsid -w ssh \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=20 \
+            -o ServerAliveCountMax=20 \
+            root@"$HOST" \
+            'test -f /opt/aplussolution/scripts/production_wiw_phase2_resync.sh && bash /opt/aplussolution/scripts/production_wiw_phase2_resync.sh'
