@@ -4,9 +4,9 @@ Deutschsprachige Workforce-, Vertrags- und Portal-Plattform für **A+ Solution G
 
 ## Rollen
 
-- **Administration / Disposition:** Schichtplanung, OpenShifts, Zeiterfassung, Urlaub, Personal, Kunden, Verträge, Dokumente, Erinnerungen, Aufträge, Nachrichten, Bewertungen, Berichte und Audit-Log.
-- **Mitarbeiter:** Dienstplan, Schichtübernahme, Verfügbarkeit, Schichttausch, GPS-Arbeitszeitkonto, Abwesenheiten, Vertragsunterschrift, Dokumente, Lohnabrechnungen, Nachrichten und Ranking.
-- **Kunden:** Personalaufträge, Einsatzabdeckung, Dokumentenupload, Mitarbeiterbewertungen sowie Prüfung, Download und digitale Signatur von Vertragsunterlagen.
+- **Administration / Disposition:** Schichtplanung, OpenShifts, Schichtbestätigungen, Zeiterfassung, Urlaub, Personal, Kunden, Verträge, Dokumente, Erinnerungen, Aufträge, Einweg-Mitteilungen, Bewertungen, Berichte und Audit-Log.
+- **Mitarbeiter:** Dienstplan, `Ausstehend / Bestätigt / Abgelehnt` für bestätigungspflichtige Zuweisungen, Schichtübernahme, Verfügbarkeit, Schichttausch, GPS-Arbeitszeitkonto, Abwesenheiten, Vertragsunterschrift, Dokumente, Lohnabrechnungen, Mitteilungen-Posteingang und Ranking.
+- **Kunden:** Personalaufträge, Einsatzabdeckung, Dokumentenupload, Mitarbeiterbewertungen, Mitteilungen-Posteingang sowie Prüfung, Download und digitale Signatur von Vertragsunterlagen.
 
 ## Architektur
 
@@ -19,7 +19,9 @@ Deutschsprachige Workforce-, Vertrags- und Portal-Plattform für **A+ Solution G
 
 ## Enthaltene Funktionsbereiche
 
-Dienstplanung über mehrere Kunden und Einsatzorte, OpenShifts, Verfügbarkeiten, Schichttausch mit Freigabe, Wochenkopie, Sammelveröffentlichung, Überschneidungsprüfung, Personalabdeckung, Monatsstundenwarnung, GPS-Geofence-Zeiterfassung, Freigaben, Abwesenheiten, Kundenaufträge, digitale Personal- und Kundenakten, Vertragsgenerator, PDF, Signatur-Hash/IP/Audit, 30-/7-Tage-Erinnerungen an Administration, Mitarbeiter und Kundenkontakte, Lohnabrechnungen, Nachrichten, Benachrichtigungen, Rollenrechte, Bewertungen, Ranking und CSV-Berichte.
+Dienstplanung über mehrere Kunden und Einsatzorte, OpenShifts, bestätigungspflichtige Zuweisungen mit Status `Ausstehend / Bestätigt / Abgelehnt`, Verfügbarkeiten, Schichttausch mit Freigabe, Wochenkopie, Sammelveröffentlichung, Überschneidungsprüfung, Personalabdeckung, Monatsstundenwarnung, GPS-Geofence-Zeiterfassung, Freigaben, Abwesenheiten, Kundenaufträge, digitale Personal- und Kundenakten, Vertragsgenerator, PDF, Signatur-Hash/IP/Audit, 30-/7-Tage-Erinnerungen an Administration, Mitarbeiter und Kundenkontakte, Lohnabrechnungen, Einweg-Mitteilungen mit gezielter Empfängerauswahl, Datei/Bild, Push-Auslösung, Versandhistorie und Lesestatus, Rollenrechte, Bewertungen, Ranking und CSV-Berichte.
+
+Aktive Kommunikation erfolgt über **Mitteilungen**: Admin/Manager senden, Mitarbeiter und Kunden lesen. Ein Reply-Composer oder aktiver Chat gehört nicht mehr zur Produktoberfläche. Historische Conversation/Message-Daten bleiben nur für Rückwärtskompatibilität erhalten.
 
 ## Steuerzentrale
 
