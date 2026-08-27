@@ -3,6 +3,7 @@ from pathlib import Path
 from rest_framework import serializers
 from .models import *
 from .workforce_scope import canonical_position_name
+from .shift_rules import automatic_break_minutes, normalized_groups
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -98,6 +99,18 @@ class AvailabilitySerializer(serializers.ModelSerializer):
 
 
 class ShiftSerializer(serializers.ModelSerializer):
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        starts_at = attrs.get('starts_at', getattr(self.instance, 'starts_at', None))
+        ends_at = attrs.get('ends_at', getattr(self.instance, 'ends_at', None))
+        if starts_at and ends_at:
+            if ends_at <= starts_at:
+                raise serializers.ValidationError({'ends_at': 'Das Ende muss nach dem Beginn liegen.'})
+            attrs['break_minutes'] = automatic_break_minutes(starts_at, ends_at)
+        if 'schedule_groups' in attrs:
+            attrs['schedule_groups'] = normalized_groups(attrs.get('schedule_groups'))
+        return attrs
+
     worker_name = serializers.CharField(source='worker.user.get_full_name', read_only=True)
     client_name = serializers.CharField(source='client.name', read_only=True)
     location_name = serializers.CharField(source='location.name', read_only=True)

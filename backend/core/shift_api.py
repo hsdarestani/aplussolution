@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import Shift
 from .shift_slots import ShiftSlot
+from .shift_rules import automatic_break_minutes, normalized_groups
 
 
 class ShiftApiSerializer(serializers.ModelSerializer):
@@ -41,10 +42,22 @@ class ShiftApiSerializer(serializers.ModelSerializer):
             )
         return workers
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        starts_at = attrs.get('starts_at', getattr(self.instance, 'starts_at', None))
+        ends_at = attrs.get('ends_at', getattr(self.instance, 'ends_at', None))
+        if starts_at and ends_at:
+            if ends_at <= starts_at:
+                raise serializers.ValidationError({'ends_at': 'Das Ende muss nach dem Beginn liegen.'})
+            attrs['break_minutes'] = automatic_break_minutes(starts_at, ends_at)
+        if 'schedule_groups' in attrs:
+            attrs['schedule_groups'] = normalized_groups(attrs.get('schedule_groups'))
+        return attrs
+
     class Meta:
         model = Shift
         fields = [
             'id', 'order', 'order_title', 'client', 'client_name', 'location', 'location_name',
             'position', 'position_name', 'starts_at', 'ends_at', 'break_minutes', 'status', 'notes',
-            'required_count', 'confirmation_required', 'open_count', 'filled_count', 'assigned_workers',
+            'required_count', 'confirmation_required', 'schedule_groups', 'open_count', 'filled_count', 'assigned_workers',
         ]
