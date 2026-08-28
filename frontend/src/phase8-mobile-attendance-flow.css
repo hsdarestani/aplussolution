@@ -1,0 +1,372 @@
+/* Mobile attendance drill-down modeled on the WIW Pay Periods -> Employee -> Timesheet -> Entry flow. */
+@media (max-width: 900px) {
+  .mobile-first-app-shell-v1[data-view='time'] .global-search,
+  body.wiw-attendance-active .header-quick-access {
+    display: none !important;
+  }
+
+  body.wiw-attendance-drilldown .mobile-tabbar {
+    display: none !important;
+  }
+
+  body.wiw-attendance-drilldown .app {
+    padding-bottom: 0 !important;
+  }
+
+  .wiw-period-workers,
+  .wiw-worker-timesheet,
+  .wiw-attendance-entry-detail,
+  .wiw-attendance-editor {
+    min-height: 100dvh;
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--wiw-bg, #fff);
+    color: var(--wiw-copy, #323232);
+  }
+
+  .wiw-attendance-toolbar {
+    min-height: calc(64px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 8px 0;
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    background: var(--wiw-primary, #155eef);
+    color: #fff;
+    border: 0;
+  }
+
+  .wiw-attendance-toolbar > strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 15px;
+    font-weight: 500;
+  }
+
+  .wiw-attendance-toolbar button {
+    min-width: 40px;
+    height: 44px;
+    margin: 0;
+    padding: 0 8px;
+    border: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    color: #fff;
+    font: inherit;
+  }
+
+  .wiw-attendance-toolbar button ion-icon {
+    font-size: 23px;
+  }
+
+  .wiw-attendance-toolbar .text-action {
+    min-width: 72px;
+    padding-inline: 10px;
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  .wiw-entry-actions {
+    display: flex;
+    align-items: center;
+  }
+
+  .wiw-worker-list {
+    display: block;
+    background: var(--wiw-bg, #fff);
+  }
+
+  .wiw-worker-row {
+    width: 100%;
+    min-height: 62px;
+    padding: 7px 12px;
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    border: 0;
+    border-bottom: 1px solid var(--wiw-line, #dadada);
+    background: var(--wiw-row, #fff);
+    color: var(--wiw-copy, #323232);
+    text-align: left;
+  }
+
+  .wiw-worker-row strong {
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .wiw-worker-avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    background: #5a91bd;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  .wiw-worker-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .wiw-worker-avatar.small {
+    width: 32px;
+    height: 32px;
+    font-size: 10px;
+  }
+
+  .wiw-timesheet-person {
+    min-height: 48px;
+    padding: 7px 11px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--wiw-section, #f3f3f3);
+    border-bottom: 1px solid var(--wiw-line, #dadada);
+  }
+
+  .wiw-timesheet-person strong {
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .wiw-timesheet-days {
+    padding-bottom: 52px;
+  }
+
+  .wiw-timesheet-days section {
+    margin: 0;
+    padding: 0;
+  }
+
+  .wiw-timesheet-day-head {
+    min-height: 34px;
+    padding: 7px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: var(--wiw-section, #f3f3f3);
+    border-bottom: 1px solid var(--wiw-line, #dadada);
+    color: var(--wiw-muted, #8b8b8b);
+    font-size: 10px;
+  }
+
+  .wiw-timesheet-day-head strong {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--wiw-copy, #323232);
+  }
+
+  .wiw-timesheet-entry {
+    width: 100%;
+    min-height: 48px;
+    padding: 10px;
+    border: 0;
+    border-bottom: 1px solid var(--wiw-line, #dadada);
+    background: var(--wiw-row, #fff);
+    color: var(--wiw-copy, #323232);
+    text-align: left;
+    font: inherit;
+  }
+
+  .wiw-timesheet-entry span {
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .wiw-timesheet-total {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 900;
+    min-height: calc(42px + env(safe-area-inset-bottom));
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: #777;
+    color: #fff;
+    border-top: 1px solid rgba(0, 0, 0, .25);
+    font-size: 10px;
+  }
+
+  .wiw-timesheet-total strong {
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  .wiw-readonly-banner {
+    min-height: 38px;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #fff5d9;
+    color: #795a00;
+    border-bottom: 1px solid #ead99e;
+    font-size: 10px;
+  }
+
+  html[data-aplus-appearance='dark'] .wiw-readonly-banner {
+    background: #4c4227;
+    color: #f0d47c;
+    border-color: #665830;
+  }
+
+  .wiw-readonly-banner ion-icon {
+    flex: 0 0 auto;
+    font-size: 17px;
+  }
+
+  .wiw-entry-fields {
+    padding: 4px 14px 8px;
+  }
+
+  .wiw-entry-field {
+    min-height: 64px;
+    padding: 10px 0;
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+  }
+
+  .wiw-entry-field > ion-icon {
+    font-size: 22px;
+    color: var(--wiw-muted, #8b8b8b);
+  }
+
+  .wiw-entry-field > div {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+  }
+
+  .wiw-entry-field small {
+    color: var(--wiw-muted, #8b8b8b);
+    font-size: 9px;
+  }
+
+  .wiw-entry-field strong {
+    overflow-wrap: anywhere;
+    color: var(--wiw-copy, #323232);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .wiw-entry-history-button {
+    width: calc(100% - 30px);
+    min-height: 34px;
+    margin: 4px 15px 10px;
+    border: 1px solid var(--wiw-line, #dadada);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--wiw-copy, #323232);
+    font: 500 10px/1 inherit;
+  }
+
+  .wiw-entry-history {
+    margin: 0 15px 18px;
+    border: 1px solid var(--wiw-line, #dadada);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .wiw-entry-history > div {
+    min-height: 44px;
+    padding: 8px 10px;
+    display: grid;
+    grid-template-columns: 95px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--wiw-line, #dadada);
+    background: var(--wiw-row, #fff);
+  }
+
+  .wiw-entry-history > div:last-child {
+    border-bottom: 0;
+  }
+
+  .wiw-entry-history span {
+    color: var(--wiw-muted, #8b8b8b);
+    font-size: 9px;
+  }
+
+  .wiw-entry-history strong {
+    font-size: 10px;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+
+  .wiw-edit-form {
+    padding: 16px 14px;
+    display: grid;
+    gap: 14px;
+  }
+
+  .wiw-edit-form label {
+    display: grid;
+    gap: 5px;
+  }
+
+  .wiw-edit-form label > span {
+    color: var(--wiw-muted, #8b8b8b);
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .wiw-edit-form input,
+  .wiw-edit-form select,
+  .wiw-edit-form textarea {
+    width: 100%;
+    min-height: 46px;
+    padding: 9px 10px;
+    border: 1px solid var(--wiw-line, #dadada);
+    border-radius: 7px;
+    background: var(--wiw-row, #fff);
+    color: var(--wiw-copy, #323232);
+    font: 500 13px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    box-sizing: border-box;
+  }
+
+  .wiw-edit-form textarea {
+    min-height: 82px;
+    resize: vertical;
+  }
+
+  .wiw-attendance-message {
+    padding: 10px 12px;
+    border-radius: 7px;
+    background: #fff1f0;
+    color: #a32620;
+    border: 1px solid #f2c2bf;
+    font-size: 11px;
+  }
+
+  .wiw-attendance-message.floating {
+    margin: 10px 14px;
+  }
+
+  .wiw-period-workers .wiw-period-empty,
+  .wiw-worker-timesheet .wiw-period-empty {
+    min-height: 120px;
+    padding: 34px 16px;
+    display: grid;
+    place-items: center;
+    color: var(--wiw-muted, #8b8b8b);
+    text-align: center;
+    font-size: 11px;
+  }
+}
