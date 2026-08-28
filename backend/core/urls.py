@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, akten_views, announcement_api, attendance_actions, attendance_views, automation_views, client_order_planning, client_portal_views, contract_views, document_catalog_views, document_center_views, global_search_views, integration_views, live_admin_center, live_operations, native_operations, oauth_views, payroll_views, portal_views, push_views, searchable_views, shift_views, store_review_views, time_views, views, wiw_dashboard, worker_portal_views
+from . import admin_center_views, advanced_views, akten_views, announcement_api, attendance_actions, attendance_views, automation_views, client_order_planning, client_portal_views, contract_views, document_catalog_views, document_center_views, global_search_views, integration_views, live_admin_center, live_operations, native_operations, oauth_views, payroll_views, portal_views, push_views, searchable_views, shift_slot_actions, shift_views, store_review_views, time_views, views, wiw_dashboard, worker_portal_views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -60,6 +60,7 @@ urlpatterns = [
     path('attendance/corrections/<uuid:pk>/cancel/', attendance_views.cancel_time_correction),
     path('attendance/corrections/<uuid:pk>/decide/', attendance_views.decide_time_correction),
     path('attendance/exceptions/', attendance_views.attendance_exceptions),
+    path('shifts/<uuid:shift_id>/cards/<uuid:slot_id>/', shift_slot_actions.edit_shift_slot),
     path('workers/portal-status/', portal_views.portal_statuses),
     path('workers/<uuid:pk>/invite/', portal_views.invite_worker),
     path('workers/<uuid:pk>/akte/', akten_views.worker_akte),
