@@ -1,0 +1,98 @@
+from datetime import timedelta
+
+import pytest
+from django.core.cache import cache
+from django.utils import timezone
+
+from core import wiw_dashboard
+from core.wiw import WhenIWorkError
+
+
+class FakeWhenIWorkClient:
+    calls = []
+
+    def __init__(self):
+        type(self).calls = []
+
+    @staticmethod
+    def extract_collection(payload, name='items'):
+        return payload.get(name, []) if isinstance(payload, dict) else []
+
+    def get(self, path, params=None):
+        params = dict(params or {})
+        type(self).calls.append((path, params))
+        if path == '/shifts':
+            return {
+                'shifts': [
+                    {'id': 10, 'user_id': 0, 'is_open': True, 'published': True, 'instances': 16, 'end_time': (timezone.now() + timedelta(days=2)).isoformat()},
+                    {'id': 11, 'user_id': 0, 'is_open': True, 'published': True, 'instances': 1, 'end_time': (timezone.now() + timedelta(days=3)).isoformat()},
+                    {'id': 12, 'user_id': 99, 'is_open': False, 'published': True, 'instances': 50, 'end_time': (timezone.now() + timedelta(days=3)).isoformat()},
+                ]
+            }
+        if path == '/requests':
+            return {'requests': [{'id': 20, 'status': 0}], 'more': False}
+        if path == '/swaps':
+            return {'swaps': [{'id': 30, 'status': 0}], 'more': False}
+        if path == '/openshiftapprovalrequests':
+            return {
+                'openshiftapprovalrequests': [
+                    {'id': 40, 'status': 0},
+                    {'id': 41, 'status': 1},
+                ]
+            }
+        raise AssertionError(f'Unexpected path {path}')
+
+
+@pytest.mark.django_db
+def test_live_dashboard_uses_correct_wiw_resources_and_counts_instances(monkeypatch):
+    cache.clear()
+    monkeypatch.setattr(wiw_dashboard, 'WhenIWorkClient', FakeWhenIWorkClient)
+
+    result = wiw_dashboard._live_wiw_snapshot(timezone.now())
+
+    assert result['open_shifts_available'] == 17
+    assert result['time_off_requests'] == 1
+    assert result['shift_requests'] == 1
+    assert result['open_shift_requests'] == 1
+    assert result['source'] == 'wiw-live-readonly'
+    assert result['live_error'] == ''
+
+    calls = {path: params for path, params in FakeWhenIWorkClient.calls}
+    assert calls['/shifts']['include_open'] == 'true'
+    assert calls['/shifts']['include_onlyopen'] == 'true'
+    assert calls['/shifts']['include_allopen'] == 'true'
+    assert calls['/shifts']['all_locations'] == 'true'
+    assert calls['/requests']['status'] == 0
+    assert calls['/swaps']['status'] == 0
+    assert calls['/swaps']['open_only'] == 'true'
+    assert '/openshiftapprovalrequests' in calls
+
+
+def test_numeric_wiw_request_statuses_are_not_all_treated_as_pending():
+    assert wiw_dashboard._pending({'status': 0}) is True
+    assert wiw_dashboard._pending({'user_status': 0, 'status': 2}) is True
+    assert wiw_dashboard._pending({'status': 1}) is False
+    assert wiw_dashboard._pending({'status': 4}) is False
+    assert wiw_dashboard._pending({'status': 'pending'}) is True
+    assert wiw_dashboard._pending({'status': 'approved'}) is False
+
+
+@pytest.mark.django_db
+def test_one_failed_wiw_resource_does_not_zero_other_live_counters(monkeypatch):
+    class PartialClient(FakeWhenIWorkClient):
+        def get(self, path, params=None):
+            if path == '/openshiftapprovalrequests':
+                raise WhenIWorkError('temporary upstream error')
+            return super().get(path, params=params)
+
+    cache.clear()
+    monkeypatch.setattr(wiw_dashboard, 'WhenIWorkClient', PartialClient)
+
+    result = wiw_dashboard._live_wiw_snapshot(timezone.now())
+
+    assert result['open_shifts_available'] == 17
+    assert result['time_off_requests'] == 1
+    assert result['shift_requests'] == 1
+    assert 'open_shift_requests' not in result
+    assert result['source'] == 'wiw-live-partial'
+    assert 'OpenShiftRequests' in result['live_error']

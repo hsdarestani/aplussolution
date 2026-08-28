@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from dateutil.parser import parse as parse_flexible_datetime
 from django.conf import settings
@@ -15,9 +15,11 @@ from .premium_approval_models import ShiftPickupRequest
 from .wiw import WhenIWorkClient, WhenIWorkError
 
 
-CACHE_KEY = 'wiw:admin-home-snapshot:v1'
+CACHE_KEY = 'wiw:admin-home-snapshot:v2'
 CACHE_SECONDS = 60
 MANAGER_ROLES = {User.Role.ADMIN, User.Role.MANAGER}
+WIW_DASHBOARD_FUTURE_DAYS = 370
+WIW_PAGE_LIMIT = 200
 
 
 def _value(item, *keys, default=None):
@@ -52,63 +54,109 @@ def _as_datetime(value):
     return result
 
 
+def _as_bool(value, default=False):
+    if value in (None, ''):
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() not in {'0', 'false', 'no', 'off', 'none', 'null'}
+
+
 def _pending(item):
-    status = str(_value(item, 'status', 'state', default='pending') or 'pending').strip().lower()
-    return status not in {
+    # All three WIW request APIs use numeric status 0 for Pending. Older
+    # payloads and local fixtures sometimes use text labels, so support both.
+    status = _value(item, 'user_status', 'status', 'state', default='pending')
+    if isinstance(status, (int, float)) or str(status).strip().lstrip('-').isdigit():
+        try:
+            return int(status) == 0
+        except (TypeError, ValueError):
+            pass
+    return str(status or 'pending').strip().lower() not in {
         'approved', 'accepted', 'complete', 'completed', 'done',
         'denied', 'rejected', 'cancelled', 'canceled', 'deleted', 'expired',
     }
 
 
-def _request_bucket(item):
-    fields = [
-        _value(item, 'type', 'request_type', 'kind', 'category', 'action', 'request_subtype', 'name', default=''),
-    ]
-    shift = item.get('shift')
-    if isinstance(shift, dict):
-        fields.extend([
-            _value(shift, 'type', 'kind', 'name', default=''),
-            _value(shift, 'status', default=''),
-        ])
-    haystack = ' '.join(str(value or '').strip().lower() for value in fields)
-    normalized = haystack.replace('-', '_').replace(' ', '_')
+def _dedupe(items):
+    result = []
+    seen = set()
+    for item in items:
+        identifier = _value(item, 'id', 'request_id', 'swap_id', 'shift_id')
+        key = str(identifier) if identifier not in (None, '') else repr(sorted(item.items()))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(item)
+    return result
 
-    if any(token in normalized for token in (
-        'time_off', 'timeoff', 'pto', 'absence', 'vacation', 'unavailable', 'availability',
-    )):
-        return 'time_off_requests'
-    if any(token in normalized for token in (
-        'open_shift', 'openshift', 'pickup', 'pick_up', 'claim', 'take_open',
-    )):
-        return 'open_shift_requests'
-    if any(token in normalized for token in (
-        'shift_swap', 'swap', 'trade', 'drop_shift', 'release_shift', 'shift_request',
-    )):
-        return 'shift_requests'
 
-    # WIW has used more than one request payload shape over time. If the type
-    # string is absent but the object points at a shift, keep it in the generic
-    # shift-request bucket instead of silently showing zero on the dashboard.
-    if _value(item, 'shift_id', 'shiftid') not in (None, '', 0, '0') or isinstance(shift, dict):
-        return 'shift_requests'
-    return None
+def _paged_get(client, path, collection_name, params, *, page_start=0, max_pages=25):
+    rows = []
+    page = page_start
+    limit = int(params.get('limit') or WIW_PAGE_LIMIT)
+    for _ in range(max_pages):
+        payload = client.get(path, params={**params, 'page': page})
+        batch = client.extract_collection(payload, collection_name)
+        rows.extend(batch)
+        if isinstance(payload, dict) and payload.get('more') is True:
+            page += 1
+            continue
+        # OpenShift approval responses do not consistently expose `more`.
+        # A short page is therefore the safe terminal condition.
+        if len(batch) >= limit and batch:
+            page += 1
+            continue
+        break
+    return _dedupe(rows)
+
+
+def _open_shift_instances(item):
+    worker_id = _value(item, 'user_id', 'worker_id', 'user', 'worker')
+    if isinstance(worker_id, dict):
+        worker_id = worker_id.get('id') or worker_id.get('user_id')
+    explicitly_open = _as_bool(_value(item, 'is_open', default=False))
+    unassigned = worker_id in (None, '', 0, '0', False)
+    if not (explicitly_open or unassigned):
+        return 0
+    if not _as_bool(_value(item, 'published', default=True), default=True):
+        return 0
+    status = str(_value(item, 'status', default='published') or 'published').strip().lower()
+    if status in {'cancelled', 'canceled', 'deleted', 'draft'}:
+        return 0
+    try:
+        return max(1, int(_value(item, 'instances', default=1) or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _local_open_shift_count(now):
+    rows = Shift.objects.filter(
+        is_open=True,
+        worker__isnull=True,
+        status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
+        ends_at__gte=now,
+    ).values('wiw_payload')
+    total = 0
+    for row in rows:
+        payload = row.get('wiw_payload') or {}
+        try:
+            total += max(1, int(payload.get('instances') or 1))
+        except (TypeError, ValueError):
+            total += 1
+    return total
 
 
 def _local_snapshot(now):
     exceptions = admin_base._exception_center_items(now)
     attendance_notices = sum(item.get('category') == 'attendance' for item in exceptions)
-    open_shifts = Shift.objects.filter(
-        is_open=True,
-        worker__isnull=True,
-        status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
-        ends_at__gte=now,
-    ).count()
     return {
         'attendance_notices': attendance_notices,
         'time_off_requests': TimeOffRequest.objects.filter(status=TimeOffRequest.Status.PENDING).count(),
         'shift_requests': ShiftSwapRequest.objects.filter(status=ShiftSwapRequest.Status.PENDING).count(),
         'open_shift_requests': ShiftPickupRequest.objects.filter(status=ShiftPickupRequest.Status.PENDING).count(),
-        'open_shifts_available': open_shifts,
+        'open_shifts_available': _local_open_shift_count(now),
         'source': 'aplus-local',
     }
 
@@ -119,46 +167,86 @@ def _live_wiw_snapshot(now):
         return cached
 
     client = WhenIWorkClient()
-    shifts = client.collection('shifts', optional=False).items
-    requests = client.collection('requests', optional=True).items
+    local_now = timezone.localtime(now)
+    start_date = (local_now - timedelta(days=1)).date()
+    end_date = (local_now + timedelta(days=WIW_DASHBOARD_FUTURE_DAYS)).date()
+    end_at = now + timedelta(days=WIW_DASHBOARD_FUTURE_DAYS)
 
-    open_shifts = 0
-    for item in shifts:
-        worker_id = _value(item, 'user_id', 'worker_id', 'user', 'worker')
-        if isinstance(worker_id, dict):
-            worker_id = worker_id.get('id') or worker_id.get('user_id')
-        if worker_id not in (None, '', 0, '0', False):
-            continue
-        status = str(_value(item, 'status', default='published') or 'published').lower()
-        if status in {'cancelled', 'canceled', 'deleted', 'draft'}:
-            continue
-        end = _as_datetime(_value(item, 'end_time', 'end', 'ends_at'))
-        if end and end < now:
-            continue
-        open_shifts += 1
+    snapshot = {}
+    errors = []
 
-    request_counts = {
-        'time_off_requests': 0,
-        'shift_requests': 0,
-        'open_shift_requests': 0,
-    }
-    unknown_requests = 0
-    for item in requests:
-        if not _pending(item):
-            continue
-        bucket = _request_bucket(item)
-        if bucket:
-            request_counts[bucket] += 1
-        else:
-            unknown_requests += 1
+    # WIW does NOT return OpenShifts from a plain /shifts call. Its default
+    # window is only now..+3 days and open shifts require the include_* flags.
+    # Count `instances`, because a single OpenShift object can represent more
+    # than one available slot in the WIW dashboard.
+    try:
+        shift_payload = client.get('/shifts', params={
+            'start': now.isoformat(),
+            'end': end_at.isoformat(),
+            'include_open': 'true',
+            'include_onlyopen': 'true',
+            'include_allopen': 'true',
+            'all_locations': 'true',
+            'unpublished': 'false',
+            'limit': 500,
+        })
+        shifts = client.extract_collection(shift_payload, 'shifts')
+        open_shifts = 0
+        for item in shifts:
+            end = _as_datetime(_value(item, 'end_time', 'end', 'ends_at'))
+            if end and end < now:
+                continue
+            open_shifts += _open_shift_instances(item)
+        snapshot['open_shifts_available'] = open_shifts
+    except Exception as exc:
+        errors.append(f'OpenShifts: {exc}')
 
-    snapshot = {
-        **request_counts,
-        'open_shifts_available': open_shifts,
-        'wiw_open_requests_unclassified': unknown_requests,
-        'source': 'wiw-live-readonly',
+    # Time Off Requests live at /requests. Ask WIW for pending requests in a
+    # real date window; the endpoint requires start/end and otherwise the old
+    # implementation could silently fall back to zero.
+    try:
+        time_off = _paged_get(client, '/requests', 'requests', {
+            'start': start_date.isoformat(),
+            'end': end_date.isoformat(),
+            'status': 0,
+            'limit': WIW_PAGE_LIMIT,
+        }, page_start=0)
+        snapshot['time_off_requests'] = sum(1 for item in time_off if _pending(item))
+    except Exception as exc:
+        errors.append(f'TimeOff: {exc}')
+
+    # Shift Requests are a separate WIW resource (/swaps). They are not mixed
+    # into /requests.
+    try:
+        swaps = _paged_get(client, '/swaps', 'swaps', {
+            'start': now.isoformat(),
+            'end': end_at.isoformat(),
+            'status': 0,
+            'open_only': 'true',
+            'limit': WIW_PAGE_LIMIT,
+        }, page_start=1)
+        snapshot['shift_requests'] = sum(1 for item in swaps if _pending(item))
+    except Exception as exc:
+        errors.append(f'ShiftRequests: {exc}')
+
+    # Shift Bidding / OpenShift Requests has its own approval-request API.
+    # Count pending approval requests, not Time Off rows that happen to point to
+    # a shift.
+    try:
+        approvals = _paged_get(client, '/openshiftapprovalrequests', 'openshiftapprovalrequests', {
+            'start': start_date.isoformat(),
+            'end': end_date.isoformat(),
+            'limit': WIW_PAGE_LIMIT,
+        }, page_start=0)
+        snapshot['open_shift_requests'] = sum(1 for item in approvals if _pending(item))
+    except Exception as exc:
+        errors.append(f'OpenShiftRequests: {exc}')
+
+    snapshot.update({
+        'source': 'wiw-live-partial' if errors else 'wiw-live-readonly',
         'fetched_at': now.isoformat(),
-    }
+        'live_error': ' | '.join(errors),
+    })
     cache.set(CACHE_KEY, snapshot, CACHE_SECONDS)
     return snapshot
 
@@ -175,6 +263,7 @@ def mobile_dashboard(request):
     if settings.WIW_SYNC_ENABLED and settings.WIW_DEV_KEY and settings.WIW_EMAIL and settings.WIW_PASSWORD:
         try:
             live = _live_wiw_snapshot(now)
+            live_error = str(live.get('live_error') or '')
             snapshot.update(live)
         except WhenIWorkError as exc:
             live_error = str(exc)
