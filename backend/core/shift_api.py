@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import Shift
+from .premium_approval_models import ShiftReleaseRequest
 from .shift_slots import ShiftSlot
 from .shift_rules import automatic_break_minutes, normalized_groups
 
@@ -40,6 +41,15 @@ class ShiftApiSerializer(serializers.ModelSerializer):
             payload['avatar'] = avatar
         return payload
 
+    def _list_instances(self):
+        instances = getattr(getattr(self, 'parent', None), 'instance', None)
+        if instances is None or isinstance(instances, Shift):
+            return []
+        try:
+            return list(instances)
+        except TypeError:
+            return []
+
     def _schedule_slots(self, obj):
         """Load card slots once for a whole list instead of once per Shift.
 
@@ -55,24 +65,16 @@ class ShiftApiSerializer(serializers.ModelSerializer):
 
         bulk_map = getattr(self, '_bulk_schedule_slot_map', None)
         if bulk_map is None:
-            instances = getattr(getattr(self, 'parent', None), 'instance', None)
-            if instances is not None and not isinstance(instances, Shift):
-                try:
-                    rows = list(instances)
-                except TypeError:
-                    rows = []
-                shift_ids = [row.pk for row in rows if getattr(row, 'pk', None)]
-                bulk_map = {shift_id: [] for shift_id in shift_ids}
-                if shift_ids:
-                    slots = ShiftSlot.objects.filter(shift_id__in=shift_ids).select_related(
-                        'worker__user'
-                    ).order_by('shift_id', 'created_at')
-                    for slot in slots:
-                        bulk_map.setdefault(slot.shift_id, []).append(slot)
-                self._bulk_schedule_slot_map = bulk_map
-            else:
-                bulk_map = {}
-                self._bulk_schedule_slot_map = bulk_map
+            rows = self._list_instances()
+            shift_ids = [row.pk for row in rows if getattr(row, 'pk', None)]
+            bulk_map = {shift_id: [] for shift_id in shift_ids}
+            if shift_ids:
+                slots = ShiftSlot.objects.filter(shift_id__in=shift_ids).select_related(
+                    'worker__user'
+                ).order_by('shift_id', 'created_at')
+                for slot in slots:
+                    bulk_map.setdefault(slot.shift_id, []).append(slot)
+            self._bulk_schedule_slot_map = bulk_map
 
         if obj.pk in bulk_map:
             slots = bulk_map[obj.pk]
@@ -123,7 +125,23 @@ class ShiftApiSerializer(serializers.ModelSerializer):
         if prefetched is not None:
             row = next((item for item in prefetched if item.worker_id == worker.id), None)
         else:
-            row = obj.release_requests.filter(worker=worker, status='pending').order_by('-created_at').first()
+            bulk_map = getattr(self, '_bulk_release_request_map', None)
+            if bulk_map is None:
+                rows = self._list_instances()
+                shift_ids = [item.pk for item in rows if getattr(item, 'pk', None)]
+                bulk_map = {}
+                if shift_ids:
+                    pending = ShiftReleaseRequest.objects.filter(
+                        shift_id__in=shift_ids,
+                        worker=worker,
+                        status=ShiftReleaseRequest.Status.PENDING,
+                    ).order_by('shift_id', '-created_at')
+                    for item in pending:
+                        bulk_map.setdefault(item.shift_id, item)
+                self._bulk_release_request_map = bulk_map
+            row = bulk_map.get(obj.pk)
+            if row is None and not self._list_instances():
+                row = obj.release_requests.filter(worker=worker, status='pending').order_by('-created_at').first()
         if not row:
             return None
         return {
