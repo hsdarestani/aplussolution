@@ -193,6 +193,7 @@ test.describe('Phase 6 mobile QA', () => {
     await expectNoHorizontalPageOverflow(page);
 
     await page.locator('ion-segment-button[value="mine"]').click();
+    await dayView.getByRole('button', { name: /Servicekraft/ }).first().click();
     await expect(page.getByRole('button', { name: 'Freigeben' })).toBeVisible();
     await page.getByRole('button', { name: 'Freigeben' }).click();
     await expect(page.getByText('Schicht freigeben?', { exact: true })).toBeVisible();
