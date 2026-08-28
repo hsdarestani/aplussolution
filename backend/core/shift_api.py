@@ -40,11 +40,26 @@ class ShiftApiSerializer(serializers.ModelSerializer):
             payload['avatar'] = avatar
         return payload
 
+    def _schedule_slots(self, obj):
+        """Reuse the bulk-prefetched slot list when the shift view provided it.
+
+        Schedule pages can contain hundreds of shifts. Querying claimed slots and
+        card slots separately for every Shift created an avoidable 2N query fanout
+        and made the admin Dienstplan feel much slower than WIW. The view now
+        prefetches one ordered slot list for all shifts; serializers filter that
+        list in memory. Callers that do not use the optimized queryset keep the
+        old safe fallback.
+        """
+        prefetched = getattr(obj, '_schedule_slots', None)
+        if prefetched is not None:
+            return prefetched
+        return list(obj.slots.select_related('worker__user').order_by('created_at'))
+
     def get_assigned_workers(self, obj):
-        slots = obj.slots.filter(
-            status=ShiftSlot.Status.CLAIMED,
-            worker__isnull=False,
-        ).select_related('worker__user').order_by('created_at')
+        slots = [
+            slot for slot in self._schedule_slots(obj)
+            if slot.status == ShiftSlot.Status.CLAIMED and slot.worker_id is not None
+        ]
         return [self._worker_payload(slot, include_avatar=True) for slot in slots]
 
     def get_slot_cards(self, obj):
@@ -55,9 +70,7 @@ class ShiftApiSerializer(serializers.ModelSerializer):
         parent Shift. Individual edits can split one card through the dedicated
         slot-edit endpoint; bulk edits keep changing the shared parent.
         """
-        slots = obj.slots.exclude(status=ShiftSlot.Status.CANCELLED).select_related(
-            'worker__user'
-        ).order_by('created_at')
+        slots = [slot for slot in self._schedule_slots(obj) if slot.status != ShiftSlot.Status.CANCELLED]
         return [
             {
                 'id': str(slot.id),
@@ -79,7 +92,12 @@ class ShiftApiSerializer(serializers.ModelSerializer):
             worker = request.user.worker_profile
         except Exception:
             return None
-        row = obj.release_requests.filter(worker=worker, status='pending').order_by('-created_at').first()
+
+        prefetched = getattr(obj, '_pending_release_requests', None)
+        if prefetched is not None:
+            row = next((item for item in prefetched if item.worker_id == worker.id), None)
+        else:
+            row = obj.release_requests.filter(worker=worker, status='pending').order_by('-created_at').first()
         if not row:
             return None
         return {
