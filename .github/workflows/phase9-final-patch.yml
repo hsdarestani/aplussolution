@@ -1,0 +1,28 @@
+name: Apply final WIW mobile integration
+
+on:
+  push:
+    branches:
+      - fix/wiw-mobile-light-attendance-history
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/wiw-mobile-light-attendance-history
+      - name: Apply final patch
+        run: python scripts/phase9_final_patch.py
+      - name: Commit and remove helper
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/phase9-final-patch.yml scripts/phase9_final_patch.py
+          git add backend/core/attendance_views.py backend/core/urls.py frontend/src/AttendanceV3.tsx frontend/src/App.tsx frontend/src/AdminHomeV4.tsx frontend/src/Phase8MobileAttendance.tsx frontend/src/wiw-mobile-light.css frontend/src/mobileAppearance.ts
+          git commit -m 'Finish WIW light mobile integration and attendance archive'
+          git push origin HEAD:fix/wiw-mobile-light-attendance-history
