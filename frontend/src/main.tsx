@@ -32,6 +32,7 @@ import AdminScheduleTools from './AdminScheduleTools';
 import AdminAvailabilityManager from './AdminAvailabilityManager';
 import CheckoutReviewEnhancer from './CheckoutReviewEnhancer';
 import DesktopAttendanceHistoryEnhancer from './DesktopAttendanceHistoryEnhancer';
+import MobileAttendanceClarityEnhancer from './MobileAttendanceClarityEnhancer';
 import NativePushRegistration from './NativePushRegistration';
 import { installBerlinLocaleDefaults } from './berlinLocale';
 import { installOperationalFetchResilience } from './operationalFetchResilience';
@@ -66,6 +67,7 @@ function renderApp() {
           <AdminAvailabilityManager />
           <CheckoutReviewEnhancer />
           <DesktopAttendanceHistoryEnhancer />
+          <MobileAttendanceClarityEnhancer />
           <NativePushRegistration />
           <StoreComplianceLinks />
           <FriendlyDateTimePicker />
