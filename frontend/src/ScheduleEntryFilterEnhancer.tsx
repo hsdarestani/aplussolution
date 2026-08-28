@@ -35,7 +35,12 @@ export default function ScheduleEntryFilterEnhancer() {
       if (!button) return;
 
       initialized.current = true;
-      sessionStorage.removeItem(ENTRY_FILTER_KEY);
+      // On mobile the WIW overlay reads the same entry intent after the
+      // authenticated role resolves. Leave it in sessionStorage until that
+      // overlay consumes it; desktop has no overlay, so consume it here.
+      if (!window.matchMedia('(max-width: 900px)').matches) {
+        sessionStorage.removeItem(ENTRY_FILTER_KEY);
+      }
       window.setTimeout(() => button.click(), 0);
     };
 
