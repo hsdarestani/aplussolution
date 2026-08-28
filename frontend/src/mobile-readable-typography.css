@@ -1,0 +1,161 @@
+/* Launch typography baseline — readable on normal phone screens for every role. */
+@media (max-width: 900px) {
+  :root {
+    --app-mobile-font-base: 15px;
+    --app-mobile-font-secondary: 13px;
+    --app-mobile-font-section: 12px;
+    --app-mobile-font-title: 20px;
+    --app-mobile-line-height: 1.4;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body,
+  ion-app,
+  .mobile-first-app-shell-v1,
+  .app-main,
+  main {
+    font-size: var(--app-mobile-font-base) !important;
+    line-height: var(--app-mobile-line-height);
+  }
+
+  /* Keep form controls at a normal readable size and avoid mobile browser zoom. */
+  ion-input,
+  ion-textarea,
+  ion-select,
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
+  ion-button,
+  button {
+    font-size: 14px;
+  }
+
+  .mobile-first-app-shell-v1 main small,
+  .app-main small {
+    font-size: var(--app-mobile-font-secondary);
+    line-height: 1.35;
+  }
+
+  /* Top shell and bottom navigation. */
+  .mobile-page-title strong { font-size: 17px !important; }
+  .mobile-page-title small { font-size: 12px !important; }
+  .mobile-tabbar button span { font-size: 11px !important; line-height: 1.2 !important; }
+  .mobile-tabbar button ion-icon { font-size: 23px !important; }
+  .global-search ion-input,
+  .global-search input { font-size: 16px !important; }
+
+  /* Employee/admin WIW-style dashboard hierarchy. */
+  .wiw-section-label {
+    font-size: var(--app-mobile-font-section) !important;
+    line-height: 1.25 !important;
+  }
+  .wiw-mobile-row strong { font-size: 15px !important; line-height: 1.35 !important; }
+  .wiw-row-icon,
+  .wiw-count { font-size: 13px !important; }
+  .wiw-row-icon ion-icon { font-size: 20px !important; }
+  .wiw-next-shift small { font-size: 13px !important; }
+  .wiw-next-shift strong { font-size: 15px !important; line-height: 1.3 !important; }
+  .wiw-next-shift span { font-size: 13px !important; line-height: 1.35 !important; }
+  .wiw-upcoming strong { font-size: 15px !important; }
+  .wiw-upcoming span { font-size: 13px !important; line-height: 1.35 !important; }
+  .wiw-upcoming > button { font-size: 14px !important; }
+
+  /* More screen. */
+  .wiw-more-title { font-size: var(--app-mobile-font-title) !important; }
+  .wiw-more-user,
+  .wiw-more-section { font-size: var(--app-mobile-font-section) !important; }
+  .wiw-more-row span { font-size: 15px !important; line-height: 1.35 !important; }
+  .wiw-more-row ion-icon { font-size: 20px !important; }
+
+  /* Attendance / pay periods. */
+  .wiw-mobile-screen-title { font-size: var(--app-mobile-font-title) !important; }
+  .wiw-period-row { min-height: 52px !important; padding: 12px 14px !important; }
+  .wiw-period-row strong { font-size: 14px !important; line-height: 1.35 !important; }
+  .wiw-period-back { font-size: 14px !important; }
+  .wiw-period-title small { font-size: 12px !important; }
+  .wiw-period-title h1 { font-size: 19px !important; }
+  .wiw-period-title strong { font-size: 21px !important; }
+  .wiw-time-entry strong { font-size: 15px !important; }
+  .wiw-time-entry span,
+  .wiw-time-entry small,
+  .wiw-period-empty { font-size: 13px !important; line-height: 1.4 !important; }
+
+  /* Admin dashboard cards outside the flattened WIW overview. */
+  .admin-home-v4 p { font-size: 14px; line-height: 1.5; }
+  .admin-home-v4 small { font-size: 12px; line-height: 1.35; }
+  .admin-priority-heading h2 { font-size: 20px !important; }
+  .admin-priority-actions button > strong { font-size: 14px !important; }
+  .admin-priority-actions button > small { font-size: 12px !important; }
+  .attention-item-copy h3 { font-size: 17px !important; }
+  .attention-item-copy p { font-size: 14px !important; }
+  .attention-item-topline { font-size: 12px !important; }
+
+  /* Manager scheduler. */
+  .sv2 > ion-segment ion-segment-button { font-size: 12px !important; }
+  .sv2-wiw-week-strip button { font-size: 11px !important; }
+  .sv2-wiw-week-strip button span { font-size: 10px !important; }
+  .sv2-wiw-week-strip button b { font-size: 13px !important; }
+  .sv2-single-day > header h2 { font-size: 13px !important; }
+  .sv2-single-day > header span { font-size: 12px !important; }
+  .sv2-event-head strong { font-size: 15px !important; line-height: 1.3 !important; }
+  .sv2-event-head > span { font-size: 12px !important; }
+  .sv2-event-details .sv2-field-copy,
+  .sv2-event-details.compact .sv2-field-copy { font-size: 13px !important; line-height: 1.35 !important; }
+  .sv2-mini-actions ion-button { font-size: 12px !important; }
+  .sv2-wiw-total { font-size: 14px !important; }
+
+  /* Employee scheduler. */
+  .wiw-employee-tabs ion-segment-button { font-size: 15px !important; }
+  .wiw-employee-tabs b { font-size: 12px !important; }
+  .wiw-employee-week-strip button small { font-size: 11px !important; }
+  .wiw-employee-week-strip button b { font-size: 16px !important; }
+  .wiw-employee-day > header strong { font-size: 14px !important; }
+  .wiw-employee-day > header span { font-size: 13px !important; }
+  .wiw-employee-day > header em { font-size: 12px !important; }
+  .wiw-employee-shift-card > div b,
+  .wiw-employee-shift-card > div span { font-size: 16px !important; }
+  .wiw-employee-shift-card p { font-size: 15px !important; }
+  .wiw-employee-shift-card small { font-size: 13px !important; }
+  .wiw-employee-shift-card i { font-size: 12px !important; }
+  .wiw-employee-day-empty { font-size: 14px !important; }
+  .wiw-employee-week-total span { font-size: 14px !important; }
+  .wiw-employee-week-total strong { font-size: 19px !important; }
+  .wiw-employee-detail-topbar strong { font-size: 18px !important; }
+  .wiw-employee-detail-row { font-size: 16px !important; line-height: 1.35 !important; }
+  .wiw-employee-detail-actions button { font-size: 15px !important; }
+  .wiw-employee-message { font-size: 14px !important; }
+
+  /* Employee clock-in card and notices. */
+  .wiw-home-clock-copy b { font-size: 16px !important; }
+  .wiw-home-clock-copy small { font-size: 13px !important; }
+  .wiw-home-clock-card > button { font-size: 16px !important; }
+  .wiw-worker-upcoming strong { font-size: 15px !important; }
+  .wiw-worker-upcoming span,
+  .wiw-home-notice { font-size: 13px !important; line-height: 1.4 !important; }
+
+  /* Generic mobile lists/forms used by operations, people, documents, messages and settings. */
+  .mobile-first-app-shell-v1 ion-item,
+  .mobile-first-app-shell-v1 ion-label,
+  .mobile-first-app-shell-v1 .row,
+  .mobile-first-app-shell-v1 .panel,
+  .mobile-first-app-shell-v1 .notice {
+    font-size: 15px;
+  }
+
+  .mobile-first-app-shell-v1 .row p,
+  .mobile-first-app-shell-v1 .panel p,
+  .mobile-first-app-shell-v1 .notice,
+  .mobile-first-app-shell-v1 .muted,
+  .mobile-first-app-shell-v1 .helper,
+  .mobile-first-app-shell-v1 .hint {
+    font-size: 13px;
+    line-height: 1.45;
+  }
+}
