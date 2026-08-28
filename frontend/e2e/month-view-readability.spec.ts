@@ -10,7 +10,7 @@ test('month cards use icons without repeated field labels and keep readable valu
   const schedule = source('src/ScheduleV2.tsx');
 
   expect(main).toContain("import './schedule-month-compact.css';");
-  expect(css).toContain('.sv2-month-grid .sv2-event-details.compact .sv2-field-copy>small{display:none}');
+  expect(css).toContain('.sv2 .sv2-month-grid .sv2-event-details.compact .sv2-field-copy>small{display:none}');
   expect(css).toContain('font-size:10px');
   expect(css).toContain('grid-template-columns:repeat(7,minmax(145px,1fr))');
   expect(schedule).toContain("view==='month'");
