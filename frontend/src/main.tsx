@@ -26,6 +26,8 @@ import HeaderQuickAccess from './HeaderQuickAccess';
 import ScheduleMobileEnhancer from './ScheduleMobileEnhancer';
 import ScheduleEntryFilterEnhancer from './ScheduleEntryFilterEnhancer';
 import WiwScheduleMobile from './WiwScheduleMobile';
+import AdminScheduleTools from './AdminScheduleTools';
+import AdminAvailabilityManager from './AdminAvailabilityManager';
 import CheckoutReviewEnhancer from './CheckoutReviewEnhancer';
 import DesktopAttendanceHistoryEnhancer from './DesktopAttendanceHistoryEnhancer';
 import NativePushRegistration from './NativePushRegistration';
@@ -55,6 +57,8 @@ function renderApp() {
           <ScheduleMobileEnhancer />
           <ScheduleEntryFilterEnhancer />
           <WiwScheduleMobile />
+          <AdminScheduleTools />
+          <AdminAvailabilityManager />
           <CheckoutReviewEnhancer />
           <DesktopAttendanceHistoryEnhancer />
           <NativePushRegistration />
