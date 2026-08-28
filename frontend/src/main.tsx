@@ -15,7 +15,7 @@ import './mobile-header-actions-fix.css';
 import './phase8-wiw-mobile.css';
 import './wiw-mobile-light.css';
 import './schedule-month-compact.css';
-import App from './App';
+App from './App';
 import StoreComplianceLinks from './StoreComplianceLinks';
 import StoreLegalPage, { legalPageFromPath } from './StoreLegalPages';
 import FriendlyDateTimePicker from './FriendlyDateTimePicker';
@@ -42,6 +42,7 @@ import { installMobileAppearance } from './mobileAppearance';
 import './brand-navy.css';
 import './mobile-readable-typography.css';
 import './mobile-page-gutters.css';
+import './wiw-shift-save-hotfix.css';
 
 installBerlinLocaleDefaults();
 installOperationalFetchResilience();
