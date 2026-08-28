@@ -24,11 +24,13 @@ import WorkflowCompletionEnhancer from './WorkflowCompletionEnhancer';
 import ApiHealthBanner from './ApiHealthBanner';
 import HeaderQuickAccess from './HeaderQuickAccess';
 import ScheduleMobileEnhancer from './ScheduleMobileEnhancer';
+import DesktopAttendanceHistoryEnhancer from './DesktopAttendanceHistoryEnhancer';
 import NativePushRegistration from './NativePushRegistration';
 import { installBerlinLocaleDefaults } from './berlinLocale';
 import { installOperationalFetchResilience } from './operationalFetchResilience';
 import { installLocationPicker } from './locationPicker';
 import { installMobileAppearance } from './mobileAppearance';
+import './brand-navy.css';
 
 installBerlinLocaleDefaults();
 installOperationalFetchResilience();
@@ -48,6 +50,7 @@ function renderApp() {
           <App />
           <HeaderQuickAccess />
           <ScheduleMobileEnhancer />
+          <DesktopAttendanceHistoryEnhancer />
           <NativePushRegistration />
           <StoreComplianceLinks />
           <FriendlyDateTimePicker />
