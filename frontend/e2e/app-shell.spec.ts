@@ -186,13 +186,15 @@ test.describe('Phase 6 mobile QA', () => {
     await expectNoHorizontalPageOverflow(page);
 
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Dienstplan' }).click();
-    await expect(page.getByTestId('phase8-week-strip')).toBeVisible();
-    const dayView = page.getByTestId('schedule-day-view');
+    const workerSchedule = page.getByTestId('wiw-employee-schedule');
+    await expect(workerSchedule).toBeVisible();
+    await expect(workerSchedule.getByTestId('phase8-week-strip')).toBeVisible();
+    const dayView = workerSchedule.getByTestId('schedule-day-view');
     await expect(dayView.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
     await expect(dayView.getByText('Main Suites Frankfurt', { exact: true }).first()).toBeVisible();
     await expectNoHorizontalPageOverflow(page);
 
-    await page.locator('ion-segment-button[value="mine"]').click();
+    await workerSchedule.locator('ion-segment-button[value="mine"]').click();
     await dayView.getByRole('button', { name: /Servicekraft/ }).first().click();
     await expect(page.getByRole('button', { name: 'Freigeben' })).toBeVisible();
     await page.getByRole('button', { name: 'Freigeben' }).click();
