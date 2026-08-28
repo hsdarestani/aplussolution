@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+// Final Phase 8 acceptance contract for the production candidate.
 const read=(path:string)=>readFileSync(resolve(process.cwd(),path),'utf8');
 
 test('Phase 8 bottom navigation keeps Mitteilungen inside Mehr', async()=>{
