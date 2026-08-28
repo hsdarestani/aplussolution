@@ -70,18 +70,74 @@ ion-button:not([fill='outline']):not([fill='clear']) {
   .wiw-mobile-screen-title,
   .wiw-period-back,
   .wiw-more-title,
-  .wiw-upcoming > button {
+  .wiw-upcoming > button,
+  .wiw-form-topbar {
     background: var(--wiw-primary) !important;
+  }
+
+  .wiw-form-topbar {
+    border-bottom-color: var(--wiw-primary) !important;
   }
 
   .mobile-tabbar button.active,
   .wiw-more-row.active,
   .wiw-more-theme button.active,
-  .sv2-event-details .sv2-entity-link {
+  .sv2-event-details .sv2-entity-link,
+  .wiw-search-row button,
+  .wiw-card-line.secondary > span.open,
+  .wiw-form-row.green > ion-icon,
+  .wiw-form-row.green .wiw-form-row-copy span,
+  .wiw-count-stepper button,
+  .wiw-choice-sheet > header button,
+  .wiw-date-sheet > header button,
+  .wiw-choice-sheet > div > button.selected,
+  .wiw-form-extra-actions .wiw-extra-icon,
+  .wiw-enhancer-sheet > header button {
     color: var(--wiw-primary) !important;
   }
 
   .sv2-wiw-week-strip button.today b {
     outline-color: var(--wiw-primary) !important;
+  }
+
+  .wiw-tabs button.active {
+    border-bottom-color: var(--wiw-primary) !important;
+  }
+
+  .wiw-week-strip button.today b {
+    box-shadow: inset 0 0 0 2px var(--wiw-primary) !important;
+  }
+
+  .wiw-shift-card {
+    border-left-color: var(--wiw-primary) !important;
+  }
+
+  .wiw-switch.on,
+  .wiw-enhancer-actions button.primary,
+  .wiw-create-fab,
+  .admin-schedule-actions button.primary,
+  .admin-manage-toolbar .primary,
+  .admin-schedule-sheet-actions .primary,
+  .admin-create-menu > button.primary .menu-icon,
+  .admin-availability-actions .primary,
+  .admin-availability-form header {
+    background: var(--wiw-primary) !important;
+  }
+
+  .wiw-enhancer-actions button.primary,
+  .admin-manage-toolbar .primary,
+  .admin-schedule-sheet-actions .primary,
+  .admin-create-menu > button.primary .menu-icon,
+  .admin-availability-actions .primary {
+    border-color: var(--wiw-primary) !important;
+  }
+
+  .wiw-date-sheet > div button {
+    border-color: var(--wiw-primary) !important;
+    color: var(--wiw-primary) !important;
+  }
+
+  .wiw-standard-color-hint .wiw-standard-color-swatch {
+    background: var(--wiw-primary) !important;
   }
 }
