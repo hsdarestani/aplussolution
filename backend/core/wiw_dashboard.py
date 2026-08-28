@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from dateutil.parser import parse as parse_flexible_datetime
 from django.conf import settings
 from django.core.cache import cache
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -12,6 +13,7 @@ from rest_framework.response import Response
 from . import admin_center_views as admin_base
 from .models import IntegrationSyncRun, Shift, ShiftSwapRequest, TimeOffRequest, User
 from .premium_approval_models import ShiftPickupRequest
+from .shift_slots import ShiftSlot
 from .wiw import WhenIWorkClient, WhenIWorkError
 
 
@@ -131,21 +133,19 @@ def _open_shift_instances(item):
         return 1
 
 
-def _local_open_shift_count(now):
-    rows = Shift.objects.filter(
-        is_open=True,
+def _local_open_shift_count(now, *, native_only=False):
+    # Open capacity is represented by ShiftSlot. Counting slots keeps native
+    # multi-person needs accurate and lets the dashboard react immediately to
+    # a local assignment/release without waiting for the read-only WIW cache.
+    rows = ShiftSlot.objects.filter(
+        shift__status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
+        shift__ends_at__gte=now,
+        status=ShiftSlot.Status.OPEN,
         worker__isnull=True,
-        status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
-        ends_at__gte=now,
-    ).values('wiw_payload')
-    total = 0
-    for row in rows:
-        payload = row.get('wiw_payload') or {}
-        try:
-            total += max(1, int(payload.get('instances') or 1))
-        except (TypeError, ValueError):
-            total += 1
-    return total
+    )
+    if native_only:
+        rows = rows.filter(Q(shift__wiw_shift_id__isnull=True) | Q(shift__wiw_shift_id=''))
+    return rows.count()
 
 
 def _local_snapshot(now):
@@ -258,12 +258,18 @@ def mobile_dashboard(request):
 
     now = timezone.now()
     snapshot = _local_snapshot(now)
+    # WIW is intentionally read-only. Native A+ OpenShifts therefore never
+    # appear in the live WIW result and must be added without double-counting
+    # imported WIW shifts that also exist locally.
+    native_open_shifts = _local_open_shift_count(now, native_only=True)
     live_error = ''
 
     if settings.WIW_SYNC_ENABLED and settings.WIW_DEV_KEY and settings.WIW_EMAIL and settings.WIW_PASSWORD:
         try:
-            live = _live_wiw_snapshot(now)
+            live = dict(_live_wiw_snapshot(now))
             live_error = str(live.get('live_error') or '')
+            if 'open_shifts_available' in live:
+                live['open_shifts_available'] = int(live.get('open_shifts_available') or 0) + native_open_shifts
             snapshot.update(live)
         except WhenIWorkError as exc:
             live_error = str(exc)

@@ -121,6 +121,21 @@ export default function AdminHomeV4({ navigate }: { navigate: Navigate }) {
     return () => window.clearTimeout(timer);
   }, [category, severity, query]);
 
+  useEffect(() => {
+    const refresh = () => { void load(); };
+    const refreshWhenVisible = () => { if (document.visibilityState === 'visible') refresh(); };
+    const interval = window.setInterval(refresh, 30000);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('aplus:dashboard-invalidated', refresh);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('aplus:dashboard-invalidated', refresh);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [category, severity, query]);
+
   const results: ExceptionItem[] = data?.results || [];
   const summary = data?.summary || {};
   const byCategory = summary.by_category || {};

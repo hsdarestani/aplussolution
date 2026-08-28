@@ -21,7 +21,7 @@ import './wiw-schedule-mobile.css';
 
 type TabKey = 'all' | 'open' | 'filled' | 'draft';
 type Choice = { value: string; label: string };
-type EditingCard = { shiftId: string; slotId: string; parentCount: number; workerName?: string };
+type EditingCard = { shiftId: string; slotId: string; parentCount: number; workerName?: string; isOpen: boolean };
 type FormState = {
   client: string;
   date: string;
@@ -383,7 +383,7 @@ export default function WiwScheduleMobile() {
     const startMinute = timeMinuteFromIso(card.shift.starts_at);
     const endMinute = timeMinuteFromIso(card.shift.ends_at);
     const dayOffset = Math.round((keyDate(endDate).getTime() - keyDate(startDate).getTime()) / 86400000);
-    setEditing({ shiftId: String(card.shift.id), slotId: String(card.slot.id), parentCount: Number(card.shift.required_count || 1), workerName: card.worker?.name });
+    setEditing({ shiftId: String(card.shift.id), slotId: String(card.slot.id), parentCount: Number(card.shift.required_count || 1), workerName: card.worker?.name, isOpen: card.isOpen });
     setForm({
       client: String(card.shift.client || ''),
       date: startDate,
@@ -430,8 +430,17 @@ export default function WiwScheduleMobile() {
       if (editing) {
         payload.status = form.publish_now ? 'published' : 'draft';
         payload.apply_all = form.apply_all;
-        await api(`shifts/${editing.shiftId}/cards/${editing.slotId}/`, { method: 'PATCH', body: JSON.stringify(payload) });
-        setToast(form.apply_all ? 'Änderungen auf alle Karten angewendet.' : 'Nur diese Schichtkarte wurde geändert.');
+        const edited: any = await api(`shifts/${editing.shiftId}/cards/${editing.slotId}/`, { method: 'PATCH', body: JSON.stringify(payload) });
+        if (editing.isOpen && form.workers.length) {
+          const targetShiftId = String(edited?.shift?.id || editing.shiftId);
+          await api(`shifts/${targetShiftId}/assign/`, {
+            method: 'POST',
+            body: JSON.stringify({ workers: [form.workers[0]], publish_remaining: form.publish_now }),
+          });
+          setToast('Mitarbeiter wurde der OpenShift zugewiesen.');
+        } else {
+          setToast(form.apply_all ? 'Änderungen auf alle Karten angewendet.' : 'Nur diese Schichtkarte wurde geändert.');
+        }
       } else {
         payload.required_count = Math.max(1, Number(form.required_count || 1));
         payload.status = form.publish_now ? 'published' : 'draft';
@@ -443,6 +452,7 @@ export default function WiwScheduleMobile() {
         setToast(`${payload.required_count} separate Schichtkarte${payload.required_count === 1 ? '' : 'n'} erstellt.`);
       }
       setFormOpen(false);
+      window.dispatchEvent(new Event('aplus:dashboard-invalidated'));
       await load();
     } catch (error: any) {
       setToast(error.message || 'Schicht konnte nicht gespeichert werden.');
@@ -524,9 +534,9 @@ export default function WiwScheduleMobile() {
           <Row icon={personOutline} label="OpenShift" trailing={<Switch checked={form.publish_now} onChange={(value) => setForm((current) => ({ ...current, publish_now: value }))} />} />
           {!editing ? <Row icon={layersOutline} label={`${form.required_count} Schicht${form.required_count === 1 ? '' : 'en'}`} trailing={<div className="wiw-count-stepper"><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: Math.max(current.workers.length || 1, current.required_count - 1) }))}>−</button><b>{form.required_count}</b><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: current.required_count + 1 }))}>+</button></div>} /> : <Row icon={layersOutline} label="1 Schichtkarte" value={editing.workerName || 'OpenShift'} />}
           <Row icon={checkmarkOutline} label="Erfordere Übernahme-Bestätigung" trailing={<Switch checked={form.confirmation_required} onChange={(value) => setForm((current) => ({ ...current, confirmation_required: value }))} />} />
-          {!editing ? <Row icon={peopleOutline} label={form.workers.length ? `${form.workers.length} Benutzer direkt zugewiesen` : 'Geeignete Benutzer anzeigen'} muted={!form.workers.length} onClick={() => setSheet('workers')} /> : null}
+          {(!editing || editing.isOpen) ? <Row icon={peopleOutline} label={editing ? (form.workers.length ? 'Mitarbeiter ändern' : 'Mitarbeiter zuweisen') : (form.workers.length ? `${form.workers.length} Benutzer direkt zugewiesen` : 'Geeignete Benutzer anzeigen')} value={editing && form.workers.length ? workerChoices.find((choice) => choice.value === form.workers[0])?.label : undefined} muted={!form.workers.length} onClick={() => setSheet('workers')} /> : null}
 
-          {editing && editing.parentCount > 1 ? <div className="wiw-bulk-edit-row"><div><b>Alle Karten dieser Schicht mitändern</b><span>Wenn aus, wird nur diese Person / OpenShift-Karte geändert.</span></div><Switch checked={form.apply_all} onChange={(value) => setForm((current) => ({ ...current, apply_all: value }))} /></div> : null}
+          {editing && editing.parentCount > 1 && !editing.isOpen ? <div className="wiw-bulk-edit-row"><div><b>Alle Karten dieser Schicht mitändern</b><span>Wenn aus, wird nur diese Person / OpenShift-Karte geändert.</span></div><Switch checked={form.apply_all} onChange={(value) => setForm((current) => ({ ...current, apply_all: value }))} /></div> : null}
 
           <div className="wiw-form-separator" />
           <Row icon={colorPaletteOutline} label="Standardfarbe" />
@@ -539,7 +549,7 @@ export default function WiwScheduleMobile() {
         {sheet === 'position' ? <ChoiceSheet title="Position" choices={positionChoices} selected={form.position} onClose={() => setSheet('')} onSelect={(choice) => { setForm((current) => ({ ...current, position: choice.value })); setSheet(''); }} /> : null}
         {sheet === 'location' ? <ChoiceSheet title="Jobstandort" choices={locationChoices} selected={form.location} onClose={() => setSheet('')} onSelect={(choice) => { setForm((current) => ({ ...current, location: choice.value })); setSheet(''); }} /> : null}
         {sheet === 'groups' ? <MultiChoiceSheet title="Zeitplan" choices={SCHEDULE_GROUPS} selected={form.schedule_groups} onClose={() => setSheet('')} onChange={(values) => setForm((current) => ({ ...current, schedule_groups: values }))} /> : null}
-        {sheet === 'workers' ? <MultiChoiceSheet title="Geeignete Benutzer" choices={workerChoices} selected={form.workers} limit={form.required_count} onClose={() => setSheet('')} onChange={(values) => setForm((current) => ({ ...current, workers: values }))} /> : null}
+        {sheet === 'workers' ? <MultiChoiceSheet title={editing?.isOpen ? 'Mitarbeiter zuweisen' : 'Geeignete Benutzer'} choices={workerChoices} selected={form.workers} limit={editing ? 1 : form.required_count} onClose={() => setSheet('')} onChange={(values) => setForm((current) => ({ ...current, workers: values }))} /> : null}
       </div> : null}
 
       {toast ? <button type="button" className="wiw-toast" onClick={() => setToast('')}>{toast}</button> : null}
