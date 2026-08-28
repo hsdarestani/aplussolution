@@ -4,13 +4,14 @@ import {
   calendarOutline,
   chevronForwardOutline,
   documentTextOutline,
+  locationOutline,
   notificationsOutline,
   peopleOutline,
   stopwatchOutline,
-  timeOutline,
 } from 'ionicons/icons';
 import { api, User } from './api';
 import './employee-portal.css';
+import './wiw-employee-home-mobile.css';
 
 const APP_TIME_ZONE = 'Europe/Berlin';
 const time = (x:string) => new Date(x).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit',timeZone:APP_TIME_ZONE});
@@ -24,42 +25,107 @@ function MobileRow({icon,label,count,onClick,muted}:{icon:string;label:string;co
   </button>;
 }
 
+async function currentPosition(): Promise<GeolocationPosition> {
+  if (!navigator.geolocation) throw new Error('Standortdienste werden auf diesem Gerät nicht unterstützt.');
+  return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(
+    resolve,
+    (error) => {
+      if (error.code === error.PERMISSION_DENIED) reject(new Error('Standortzugriff wurde nicht erlaubt. Bitte Standortdienste aktivieren.'));
+      else if (error.code === error.TIMEOUT) reject(new Error('Standort konnte nicht rechtzeitig bestimmt werden. Bitte erneut versuchen.'));
+      else reject(new Error('Standort konnte nicht bestimmt werden.'));
+    },
+    { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 },
+  ));
+}
+
 export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:any)=>void}) {
   const [data,setData]=useState<any>();
+  const [attendance,setAttendance]=useState<any>();
   const [error,setError]=useState('');
-  useEffect(()=>{api('employee/home/').then(setData).catch(e=>setError(e.message));},[]);
+  const [clockIntent,setClockIntent]=useState<'in'|'out'|''>('');
+  const [clockBusy,setClockBusy]=useState(false);
+  const [notice,setNotice]=useState('');
+
+  const load = async () => {
+    try {
+      const [home, attendanceHome] = await Promise.all([api('employee/home/'), api('attendance/home/')]);
+      setData(home);
+      setAttendance(attendanceHome);
+      setError('');
+    } catch (e:any) {
+      setError(e.message);
+    }
+  };
+
+  useEffect(()=>{void load();},[]);
+
+  async function clock() {
+    if (!clockIntent) return;
+    setClockBusy(true);
+    setNotice('');
+    try {
+      const position = await currentPosition();
+      const payload:any = { lat: position.coords.latitude, lng: position.coords.longitude };
+      if (clockIntent === 'in' && attendance?.eligible_shift?.id) payload.shift = attendance.eligible_shift.id;
+      const result:any = await api(`time-entries/clock_${clockIntent}/`, { method: 'POST', body: JSON.stringify(payload) });
+      setNotice(clockIntent === 'in'
+        ? 'Du bist eingestempelt.'
+        : result?.review_required ? 'Ausgestempelt. Der Standort wird von der Administration geprüft.' : 'Du bist ausgestempelt.');
+      setClockIntent('');
+      await load();
+    } catch (e:any) {
+      setNotice(e.message || 'Zeiterfassung konnte nicht gestartet werden.');
+    } finally {
+      setClockBusy(false);
+    }
+  }
+
   if(error) return <div className="employee-empty"><h2>Startseite konnte nicht geladen werden</h2><p>{error}</p></div>;
-  if(!data) return <div className="employee-loader"><IonSpinner/><span>Dein Bereich wird geladen …</span></div>;
+  if(!data||!attendance) return <div className="employee-loader"><IonSpinner/><span>Dein Bereich wird geladen …</span></div>;
   const worked = Number(data.month_worked_minutes||0);
   const nextShift = data.next_shift;
+  const active = attendance.active_entry;
+  const canClockIn = Boolean(attendance.eligible_shift?.id);
 
   return <>
-    <div className="wiw-mobile-dashboard" data-testid="phase8-mobile-dashboard">
-      <div className="wiw-section-label">Heute</div>
-      <MobileRow icon={notificationsOutline} label="Arbeitszeit-Hinweise" count={data.unread_notifications||0} onClick={()=>navigate('messages')}/>
-      <MobileRow icon={peopleOutline} label="Mitarbeiteraktivität" onClick={()=>navigate('time')}/>
-
+    <div className="wiw-mobile-dashboard wiw-worker-home" data-testid="phase8-mobile-dashboard">
       <div className="wiw-section-label">Anfragen</div>
-      <MobileRow icon={calendarOutline} label="Abwesenheitsanträge" count={0} onClick={()=>navigate('operations')}/>
       <MobileRow icon={calendarOutline} label="Schichtanfragen" count={0} onClick={()=>navigate('operations')}/>
-      <MobileRow icon={calendarOutline} label="OpenShift-Anfragen" count={data.available_count||0} onClick={()=>navigate('schedule')}/>
+      <MobileRow icon={calendarOutline} label="OpenShift-Anfragen" count={data.available_count||0} onClick={()=>{sessionStorage.setItem('aplus:schedule-entry-filter','open');navigate('schedule');}}/>
 
-      <div className="wiw-section-label">Mein Dienstplan</div>
-      <button type="button" className="wiw-next-shift" onClick={()=>navigate('schedule')}>
-        <small>Nächster Einsatz:</small>
-        <strong>{nextShift ? `${day(nextShift.starts_at)} · ${time(nextShift.starts_at)}–${time(nextShift.ends_at)}` : 'Nichts geplant'}</strong>
-        {nextShift&&<span>{nextShift.client_name} · {nextShift.location_name}</span>}
+      <div className="wiw-section-label">Mein Zeitplan</div>
+      <button type="button" className="wiw-next-shift wiw-worker-next" onClick={()=>navigate('schedule')}>
+        <small>{nextShift ? `Nächste Schicht: ${day(nextShift.starts_at)}` : 'Nächste Schicht'}</small>
+        <strong>{nextShift ? `${time(nextShift.starts_at)}–${time(nextShift.ends_at)}` : 'Keine anstehende Schicht'}</strong>
+        {nextShift&&<>
+          <span className="wiw-next-meta">⌁ {nextShift.client_name || 'A+'}</span>
+          <span className="wiw-next-meta">⌖ {nextShift.location_name}</span>
+          <span className="wiw-next-meta">♙ {nextShift.position_name}</span>
+        </>}
+        <IonIcon className="wiw-next-chevron" icon={chevronForwardOutline}/>
       </button>
       <MobileRow icon={calendarOutline} label="Meine Schichten" onClick={()=>navigate('schedule')}/>
-      <MobileRow icon={calendarOutline} label="OpenShifts verfügbar" count={data.available_count||0} onClick={()=>navigate('schedule')}/>
+      <MobileRow icon={calendarOutline} label="OpenShifts verfügbar" count={data.available_count||0} onClick={()=>{sessionStorage.setItem('aplus:schedule-entry-filter','open');navigate('schedule');}}/>
 
-      <div className="wiw-section-label">Wichtige anstehende Termine</div>
-      <div className="wiw-upcoming">
-        <div>
-          {nextShift?<><strong>{nextShift.position_name}</strong><span>{nextShift.client_name} · {day(nextShift.starts_at)} {time(nextShift.starts_at)}</span></>:<span>Keine anstehenden Schichten</span>}
+      <div className="wiw-section-label">Zeiterfassung</div>
+      <div className="wiw-home-clock-card">
+        <div className="wiw-home-clock-copy">
+          <span className="wiw-home-clock-icon"><IonIcon icon={locationOutline}/></span>
+          <div>
+            <b>{active ? 'Arbeitszeit läuft' : canClockIn ? 'Bereit zum Einstempeln' : 'Noch keine Zeiterfassung möglich'}</b>
+            <small>{active ? `Seit ${time(active.clock_in)}` : canClockIn ? `${attendance.eligible_shift.position_name || 'Einsatz'} · ${attendance.eligible_shift.location_name}` : 'Einstempeln ist rund um eine bestätigte Schicht möglich.'}</small>
+          </div>
         </div>
-        <button type="button" onClick={()=>{sessionStorage.setItem('phase8:attendance-clock','1');navigate('time');}}>Einstempeln</button>
+        <button type="button" className={active ? 'clock-out' : ''} disabled={clockBusy || (!active && !canClockIn)} onClick={()=>setClockIntent(active?'out':'in')}>
+          {active ? 'Ausstempeln' : 'Einstempeln'}
+        </button>
       </div>
+
+      <div className="wiw-section-label">Wichtige bevorstehende Daten</div>
+      <div className="wiw-upcoming wiw-worker-upcoming">
+        {nextShift?<div><strong>{nextShift.position_name}</strong><span>{nextShift.client_name} · {day(nextShift.starts_at)} {time(nextShift.starts_at)}</span></div>:<span>Keine wichtigen anstehenden Termine</span>}
+      </div>
+      {notice&&<div className="wiw-home-notice">{notice}</div>}
     </div>
 
     <div className="employee-desktop-dashboard">
@@ -92,5 +158,16 @@ export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:a
         </section>
       </div>
     </div>
+
+    {clockIntent&&<div className="wiw-location-backdrop" role="dialog" aria-modal="true" aria-label="Standortberechtigung">
+      <div className="wiw-location-modal">
+        <div className="wiw-location-symbol"><IonIcon icon={locationOutline}/></div>
+        <h2>Für die Zeiterfassung ist eine Berechtigung zur Standortbestimmung erforderlich</h2>
+        <p>Aktiviere die Standortdienste, damit A+ weiß, wo du deine Arbeitszeit {clockIntent==='in'?'beginnst':'beendest'}.</p>
+        {notice&&<div className="wiw-location-error">{notice}</div>}
+        <button type="button" className="activate" disabled={clockBusy} onClick={()=>void clock()}>{clockBusy?'Standort wird bestimmt …':'Standortdienste aktivieren'}</button>
+        <button type="button" className="cancel" disabled={clockBusy} onClick={()=>{setClockIntent('');setNotice('');}}>Abbrechen</button>
+      </div>
+    </div>}
   </>;
 }
