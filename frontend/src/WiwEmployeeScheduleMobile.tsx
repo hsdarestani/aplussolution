@@ -78,7 +78,7 @@ export default function WiwEmployeeScheduleMobile() {
   const [releaseTarget, setReleaseTarget] = useState<any>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  const swipe = useRef<{ x: number; y: number }>();
+  const swipe = useRef<{ x: number; y: number } | undefined>(undefined);
 
   useEffect(() => {
     const root = document.getElementById('root');
