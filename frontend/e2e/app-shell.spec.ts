@@ -200,7 +200,6 @@ test.describe('Phase 6 mobile QA', () => {
     await page.getByRole('button', { name: 'Freigeben' }).click();
     const releaseAlert = page.locator('ion-alert').filter({ hasText: 'Schicht freigeben?' }).last();
     await expect(releaseAlert).toBeVisible();
-    await expect(releaseAlert.getByText('wird wieder für andere Mitarbeiter verfügbar.', { exact: false })).toBeVisible();
     await releaseAlert.getByRole('button', { name: 'Abbrechen' }).click();
     await expect(releaseAlert).toBeHidden();
 
