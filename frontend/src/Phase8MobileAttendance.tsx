@@ -13,7 +13,7 @@ function key(date:Date){return `${date.getUTCFullYear()}-${String(date.getUTCMon
 function label(start:Date,end:Date){return `1. ${fmtMonth(start)} – 1. ${fmtMonth(end)} ${end.getUTCFullYear()}`;}
 function monthDistance(newer:Date,older:Date){return (newer.getUTCFullYear()-older.getUTCFullYear())*12+(newer.getUTCMonth()-older.getUTCMonth());}
 
-export default function Phase8MobileAttendance({data}:{data:any}){
+export default function Phase8MobileAttendance({data,showWorker=false}:{data:any;showWorker?:boolean}){
   const history=useMemo(()=>Array.isArray(data.history)?data.history:[],[data.history]);
   const periods=useMemo(()=>{
     const current=firstOfMonth(new Date());
@@ -46,7 +46,7 @@ export default function Phase8MobileAttendance({data}:{data:any}){
       <div className="wiw-section-label">Arbeitszeiten</div>
       {entries.map((entry:any)=><div className="wiw-time-entry" key={entry.id}>
         <span className="wiw-row-icon"><IonIcon icon={timeOutline}/></span>
-        <div><strong>{fmtDate(entry.clock_in)}</strong><span>{fmtTime(entry.clock_in)} – {entry.clock_out?fmtTime(entry.clock_out):'läuft'}</span><small>{entry.shift_title||'Arbeitszeit'}</small></div>
+        <div><strong>{showWorker && entry.worker_name ? `${entry.worker_name} · ` : ''}{fmtDate(entry.clock_in)}</strong><span>{fmtTime(entry.clock_in)} – {entry.clock_out?fmtTime(entry.clock_out):'läuft'}</span><small>{entry.shift_title||'Arbeitszeit'}</small></div>
       </div>)}
       {!entries.length&&<div className="wiw-period-empty">Keine Arbeitszeiten in diesem Zeitraum.</div>}
     </div>;

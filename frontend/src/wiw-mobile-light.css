@@ -105,3 +105,12 @@
   .wiw-more-theme{min-height:48px;padding:7px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid var(--wiw-line);background:var(--wiw-row)}
   .wiw-more-theme>span{font-size:12px}.wiw-more-theme>div{display:flex;gap:4px}.wiw-more-theme button{padding:6px 9px;display:flex;align-items:center;gap:4px;border:1px solid var(--wiw-line);border-radius:999px;background:var(--wiw-bg);color:var(--wiw-copy);font-size:10px}.wiw-more-theme button.active{border-color:var(--wiw-primary);color:var(--wiw-primary)}
 }
+
+@media(max-width:900px){
+  .wiw-mobile-admin-dashboard{display:block;background:var(--wiw-bg);color:var(--wiw-copy);min-height:calc(100dvh - 126px)}
+  .admin-home-v4>.wiw-mobile-admin-dashboard~*{display:none!important}
+  .mobile-first-app-shell-v1[data-view='more'] .mobile-appbar{display:none!important}
+  .mobile-first-app-shell-v1[data-view='more'] .app{padding-top:0!important}
+  .mobile-first-app-shell-v1[data-view='more'] .global-search{display:none!important}
+}
+@media(min-width:901px){.wiw-mobile-admin-dashboard{display:none!important}}

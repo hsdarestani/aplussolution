@@ -9,8 +9,10 @@ export function getMobileAppearance(): MobileAppearance {
 
 export function applyMobileAppearance(next: MobileAppearance) {
   if (typeof document !== 'undefined') document.documentElement.dataset.aplusAppearance = next;
-  if (typeof window !== 'undefined') window.localStorage.setItem(STORAGE_KEY, next);
-  window.dispatchEvent(new CustomEvent('aplus-appearance-change', { detail: next }));
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(STORAGE_KEY, next);
+    window.dispatchEvent(new CustomEvent('aplus-appearance-change', { detail: next }));
+  }
 }
 
 export function installMobileAppearance() {

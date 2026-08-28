@@ -135,6 +135,24 @@ def employee_attendance_home(request):
     })
 
 
+@api_view(['GET'])
+def attendance_history(request):
+    if request.user.role == User.Role.WORKER:
+        queryset = TimeEntry.objects.filter(worker=request.user.worker_profile)
+    elif _manager_only(request):
+        queryset = TimeEntry.objects.exclude(worker__user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX)
+    else:
+        return Response({'detail': 'Keine Berechtigung.'}, status=403)
+
+    queryset = queryset.select_related('shift__position', 'worker__user').filter(
+        clock_out__isnull=False,
+    ).order_by('-clock_in')
+    return Response({
+        'count': queryset.count(),
+        'history': TimeEntrySerializer(queryset, many=True, context={'request': request}).data,
+    })
+
+
 @api_view(['POST'])
 def request_time_correction(request, entry_id):
     if request.user.role != User.Role.WORKER:
