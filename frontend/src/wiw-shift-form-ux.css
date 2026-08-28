@@ -1,0 +1,68 @@
+@media (max-width: 900px) {
+  /* The WIW-style editor is a full-screen workflow. Hide the normal app chrome
+     while it is open so its own green top bar (Abbrechen / Sichern) is not
+     covered by the mobile header or bottom navigation. */
+  body.wiw-shift-form-active .mobile-appbar,
+  body.wiw-shift-form-active .mobile-tabbar,
+  body.wiw-shift-form-active .wiw-week-total,
+  body.wiw-shift-form-active .wiw-create-fab,
+  body.wiw-shift-form-active .header-quick-access {
+    display: none !important;
+  }
+
+  body.wiw-shift-form-active .wiw-shift-form-screen {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 2147482000 !important;
+    min-height: 100dvh !important;
+    max-height: 100dvh !important;
+  }
+
+  body.wiw-shift-form-active .wiw-form-topbar {
+    display: grid !important;
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 2147482100 !important;
+  }
+
+  body.wiw-shift-form-active .wiw-form-scroll {
+    height: calc(100dvh - 58px - env(safe-area-inset-top)) !important;
+    padding-bottom: calc(28px + env(safe-area-inset-bottom)) !important;
+  }
+
+  /* Safety fallback: if an Ionic/WebView stacking context still covers the
+     native-looking top bar, this back control remains reachable and triggers
+     the real Abbrechen action rather than duplicating state. */
+  .wiw-form-back-fallback {
+    position: fixed;
+    z-index: 2147483000;
+    top: calc(env(safe-area-inset-top) + 7px);
+    left: 8px;
+    min-width: 76px;
+    height: 44px;
+    padding: 0 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 0;
+    background: transparent;
+    color: #fff;
+    font: inherit;
+  }
+
+  .wiw-form-back-fallback span {
+    font-size: 32px;
+    line-height: 1;
+    font-weight: 300;
+    transform: translateY(-1px);
+  }
+
+  .wiw-form-back-fallback b {
+    font-size: 14px;
+    font-weight: 500;
+  }
+}
+
+@media (min-width: 901px) {
+  .wiw-form-back-fallback { display: none !important; }
+}
