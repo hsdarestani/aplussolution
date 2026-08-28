@@ -10,8 +10,8 @@ class ShiftApiSerializer(serializers.ModelSerializer):
     location_name = serializers.CharField(source='location.name', read_only=True)
     position_name = serializers.CharField(source='position.name', read_only=True)
     order_title = serializers.CharField(source='order.title', read_only=True)
-    open_count = serializers.IntegerField(read_only=True)
-    filled_count = serializers.IntegerField(read_only=True)
+    open_count = serializers.SerializerMethodField()
+    filled_count = serializers.SerializerMethodField()
     assigned_workers = serializers.SerializerMethodField()
     slot_cards = serializers.SerializerMethodField()
     my_release_request = serializers.SerializerMethodField()
@@ -54,10 +54,9 @@ class ShiftApiSerializer(serializers.ModelSerializer):
         """Load card slots once for a whole list instead of once per Shift.
 
         The admin Dienstplan can contain hundreds of imported/historical shifts.
-        Both assigned_workers and slot_cards need the same slot data, and the old
-        serializer caused an N+1 query pattern. When serializing a list, build one
-        in-memory slot map for every Shift in that response. Single-object callers
-        retain a small safe fallback.
+        Counts, assigned_workers and slot_cards all use the same slot data. When
+        serializing a list, build one in-memory slot map for every Shift in that
+        response. Single-object/create callers retain one small safe fallback.
         """
         prefetched = getattr(obj, '_schedule_slots', None)
         if prefetched is not None:
@@ -82,6 +81,18 @@ class ShiftApiSerializer(serializers.ModelSerializer):
             slots = list(obj.slots.select_related('worker__user').order_by('created_at'))
         setattr(obj, '_schedule_slots', slots)
         return slots
+
+    def get_open_count(self, obj):
+        return sum(
+            1 for slot in self._schedule_slots(obj)
+            if slot.status == ShiftSlot.Status.OPEN and slot.worker_id is None
+        )
+
+    def get_filled_count(self, obj):
+        return sum(
+            1 for slot in self._schedule_slots(obj)
+            if slot.status == ShiftSlot.Status.CLAIMED and slot.worker_id is not None
+        )
 
     def get_assigned_workers(self, obj):
         slots = [
