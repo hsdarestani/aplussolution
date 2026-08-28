@@ -1,6 +1,7 @@
 /* Mobile attendance drill-down modeled on the WIW Pay Periods -> Employee -> Timesheet -> Entry flow. */
 @media (max-width: 900px) {
-  .mobile-first-app-shell-v1[data-view='time'] .global-search {
+  .mobile-first-app-shell-v1[data-view='time'] .global-search,
+  body.wiw-attendance-active .header-quick-access {
     display: none !important;
   }
 
