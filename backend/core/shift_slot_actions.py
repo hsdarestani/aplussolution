@@ -62,13 +62,16 @@ def edit_shift_slot(request, shift_id, slot_id):
     apply_all = request.data.get('apply_all') in (True, 'true', '1', 1)
 
     with transaction.atomic():
-        shift = Shift.objects.select_for_update().select_related(
-            'order', 'client', 'location', 'position'
-        ).filter(pk=shift_id).first()
+        # Lock only the rows that are actually mutated. Joining nullable relations
+        # (Shift.order and ShiftSlot.worker) before SELECT FOR UPDATE works on
+        # SQLite but PostgreSQL correctly rejects it with:
+        # "FOR UPDATE cannot be applied to the nullable side of an outer join".
+        # That production-only database error was the generic mobile Sichern 500.
+        shift = Shift.objects.select_for_update().filter(pk=shift_id).first()
         if not shift:
             return Response({'detail': 'Schicht wurde nicht gefunden.'}, status=404)
 
-        slot = ShiftSlot.objects.select_for_update().select_related('worker__user').filter(
+        slot = ShiftSlot.objects.select_for_update().filter(
             pk=slot_id,
             shift=shift,
         ).exclude(status=ShiftSlot.Status.CANCELLED).first()
