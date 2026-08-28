@@ -15,9 +15,18 @@ REPORT_FILE="$BACKUP_DIR/wiw-final-report-$STAMP.log"
 COUNTS_BEFORE="$BACKUP_DIR/pre-wiw-counts-$STAMP.log"
 COUNTS_AFTER="$BACKUP_DIR/post-wiw-counts-$STAMP.log"
 
+run_mobile_shift_probe() {
+  echo "Running rollback-only production mobile shift CRUD probe..."
+  docker compose exec -T backend python manage.py diagnose_mobile_shift_crud
+}
+
 if [[ -f "$DONE_MARKER" ]]; then
   echo "WIW bounded full reset already completed; marker: $DONE_MARKER"
   cat "$DONE_MARKER"
+  # Even after the destructive one-time migration is retired, every release
+  # should prove the exact mobile create/edit/assign paths against current
+  # production-shaped WIW data. The command wraps every write in a rollback.
+  run_mobile_shift_probe
   exit 0
 fi
 
@@ -100,11 +109,12 @@ perform_clean_import() {
 
   docker compose up -d celery celery-beat >/dev/null || return 1
   curl -fsS --retry 12 --retry-delay 5 https://solution.smarbiz.sbs/health/ >/dev/null || return 1
+  run_mobile_shift_probe || return 1
   return 0
 }
 
 if ! perform_clean_import; then
-  echo "WIW bounded clean import failed; restoring the exact pre-reset production backup." >&2
+  echo "WIW bounded clean import or mobile CRUD production probe failed; restoring the exact pre-reset production backup." >&2
   restore_database
   exit 1
 fi
