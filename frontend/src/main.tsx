@@ -15,7 +15,6 @@ import './mobile-header-actions-fix.css';
 import './phase8-wiw-mobile.css';
 import './wiw-mobile-light.css';
 import './schedule-month-compact.css';
-import './brand-navy.css';
 import App from './App';
 import StoreComplianceLinks from './StoreComplianceLinks';
 import StoreLegalPage, { legalPageFromPath } from './StoreLegalPages';
@@ -31,6 +30,7 @@ import { installBerlinLocaleDefaults } from './berlinLocale';
 import { installOperationalFetchResilience } from './operationalFetchResilience';
 import { installLocationPicker } from './locationPicker';
 import { installMobileAppearance } from './mobileAppearance';
+import './brand-navy.css';
 
 installBerlinLocaleDefaults();
 installOperationalFetchResilience();
