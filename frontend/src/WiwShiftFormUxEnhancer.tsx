@@ -30,8 +30,12 @@ function findForm() {
   return document.querySelector<HTMLElement>('.wiw-shift-form-screen');
 }
 
+function formScroll() {
+  return findForm()?.querySelector<HTMLElement>('.wiw-form-scroll') || null;
+}
+
 function directActionRows() {
-  const scroll = findForm()?.querySelector<HTMLElement>('.wiw-form-scroll');
+  const scroll = formScroll();
   if (!scroll) return [] as HTMLButtonElement[];
   return Array.from(scroll.children).filter((node): node is HTMLButtonElement => node instanceof HTMLButtonElement && node.matches('.wiw-form-row'));
 }
@@ -48,11 +52,6 @@ function clientRow() {
 
 function noteRow() {
   return directActionRows().find((row) => /Notiz|Hinweis/.test(text(row))) || null;
-}
-
-function closeForm() {
-  const cancel = document.querySelector<HTMLButtonElement>('.wiw-shift-form-screen .wiw-form-topbar button:first-child');
-  cancel?.click();
 }
 
 function openLocationAfterClientChoice() {
@@ -101,6 +100,7 @@ async function waitForAndSelectLocation(name: string) {
 
 export default function WiwShiftFormUxEnhancer() {
   const [open, setOpen] = useState(false);
+  const [scrollHost, setScrollHost] = useState<HTMLElement | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [locationOpen, setLocationOpen] = useState(false);
@@ -110,8 +110,10 @@ export default function WiwShiftFormUxEnhancer() {
 
   useEffect(() => {
     const sync = () => {
-      const isOpen = Boolean(findForm());
+      const currentForm = findForm();
+      const isOpen = Boolean(currentForm);
       setOpen(isOpen);
+      setScrollHost(currentForm?.querySelector<HTMLElement>('.wiw-form-scroll') || null);
       document.body.classList.toggle('wiw-shift-form-active', isOpen);
       if (!isOpen) {
         setTemplateOpen(false);
@@ -154,10 +156,10 @@ export default function WiwShiftFormUxEnhancer() {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      if (!templateOpen && !locationOpen) return;
       event.preventDefault();
-      if (templateOpen) return setTemplateOpen(false);
-      if (locationOpen) return setLocationOpen(false);
-      closeForm();
+      if (templateOpen) setTemplateOpen(false);
+      if (locationOpen) setLocationOpen(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -187,13 +189,11 @@ export default function WiwShiftFormUxEnhancer() {
         }),
       });
       setLocationOpen(false);
+      const savedName = String(saved?.name || locationDraft.name);
       setLocationDraft({ name: '', address: '', geofence_radius_m: 250 });
 
-      // Refresh the real WIW schedule component so its location state receives
-      // the just-created record, then select it through its normal picker. This
-      // keeps web/mobile and the saved shift on the same source of truth.
       document.querySelector<HTMLButtonElement>('.wiw-search-row button')?.click();
-      const selected = await waitForAndSelectLocation(String(saved?.name || locationDraft.name));
+      const selected = await waitForAndSelectLocation(savedName);
       setMessage(selected ? 'Einsatzort gespeichert und ausgewählt.' : 'Einsatzort gespeichert. Bitte Jobstandort einmal öffnen und auswählen.');
     } catch (error: any) {
       setMessage(error.message || 'Einsatzort konnte nicht gespeichert werden.');
@@ -205,26 +205,25 @@ export default function WiwShiftFormUxEnhancer() {
   if (!open || typeof document === 'undefined') return null;
   const client = selectedClient(clients);
 
-  return createPortal(
-    <>
-      <button type="button" className="wiw-form-back-fallback" aria-label="Zurück zum Dienstplan" onClick={closeForm}>
-        <span aria-hidden="true">‹</span>
-        <b>Zurück</b>
+  const inlineExtras = scrollHost ? createPortal(
+    <div className="wiw-form-extra-actions" aria-label="Zusätzliche Schichtoptionen">
+      <div className="wiw-form-separator" />
+      <button type="button" onClick={() => setLocationOpen(true)} disabled={!client}>
+        <span className="wiw-extra-icon">⌖</span>
+        <span><b>Einsatzort anlegen</b><small>{client ? `für ${client.name}` : 'Zuerst Kunde auswählen'}</small></span>
+        <em>›</em>
       </button>
+      <button type="button" onClick={() => setTemplateOpen(true)}>
+        <span className="wiw-extra-icon">≡</span>
+        <span><b>Textvorlage für Notiz</b><small>Mitarbeiterhinweis schnell einsetzen</small></span>
+        <em>›</em>
+      </button>
+    </div>,
+    scrollHost,
+  ) : null;
 
-      <div className="wiw-form-extra-actions" aria-label="Zusätzliche Schichtoptionen">
-        <button type="button" onClick={() => setLocationOpen(true)} disabled={!client}>
-          <span className="wiw-extra-icon">⌖</span>
-          <span><b>Einsatzort anlegen</b><small>{client ? `für ${client.name}` : 'Zuerst Kunde auswählen'}</small></span>
-          <em>›</em>
-        </button>
-        <button type="button" onClick={() => setTemplateOpen(true)}>
-          <span className="wiw-extra-icon">≡</span>
-          <span><b>Textvorlage für Notiz</b><small>Mitarbeiterhinweis schnell einsetzen</small></span>
-          <em>›</em>
-        </button>
-      </div>
-
+  const overlays = createPortal(
+    <>
       {templateOpen ? <div className="wiw-enhancer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setTemplateOpen(false); }}>
         <section className="wiw-enhancer-sheet">
           <header><b>Textvorlage für Mitarbeiterhinweis</b><button type="button" onClick={() => setTemplateOpen(false)}>Fertig</button></header>
@@ -253,4 +252,6 @@ export default function WiwShiftFormUxEnhancer() {
     </>,
     document.body,
   );
+
+  return <>{inlineExtras}{overlays}</>;
 }
