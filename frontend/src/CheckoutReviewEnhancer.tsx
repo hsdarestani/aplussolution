@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from './api';
 import './checkout-review-enhancer.css';
@@ -36,6 +36,7 @@ function minusMinutes(value: string, minutes: number) {
 
 export default function CheckoutReviewEnhancer() {
   const [active, setActive] = useState(false);
+  const [manager, setManager] = useState(false);
   const [rows, setRows] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -51,8 +52,34 @@ export default function CheckoutReviewEnhancer() {
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    if (!active) {
+      setManager(false);
+      setRows([]);
+      setOpen(false);
+      return;
+    }
+    let cancelled = false;
+    api('auth/me/').then((user: any) => {
+      if (cancelled) return;
+      const allowed = ['admin', 'manager'].includes(user?.role);
+      setManager(allowed);
+      if (!allowed) {
+        setRows([]);
+        setOpen(false);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setManager(false);
+        setRows([]);
+        setOpen(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [active]);
+
   const load = async () => {
-    if (!active) return;
+    if (!active || !manager) return;
     try {
       const data: any = await api('attendance/exceptions/');
       const all = Array.isArray(data?.unapproved_entries) ? data.unapproved_entries : [];
@@ -64,13 +91,12 @@ export default function CheckoutReviewEnhancer() {
         return next;
       });
     } catch {
-      // Workers and clients receive 403 here. The enhancer stays invisible for them.
       setRows([]);
       setOpen(false);
     }
   };
 
-  useEffect(() => { if (active) void load(); }, [active]);
+  useEffect(() => { if (active && manager) void load(); }, [active, manager]);
 
   async function approve(entry: any) {
     setBusy(entry.id);
@@ -93,7 +119,7 @@ export default function CheckoutReviewEnhancer() {
 
   const count = rows.length;
   const host = typeof document !== 'undefined' ? document.body : null;
-  if (!active || !count || !host) return null;
+  if (!active || !manager || !count || !host) return null;
 
   return createPortal(
     <>
