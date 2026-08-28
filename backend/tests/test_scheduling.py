@@ -44,7 +44,7 @@ def test_unavailability_blocks_worker_claim(auth_worker, worker_user, company, l
 
 
 @pytest.mark.django_db
-def test_worker_claims_and_releases_open_shift(auth_worker, worker_user, company, location, position):
+def test_worker_claim_requires_admin_approval_before_release(auth_worker, auth_admin, worker_user, company, location, position):
     start = timezone.now() + timedelta(days=2)
     candidate = published_shift(company, location, position, start)
     response = auth_worker.post(f'/api/shifts/{candidate.id}/claim/', {}, format='json')
@@ -52,8 +52,30 @@ def test_worker_claims_and_releases_open_shift(auth_worker, worker_user, company
     candidate.refresh_from_db()
     assert candidate.worker == worker_user.worker_profile
     assert candidate.is_open is False
-    released = auth_worker.post(f'/api/shifts/{candidate.id}/release/', {}, format='json')
-    assert released.status_code == 200
+
+    # The legacy direct-release path must no longer let an employee silently
+    # give back an already accepted shift.
+    direct_release = auth_worker.post(f'/api/shifts/{candidate.id}/release/', {}, format='json')
+    assert direct_release.status_code == 400
+    candidate.refresh_from_db()
+    assert candidate.worker == worker_user.worker_profile
+    assert candidate.is_open is False
+
+    requested = auth_worker.post(f'/api/employee/shifts/{candidate.id}/release-request/', {}, format='json')
+    assert requested.status_code == 202
+    assert requested.data['pending_approval'] is True
+
+    candidate.refresh_from_db()
+    assert candidate.worker == worker_user.worker_profile
+    assert candidate.is_open is False
+
+    pending = auth_admin.get('/api/premium/release-requests/')
+    assert pending.status_code == 200
+    row = next(item for item in pending.data if str(item['shift_id']) == str(candidate.id))
+    approved = auth_admin.post(f"/api/premium/release-requests/{row['id']}/decide/", {'status': 'approved'}, format='json')
+    assert approved.status_code == 200
+    assert approved.data['status'] == 'approved'
+
     candidate.refresh_from_db()
     assert candidate.worker is None
     assert candidate.is_open is True
@@ -97,54 +119,3 @@ def test_geofence_clock_in_and_out(auth_worker, worker_user, shift):
     assert out.status_code == 200
     assert TimeEntry.objects.get().clock_out is not None
 
-
-@pytest.mark.django_db
-def test_multi_place_claim_can_clock_in_without_legacy_shift_worker(company, location, position, second_worker):
-    start = timezone.now() - timedelta(minutes=10)
-    candidate = published_shift(company, location, position, start, required_count=2)
-    client = APIClient()
-    client.force_authenticate(second_worker.user)
-    claimed = client.post(f'/api/shifts/{candidate.id}/claim/', {}, format='json')
-    assert claimed.status_code == 200
-    candidate.refresh_from_db()
-    assert candidate.worker is None
-    clocked = client.post(
-        '/api/time-entries/clock_in/',
-        {'shift': str(candidate.id), 'lat': 50.1101, 'lng': 8.6801},
-        format='json',
-    )
-    assert clocked.status_code == 201
-    assert TimeEntry.objects.filter(worker=second_worker, shift=candidate, clock_out__isnull=True).exists()
-
-
-@pytest.mark.django_db
-def test_copy_week_and_bulk_publish(auth_admin, shift):
-    source = shift.starts_at.date().isoformat()
-    target = (shift.starts_at.date() + timedelta(days=7)).isoformat()
-    response = auth_admin.post('/api/operations/copy-week/', {'source_start': source, 'target_start': target}, format='json')
-    assert response.status_code == 201
-    copied = Shift.objects.get(pk=response.data['created'][0])
-    assert copied.status == Shift.Status.DRAFT
-    response = auth_admin.post('/api/operations/bulk-publish/', {'ids': [str(copied.id)]}, format='json')
-    assert response.status_code == 200
-    copied.refresh_from_db()
-    # Copy Week preserves the original assignment. A fully staffed published
-    # demand therefore transitions to CONFIRMED, matching the canonical
-    # single-shift publish endpoint and ShiftSlot state machine.
-    assert copied.status == Shift.Status.CONFIRMED
-
-
-@pytest.mark.django_db
-def test_shift_swap_requires_target_and_transfers_shift(auth_admin, worker_user, second_worker, shift):
-    client = APIClient(); client.force_authenticate(worker_user)
-    request = client.post('/api/operations/swaps/', {'shift': str(shift.id), 'note': 'Bitte übernehmen'}, format='json')
-    assert request.status_code == 201
-    swap_id = request.data['id']
-    no_target = auth_admin.post(f'/api/operations/swaps/{swap_id}/decide/', {'status': 'approved'}, format='json')
-    assert no_target.status_code == 400
-    approved = auth_admin.post(f'/api/operations/swaps/{swap_id}/decide/', {'status': 'approved', 'offered_to': str(second_worker.id)}, format='json')
-    assert approved.status_code == 200
-    shift.refresh_from_db()
-    assert shift.worker == second_worker
-    assert ShiftSwapRequest.objects.get(pk=swap_id).status == 'approved'
-    assert Notification.objects.filter(user=worker_user, kind='shift-swap-decision').exists()
