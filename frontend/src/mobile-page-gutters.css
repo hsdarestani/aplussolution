@@ -1,0 +1,52 @@
+/* Consistent mobile reading gutter for secondary app pages.
+   Schedule/time/dashboard keep their purpose-built WIW layouts untouched. */
+@media (max-width: 900px) {
+  .mobile-first-app-shell-v1[data-view="profile"] .app-main,
+  .mobile-first-app-shell-v1[data-view="contracts"] .app-main,
+  .mobile-first-app-shell-v1[data-view="settings"] .app-main,
+  .mobile-first-app-shell-v1[data-view="people"] .app-main,
+  .mobile-first-app-shell-v1[data-view="messages"] .app-main,
+  .mobile-first-app-shell-v1[data-view="operations"] .app-main,
+  .mobile-first-app-shell-v1[data-view="documents"] .app-main,
+  .mobile-first-app-shell-v1[data-view="orders"] .app-main,
+  .mobile-first-app-shell-v1[data-view="ranking"] .app-main,
+  .mobile-first-app-shell-v1[data-view="ratings"] .app-main {
+    padding-left: max(14px, env(safe-area-inset-left)) !important;
+    padding-right: max(14px, env(safe-area-inset-right)) !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: hidden;
+  }
+
+  /* Keep every page-level block inside the new gutter even when older modules
+     used viewport-width sizing. Do not touch modal/sheet portals. */
+  .mobile-first-app-shell-v1[data-view="profile"] .app-main > *,
+  .mobile-first-app-shell-v1[data-view="contracts"] .app-main > *,
+  .mobile-first-app-shell-v1[data-view="settings"] .app-main > *,
+  .mobile-first-app-shell-v1[data-view="people"] .app-main > *,
+  .mobile-first-app-shell-v1[data-view="messages"] .app-main > *,
+  .mobile-first-app-shell-v1[data-view="operations"] .app-main > *,
+  .mobile-first-app-shell-v1[data-view="documents"] .app-main > *,
+  .mobile-first-app-shell-v1[data-view="orders"] .app-main > *,
+  .mobile-first-app-shell-v1[data-view="ranking"] .app-main > *,
+  .mobile-first-app-shell-v1[data-view="ratings"] .app-main > * {
+    max-width: 100% !important;
+    box-sizing: border-box;
+  }
+
+  /* Page titles should line up with cards/actions rather than visually touching
+     the viewport edge. */
+  .mobile-first-app-shell-v1[data-view="profile"] .app-main .title,
+  .mobile-first-app-shell-v1[data-view="contracts"] .app-main .title,
+  .mobile-first-app-shell-v1[data-view="settings"] .app-main .title,
+  .mobile-first-app-shell-v1[data-view="people"] .app-main .title,
+  .mobile-first-app-shell-v1[data-view="messages"] .app-main .title,
+  .mobile-first-app-shell-v1[data-view="operations"] .app-main .title,
+  .mobile-first-app-shell-v1[data-view="documents"] .app-main .title,
+  .mobile-first-app-shell-v1[data-view="orders"] .app-main .title,
+  .mobile-first-app-shell-v1[data-view="ranking"] .app-main .title,
+  .mobile-first-app-shell-v1[data-view="ratings"] .app-main .title {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+}
