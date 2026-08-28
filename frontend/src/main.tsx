@@ -12,6 +12,7 @@ import './people-lists.css';
 import './steuerzentrale-hardening.css';
 import './header-quick-access.css';
 import './mobile-header-actions-fix.css';
+import './phase8-wiw-mobile.css';
 import App from './App';
 import StoreComplianceLinks from './StoreComplianceLinks';
 import StoreLegalPage, { legalPageFromPath } from './StoreLegalPages';

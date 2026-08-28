@@ -76,20 +76,13 @@ test('schedule keeps Berlin time and offers five planning views with customer co
   const timeline = page.getByTestId('schedule-timeline-view'); await expect(timeline).toBeVisible(); await expect(timeline).toContainText('QA Frankfurt Testsite'); await expect(timeline).toContainText('QA Servicekraft');
 });
 
-test('planning views keep overflow inside the workspace on mobile', async ({ page }) => {
+test('Phase 8 mobile planning keeps the day workspace and week strip inside the viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 }); await page.clock.setFixedTime(fixedNow); await mockAdmin(page); await page.goto('/?view=schedule');
-  const views: Array<[string, string]> = [
-    ['day', 'schedule-day-view'],
-    ['week', 'schedule-week-view'],
-    ['month', 'schedule-month-view'],
-    ['timeline', 'schedule-timeline-view'],
-  ];
-  for (const [key, testId] of views) {
-    await page.getByTestId(`schedule-view-${key}`).click();
-    await expect(page.getByTestId(testId)).toBeVisible();
-    const noPageOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
-    expect(noPageOverflow).toBeTruthy();
-  }
+  await expect(page.getByTestId('phase8-week-strip')).toBeVisible();
+  await expect(page.getByTestId('schedule-day-view')).toBeVisible();
+  await expect(page.getByTestId('schedule-view-toolbar')).toBeHidden();
+  const noPageOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+  expect(noPageOverflow).toBeTruthy();
 });
 
 test('worker home always shows German business time regardless of device timezone', async ({ page }) => {

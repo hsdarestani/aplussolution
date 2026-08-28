@@ -3091,9 +3091,7 @@ export default function App() {
   if (!user) return <IonApp><Login done={setUser} /></IonApp>;
 
   const items = nav[user.role] || nav.worker;
-  const primaryViews: View[] = isManager(user)
-    ? ['dashboard', 'schedule', 'time', 'messages']
-    : ['dashboard', 'schedule', 'time', 'messages'];
+  const primaryViews: View[] = ['dashboard', 'schedule', 'time'];
   const mobilePrimaryItems = items.filter(([key]) => primaryViews.includes(key));
   const mobileMoreItems = items.filter(([key]) => !primaryViews.includes(key));
   const currentLabel = view === 'profile' ? 'Profil' : view === 'akte' ? 'Digitale Akte' : items.find(([key]) => key === view)?.[1] || 'A+ Solution';
@@ -3104,10 +3102,10 @@ export default function App() {
     client: 'Kundenportal',
   };
   const mobileLabels: Partial<Record<View, string>> = {
-    dashboard: 'Start',
+    dashboard: 'Dashboard',
     orders: 'Aufträge',
     schedule: 'Dienstplan',
-    time: 'Zeit',
+    time: 'Zeiterfassung',
     people: 'Personal',
     settings: 'Setup',
     messages: 'Mitteilungen',

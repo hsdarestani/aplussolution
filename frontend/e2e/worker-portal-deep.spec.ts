@@ -242,12 +242,12 @@ test.describe('Worker portal deep regression QA', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     const state = await mockWorkerApi(page);
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: worker.name })).toBeVisible();
-    await expect(page.getByText('QA-MA-001')).toBeVisible();
+    await expect(page.getByTestId('phase8-mobile-dashboard')).toBeVisible();
+    await expect(page.getByText('Heute', { exact: true })).toBeVisible();
     await expect(page.locator('.mobile-tabbar')).toBeVisible();
 
     await page.goto('/?view=people');
-    await expect(page.getByRole('heading', { name: worker.name })).toBeVisible();
+    await expect(page.getByTestId('phase8-mobile-dashboard')).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBeNull();
     expect(forbiddenManagerFanout(state)).toEqual([]);
   });
@@ -272,7 +272,9 @@ test.describe('Worker portal deep regression QA', () => {
   test('clock in/out and correction use real worker states', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const state = await mockWorkerApi(page);
-    await page.goto('/?view=time');
+    await page.goto('/');
+    await page.getByTestId('phase8-mobile-dashboard').getByRole('button', { name: 'Einstempeln' }).click();
+    await expect(page.getByRole('heading', { name: 'Bereit für deinen Einsatz?' })).toBeVisible();
     await page.getByRole('button', { name: 'Einstempeln' }).click();
     await expect.poll(() => state.activeClock).toBe(true);
     await expect(page.getByRole('button', { name: 'Ausstempeln' })).toBeVisible();

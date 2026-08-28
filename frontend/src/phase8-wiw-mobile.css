@@ -1,0 +1,520 @@
+/* Phase 8 — WIW-reference mobile shell. Desktop intentionally remains unchanged. */
+.wiw-mobile-dashboard,
+.wiw-pay-periods,
+.wiw-pay-period-detail,
+.sv2-wiw-week-strip,
+.sv2-wiw-fab,
+.sv2-wiw-total {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  :root {
+    --wiw-bg: #2d2d2f;
+    --wiw-row: #323234;
+    --wiw-section: #474749;
+    --wiw-line: #171719;
+    --wiw-copy: #f3f3f4;
+    --wiw-muted: #b8b8bd;
+    --wiw-primary: #155eef;
+    --wiw-primary-soft: #7fa7ff;
+  }
+
+  html, body, #root, ion-app, ion-page {
+    background: var(--wiw-bg) !important;
+  }
+
+  .app-content,
+  .app-content::part(scroll) {
+    --background: var(--wiw-bg) !important;
+    background: var(--wiw-bg) !important;
+  }
+
+  .app {
+    background: var(--wiw-bg) !important;
+    padding-top: calc(64px + env(safe-area-inset-top)) !important;
+    padding-bottom: calc(70px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .mobile-appbar {
+    height: calc(64px + env(safe-area-inset-top)) !important;
+    padding: env(safe-area-inset-top) 12px 0 !important;
+    grid-template-columns: 72px minmax(0,1fr) 42px !important;
+    background: var(--wiw-primary) !important;
+    border-bottom: 1px solid #0c46c8 !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .mobile-brand,
+  .mobile-page-title small,
+  .mobile-page-title strong {
+    color: #fff !important;
+  }
+
+  .mobile-brand span {
+    font-size: 25px !important;
+    letter-spacing: -1.5px !important;
+  }
+
+  .mobile-brand small {
+    display: none !important;
+  }
+
+  .mobile-page-title small {
+    opacity: .72;
+  }
+
+  .mobile-page-title strong {
+    font-size: 15px !important;
+    font-weight: 600 !important;
+  }
+
+  .mobile-avatar {
+    width: 36px !important;
+    height: 36px !important;
+    border-radius: 50% !important;
+    background: rgba(255,255,255,.16) !important;
+    box-shadow: none !important;
+    border: 1px solid rgba(255,255,255,.35) !important;
+  }
+
+  .mobile-tabbar {
+    min-height: calc(62px + env(safe-area-inset-bottom)) !important;
+    padding: 5px 6px calc(5px + env(safe-area-inset-bottom)) !important;
+    grid-template-columns: repeat(4,minmax(0,1fr)) !important;
+    gap: 0 !important;
+    background: #2b2b2d !important;
+    border-top: 1px solid #111 !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .mobile-tabbar button {
+    min-height: 50px !important;
+    padding: 4px 2px !important;
+    border-radius: 0 !important;
+    color: #9a9a9f !important;
+    background: transparent !important;
+    gap: 2px !important;
+  }
+
+  .mobile-tabbar button ion-icon {
+    font-size: 21px !important;
+  }
+
+  .mobile-tabbar button span {
+    font-size: 9px !important;
+    font-weight: 500 !important;
+  }
+
+  .mobile-tabbar button.active {
+    color: var(--wiw-primary-soft) !important;
+  }
+
+  .mobile-tabbar button.active::before {
+    display: none !important;
+  }
+
+  main,
+  .app-main {
+    padding: 0 !important;
+    background: var(--wiw-bg) !important;
+    color: var(--wiw-copy);
+  }
+
+  .app-main > .global-search,
+  .app-main > .header-quick-access {
+    margin: 8px 10px;
+  }
+
+  /* More sheet follows the same dark mobile language. */
+  .mobile-menu-modal ion-content {
+    --background: #2f2f31 !important;
+  }
+  .mobile-menu-sheet { background:#2f2f31 !important; color:var(--wiw-copy); }
+  .mobile-menu-handle { background:#707075 !important; }
+  .mobile-menu-user,
+  .mobile-menu-grid > button {
+    background:#353537 !important;
+    border-color:#19191b !important;
+    color:var(--wiw-copy) !important;
+    box-shadow:none !important;
+  }
+  .mobile-menu-user small { color:var(--wiw-muted) !important; }
+  .mobile-menu-heading small,
+  .mobile-menu-heading button { color:var(--wiw-primary-soft) !important; }
+  .mobile-menu-icon { background:#242d43 !important; color:var(--wiw-primary-soft) !important; }
+  .mobile-menu-grid > button.active { background:#24355f !important; border-color:#4f7ee8 !important; }
+  .mobile-logout { background:#3a2929 !important; border-color:#704343 !important; }
+
+  /* Employee dashboard — section bars and rows mirror WIW's information hierarchy. */
+  .wiw-mobile-dashboard {
+    display:block;
+    min-height:calc(100dvh - 126px);
+    background:var(--wiw-bg);
+    color:var(--wiw-copy);
+  }
+  .employee-desktop-dashboard { display:none !important; }
+  .wiw-section-label {
+    min-height:34px;
+    padding:10px 11px 7px;
+    display:flex;
+    align-items:flex-end;
+    background:var(--wiw-section);
+    border-top:1px solid #555557;
+    border-bottom:1px solid var(--wiw-line);
+    color:#e8e8ea;
+    font-size:10px;
+    font-weight:500;
+    letter-spacing:.01em;
+  }
+  .wiw-mobile-row,
+  .wiw-next-shift,
+  .wiw-upcoming {
+    width:100%;
+    min-height:55px;
+    margin:0;
+    padding:9px 12px;
+    display:flex;
+    align-items:center;
+    gap:12px;
+    border:0;
+    border-bottom:1px solid var(--wiw-line);
+    border-radius:0;
+    background:var(--wiw-row);
+    color:var(--wiw-copy);
+    text-align:left;
+    box-shadow:none;
+  }
+  .wiw-mobile-row strong { flex:1; font-size:12px; font-weight:500; }
+  .wiw-row-icon,
+  .wiw-count {
+    width:32px;
+    min-width:32px;
+    height:32px;
+    display:grid;
+    place-items:center;
+    border:1px solid #8a8a8f;
+    border-radius:50%;
+    color:#d8d8dc;
+    font-size:12px;
+    font-weight:500;
+  }
+  .wiw-row-icon ion-icon { font-size:18px; }
+  .wiw-row-chevron { color:#6f6f74; font-size:15px; }
+  .wiw-next-shift { min-height:48px; gap:6px; flex-wrap:wrap; }
+  .wiw-next-shift small { color:#dedee1; font-size:10px; }
+  .wiw-next-shift strong { color:var(--wiw-muted); font-size:11px; font-weight:500; }
+  .wiw-next-shift span { width:100%; color:#929298; font-size:10px; }
+  .wiw-upcoming {
+    min-height:69px;
+    justify-content:space-between;
+    gap:12px;
+  }
+  .wiw-upcoming > div { min-width:0; display:grid; gap:4px; }
+  .wiw-upcoming strong { font-size:12px; }
+  .wiw-upcoming span { color:var(--wiw-muted); font-size:10px; }
+  .wiw-upcoming > button {
+    min-width:82px;
+    min-height:38px;
+    padding:0 13px;
+    border:0;
+    border-radius:7px;
+    background:var(--wiw-primary);
+    color:#fff;
+    font-weight:600;
+    font-size:12px;
+  }
+
+  /* Attendance — Pay Periods screen. */
+  .wiw-pay-periods,
+  .wiw-pay-period-detail {
+    display:block;
+    min-height:calc(100dvh - 126px);
+    background:var(--wiw-bg);
+    color:var(--wiw-copy);
+  }
+  .wiw-mobile-screen-title {
+    min-height:50px;
+    padding:17px 11px 10px;
+    background:var(--wiw-primary);
+    color:#fff;
+    font-size:14px;
+    font-weight:500;
+  }
+  .wiw-period-row {
+    width:100%;
+    min-height:41px;
+    padding:9px 10px;
+    display:grid;
+    grid-template-columns:minmax(0,1fr) 20px 14px;
+    align-items:center;
+    gap:8px;
+    border:0;
+    border-bottom:1px solid #141416;
+    background:var(--wiw-row);
+    color:var(--wiw-copy);
+    text-align:left;
+  }
+  .wiw-period-row strong { font-size:10px; font-weight:500; }
+  .wiw-period-row > ion-icon { color:#77777c; font-size:13px; }
+  .wiw-period-circle { width:15px; height:15px; border:1.5px solid #b7b7bb; border-radius:50%; }
+  .wiw-period-back {
+    width:100%;
+    min-height:42px;
+    padding:8px 10px;
+    display:flex;
+    align-items:center;
+    gap:7px;
+    border:0;
+    border-bottom:1px solid #111;
+    background:#38383a;
+    color:var(--wiw-primary-soft);
+    text-align:left;
+    font-size:11px;
+  }
+  .wiw-period-title { padding:15px 12px; background:#343436; border-bottom:1px solid #111; }
+  .wiw-period-title small { color:var(--wiw-muted); font-size:9px; }
+  .wiw-period-title h1 { margin:5px 0 9px; color:#fff; font-size:16px; font-weight:500; }
+  .wiw-period-title strong { color:var(--wiw-primary-soft); font-size:18px; }
+  .wiw-time-entry {
+    min-height:58px;
+    padding:9px 12px;
+    display:flex;
+    gap:12px;
+    align-items:center;
+    border-bottom:1px solid #151517;
+    background:var(--wiw-row);
+  }
+  .wiw-time-entry > div { display:grid; gap:2px; }
+  .wiw-time-entry strong { font-size:11px; }
+  .wiw-time-entry span,.wiw-time-entry small { color:var(--wiw-muted); font-size:10px; }
+  .wiw-period-empty { padding:34px 14px; color:var(--wiw-muted); text-align:center; font-size:11px; }
+
+  /* Scheduler — hide desktop planning chrome and expose WIW-style tabs/week strip/list. */
+  .sv2 { color:var(--wiw-copy); }
+  .sv2-title,
+  .sv2-search,
+  .sv2-service-filter,
+  .sv2-client-legend,
+  .sv2-view-toolbar { display:none !important; }
+  .sv2 > ion-segment {
+    margin:0 !important;
+    min-height:42px;
+    --background:#353537;
+    border-radius:0 !important;
+    border-bottom:1px solid #151517;
+  }
+  .sv2 > ion-segment ion-segment-button {
+    --color:#8e8e93;
+    --color-checked:#fff;
+    --indicator-color:var(--wiw-primary);
+    min-height:42px;
+    font-size:9px;
+  }
+  .sv2-wiw-week-strip {
+    display:grid;
+    grid-template-columns:26px repeat(7,minmax(0,1fr)) 26px;
+    align-items:stretch;
+    min-height:51px;
+    background:#363638;
+    border-bottom:1px solid #111;
+  }
+  .sv2-wiw-week-strip button {
+    min-width:0;
+    padding:4px 1px;
+    display:grid;
+    place-items:center;
+    align-content:center;
+    gap:2px;
+    border:0;
+    background:transparent;
+    color:#dddde0;
+    font-size:9px;
+  }
+  .sv2-wiw-week-strip button.nav { font-size:20px; color:#bcbcc1; }
+  .sv2-wiw-week-strip button span { font-size:8px; color:#a3a3a8; text-transform:uppercase; }
+  .sv2-wiw-week-strip button b {
+    width:25px;
+    height:25px;
+    display:grid;
+    place-items:center;
+    border-radius:50%;
+    font-size:10px;
+    font-weight:500;
+  }
+  .sv2-wiw-week-strip button.active b { background:#202020; color:#fff; }
+  .sv2-wiw-week-strip button.today b { outline:2px solid var(--wiw-primary); }
+  .sv2-day-wrap { margin:0 !important; padding:0 !important; }
+  .sv2-single-day {
+    border:0 !important;
+    border-radius:0 !important;
+    background:var(--wiw-bg) !important;
+    box-shadow:none !important;
+  }
+  .sv2-single-day > header {
+    min-height:38px;
+    padding:8px 11px !important;
+    display:flex;
+    align-items:center;
+    background:var(--wiw-section) !important;
+    border:0 !important;
+    border-bottom:1px solid #151517 !important;
+  }
+  .sv2-single-day > header small { display:none; }
+  .sv2-single-day > header h2 { margin:0 !important; color:#e6e6e8; font-size:10px !important; font-weight:500 !important; }
+  .sv2-single-day > header span { color:#b8b8bd !important; font-size:9px !important; }
+  .sv2-single-day-events { padding:0 !important; }
+  .sv2-event {
+    margin:0 !important;
+    min-height:72px;
+    padding:8px 10px 8px 8px !important;
+    border:0 !important;
+    border-bottom:1px solid #141416 !important;
+    border-left:4px solid hsl(var(--sv2-client-hue) 60% 60%) !important;
+    border-radius:0 !important;
+    background:var(--wiw-row) !important;
+    color:#fff !important;
+    box-shadow:none !important;
+  }
+  .sv2-event-head { margin-bottom:5px !important; }
+  .sv2-event-head strong { font-size:12px !important; font-weight:500 !important; color:#fff !important; }
+  .sv2-event-head > span { color:#9f9fa4 !important; font-size:9px !important; }
+  .sv2-event-details { gap:3px !important; }
+  .sv2-mini-actions {
+    display:flex;
+    justify-content:flex-end;
+    gap:6px;
+    margin-top:5px;
+  }
+  .sv2-mini-actions ion-button {
+    margin:0;
+    min-height:28px;
+    font-size:9px;
+  }
+  .sv2-event-line {
+    min-height:16px !important;
+    gap:6px !important;
+    color:#d8d8dc !important;
+    font-size:10px !important;
+  }
+  .sv2-event-line ion-icon { font-size:12px !important; color:#aeb4c4 !important; }
+  .sv2-field-copy { gap:3px !important; align-items:baseline !important; }
+  .sv2-field-copy small { display:none !important; }
+  .sv2-profile-line { min-height:24px !important; }
+  .sv2-no-events {
+    min-height:66px;
+    display:grid;
+    place-items:center;
+    color:#a6a6aa !important;
+    background:#303032;
+    border-bottom:1px solid #171719;
+    font-size:10px;
+  }
+  .sv2-list { margin:0 !important; }
+  .sv2-card {
+    margin:0 !important;
+    padding:8px 10px !important;
+    border:0 !important;
+    border-bottom:1px solid #151517 !important;
+    border-radius:0 !important;
+    background:var(--wiw-row) !important;
+    color:#fff !important;
+    box-shadow:none !important;
+  }
+  .sv2-wiw-fab {
+    position:fixed;
+    right:14px;
+    bottom:calc(75px + env(safe-area-inset-bottom));
+    z-index:900;
+    width:48px;
+    height:48px;
+    display:grid;
+    place-items:center;
+    border:0;
+    border-radius:50%;
+    background:var(--wiw-primary);
+    color:#fff;
+    box-shadow:0 5px 14px rgba(0,0,0,.35);
+    font-size:28px;
+    font-weight:300;
+  }
+  .sv2-wiw-total {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    min-height:37px;
+    padding:8px 11px;
+    background:#4a4a4c;
+    border-top:1px solid #5b5b5e;
+    color:#f0f0f2;
+    font-size:10px;
+  }
+  .sv2-wiw-total strong { font-size:11px; font-weight:500; }
+
+  /* Generic mobile administration inherits the same dense dark surfaces. */
+  .admin-home-v4,
+  .attendance-head,
+  .attendance-panel,
+  .attention-list,
+  .attention-toolbar { color:var(--wiw-copy) !important; }
+  .admin-attention-hero,
+  .admin-priority-section,
+  .attention-toolbar,
+  .attendance-head,
+  .attendance-panel,
+  .clock-card {
+    margin:0 !important;
+    padding:12px !important;
+    border:0 !important;
+    border-bottom:1px solid #151517 !important;
+    border-radius:0 !important;
+    background:#343436 !important;
+    color:var(--wiw-copy) !important;
+    box-shadow:none !important;
+  }
+  .admin-attention-hero h1,
+  .admin-priority-section h2,
+  .attendance-head h1,
+  .attendance-panel h2,
+  .clock-card h2 { color:#fff !important; }
+  .admin-attention-hero p,
+  .admin-priority-section span,
+  .attendance-head p,
+  .clock-card p { color:var(--wiw-muted) !important; }
+  .attention-summary,
+  .attendance-stats {
+    margin:0 !important;
+    gap:1px !important;
+    background:#151517 !important;
+  }
+  .attention-summary-card,
+  .attendance-stat {
+    border:0 !important;
+    border-radius:0 !important;
+    background:#3b3b3d !important;
+    color:#fff !important;
+    box-shadow:none !important;
+  }
+  .attention-item,
+  .attendance-row {
+    margin:0 !important;
+    padding:10px !important;
+    border:0 !important;
+    border-bottom:1px solid #151517 !important;
+    border-radius:0 !important;
+    background:var(--wiw-row) !important;
+    color:#fff !important;
+    box-shadow:none !important;
+  }
+  .attention-item p,
+  .attendance-row small,
+  .attendance-change span { color:var(--wiw-muted) !important; }
+}
+
+@media (min-width: 901px) {
+  .employee-desktop-dashboard { display:block; }
+}

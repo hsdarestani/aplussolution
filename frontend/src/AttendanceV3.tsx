@@ -10,6 +10,7 @@ import {
   IonToast,
 } from '@ionic/react';
 import { api, User } from './api';
+import Phase8MobileAttendance from './Phase8MobileAttendance';
 import './attendance-v3.css';
 
 const isManager = (user: User) => user.role === 'admin' || user.role === 'manager';
@@ -79,6 +80,16 @@ export default function AttendanceV3({ user }: { user: User }) {
   const [correction, setCorrection] = useState<any>();
   const [absence, setAbsence] = useState<any>();
   const [closeTarget, setCloseTarget] = useState<any>();
+  const [mobileClockMode] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const requested = sessionStorage.getItem('phase8:attendance-clock') === '1';
+      if (requested) sessionStorage.removeItem('phase8:attendance-clock');
+      return requested;
+    } catch {
+      return false;
+    }
+  });
 
   const load = async () => {
     const [main, timeOff] = await Promise.all([
@@ -210,6 +221,10 @@ export default function AttendanceV3({ user }: { user: User }) {
   }, [data]);
 
   if (!data) return <div className="attendance-loading"><IonSpinner /></div>;
+
+  if (user.role === 'worker' && !mobileClockMode && typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches) {
+    return <Phase8MobileAttendance data={data} />;
+  }
 
   if (isManager(user)) {
     return (
