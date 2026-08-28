@@ -1,0 +1,118 @@
+@media (max-width: 900px) {
+  /* Attendance must make empty months visibly different instead of presenting
+     every pay period as the same selectable row. */
+  .wiw-pay-periods {
+    padding-bottom: calc(74px + env(safe-area-inset-bottom));
+  }
+
+  .wiw-attendance-role-note {
+    padding: 11px 16px 12px;
+    display: grid;
+    gap: 3px;
+    border-bottom: 1px solid var(--wiw-line, #dadada);
+    background: var(--wiw-section, #f3f3f3);
+    color: var(--wiw-copy, #323232);
+  }
+
+  .wiw-attendance-role-note b {
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .wiw-attendance-role-note span {
+    color: var(--wiw-muted, #7d858d);
+    font-size: 10px;
+    line-height: 1.4;
+  }
+
+  .wiw-period-row {
+    min-height: 66px !important;
+    padding: 9px 16px !important;
+    grid-template-columns: minmax(0, 1fr) 34px !important;
+    grid-template-rows: auto auto !important;
+    column-gap: 12px !important;
+    row-gap: 3px !important;
+  }
+
+  .wiw-period-row > strong {
+    grid-column: 1;
+    grid-row: 1;
+    font-size: 13px !important;
+    line-height: 1.25;
+  }
+
+  .wiw-period-meta {
+    grid-column: 1;
+    grid-row: 2;
+    color: var(--wiw-muted, #7d858d);
+    font-size: 10px;
+    line-height: 1.25;
+  }
+
+  .wiw-period-row .wiw-period-circle {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    width: 28px !important;
+    height: 28px !important;
+    display: grid;
+    place-items: center;
+    box-sizing: border-box;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .wiw-period-row.has-time {
+    box-shadow: inset 3px 0 0 #6bad50;
+  }
+
+  .wiw-period-row.has-time .wiw-period-meta {
+    color: #568d43;
+    font-weight: 650;
+  }
+
+  .wiw-period-circle.has-data {
+    border-color: #6bad50 !important;
+    background: #6bad50;
+    color: #fff;
+  }
+
+  .wiw-period-row.is-empty {
+    background: color-mix(in srgb, var(--wiw-row, #fff) 91%, #9aa0a6 9%) !important;
+  }
+
+  .wiw-period-row.is-empty > strong {
+    opacity: .72;
+  }
+
+  .wiw-period-circle.empty {
+    border-color: #b7bcc1 !important;
+    background: transparent;
+    color: #a2a8ae;
+  }
+
+  /* Phase-8's global mobile reset intentionally removes main padding. Restore a
+     comfortable app gutter only on content-heavy request/document views. */
+  .mobile-first-app-shell-v1[data-view='operations'] .app-main,
+  .mobile-first-app-shell-v1[data-view='documents'] .app-main {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+    box-sizing: border-box;
+  }
+
+  .mobile-first-app-shell-v1[data-view='operations'] .title,
+  .mobile-first-app-shell-v1[data-view='documents'] .title {
+    margin-top: 10px;
+  }
+
+  .mobile-first-app-shell-v1[data-view='operations'] .operations-panel,
+  .mobile-first-app-shell-v1[data-view='documents'] .document-center-v5,
+  .mobile-first-app-shell-v1[data-view='documents'] .panel {
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+}
+
+html[data-aplus-appearance='dark'] .wiw-period-row.is-empty {
+  background: color-mix(in srgb, var(--wiw-row, #323234) 90%, #000 10%) !important;
+}
