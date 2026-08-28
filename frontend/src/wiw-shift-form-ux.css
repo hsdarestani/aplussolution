@@ -40,6 +40,32 @@
     z-index: 2147483200 !important;
   }
 
+  /* Standardfarbe is informational in the A+ skin: all WIW accents use the
+     fixed brand navy instead of exposing a second per-shift color system. */
+  .wiw-standard-color-row {
+    cursor: default !important;
+  }
+
+  .wiw-standard-color-hint {
+    margin-left: auto;
+    display: inline-flex !important;
+    align-items: center;
+    gap: 6px;
+    color: #7f8790 !important;
+    font-size: 11px !important;
+    font-weight: 500 !important;
+    white-space: nowrap;
+  }
+
+  .wiw-standard-color-hint .wiw-standard-color-swatch {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 12px;
+    border-radius: 50%;
+    background: #06283f;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.45), 0 0 0 1px rgba(6,40,63,.16);
+  }
+
   /* Restored A+ capabilities are normal rows in the WIW form flow. They scroll
      with the rest of the editor instead of covering pickers or bottom sheets. */
   .wiw-form-extra-actions {
