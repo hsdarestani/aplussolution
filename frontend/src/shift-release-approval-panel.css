@@ -1,0 +1,62 @@
+.shift-release-approval-panel {
+  margin: 22px 0;
+  border: 1px solid #e1e5df;
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+}
+.shift-release-approval-panel > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px;
+  border-bottom: 1px solid #ecefea;
+}
+.shift-release-approval-panel header small { color: #6c8e5a; font-weight: 800; letter-spacing: .08em; }
+.shift-release-approval-panel header h2 { margin: 4px 0; font-size: 20px; }
+.shift-release-approval-panel header p { margin: 0; color: #757b72; line-height: 1.45; }
+.shift-release-approval-panel header > b {
+  min-width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 18px;
+  background: #fff3cc;
+  color: #806600;
+}
+.shift-release-approval-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 15px 20px;
+  border-bottom: 1px solid #f0f1ef;
+}
+.shift-release-approval-row > div:first-child { display: flex; flex-direction: column; gap: 4px; }
+.shift-release-approval-row span { color: #747974; font-size: 13px; }
+.shift-release-approval-actions { display: flex; gap: 8px; }
+.shift-release-approval-actions button {
+  min-height: 36px;
+  padding: 0 13px;
+  border: 1px solid #d2d5d0;
+  border-radius: 7px;
+  background: #fff;
+  color: #525852;
+  font-weight: 700;
+}
+.shift-release-approval-actions button.approve { border-color: #73a85a; background: #67a24b; color: #fff; }
+.shift-release-approval-actions button:disabled { opacity: .55; }
+.shift-release-empty { padding: 18px 20px; color: #8a8f88; }
+.shift-release-message { margin: 12px 20px 18px; padding: 10px 12px; border-radius: 7px; background: #eef7e9; color: #486a36; }
+
+@media (max-width: 900px) {
+  .shift-release-approval-panel { margin: 12px 10px 84px; border-radius: 10px; }
+  .shift-release-approval-panel > header { padding: 15px; }
+  .shift-release-approval-panel header h2 { font-size: 17px; }
+  .shift-release-approval-panel header p { font-size: 12px; }
+  .shift-release-approval-row { align-items: stretch; flex-direction: column; padding: 14px 15px; }
+  .shift-release-approval-actions { width: 100%; }
+  .shift-release-approval-actions button { flex: 1; }
+}
