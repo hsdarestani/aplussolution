@@ -41,19 +41,45 @@ class ShiftApiSerializer(serializers.ModelSerializer):
         return payload
 
     def _schedule_slots(self, obj):
-        """Reuse the bulk-prefetched slot list when the shift view provided it.
+        """Load card slots once for a whole list instead of once per Shift.
 
-        Schedule pages can contain hundreds of shifts. Querying claimed slots and
-        card slots separately for every Shift created an avoidable 2N query fanout
-        and made the admin Dienstplan feel much slower than WIW. The view now
-        prefetches one ordered slot list for all shifts; serializers filter that
-        list in memory. Callers that do not use the optimized queryset keep the
-        old safe fallback.
+        The admin Dienstplan can contain hundreds of imported/historical shifts.
+        Both assigned_workers and slot_cards need the same slot data, and the old
+        serializer caused an N+1 query pattern. When serializing a list, build one
+        in-memory slot map for every Shift in that response. Single-object callers
+        retain a small safe fallback.
         """
         prefetched = getattr(obj, '_schedule_slots', None)
         if prefetched is not None:
             return prefetched
-        return list(obj.slots.select_related('worker__user').order_by('created_at'))
+
+        bulk_map = getattr(self, '_bulk_schedule_slot_map', None)
+        if bulk_map is None:
+            instances = getattr(getattr(self, 'parent', None), 'instance', None)
+            if instances is not None and not isinstance(instances, Shift):
+                try:
+                    rows = list(instances)
+                except TypeError:
+                    rows = []
+                shift_ids = [row.pk for row in rows if getattr(row, 'pk', None)]
+                bulk_map = {shift_id: [] for shift_id in shift_ids}
+                if shift_ids:
+                    slots = ShiftSlot.objects.filter(shift_id__in=shift_ids).select_related(
+                        'worker__user'
+                    ).order_by('shift_id', 'created_at')
+                    for slot in slots:
+                        bulk_map.setdefault(slot.shift_id, []).append(slot)
+                self._bulk_schedule_slot_map = bulk_map
+            else:
+                bulk_map = {}
+                self._bulk_schedule_slot_map = bulk_map
+
+        if obj.pk in bulk_map:
+            slots = bulk_map[obj.pk]
+        else:
+            slots = list(obj.slots.select_related('worker__user').order_by('created_at'))
+        setattr(obj, '_schedule_slots', slots)
+        return slots
 
     def get_assigned_workers(self, obj):
         slots = [
