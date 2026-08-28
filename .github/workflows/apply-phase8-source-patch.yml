@@ -1,0 +1,29 @@
+name: Apply Phase 8 source patch
+
+on:
+  push:
+    branches:
+      - feature/phase8-signatures-wiw-mobile
+    paths:
+      - scripts/phase8_source_patch.py
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/phase8-signatures-wiw-mobile
+      - name: Apply product patch
+        run: python scripts/phase8_source_patch.py
+      - name: Commit source changes and retire helper
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm scripts/phase8_source_patch.py .github/workflows/apply-phase8-source-patch.yml
+          git add frontend/src/App.tsx frontend/src/AttendanceV3.tsx frontend/src/ScheduleV2.tsx frontend/src/AdminHomeV4.tsx frontend/e2e/app-shell.spec.ts
+          git commit -m 'Apply Phase 8 mobile interaction structure'
+          git push origin HEAD:feature/phase8-signatures-wiw-mobile
