@@ -13,12 +13,15 @@ test('Phase 8 bottom navigation keeps Mitteilungen inside Mehr', async()=>{
   expect(app).not.toContain("['dashboard', 'schedule', 'time', 'messages']");
 });
 
-test('Phase 8 worker dashboard follows the WIW section hierarchy', async()=>{
+test('Phase 8 worker dashboard follows the WIW employee hierarchy and GPS clock flow', async()=>{
   const home=read('src/EmployeeHome.tsx');
-  for(const label of ['Heute','Arbeitszeit-Hinweise','Mitarbeiteraktivität','Anfragen','Abwesenheitsanträge','Schichtanfragen','OpenShift-Anfragen','Mein Dienstplan','OpenShifts verfügbar','Wichtige anstehende Termine','Einstempeln']){
+  for(const label of ['Anfragen','Schichtanfragen','OpenShift-Anfragen','Mein Zeitplan','Meine Schichten','OpenShifts verfügbar','Zeiterfassung','Wichtige bevorstehende Daten','Einstempeln','Ausstempeln']){
     expect(home).toContain(label);
   }
-  expect(home).toContain("sessionStorage.setItem('phase8:attendance-clock','1')");
+  expect(home).toContain('Für die Zeiterfassung ist eine Berechtigung zur Standortbestimmung erforderlich');
+  expect(home).toContain('Standortdienste aktivieren');
+  expect(home).toContain("navigator.geolocation.getCurrentPosition");
+  expect(home).toContain("api(`time-entries/clock_${clockIntent}/`");
 });
 
 test('Phase 8 attendance spans the complete imported history without removing clock mode', async()=>{
@@ -30,12 +33,24 @@ test('Phase 8 attendance spans the complete imported history without removing cl
   expect(periods).not.toContain('Array.from({length:13}');
   expect(periods).toContain('Abrechnungszeiträume');
   expect(periods).toContain('entry.worked_minutes');
-  expect(attendance).toContain("sessionStorage.getItem('phase8:attendance-clock') === '1'");
   expect(attendance).toContain("api('attendance/history/')");
   expect(attendance).toContain('<Phase8MobileAttendance data={data} showWorker={isManager(user)} />');
 });
 
-test('Phase 8 scheduler exposes WIW week strip, total hours and mobile create control', async()=>{
+test('Phase 8 worker scheduler exposes WIW week strip, names, totals and approved release requests', async()=>{
+  const schedule=read('src/WiwEmployeeScheduleMobile.tsx');
+  expect(schedule).toContain('phase8-week-strip');
+  expect(schedule).toContain('phase8-week-total');
+  expect(schedule).toContain('Gesamtstunden');
+  expect(schedule).toContain('Meine Schichten');
+  expect(schedule).toContain('OpenShifts');
+  expect(schedule).toContain('Schicht übernommen. Dein Name steht jetzt im Dienstplan.');
+  expect(schedule).toContain('Freigeben');
+  expect(schedule).toContain('employee/shifts/${shift.id}/release-request/');
+  expect(schedule).toContain('bis die Administration zustimmt');
+});
+
+test('Phase 8 admin scheduler keeps WIW week strip, total hours and mobile create control', async()=>{
   const schedule=read('src/ScheduleV2.tsx');
   expect(schedule).toContain("matchMedia('(max-width: 900px)').matches?'day':'list'");
   expect(schedule).toContain('phase8-week-strip');
@@ -43,8 +58,6 @@ test('Phase 8 scheduler exposes WIW week strip, total hours and mobile create co
   expect(schedule).toContain('Gesamtstunden');
   expect(schedule).toContain('sv2-wiw-fab');
   expect(schedule).toContain('sv2-mini-actions');
-  expect(schedule).toContain('Schicht übernommen.');
-  expect(schedule).toContain('Freigeben');
 });
 
 test('Phase 8 mobile visual override is mobile-only and keeps A+ identity', async()=>{
