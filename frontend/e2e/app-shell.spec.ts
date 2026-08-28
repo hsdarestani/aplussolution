@@ -206,8 +206,9 @@ test.describe('Phase 6 mobile QA', () => {
     await expectNoHorizontalPageOverflow(page);
 
     await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
-    await expect(page.getByRole('heading', { name: 'Weitere Bereiche' })).toBeVisible();
-    const moreMenu = page.locator('.mobile-menu-grid');
+    const moreMenu = page.getByTestId('wiw-more-screen');
+    await expect(moreMenu).toBeVisible();
+    await expect(moreMenu.getByText('Mehr', { exact: true })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: 'Meine Verträge', exact: true })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: 'Dokumente', exact: true })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: 'Ranking', exact: true })).toBeVisible();
@@ -249,23 +250,19 @@ test.describe('Phase 6 mobile QA', () => {
     await page.goto('/');
 
     await expect(page.getByTestId('admin-exception-center')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Nur das, was heute Aufmerksamkeit braucht.' })).toBeVisible();
-    await expect(page.getByText('Schicht noch nicht vollständig besetzt')).toBeVisible();
+    const dashboard = page.getByTestId('wiw-mobile-admin-dashboard');
+    await expect(dashboard).toBeVisible();
+    await expect(dashboard.getByRole('button', { name: 'Arbeitszeit-Hinweise', exact: true })).toBeVisible();
+    await expect(dashboard.getByRole('button', { name: 'Mitarbeiteraktivität', exact: true })).toBeVisible();
     await expect(page.locator('.mobile-tabbar button')).toHaveCount(4);
     await expectNoHorizontalPageOverflow(page);
 
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeiterfassung' }).click();
-    await expect(page.getByRole('heading', { name: /Ungewöhnlich lange (laufende Timer|offene Zeiterfassungen)/ })).toBeVisible();
-    await page.getByRole('button', { name: /Timer beenden|Prüfen & schließen/ }).click();
-    const closeAlert = page.locator('ion-alert');
-    await expect(closeAlert).toBeVisible();
-    await expect(closeAlert.locator('textarea')).toBeVisible();
-    await closeAlert.locator('textarea').fill('E2E Prüfung');
-    await page.getByRole('button', { name: 'Abbrechen' }).click();
-    await expect(closeAlert).toBeHidden();
+    await expect(page.getByTestId('phase8-pay-periods')).toBeVisible();
+    await expect(page.getByText('Abrechnungszeiträume', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
-    const moreMenu = page.locator('.mobile-menu-grid');
+    const moreMenu = page.getByTestId('wiw-more-screen');
     await expect(moreMenu.getByRole('button', { name: 'Verträge & ANÜ', exact: true })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: 'Lohn & Dokumente', exact: true })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: 'Anfragen, Berichte & Verwaltung', exact: true })).toBeVisible();
@@ -297,7 +294,8 @@ test.describe('Phase 6 mobile QA', () => {
     expect(seenPaths).not.toContain('orders/');
 
     await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
-    const moreMenu = page.locator('.mobile-menu-grid');
+    const moreMenu = page.getByTestId('wiw-more-screen');
+    await expect(moreMenu).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: 'Servicecenter', exact: true })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: 'Aufträge', exact: true })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: 'Verträge & Signatur', exact: true })).toBeVisible();

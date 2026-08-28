@@ -92,11 +92,29 @@ export default function AttendanceV3({ user }: { user: User }) {
   });
 
   const load = async () => {
-    const [main, timeOff] = await Promise.all([
+    const mobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches;
+    const requests: Promise<any>[] = [
       api(isManager(user) ? 'attendance/exceptions/' : 'attendance/home/'),
       api('time-off/'),
-    ]);
-    setData(main);
+    ];
+    if (mobile && (isManager(user) || user.role === 'worker')) requests.push(api('attendance/history/'));
+    const [main, timeOff, archive] = await Promise.all(requests);
+    if (archive) {
+      const archiveHistory = Array.isArray(archive?.history) ? archive.history : [];
+      const mainHistory = Array.isArray(main?.history) ? main.history : [];
+      const merged = new Map<string, any>();
+      // Archive first, then the live attendance/home response so a freshly
+      // clocked-out native row wins over any stale copy from the archive call.
+      [...archiveHistory, ...mainHistory].forEach((entry: any) => {
+        if (entry?.id) merged.set(String(entry.id), entry);
+      });
+      const history = Array.from(merged.values()).sort((a: any, b: any) =>
+        new Date(b.clock_in).getTime() - new Date(a.clock_in).getTime(),
+      );
+      setData({ ...main, history, history_count: archive.count ?? history.length });
+    } else {
+      setData(main);
+    }
     setAbsences(unpack(timeOff));
   };
 
@@ -222,8 +240,8 @@ export default function AttendanceV3({ user }: { user: User }) {
 
   if (!data) return <div className="attendance-loading"><IonSpinner /></div>;
 
-  if (user.role === 'worker' && !mobileClockMode && typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches) {
-    return <Phase8MobileAttendance data={data} />;
+  if ((user.role === 'worker' || isManager(user)) && !mobileClockMode && typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches) {
+    return <Phase8MobileAttendance data={data} showWorker={isManager(user)} />;
   }
 
   if (isManager(user)) {

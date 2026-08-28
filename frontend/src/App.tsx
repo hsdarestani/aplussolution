@@ -58,6 +58,7 @@ import ListToolbar from './ListToolbar';
 import DocumentCenterV5 from './DocumentCenterV5';
 import AktePage from './AktePage';
 import Settings from './Settings';
+import MobileMoreMenu from './MobileMoreMenu';
 import { akteHref, openAkte } from './entityNavigation';
 
 type View =
@@ -3132,8 +3133,12 @@ export default function App() {
   else if (view === 'operations') content = <Operations user={user} />;
   else if (view === 'akte') content = <AktePage user={user} />;
 
+  if (mobileMenuOpen) {
+    content = <MobileMoreMenu user={user} items={mobileMoreItems as [string,string][]} view={view} navigate={navigateTo} onLogout={logout} />;
+  }
+
   return (
-    <IonApp className="mobile-first-app-shell-v1">
+    <IonApp className="mobile-first-app-shell-v1" data-view={mobileMenuOpen ? 'more' : view}>
       <IonPage>
         <Header title="A+ Solution" appShell />
         <IonContent className="app-content">
@@ -3211,7 +3216,7 @@ export default function App() {
           ))}
           <button
             type="button"
-            className={!primaryViews.includes(view) ? 'active' : ''}
+            className={mobileMenuOpen || !primaryViews.includes(view) ? 'active' : ''}
             onClick={() => setMobileMenuOpen(true)}
             aria-label="Weitere Bereiche öffnen"
           >
@@ -3221,13 +3226,14 @@ export default function App() {
         </nav>
 
         <IonModal
-          isOpen={mobileMenuOpen}
+          isOpen={false}
           onDidDismiss={() => setMobileMenuOpen(false)}
-          initialBreakpoint={0.72}
-          breakpoints={[0, 0.72, 1]}
+          initialBreakpoint={1}
+          breakpoints={[0, 1]}
           className="mobile-menu-modal"
         >
           <IonContent>
+            <MobileMoreMenu user={user} items={mobileMoreItems as [string,string][]} view={view} navigate={navigateTo} onLogout={logout} />
             <div className="mobile-menu-sheet">
               <div className="mobile-menu-handle" />
               <div className="mobile-menu-user">

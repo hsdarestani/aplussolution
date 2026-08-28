@@ -1,0 +1,116 @@
+/* Global schedule readability: icons carry the labels in every calendar view. */
+.sv2-client-legend{display:none!important}
+.sv2-event-details .sv2-field-copy>small{display:none!important}
+.sv2-event-details .sv2-event-line{grid-template-columns:17px minmax(0,1fr);gap:6px;align-items:center}
+.sv2-event-details .sv2-event-line>ion-icon{font-size:14px;margin-top:0}
+.sv2-event-details .sv2-field-copy{font-size:12px;line-height:1.3;min-width:0}
+.sv2-event-details.compact .sv2-event-line{grid-template-columns:14px minmax(0,1fr);gap:5px}
+.sv2-event-details.compact .sv2-event-line>ion-icon{font-size:12px}
+.sv2-event-details.compact .sv2-field-copy{font-size:10px;line-height:1.25}
+
+@media(max-width:900px){
+  :root{
+    --wiw-bg:#fff;
+    --wiw-row:#fff;
+    --wiw-section:#f3f3f3;
+    --wiw-line:#dadada;
+    --wiw-copy:#323232;
+    --wiw-muted:#8b8b8b;
+    --wiw-primary:#155eef;
+    --wiw-primary-soft:#4c7df1;
+    --wiw-nav:#fff;
+    --wiw-card:#fff;
+  }
+  html[data-aplus-appearance='dark']{
+    --wiw-bg:#2d2d2f;
+    --wiw-row:#323234;
+    --wiw-section:#474749;
+    --wiw-line:#171719;
+    --wiw-copy:#f3f3f4;
+    --wiw-muted:#b8b8bd;
+    --wiw-primary:#155eef;
+    --wiw-primary-soft:#7fa7ff;
+    --wiw-nav:#2b2b2d;
+    --wiw-card:#353537;
+  }
+
+  html,body,#root,ion-app,ion-page,.app-content,.app-content::part(scroll),.app,.app-main,main{background:var(--wiw-bg)!important;color:var(--wiw-copy)!important}
+  .mobile-appbar{background:var(--wiw-primary)!important;border-bottom:0!important;box-shadow:none!important}
+  .mobile-tabbar{background:var(--wiw-nav)!important;border-top:1px solid var(--wiw-line)!important;box-shadow:none!important}
+  .mobile-tabbar button{color:var(--wiw-muted)!important;background:transparent!important}
+  .mobile-tabbar button.active{color:var(--wiw-primary)!important}
+
+  /* Dashboard: flat WIW hierarchy on a light surface. */
+  .mobile-first-app-shell-v1[data-view='dashboard'] .mobile-page-title,
+  .mobile-first-app-shell-v1[data-view='dashboard'] .mobile-avatar{display:none!important}
+  .mobile-first-app-shell-v1[data-view='dashboard'] .mobile-appbar{grid-template-columns:1fr!important}
+  .mobile-first-app-shell-v1[data-view='dashboard'] .mobile-brand{justify-self:start!important}
+  .mobile-first-app-shell-v1[data-view='dashboard'] .mobile-brand span{font-size:18px!important;letter-spacing:0!important}
+  .wiw-mobile-dashboard{background:var(--wiw-bg)!important;color:var(--wiw-copy)!important}
+  .wiw-section-label{min-height:34px!important;padding:9px 11px 6px!important;background:var(--wiw-section)!important;border-color:var(--wiw-line)!important;color:#666!important;font-size:10px!important;font-weight:500!important}
+  html[data-aplus-appearance='dark'] .wiw-section-label{color:#e8e8ea!important}
+  .wiw-mobile-row,.wiw-next-shift,.wiw-upcoming{min-height:55px!important;padding:9px 12px!important;background:var(--wiw-row)!important;color:var(--wiw-copy)!important;border-bottom:1px solid var(--wiw-line)!important}
+  .wiw-mobile-row strong{font-size:12px!important;font-weight:500!important}
+  .wiw-row-icon,.wiw-count{border-color:#cfcfcf!important;color:#777!important;background:transparent!important}
+  html[data-aplus-appearance='dark'] .wiw-row-icon,html[data-aplus-appearance='dark'] .wiw-count{border-color:#8a8a8f!important;color:#d8d8dc!important}
+  .wiw-row-chevron{display:none!important}
+  .wiw-next-shift small{color:#555!important}.wiw-next-shift strong{color:#999!important}.wiw-next-shift span{color:#999!important}
+  html[data-aplus-appearance='dark'] .wiw-next-shift small{color:#dedee1!important}
+  .wiw-upcoming{min-height:70px!important;border-radius:12px 12px 0 0!important;margin-top:0!important}
+  .wiw-upcoming span{color:var(--wiw-muted)!important}
+  .wiw-upcoming>button{background:var(--wiw-primary)!important;color:#fff!important}
+
+  /* Attendance: one WIW-style Pay Periods page, no duplicate app header. */
+  .mobile-first-app-shell-v1[data-view='time'] .mobile-appbar{display:none!important}
+  .mobile-first-app-shell-v1[data-view='time'] .app{padding-top:0!important}
+  .wiw-pay-periods,.wiw-pay-period-detail{background:var(--wiw-bg)!important;color:var(--wiw-copy)!important;min-height:calc(100dvh - 62px)!important}
+  .wiw-mobile-screen-title{padding:calc(16px + env(safe-area-inset-top)) 11px 12px!important;min-height:calc(64px + env(safe-area-inset-top))!important;display:flex!important;align-items:flex-end!important;background:var(--wiw-primary)!important;color:#fff!important;font-size:16px!important}
+  .wiw-period-row{min-height:41px!important;background:var(--wiw-row)!important;color:var(--wiw-copy)!important;border-bottom:1px solid var(--wiw-line)!important}
+  .wiw-period-row strong{font-size:10px!important;font-weight:500!important}
+  .wiw-period-circle{border-color:#9e9e9e!important}
+  .wiw-period-row>ion-icon{display:none!important}
+  .wiw-period-back{padding-top:calc(8px + env(safe-area-inset-top))!important;min-height:calc(48px + env(safe-area-inset-top))!important;background:var(--wiw-primary)!important;color:#fff!important;border:0!important}
+  .wiw-period-title{background:var(--wiw-section)!important;border-bottom:1px solid var(--wiw-line)!important}
+  .wiw-period-title h1{color:var(--wiw-copy)!important}.wiw-period-title small{color:var(--wiw-muted)!important}
+  .wiw-time-entry{background:var(--wiw-row)!important;border-bottom:1px solid var(--wiw-line)!important;color:var(--wiw-copy)!important}
+  .wiw-time-entry span,.wiw-time-entry small,.wiw-period-empty{color:var(--wiw-muted)!important}
+
+  /* Scheduler keeps the successful Phase 8 layout but uses the chosen appearance. */
+  .sv2{color:var(--wiw-copy)!important}
+  .sv2>ion-segment{--background:var(--wiw-row)!important;border-bottom:1px solid var(--wiw-line)!important}
+  .sv2>ion-segment ion-segment-button{--color:var(--wiw-muted)!important;--color-checked:var(--wiw-copy)!important}
+  .sv2-wiw-week-strip{background:var(--wiw-row)!important;border-bottom:1px solid var(--wiw-line)!important}
+  .sv2-wiw-week-strip button{color:var(--wiw-copy)!important}.sv2-wiw-week-strip button span{color:var(--wiw-muted)!important}
+  .sv2-wiw-week-strip button.active b{background:#303030!important;color:#fff!important}
+  .sv2-single-day{background:var(--wiw-bg)!important}
+  .sv2-single-day>header{background:var(--wiw-section)!important;border-bottom:1px solid var(--wiw-line)!important}
+  .sv2-single-day>header h2{color:var(--wiw-copy)!important}.sv2-single-day>header span{color:var(--wiw-muted)!important}
+  .sv2-event{background:var(--wiw-row)!important;color:var(--wiw-copy)!important;border-bottom:1px solid var(--wiw-line)!important}
+  .sv2-event-head strong{color:var(--wiw-copy)!important}.sv2-event-head>span{color:var(--wiw-muted)!important}
+  .sv2-event-details .sv2-field-copy{color:var(--wiw-copy)!important}
+  .sv2-event-details .sv2-entity-link{color:var(--wiw-primary)!important}
+  .sv2-wiw-total{background:#595959!important;color:#fff!important}
+
+  /* More: full-screen vertical WIW list instead of a card grid. */
+  .mobile-menu-modal{--height:100%;--width:100%;--border-radius:0}
+  .mobile-menu-modal::part(content){border-radius:0!important}
+  .mobile-menu-modal ion-content{--background:var(--wiw-bg)!important}
+  .wiw-more-screen{display:block;min-height:100dvh;padding-bottom:calc(70px + env(safe-area-inset-bottom));background:var(--wiw-bg);color:var(--wiw-copy)}
+  .wiw-more-screen + .mobile-menu-sheet{display:none!important}
+  .wiw-more-title{min-height:calc(64px + env(safe-area-inset-top));padding:calc(16px + env(safe-area-inset-top)) 12px 12px;display:flex;align-items:flex-end;background:var(--wiw-primary);color:#fff;font-size:16px}
+  .wiw-more-user,.wiw-more-section{min-height:34px;padding:9px 11px 6px;display:flex;align-items:flex-end;background:var(--wiw-section);border-bottom:1px solid var(--wiw-line);color:#555;font-size:10px;font-weight:600}
+  html[data-aplus-appearance='dark'] .wiw-more-user,html[data-aplus-appearance='dark'] .wiw-more-section{color:#eee}
+  .wiw-more-row{width:100%;min-height:42px;padding:8px 14px;display:grid;grid-template-columns:22px 1fr;gap:8px;align-items:center;border:0;border-bottom:1px solid var(--wiw-line);background:var(--wiw-row);color:var(--wiw-copy);text-align:left;font:inherit}
+  .wiw-more-row ion-icon{font-size:17px;color:#8b8b8b}.wiw-more-row span{font-size:12px}.wiw-more-row.active{color:var(--wiw-primary)}
+  .wiw-more-theme{min-height:48px;padding:7px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid var(--wiw-line);background:var(--wiw-row)}
+  .wiw-more-theme>span{font-size:12px}.wiw-more-theme>div{display:flex;gap:4px}.wiw-more-theme button{padding:6px 9px;display:flex;align-items:center;gap:4px;border:1px solid var(--wiw-line);border-radius:999px;background:var(--wiw-bg);color:var(--wiw-copy);font-size:10px}.wiw-more-theme button.active{border-color:var(--wiw-primary);color:var(--wiw-primary)}
+}
+
+@media(max-width:900px){
+  .wiw-mobile-admin-dashboard{display:block;background:var(--wiw-bg);color:var(--wiw-copy);min-height:calc(100dvh - 126px)}
+  .admin-home-v4>.wiw-mobile-admin-dashboard~*{display:none!important}
+  .mobile-first-app-shell-v1[data-view='more'] .mobile-appbar{display:none!important}
+  .mobile-first-app-shell-v1[data-view='more'] .app{padding-top:0!important}
+  .mobile-first-app-shell-v1[data-view='more'] .global-search{display:none!important}
+}
+@media(min-width:901px){.wiw-mobile-admin-dashboard{display:none!important}}

@@ -53,6 +53,7 @@ urlpatterns = [
     path('document-center/reminders/run/', document_center_views.run_contract_reminders),
     path('contracts/<uuid:pk>/readiness/', document_center_views.contract_readiness_view),
     path('attendance/home/', attendance_views.employee_attendance_home),
+    path('attendance/history/', attendance_views.attendance_history),
     path('attendance/entries/<uuid:entry_id>/correction/', attendance_views.request_time_correction),
     path('attendance/entries/<uuid:pk>/close/', attendance_actions.close_running_entry),
     path('attendance/corrections/<uuid:pk>/cancel/', attendance_views.cancel_time_correction),

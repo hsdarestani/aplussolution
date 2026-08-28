@@ -91,10 +91,12 @@ def employee_attendance_home(request):
     )
     active = None if stale_active else open_entry
 
+    # Keep the complete closed history, including imported WIW rows. The mobile
+    # Pay Periods view derives its range from the oldest available entry.
     history_qs = TimeEntry.objects.select_related('shift__position', 'worker__user').filter(
         worker=worker,
         clock_out__isnull=False,
-    ).order_by('-clock_in')[:30]
+    ).order_by('-clock_in')
 
     # Closed historical entries still belong in payroll/history. Forgotten open
     # timers, however, must never inflate the monthly total.
@@ -130,6 +132,24 @@ def employee_attendance_home(request):
         'pending_corrections': sum(1 for item in corrections if item.status == TimeEntryCorrection.Status.PENDING),
         'history': TimeEntrySerializer(history_qs, many=True, context={'request': request}).data,
         'corrections': [correction_payload(item) for item in corrections],
+    })
+
+
+@api_view(['GET'])
+def attendance_history(request):
+    if request.user.role == User.Role.WORKER:
+        queryset = TimeEntry.objects.filter(worker=request.user.worker_profile)
+    elif _manager_only(request):
+        queryset = TimeEntry.objects.exclude(worker__user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX)
+    else:
+        return Response({'detail': 'Keine Berechtigung.'}, status=403)
+
+    queryset = queryset.select_related('shift__position', 'worker__user').filter(
+        clock_out__isnull=False,
+    ).order_by('-clock_in')
+    return Response({
+        'count': queryset.count(),
+        'history': TimeEntrySerializer(queryset, many=True, context={'request': request}).data,
     })
 
 
