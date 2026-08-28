@@ -38,7 +38,12 @@ def _editable_payload(data):
 def _apply_payload(shift, data):
     serializer = ShiftApiSerializer(shift, data=_editable_payload(data), partial=True)
     serializer.is_valid(raise_exception=True)
-    shift = serializer.save(worker=None)
+    # Preserve Shift.worker while the model save signal runs. Passing worker=None
+    # here used to make imported WIW one-person shifts look unassigned to the
+    # ensure_shift_capacity signal, which immediately reopened the claimed slot.
+    # refresh_shift_state below still derives the legacy Shift.worker mirror from
+    # the authoritative ShiftSlot after the edit.
+    shift = serializer.save()
     ensure_slots(shift)
     refresh_shift_state(shift)
     return shift
