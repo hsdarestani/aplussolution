@@ -17,7 +17,7 @@ async function mockAdmin(page: Page) {
 
 test('shift form uses one editable date-time field per boundary and keeps quick date shortcuts', async ({page}) => {
   await page.setViewportSize({width:390,height:844}); await mockAdmin(page); await page.goto('/?view=schedule');
-  await page.getByTestId('schedule-create-manual').click();
+  await page.getByRole('button', { name: 'Schicht anlegen' }).click();
   const start=page.getByTestId('datetime-beginn'); const end=page.getByTestId('datetime-ende');
   const startField=start.locator('ion-input[type="datetime-local"]'); const endField=end.locator('ion-input[type="datetime-local"]');
   await expect(startField).toBeVisible(); await expect(endField).toBeVisible();

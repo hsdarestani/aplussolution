@@ -187,8 +187,9 @@ test.describe('Phase 6 mobile QA', () => {
 
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Dienstplan' }).click();
     await expect(page.getByTestId('phase8-week-strip')).toBeVisible();
-    await expect(page.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText('Main Suites Frankfurt', { exact: true }).first()).toBeVisible();
+    const dayView = page.getByTestId('schedule-day-view');
+    await expect(dayView.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
+    await expect(dayView.getByText('Main Suites Frankfurt', { exact: true }).first()).toBeVisible();
     await expectNoHorizontalPageOverflow(page);
 
     await page.locator('ion-segment-button[value="mine"]').click();
@@ -280,7 +281,7 @@ test.describe('Phase 6 mobile QA', () => {
     await expect(page.getByText('Personal genau dann, wenn du es brauchst.')).toBeVisible();
     await expect(page.getByText('Aktive Aufträge')).toBeVisible();
     await expect(page.getByText('Zu unterzeichnen')).toBeVisible();
-    await expect(page.locator('.mobile-tabbar button')).toHaveCount(4);
+    await expect(page.locator('.mobile-tabbar button')).toHaveCount(3);
     await expectNoHorizontalPageOverflow(page);
 
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Dienstplan' }).click();

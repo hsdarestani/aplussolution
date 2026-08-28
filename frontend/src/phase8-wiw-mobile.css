@@ -384,6 +384,17 @@
   .sv2-event-head strong { font-size:12px !important; font-weight:500 !important; color:#fff !important; }
   .sv2-event-head > span { color:#9f9fa4 !important; font-size:9px !important; }
   .sv2-event-details { gap:3px !important; }
+  .sv2-mini-actions {
+    display:flex;
+    justify-content:flex-end;
+    gap:6px;
+    margin-top:5px;
+  }
+  .sv2-mini-actions ion-button {
+    margin:0;
+    min-height:28px;
+    font-size:9px;
+  }
   .sv2-event-line {
     min-height:16px !important;
     gap:6px !important;
