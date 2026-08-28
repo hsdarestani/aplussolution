@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, akten_views, announcement_api, attendance_actions, attendance_views, automation_views, client_order_planning, client_portal_views, contract_views, document_catalog_views, document_center_views, global_search_views, integration_views, live_admin_center, live_operations, native_operations, oauth_views, payroll_views, portal_views, push_views, searchable_views, shift_views, store_review_views, time_views, views, wiw_dashboard, worker_portal_views
+from . import admin_center_views, advanced_views, akten_views, announcement_api, attendance_actions, attendance_views, automation_views, availability_admin, client_order_planning, client_portal_views, contract_views, document_catalog_views, document_center_views, global_search_views, integration_views, live_admin_center, live_operations, native_operations, oauth_views, payroll_views, portal_views, push_views, searchable_views, shift_card_admin, shift_slot_actions, shift_views, store_review_views, time_views, views, wiw_dashboard, worker_portal_views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -60,6 +60,8 @@ urlpatterns = [
     path('attendance/corrections/<uuid:pk>/cancel/', attendance_views.cancel_time_correction),
     path('attendance/corrections/<uuid:pk>/decide/', attendance_views.decide_time_correction),
     path('attendance/exceptions/', attendance_views.attendance_exceptions),
+    path('shifts/<uuid:shift_id>/cards/<uuid:slot_id>/', shift_slot_actions.edit_shift_slot),
+    path('shifts/<uuid:shift_id>/cards/<uuid:slot_id>/delete/', shift_card_admin.delete_shift_card),
     path('workers/portal-status/', portal_views.portal_statuses),
     path('workers/<uuid:pk>/invite/', portal_views.invite_worker),
     path('workers/<uuid:pk>/akte/', akten_views.worker_akte),
@@ -79,8 +81,8 @@ urlpatterns = [
     path('document-catalog/import-bundle/', integration_views.import_bundle),
     path('operations/', live_operations.operations_overview),
     path('operations/schedule-quality/', native_operations.schedule_quality),
-    path('operations/availability/', advanced_views.availability_create),
-    path('operations/availability/<uuid:pk>/', advanced_views.availability_delete),
+    path('operations/availability/', availability_admin.availability_collection),
+    path('operations/availability/<uuid:pk>/', availability_admin.availability_detail),
     path('operations/swaps/', native_operations.swap_create),
     path('operations/swaps/<uuid:pk>/decide/', native_operations.swap_decide),
     path('operations/copy-week/', native_operations.copy_week),

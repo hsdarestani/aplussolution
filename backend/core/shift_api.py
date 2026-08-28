@@ -12,35 +12,63 @@ class ShiftApiSerializer(serializers.ModelSerializer):
     open_count = serializers.IntegerField(read_only=True)
     filled_count = serializers.IntegerField(read_only=True)
     assigned_workers = serializers.SerializerMethodField()
+    slot_cards = serializers.SerializerMethodField()
+
+    def _worker_payload(self, slot, include_avatar=False):
+        request = self.context.get('request')
+        worker = slot.worker
+        if not worker:
+            return None
+        payload = {
+            'id': str(worker.id),
+            'slot_id': str(slot.id),
+            'name': worker.user.get_full_name() or worker.user.email,
+            'employee_number': worker.employee_number,
+            'confirmation_status': slot.confirmation_status,
+            'confirmation_label': slot.get_confirmation_status_display(),
+            'confirmation_requested_at': slot.confirmation_requested_at,
+            'confirmation_decided_at': slot.confirmation_decided_at,
+            'is_me': bool(request and request.user.is_authenticated and worker.user_id == request.user.id),
+        }
+        if include_avatar:
+            avatar = ''
+            if worker.user.avatar:
+                avatar = worker.user.avatar.url
+                if request:
+                    avatar = request.build_absolute_uri(avatar)
+            payload['avatar'] = avatar
+        return payload
 
     def get_assigned_workers(self, obj):
-        request = self.context.get('request')
         slots = obj.slots.filter(
             status=ShiftSlot.Status.CLAIMED,
             worker__isnull=False,
         ).select_related('worker__user').order_by('created_at')
-        workers = []
-        for slot in slots:
-            avatar = ''
-            if slot.worker.user.avatar:
-                avatar = slot.worker.user.avatar.url
-                if request:
-                    avatar = request.build_absolute_uri(avatar)
-            workers.append(
-                {
-                    'id': str(slot.worker_id),
-                    'slot_id': str(slot.id),
-                    'name': slot.worker.user.get_full_name() or slot.worker.user.email,
-                    'employee_number': slot.worker.employee_number,
-                    'avatar': avatar,
-                    'confirmation_status': slot.confirmation_status,
-                    'confirmation_label': slot.get_confirmation_status_display(),
-                    'confirmation_requested_at': slot.confirmation_requested_at,
-                    'confirmation_decided_at': slot.confirmation_decided_at,
-                    'is_me': bool(request and request.user.is_authenticated and slot.worker.user_id == request.user.id),
-                }
-            )
-        return workers
+        return [self._worker_payload(slot, include_avatar=True) for slot in slots]
+
+    def get_slot_cards(self, obj):
+        """Expose capacity as first-class cards without duplicating Shift rows.
+
+        A five-person demand therefore has five stable cards. Each card has its
+        own slot id and worker/open state, while shared shift data remains on the
+        parent Shift. Individual edits can split one card through the dedicated
+        slot-edit endpoint; bulk edits keep changing the shared parent.
+        """
+        slots = obj.slots.exclude(status=ShiftSlot.Status.CANCELLED).select_related(
+            'worker__user'
+        ).order_by('created_at')
+        return [
+            {
+                'id': str(slot.id),
+                'status': slot.status,
+                'is_open': slot.status == ShiftSlot.Status.OPEN and slot.worker_id is None,
+                'worker': self._worker_payload(slot, include_avatar=False),
+                'confirmation_status': slot.confirmation_status,
+                'confirmation_label': slot.get_confirmation_status_display(),
+                'source': slot.source,
+            }
+            for slot in slots
+        ]
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
@@ -59,5 +87,6 @@ class ShiftApiSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'order', 'order_title', 'client', 'client_name', 'location', 'location_name',
             'position', 'position_name', 'starts_at', 'ends_at', 'break_minutes', 'status', 'notes',
-            'required_count', 'confirmation_required', 'schedule_groups', 'open_count', 'filled_count', 'assigned_workers',
+            'required_count', 'confirmation_required', 'schedule_groups', 'open_count', 'filled_count',
+            'assigned_workers', 'slot_cards',
         ]
