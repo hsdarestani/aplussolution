@@ -1,0 +1,26 @@
+@media (max-width: 900px) {
+  /* The WIW editor is promoted to a very high full-screen layer by the mobile
+     compatibility shell. Save errors/success feedback must live above that
+     layer too; otherwise a failed PATCH looks exactly like a dead Sichern
+     button because the toast is rendered behind the editor. */
+  body.wiw-shift-form-active .wiw-toast {
+    z-index: 2147483600 !important;
+    bottom: calc(18px + env(safe-area-inset-bottom)) !important;
+    pointer-events: auto !important;
+  }
+
+  body.wiw-shift-form-active .wiw-form-topbar {
+    pointer-events: auto !important;
+  }
+
+  body.wiw-shift-form-active .wiw-form-topbar button {
+    position: relative;
+    z-index: 2;
+    pointer-events: auto;
+    touch-action: manipulation;
+  }
+
+  body.wiw-shift-form-active .wiw-form-topbar button:disabled {
+    pointer-events: none;
+  }
+}
