@@ -187,7 +187,7 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
   }
 
   function openEdit(entry: any) {
-    if (!showWorker || entry?.wiw_time_id) return;
+    if (!showWorker) return;
     setForm({
       mode: 'edit', id: String(entry.id), worker: workerId(entry), clock_in: inputDateTime(entry.clock_in), clock_out: inputDateTime(entry.clock_out), edit_reason: entry.edit_reason || '',
     });
@@ -222,7 +222,7 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
   }
 
   async function removeEntry(entry: any) {
-    if (!showWorker || !entry?.id || entry?.wiw_time_id) return;
+    if (!showWorker || !entry?.id) return;
     if (!window.confirm('Diesen Zeiteintrag wirklich löschen?')) return;
     setBusy(true);
     try {
@@ -256,18 +256,18 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
   }
 
   if (selectedEntry) {
-    const readonly = Boolean(selectedEntry.wiw_time_id);
+    const imported = Boolean(selectedEntry.wiw_time_id);
     const selectedName = workerName(selectedEntry);
     return <div className="wiw-attendance-entry-detail" data-testid="phase8-entry-detail">
       <div className="wiw-attendance-toolbar">
         <button type="button" className="back" aria-label="Zurück" onClick={() => setSelectedEntry(undefined)}><IonIcon icon={chevronBackOutline} /></button>
         <strong>Zeiteintrag</strong>
         <div className="wiw-entry-actions">
-          {showWorker && !readonly && <button type="button" aria-label="Zeiteintrag löschen" disabled={busy} onClick={() => void removeEntry(selectedEntry)}><IonIcon icon={trashOutline} /></button>}
-          {showWorker && !readonly && <button type="button" aria-label="Zeiteintrag bearbeiten" onClick={() => openEdit(selectedEntry)}><IonIcon icon={createOutline} /></button>}
+          {showWorker && <button type="button" aria-label="Zeiteintrag löschen" disabled={busy} onClick={() => void removeEntry(selectedEntry)}><IonIcon icon={trashOutline} /></button>}
+          {showWorker && <button type="button" aria-label="Zeiteintrag bearbeiten" onClick={() => openEdit(selectedEntry)}><IonIcon icon={createOutline} /></button>}
         </div>
       </div>
-      {readonly && <div className="wiw-readonly-banner"><IonIcon icon={informationCircleOutline} /> WIW-Import · historischer Eintrag, schreibgeschützt</div>}
+      {imported && <div className="wiw-readonly-banner"><IonIcon icon={informationCircleOutline} /> WIW-Import · historischer Eintrag · durch Admin bearbeitbar</div>}
       <div className="wiw-entry-fields">
         <DetailRow icon={personOutline} label="Wer" value={selectedName} />
         <DetailRow icon={calendarOutline} label="Datum" value={fmtDay(selectedEntry.clock_in)} />
@@ -278,7 +278,7 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
       </div>
       <button className="wiw-entry-history-button" type="button" onClick={() => setHistoryOpen((value) => !value)}>Eintragsverlauf anzeigen</button>
       {historyOpen && <div className="wiw-entry-history">
-        <div><span>Quelle</span><strong>{readonly ? 'When I Work Import' : 'A+ Solution'}</strong></div>
+        <div><span>Quelle</span><strong>{imported ? 'When I Work Import' : 'A+ Solution'}</strong></div>
         <div><span>Status</span><strong>{selectedEntry.approved ? 'Freigegeben' : 'Nicht freigegeben'}</strong></div>
         {selectedEntry.created_at && <div><span>Erstellt</span><strong>{fmtDate(selectedEntry.created_at)} · {fmtTime(selectedEntry.created_at)}</strong></div>}
         {selectedEntry.updated_at && <div><span>Zuletzt geändert</span><strong>{fmtDate(selectedEntry.updated_at)} · {fmtTime(selectedEntry.updated_at)}</strong></div>}
