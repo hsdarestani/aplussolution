@@ -174,6 +174,58 @@ def test_admin_can_save_edit_for_claimed_single_shift_card(auth_admin, company, 
 
 
 @pytest.mark.django_db
+def test_admin_edit_preserves_claimed_worker_on_wiw_imported_shift(auth_admin, company, location, position, worker_user):
+    starts = timezone.now() + timedelta(days=5, hours=2)
+    worker = worker_user.worker_profile
+    shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        worker=worker,
+        starts_at=starts,
+        ends_at=starts + timedelta(hours=6),
+        required_count=1,
+        status=Shift.Status.CONFIRMED,
+        wiw_shift_id='qa-wiw-edit-claimed-1',
+        schedule_groups=['service'],
+    )
+    slot = ShiftSlot.objects.get(shift=shift)
+    assert slot.worker_id == worker.id
+    assert slot.status == ShiftSlot.Status.CLAIMED
+    assert slot.source == 'wiw'
+
+    new_start = starts + timedelta(minutes=15)
+    new_end = new_start + timedelta(hours=6)
+    response = auth_admin.patch(
+        f'/api/shifts/{shift.id}/cards/{slot.id}/',
+        {
+            'client': str(company.id),
+            'location': str(location.id),
+            'position': str(position.id),
+            'starts_at': new_start.isoformat(),
+            'ends_at': new_end.isoformat(),
+            'notes': 'WIW mobile edit saved',
+            'confirmation_required': True,
+            'schedule_groups': ['service'],
+            'status': 'published',
+            'apply_all': False,
+        },
+        format='json',
+    )
+
+    assert response.status_code == 200, response.data
+    shift.refresh_from_db()
+    slot.refresh_from_db()
+    assert shift.starts_at == new_start
+    assert shift.ends_at == new_end
+    assert shift.worker_id == worker.id
+    assert slot.worker_id == worker.id
+    assert slot.status == ShiftSlot.Status.CLAIMED
+    assert response.data['shift']['filled_count'] == 1
+    assert response.data['shift']['open_count'] == 0
+
+
+@pytest.mark.django_db
 def test_admin_can_bulk_save_edit_for_multi_card_shift(auth_admin, company, location, position):
     starts = timezone.now() + timedelta(days=6)
     shift = Shift.objects.create(
