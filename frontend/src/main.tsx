@@ -15,7 +15,7 @@ import './mobile-header-actions-fix.css';
 import './phase8-wiw-mobile.css';
 import './wiw-mobile-light.css';
 import './schedule-month-compact.css';
-App from './App';
+import App from './App';
 import StoreComplianceLinks from './StoreComplianceLinks';
 import StoreLegalPage, { legalPageFromPath } from './StoreLegalPages';
 import FriendlyDateTimePicker from './FriendlyDateTimePicker';
