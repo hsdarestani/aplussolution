@@ -132,12 +132,12 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
 
   const workerMap = useMemo(() => new Map(workers.map((worker: any) => [String(worker.id), worker])), [workers]);
   const periods = useMemo(() => {
-    const current = firstOfMonth(new Date());
-    const valid = history.map((entry: any) => entry?.clock_in ? new Date(entry.clock_in) : undefined).filter((entry: any) => entry && !Number.isNaN(entry.getTime())) as Date[];
-    const earliest = valid.length ? firstOfMonth(new Date(Math.min(...valid.map((item) => item.getTime())))) : monthStart(-12, current);
-    const count = Math.max(1, monthDistance(current, earliest) + 1);
-    return Array.from({ length: count }, (_, index) => {
-      const start = monthStart(-index, current), end = monthStart(1 - index, current);
+    const current=firstOfMonth(new Date());
+    const valid=history.map((entry: any) => entry?.clock_in ? new Date(entry.clock_in) : undefined).filter((entry: any) => entry && !Number.isNaN(entry.getTime())) as Date[];
+    const earliest=valid.length ? firstOfMonth(new Date(Math.min(...valid.map((item) => item.getTime())))) : monthStart(-12, current);
+    const count=Math.max(1, monthDistance(current, earliest) + 1);
+    return Array.from({length:count},(_, index) => {
+      const start=monthStart(-index, current), end=monthStart(1 - index, current);
       return { key: key(start), start, end, label: label(start, end) };
     });
   }, [history]);
