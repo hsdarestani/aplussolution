@@ -84,7 +84,7 @@ test('mobile planning defaults to the vertically scrollable full week and keeps 
   await expect(week.locator('.sv2-week-day')).toHaveCount(7);
   await expect(page.getByTestId('schedule-day-view')).toHaveCount(0);
   await expect(page.getByTestId('schedule-view-toolbar')).toBeHidden();
-  await expect(page.locator('.sv2 > ion-segment ion-segment-button[value="all"]')).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('.sv2 > ion-segment ion-segment-button[value="all"]')).toHaveClass(/segment-button-checked/);
   const noPageOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
   expect(noPageOverflow).toBeTruthy();
 });
