@@ -99,7 +99,7 @@ def worker_akte(request, pk):
         master_payload = request.data.get('master_data') if isinstance(request.data.get('master_data'), dict) else {}
         with transaction.atomic():
             user_fields = {'first_name', 'last_name', 'email', 'phone'}
-            worker_fields = {'employee_number', 'employment_type', 'monthly_hours', 'tariff_hourly_rate', 'extra_allowance', 'ranking_points', 'active', 'skills'}
+            worker_fields = {'employee_number', 'employment_type', 'monthly_hours', 'tariff_hourly_rate', 'extra_allowance', 'ranking_points', 'active', 'skills', 'open_shift_client_ids', 'schedule_groups'}
             for key in user_fields:
                 if key in payload:
                     setattr(worker.user, key, payload[key])

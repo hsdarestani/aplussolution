@@ -27,3 +27,9 @@
 .sv2-confirmation-panel.compact .sv2-confirmation-person{display:none}
 .sv2-confirmation-panel.compact{padding-top:4px;gap:3px}
 @media(max-width:700px){.sv2-confirmation-actions.admin{width:100%}.sv2-confirmation-row{align-items:flex-start}}
+
+
+/* phase7-completion-sweep */
+.sv2-location-field{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}.sv2-location-field ion-button{min-height:54px}
+.sv2-staff-stepper,.sv2-auto-break{border:1px solid var(--line,#e4e7ec);border-radius:14px;padding:12px 14px;background:#fff;display:flex;align-items:center;justify-content:space-between;gap:12px}.sv2-staff-stepper>span,.sv2-auto-break>span{font-size:13px;font-weight:700;color:#475467}.sv2-staff-stepper>div{display:flex;align-items:center;gap:12px}.sv2-staff-stepper button{width:48px;height:48px;border-radius:14px;border:1px solid #cdd5df;background:#f8fafc;font-size:30px;line-height:1;cursor:pointer}.sv2-staff-stepper button:disabled{opacity:.35}.sv2-staff-stepper strong{min-width:30px;text-align:center;font-size:22px}.sv2-auto-break{display:grid;grid-template-columns:1fr auto}.sv2-auto-break strong{font-size:20px}.sv2-auto-break small{grid-column:1/-1;color:#667085}
+@media(max-width:640px){.sv2-location-field{grid-template-columns:1fr}.sv2-location-field ion-button{margin:0}.sv2-staff-stepper,.sv2-auto-break{min-height:72px}}

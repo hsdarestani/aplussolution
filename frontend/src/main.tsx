@@ -23,9 +23,11 @@ import HeaderQuickAccess from './HeaderQuickAccess';
 import NativePushRegistration from './NativePushRegistration';
 import { installBerlinLocaleDefaults } from './berlinLocale';
 import { installOperationalFetchResilience } from './operationalFetchResilience';
+import { installLocationPicker } from './locationPicker';
 
 installBerlinLocaleDefaults();
 installOperationalFetchResilience();
+installLocationPicker();
 setupIonicReact({ mode: 'md' });
 
 function renderApp() {

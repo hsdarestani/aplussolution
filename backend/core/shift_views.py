@@ -23,6 +23,7 @@ from .shift_service import (
     release_shift,
 )
 from .shift_slots import ShiftSlot
+from .shift_rules import shift_visible_to_worker
 
 
 SYNTHETIC_MIGRATION_EMAIL_SUFFIX = '@sync.invalid'
@@ -111,10 +112,12 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
     def available(self, request):
         if request.user.role != User.Role.WORKER:
             return Response({'detail': 'Nur Mitarbeiter können verfügbare Schichten abrufen.'}, status=403)
+        worker = request.user.worker_profile
         qs = self.filter_queryset(self.base_queryset().filter(
             status=Shift.Status.PUBLISHED, starts_at__gte=timezone.now(), slots__status='open'
-        ).exclude(slots__worker=request.user.worker_profile).distinct())
-        return self._list_response(qs)
+        ).exclude(slots__worker=worker).distinct())
+        visible = [shift for shift in qs if shift_visible_to_worker(shift, worker)]
+        return self._list_response(visible)
 
     @action(detail=False, methods=['get'])
     def mine(self, request):
