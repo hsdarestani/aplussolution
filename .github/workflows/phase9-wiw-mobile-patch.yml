@@ -1,0 +1,28 @@
+name: Apply WIW mobile and attendance fixes
+
+on:
+  push:
+    branches:
+      - fix/wiw-mobile-light-attendance-history
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/wiw-mobile-light-attendance-history
+      - name: Apply source patch
+        run: python scripts/phase9_wiw_mobile_patch.py
+      - name: Commit product changes and remove helpers
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/phase9-wiw-mobile-patch.yml .github/workflows/diagnose-wiw-attendance-history.yml scripts/phase9_wiw_mobile_patch.py
+          git add backend/core/attendance_views.py frontend/src/App.tsx frontend/src/main.tsx
+          git commit -m 'Complete WIW light mobile shell and full attendance history'
+          git push origin HEAD:fix/wiw-mobile-light-attendance-history
