@@ -249,9 +249,10 @@ test.describe('Worker portal deep regression QA', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     const state = await mockWorkerApi(page);
     await page.goto('/');
-    await expect(page.getByTestId('phase8-mobile-dashboard')).toBeVisible();
-    await expect(page.getByText('Mein Zeitplan', { exact: true })).toBeVisible();
-    await expect(page.getByText('Zeiterfassung', { exact: true })).toBeVisible();
+    const dashboard = page.getByTestId('phase8-mobile-dashboard');
+    await expect(dashboard).toBeVisible();
+    await expect(dashboard.getByText('Mein Zeitplan', { exact: true })).toBeVisible();
+    await expect(dashboard.getByText('Zeiterfassung', { exact: true })).toBeVisible();
     await expect(page.locator('.mobile-tabbar')).toBeVisible();
 
     await page.goto('/?view=people');
@@ -265,12 +266,13 @@ test.describe('Worker portal deep regression QA', () => {
     const state = await mockWorkerApi(page);
     await page.goto('/?view=schedule');
 
-    await page.locator('ion-segment-button[value="open"]').click();
+    const workerSchedule = page.getByTestId('wiw-employee-schedule');
+    await workerSchedule.locator('ion-segment-button[value="open"]').click();
     await page.getByTestId('schedule-day-view').getByRole('button', { name: /Servicekraft/ }).click();
     await page.getByRole('button', { name: 'Schicht übernehmen' }).click();
     await expect.poll(() => state.claimed).toBe(true);
 
-    await page.locator('ion-segment-button[value="mine"]').click();
+    await workerSchedule.locator('ion-segment-button[value="mine"]').click();
     await page.getByTestId('schedule-day-view').getByRole('button', { name: /Servicekraft/ }).click();
     await page.getByRole('button', { name: 'Freigeben' }).click();
     await page.locator('ion-alert').getByRole('button', { name: 'Freigeben' }).click();
@@ -298,7 +300,9 @@ test.describe('Worker portal deep regression QA', () => {
     await page.getByRole('button', { name: 'Standortdienste aktivieren' }).click();
     await expect.poll(() => state.activeClock).toBe(false);
 
+    await page.evaluate(() => sessionStorage.setItem('phase8:attendance-clock', '1'));
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeiterfassung' }).click();
+    await expect(page.getByRole('button', { name: 'Korrektur' })).toBeVisible();
     await page.getByRole('button', { name: 'Korrektur' }).click();
     await page.getByLabel('Warum soll der Eintrag geändert werden?').fill('QA Korrektur');
     await page.getByRole('button', { name: 'Anfrage senden' }).click();
