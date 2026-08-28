@@ -1,7 +1,14 @@
 @media (max-width: 900px) {
-  /* The WIW-style editor is a full-screen workflow. Hide the normal app chrome
-     while it is open so its own green top bar (Abbrechen / Sichern) is not
-     covered by the mobile header or bottom navigation. */
+  /* The WIW mobile schedule is the only schedule surface on phones. The legacy
+     ScheduleV2 stays mounted for shared state/actions, but must never render
+     underneath the WIW week (the duplicated cards/totals seen after scrolling). */
+  body.wiw-native-schedule-active .sv2 {
+    display: none !important;
+  }
+
+  /* The WIW-style editor is a full-screen workflow. Hide normal app chrome
+     while it is open so neither the total-hours bar nor the tabbar can cover
+     pickers, calendars or sheets. */
   body.wiw-shift-form-active .mobile-appbar,
   body.wiw-shift-form-active .mobile-tabbar,
   body.wiw-shift-form-active .wiw-week-total,
@@ -27,15 +34,20 @@
 
   body.wiw-shift-form-active .wiw-form-scroll {
     height: calc(100dvh - 58px - env(safe-area-inset-top)) !important;
-    padding-bottom: calc(28px + env(safe-area-inset-bottom)) !important;
+    padding-bottom: calc(150px + env(safe-area-inset-bottom)) !important;
   }
 
-  /* Safety fallback: if an Ionic/WebView stacking context still covers the
-     native-looking top bar, this back control remains reachable and triggers
-     the real Abbrechen action rather than duplicating state. */
+  /* All native-looking choice/date sheets must sit above the form, total bar
+     and browser/webview stacking contexts. */
+  body.wiw-shift-form-active .wiw-sheet-backdrop,
+  body.wiw-shift-form-active .wiw-choice-sheet,
+  body.wiw-shift-form-active .wiw-date-sheet {
+    z-index: 2147483200 !important;
+  }
+
   .wiw-form-back-fallback {
     position: fixed;
-    z-index: 2147483000;
+    z-index: 2147483300;
     top: calc(env(safe-area-inset-top) + 7px);
     left: 8px;
     min-width: 76px;
@@ -61,8 +73,248 @@
     font-size: 14px;
     font-weight: 500;
   }
+
+  /* Restored A+ extras keep the same flat WIW row language. They stay above
+     the bottom safe area, while extra padding on the scroll pane prevents them
+     from covering the normal form fields. */
+  .wiw-form-extra-actions {
+    position: fixed;
+    z-index: 2147482500;
+    left: 0;
+    right: 0;
+    bottom: env(safe-area-inset-bottom);
+    display: grid;
+    background: #efefef;
+    border-top: 1px solid #d8d8d8;
+    box-shadow: 0 -5px 16px rgba(0,0,0,.08);
+  }
+
+  .wiw-form-extra-actions > button {
+    width: 100%;
+    min-height: 55px;
+    padding: 7px 14px;
+    display: grid;
+    grid-template-columns: 28px minmax(0,1fr) 18px;
+    align-items: center;
+    gap: 8px;
+    border: 0;
+    border-bottom: 1px solid #dfdfdf;
+    background: #fff;
+    color: #454545;
+    text-align: left;
+    font: inherit;
+  }
+
+  .wiw-form-extra-actions > button:disabled {
+    opacity: .48;
+  }
+
+  .wiw-form-extra-actions .wiw-extra-icon {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    color: #68a94d;
+    font-size: 20px;
+  }
+
+  .wiw-form-extra-actions > button > span:nth-child(2) {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+  }
+
+  .wiw-form-extra-actions b {
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .wiw-form-extra-actions small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #989898;
+    font-size: 10px;
+  }
+
+  .wiw-form-extra-actions em {
+    color: #bbb;
+    font-size: 23px;
+    font-style: normal;
+  }
+
+  .wiw-enhancer-backdrop {
+    position: fixed;
+    z-index: 2147483400;
+    inset: 0;
+    display: flex;
+    align-items: flex-end;
+    background: rgba(0,0,0,.25);
+  }
+
+  .wiw-enhancer-sheet {
+    width: 100%;
+    max-height: 78dvh;
+    overflow: auto;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    border-radius: 15px 15px 0 0;
+    background: #f5f5f5;
+    box-shadow: 0 -10px 30px rgba(0,0,0,.18);
+  }
+
+  .wiw-enhancer-sheet > header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    height: 50px;
+    padding: 0 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #ddd;
+    background: #fff;
+  }
+
+  .wiw-enhancer-sheet > header b {
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .wiw-enhancer-sheet > header button {
+    height: 100%;
+    border: 0;
+    background: transparent;
+    color: #5e9f46;
+    font: inherit;
+    font-size: 14px;
+  }
+
+  .wiw-template-list {
+    display: grid;
+  }
+
+  .wiw-template-list button {
+    min-height: 64px;
+    padding: 10px 15px;
+    display: grid;
+    gap: 3px;
+    border: 0;
+    border-bottom: 1px solid #dfdfdf;
+    background: #fff;
+    color: #444;
+    text-align: left;
+    font: inherit;
+  }
+
+  .wiw-template-list b {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .wiw-template-list span {
+    color: #888;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .wiw-enhancer-form {
+    padding: 13px 14px;
+    display: grid;
+    gap: 12px;
+    background: #f5f5f5;
+  }
+
+  .wiw-client-context,
+  .wiw-enhancer-form label {
+    display: grid;
+    gap: 5px;
+  }
+
+  .wiw-client-context {
+    padding: 10px 12px;
+    border-radius: 9px;
+    background: #fff;
+  }
+
+  .wiw-client-context small,
+  .wiw-enhancer-form label {
+    color: #7c7c7c;
+    font-size: 11px;
+  }
+
+  .wiw-client-context strong {
+    color: #3e3e3e;
+    font-size: 14px;
+  }
+
+  .wiw-enhancer-form input,
+  .wiw-enhancer-form textarea {
+    width: 100%;
+    min-height: 46px;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    border: 1px solid #d2d2d2;
+    border-radius: 8px;
+    outline: 0;
+    background: #fff;
+    color: #333;
+    font: inherit;
+    font-size: 16px;
+  }
+
+  .wiw-enhancer-form textarea {
+    min-height: 82px;
+    resize: vertical;
+  }
+
+  .wiw-enhancer-actions {
+    padding: 0 14px 10px;
+    display: grid;
+    grid-template-columns: 1fr 1.4fr;
+    gap: 8px;
+  }
+
+  .wiw-enhancer-actions button {
+    min-height: 45px;
+    border: 1px solid #cfcfcf;
+    border-radius: 9px;
+    background: #fff;
+    color: #555;
+    font: inherit;
+    font-weight: 600;
+  }
+
+  .wiw-enhancer-actions button.primary {
+    border-color: #68a94d;
+    background: #68a94d;
+    color: #fff;
+  }
+
+  .wiw-enhancer-actions button:disabled {
+    opacity: .45;
+  }
+
+  .wiw-enhancer-message {
+    position: fixed;
+    z-index: 2147483500;
+    left: 16px;
+    right: 16px;
+    bottom: calc(128px + env(safe-area-inset-bottom));
+    min-height: 44px;
+    padding: 9px 13px;
+    border: 0;
+    border-radius: 9px;
+    background: #333;
+    color: #fff;
+    box-shadow: 0 6px 20px rgba(0,0,0,.22);
+    font: inherit;
+    font-size: 12px;
+  }
 }
 
 @media (min-width: 901px) {
-  .wiw-form-back-fallback { display: none !important; }
+  .wiw-form-back-fallback,
+  .wiw-form-extra-actions,
+  .wiw-enhancer-backdrop,
+  .wiw-enhancer-message { display: none !important; }
 }
