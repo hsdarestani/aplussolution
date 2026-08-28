@@ -179,7 +179,7 @@ test.describe('Phase 6 mobile QA', () => {
     await mockApi(page, worker);
     await page.goto('/');
 
-    await expect(page.getByRole('heading', { name: 'Mina Berger' })).toBeVisible();
+    await expect(page.getByTestId('phase8-mobile-dashboard')).toBeVisible();
     await expect(page.locator('.mobile-tabbar')).toBeVisible();
     await expect(page.locator('.mobile-tabbar button')).toHaveCount(4);
     await expect(page.locator('aside')).toBeHidden();
@@ -238,7 +238,7 @@ test.describe('Phase 6 mobile QA', () => {
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('time');
 
     await page.goto('/?view=people');
-    await expect(page.getByRole('heading', { name: 'Mina Berger' })).toBeVisible();
+    await expect(page.getByTestId('phase8-mobile-dashboard')).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBeNull();
   });
 
@@ -284,8 +284,7 @@ test.describe('Phase 6 mobile QA', () => {
     await expectNoHorizontalPageOverflow(page);
 
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Dienstplan' }).click();
-    await expect(page.getByRole('heading', { name: 'Einsätze', exact: true })).toBeVisible();
-    await expect(page.getByText('Geplante Einsätze und aktueller Besetzungsstatus für Ihre Aufträge.')).toBeVisible();
+    await expect(page.getByTestId('phase8-week-strip')).toBeVisible();
     await expect(page.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
     await expect(page.locator('ion-segment')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Personalbedarf/i })).toHaveCount(0);

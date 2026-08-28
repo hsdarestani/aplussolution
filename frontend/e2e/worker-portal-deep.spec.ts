@@ -242,12 +242,12 @@ test.describe('Worker portal deep regression QA', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     const state = await mockWorkerApi(page);
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: worker.name })).toBeVisible();
-    await expect(page.getByText('QA-MA-001')).toBeVisible();
+    await expect(page.getByTestId('phase8-mobile-dashboard')).toBeVisible();
+    await expect(page.getByText('Heute', { exact: true })).toBeVisible();
     await expect(page.locator('.mobile-tabbar')).toBeVisible();
 
     await page.goto('/?view=people');
-    await expect(page.getByRole('heading', { name: worker.name })).toBeVisible();
+    await expect(page.getByTestId('phase8-mobile-dashboard')).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBeNull();
     expect(forbiddenManagerFanout(state)).toEqual([]);
   });
