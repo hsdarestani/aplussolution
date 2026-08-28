@@ -13,23 +13,26 @@
   }
 
   .wiw-employee-tabs {
+    --background: #fff;
     display: grid;
     grid-template-columns: 1fr 1fr;
+    min-height: 49px;
+    padding: 0;
     background: #fff;
     border-bottom: 1px solid #ddd;
   }
-  .wiw-employee-tabs button {
+  .wiw-employee-tabs ion-segment-button {
+    --background: #fff;
+    --background-checked: #fff;
+    --color: #666;
+    --color-checked: var(--ion-color-primary, #63a944);
+    --indicator-color: var(--ion-color-primary, #63a944);
+    --indicator-height: 3px;
     min-height: 48px;
-    border: 0;
-    background: #fff;
-    color: #666;
+    margin: 0;
     font-size: 14px;
     font-weight: 700;
-    border-bottom: 3px solid transparent;
-  }
-  .wiw-employee-tabs button.active {
-    color: var(--ion-color-primary, #63a944);
-    border-bottom-color: var(--ion-color-primary, #63a944);
+    text-transform: none;
   }
   .wiw-employee-tabs b {
     display: inline-flex;
