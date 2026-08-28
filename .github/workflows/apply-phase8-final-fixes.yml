@@ -1,0 +1,30 @@
+name: Apply Phase 8 final fixes
+
+on:
+  push:
+    branches: [feature/phase8-signatures-wiw-mobile]
+    paths:
+      - '.github/workflows/apply-phase8-final-fixes.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/phase8-signatures-wiw-mobile
+          fetch-depth: 0
+      - name: Apply final fixes
+        run: python scripts/phase8_final_fixes.py
+      - name: Commit and retire helper
+        run: |
+          rm -f scripts/phase8_final_fixes.py .github/workflows/apply-phase8-final-fixes.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Fix Phase 8 final regressions"
+          git push origin HEAD:feature/phase8-signatures-wiw-mobile
