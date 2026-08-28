@@ -1,14 +1,10 @@
 @media (max-width: 900px) {
-  /* The WIW mobile schedule is the only schedule surface on phones. The legacy
-     ScheduleV2 stays mounted for shared state/actions, but must never render
-     underneath the WIW week (the duplicated cards/totals seen after scrolling). */
+  /* The WIW mobile schedule is the only schedule surface on phones. */
   body.wiw-native-schedule-active .sv2 {
     display: none !important;
   }
 
-  /* The WIW-style editor is a full-screen workflow. Hide normal app chrome
-     while it is open so neither the total-hours bar nor the tabbar can cover
-     pickers, calendars or sheets. */
+  /* The WIW-style editor owns the full mobile viewport while it is open. */
   body.wiw-shift-form-active .mobile-appbar,
   body.wiw-shift-form-active .mobile-tabbar,
   body.wiw-shift-form-active .wiw-week-total,
@@ -34,65 +30,33 @@
 
   body.wiw-shift-form-active .wiw-form-scroll {
     height: calc(100dvh - 58px - env(safe-area-inset-top)) !important;
-    padding-bottom: calc(150px + env(safe-area-inset-bottom)) !important;
+    padding-bottom: calc(32px + env(safe-area-inset-bottom)) !important;
   }
 
-  /* All native-looking choice/date sheets must sit above the form, total bar
-     and browser/webview stacking contexts. */
+  /* Choice/date sheets must always sit above the form content. */
   body.wiw-shift-form-active .wiw-sheet-backdrop,
   body.wiw-shift-form-active .wiw-choice-sheet,
   body.wiw-shift-form-active .wiw-date-sheet {
     z-index: 2147483200 !important;
   }
 
-  .wiw-form-back-fallback {
-    position: fixed;
-    z-index: 2147483300;
-    top: calc(env(safe-area-inset-top) + 7px);
-    left: 8px;
-    min-width: 76px;
-    height: 44px;
-    padding: 0 8px;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    border: 0;
-    background: transparent;
-    color: #fff;
-    font: inherit;
-  }
-
-  .wiw-form-back-fallback span {
-    font-size: 32px;
-    line-height: 1;
-    font-weight: 300;
-    transform: translateY(-1px);
-  }
-
-  .wiw-form-back-fallback b {
-    font-size: 14px;
-    font-weight: 500;
-  }
-
-  /* Restored A+ extras keep the same flat WIW row language. They stay above
-     the bottom safe area, while extra padding on the scroll pane prevents them
-     from covering the normal form fields. */
+  /* Restored A+ capabilities are normal rows in the WIW form flow. They scroll
+     with the rest of the editor instead of covering pickers or bottom sheets. */
   .wiw-form-extra-actions {
-    position: fixed;
-    z-index: 2147482500;
-    left: 0;
-    right: 0;
-    bottom: env(safe-area-inset-bottom);
+    position: static;
     display: grid;
+    width: 100%;
     background: #efefef;
-    border-top: 1px solid #d8d8d8;
-    box-shadow: 0 -5px 16px rgba(0,0,0,.08);
+  }
+
+  .wiw-form-extra-actions > .wiw-form-separator {
+    width: 100%;
   }
 
   .wiw-form-extra-actions > button {
     width: 100%;
-    min-height: 55px;
-    padding: 7px 14px;
+    min-height: 58px;
+    padding: 8px 14px;
     display: grid;
     grid-template-columns: 28px minmax(0,1fr) 18px;
     align-items: center;
@@ -299,7 +263,7 @@
     z-index: 2147483500;
     left: 16px;
     right: 16px;
-    bottom: calc(128px + env(safe-area-inset-bottom));
+    bottom: calc(24px + env(safe-area-inset-bottom));
     min-height: 44px;
     padding: 9px 13px;
     border: 0;
@@ -313,8 +277,9 @@
 }
 
 @media (min-width: 901px) {
-  .wiw-form-back-fallback,
   .wiw-form-extra-actions,
   .wiw-enhancer-backdrop,
-  .wiw-enhancer-message { display: none !important; }
+  .wiw-enhancer-message {
+    display: none !important;
+  }
 }
