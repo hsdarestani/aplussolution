@@ -47,7 +47,10 @@
   .wiw-day-empty{height:43px;display:grid;place-items:center;background:#fff;color:#aaa;font-size:11px}
   .wiw-week-total{position:sticky;bottom:0;z-index:7;height:39px;padding:0 13px;display:flex;align-items:center;justify-content:space-between;background:#5d5d5d;color:#fff;font-size:12px}
   .wiw-week-total strong{font-size:13px}
-  .wiw-create-fab{position:fixed;z-index:110;right:16px;bottom:calc(76px + env(safe-area-inset-bottom));width:49px;height:49px;border:0;border-radius:50%;background:#6bad50;color:#fff;box-shadow:0 4px 13px rgba(0,0,0,.25);font-size:30px;font-weight:300}
+  /* The visible create action now lives in the top mobile action row (+ Manuell).
+     Keep the legacy FAB in the DOM because that button is the programmatic hook
+     used by AdminScheduleTools, but do not render a second overlapping + button. */
+  .wiw-create-fab{display:none!important}
 
   .wiw-shift-form-screen{position:fixed;z-index:20000;inset:0;background:#efefef;color:#3f3f3f;overflow:hidden}
   .wiw-form-topbar{height:calc(58px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 13px 0;display:grid;grid-template-columns:88px 1fr 88px;align-items:center;background:#69aa4e;color:#fff;border-bottom:1px solid #5e9e46}
