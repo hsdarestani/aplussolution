@@ -164,10 +164,11 @@ test.describe('client mobile shell', () => {
     await page.goto('/');
 
     await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
-    await expect(page.getByRole('heading', { name: 'Weitere Bereiche' })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Verträge & Signatur/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Dokumente/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Mitarbeiter bewerten/ })).toBeVisible();
+    const more = page.getByTestId('wiw-more-screen');
+    await expect(more).toBeVisible();
+    await expect(more.getByRole('button', { name: /Verträge & Signatur/ })).toBeVisible();
+    await expect(more.getByRole('button', { name: /Dokumente/ })).toBeVisible();
+    await expect(more.getByRole('button', { name: /Mitarbeiter bewerten/ })).toBeVisible();
 
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(1);

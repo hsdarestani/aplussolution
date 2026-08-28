@@ -35,8 +35,9 @@ export default function Phase8MobileAttendance({data,showWorker=false}:{data:any
     }).sort((a:any,b:any)=>new Date(b.clock_in).getTime()-new Date(a.clock_in).getTime());
   },[history,period]);
   const minutes=entries.reduce((sum:number,entry:any)=>{
+    if(Number.isFinite(Number(entry.worked_minutes))) return sum+Math.max(0,Number(entry.worked_minutes));
     if(!entry.clock_in||!entry.clock_out)return sum;
-    return sum+Math.max(0,Math.round((new Date(entry.clock_out).getTime()-new Date(entry.clock_in).getTime())/60000)-Number(entry.break_minutes||0));
+    return sum+Math.max(0,Math.round((new Date(entry.clock_out).getTime()-new Date(entry.clock_in).getTime())/60000));
   },0);
 
   if(period){

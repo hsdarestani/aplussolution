@@ -28,16 +28,21 @@ async function openAdminHome(page: any, width: number, height: number) {
   await page.goto('/');
 }
 
-test('admin start exposes Ashkan priorities 1-5 directly on mobile and desktop', async ({ page }) => {
-  for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 1000 }]) {
-    await openAdminHome(page, viewport.width, viewport.height);
-    const priorities = page.getByTestId('admin-priority-actions');
-    await expect(priorities).toBeVisible();
-    await expect(priorities.getByRole('button')).toHaveCount(5);
-    for (const label of ['Dienstplan', 'Zeiterfassung', 'Lohn & Anfragen', 'Personal & Kunden', 'Mitteilungen']) {
-      await expect(priorities.getByRole('button', { name: label, exact: true })).toBeAttached();
-    }
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    expect(overflow).toBeLessThanOrEqual(1);
+test('admin start uses WIW hierarchy on mobile and keeps desktop priority shortcuts', async ({ page }) => {
+  await openAdminHome(page, 390, 844);
+  const wiw = page.getByTestId('wiw-mobile-admin-dashboard');
+  await expect(wiw).toBeVisible();
+  for (const label of ['Arbeitszeit-Hinweise', 'Mitarbeiteraktivität', 'Abwesenheitsanträge', 'Schichtanfragen', 'OpenShift-Anfragen', 'Schichten', 'OpenShifts verfügbar']) {
+    await expect(wiw.getByRole('button', { name: label, exact: true })).toBeVisible();
+  }
+  await expect(page.getByTestId('admin-priority-actions')).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+
+  await openAdminHome(page, 1440, 1000);
+  const priorities = page.getByTestId('admin-priority-actions');
+  await expect(priorities).toBeVisible();
+  await expect(priorities.getByRole('button')).toHaveCount(5);
+  for (const label of ['Dienstplan', 'Zeiterfassung', 'Lohn & Anfragen', 'Personal & Kunden', 'Mitteilungen']) {
+    await expect(priorities.getByRole('button', { name: label, exact: true })).toBeAttached();
   }
 });

@@ -21,13 +21,18 @@ test('Phase 8 worker dashboard follows the WIW section hierarchy', async()=>{
   expect(home).toContain("sessionStorage.setItem('phase8:attendance-clock','1')");
 });
 
-test('Phase 8 attendance exposes 13 pay periods on mobile without removing clock mode', async()=>{
+test('Phase 8 attendance spans the complete imported history without removing clock mode', async()=>{
   const periods=read('src/Phase8MobileAttendance.tsx');
   const attendance=read('src/AttendanceV3.tsx');
-  expect(periods).toContain('Array.from({length:13}');
+  expect(periods).toContain('monthDistance');
+  expect(periods).toContain('const earliest=');
+  expect(periods).toContain('Array.from({length:count}');
+  expect(periods).not.toContain('Array.from({length:13}');
   expect(periods).toContain('Abrechnungszeiträume');
+  expect(periods).toContain('entry.worked_minutes');
   expect(attendance).toContain("sessionStorage.getItem('phase8:attendance-clock') === '1'");
-  expect(attendance).toContain('<Phase8MobileAttendance data={data} />');
+  expect(attendance).toContain("api('attendance/history/')");
+  expect(attendance).toContain('<Phase8MobileAttendance data={data} showWorker={isManager(user)} />');
 });
 
 test('Phase 8 scheduler exposes WIW week strip, total hours and mobile create control', async()=>{
