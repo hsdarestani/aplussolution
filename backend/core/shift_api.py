@@ -13,6 +13,7 @@ class ShiftApiSerializer(serializers.ModelSerializer):
     filled_count = serializers.IntegerField(read_only=True)
     assigned_workers = serializers.SerializerMethodField()
     slot_cards = serializers.SerializerMethodField()
+    my_release_request = serializers.SerializerMethodField()
 
     def _worker_payload(self, slot, include_avatar=False):
         request = self.context.get('request')
@@ -70,6 +71,23 @@ class ShiftApiSerializer(serializers.ModelSerializer):
             for slot in slots
         ]
 
+    def get_my_release_request(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated or getattr(request.user, 'role', None) != 'worker':
+            return None
+        try:
+            worker = request.user.worker_profile
+        except Exception:
+            return None
+        row = obj.release_requests.filter(worker=worker, status='pending').order_by('-created_at').first()
+        if not row:
+            return None
+        return {
+            'id': str(row.id),
+            'status': row.status,
+            'created_at': row.created_at,
+        }
+
     def validate(self, attrs):
         attrs = super().validate(attrs)
         starts_at = attrs.get('starts_at', getattr(self.instance, 'starts_at', None))
@@ -88,5 +106,5 @@ class ShiftApiSerializer(serializers.ModelSerializer):
             'id', 'order', 'order_title', 'client', 'client_name', 'location', 'location_name',
             'position', 'position_name', 'starts_at', 'ends_at', 'break_minutes', 'status', 'notes',
             'required_count', 'confirmation_required', 'schedule_groups', 'open_count', 'filled_count',
-            'assigned_workers', 'slot_cards',
+            'assigned_workers', 'slot_cards', 'my_release_request',
         ]

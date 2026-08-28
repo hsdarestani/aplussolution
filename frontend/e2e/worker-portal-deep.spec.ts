@@ -34,6 +34,7 @@ async function json(route: Route, body: unknown, status = 200) {
 
 type MockState = {
   claimed: boolean;
+  releaseRequested: boolean;
   activeClock: boolean;
   correctionPending: boolean;
   contractSigned: boolean;
@@ -45,6 +46,7 @@ type MockState = {
 async function mockWorkerApi(page: Page): Promise<MockState> {
   const state: MockState = {
     claimed: false,
+    releaseRequested: false,
     activeClock: false,
     correctionPending: false,
     contractSigned: false,
@@ -96,14 +98,19 @@ async function mockWorkerApi(page: Page): Promise<MockState> {
     });
 
     if (path.startsWith('shifts/available/')) return json(route, state.claimed ? [] : [baseShift]);
-    if (path.startsWith('shifts/mine/')) return json(route, state.claimed ? [{ ...baseShift, open_count: 0, filled_count: 2 }] : []);
+    if (path.startsWith('shifts/mine/')) return json(route, state.claimed ? [{
+      ...baseShift,
+      open_count: 0,
+      filled_count: 2,
+      my_release_request: state.releaseRequested ? { id: 'release-1', status: 'pending' } : null,
+    }] : []);
     if (path === `shifts/${baseShift.id}/claim/` && method === 'POST') {
       state.claimed = true;
       return json(route, { detail: 'Schicht übernommen.' });
     }
-    if (path === `shifts/${baseShift.id}/release/` && method === 'POST') {
-      state.claimed = false;
-      return json(route, { detail: 'Schicht freigegeben.' });
+    if (path === `employee/shifts/${baseShift.id}/release-request/` && method === 'POST') {
+      state.releaseRequested = true;
+      return json(route, { id: 'release-1', status: 'pending', pending_approval: true }, 202);
     }
 
     if (path === 'attendance/home/') return json(route, {
@@ -242,8 +249,10 @@ test.describe('Worker portal deep regression QA', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     const state = await mockWorkerApi(page);
     await page.goto('/');
-    await expect(page.getByTestId('phase8-mobile-dashboard')).toBeVisible();
-    await expect(page.getByText('Heute', { exact: true })).toBeVisible();
+    const dashboard = page.getByTestId('phase8-mobile-dashboard');
+    await expect(dashboard).toBeVisible();
+    await expect(dashboard.getByText('Mein Zeitplan', { exact: true })).toBeVisible();
+    await expect(dashboard.getByText('Zeiterfassung', { exact: true })).toBeVisible();
     await expect(page.locator('.mobile-tabbar')).toBeVisible();
 
     await page.goto('/?view=people');
@@ -252,35 +261,48 @@ test.describe('Worker portal deep regression QA', () => {
     expect(forbiddenManagerFanout(state)).toEqual([]);
   });
 
-  test('worker can claim and release an open shift', async ({ page }) => {
+  test('worker can claim an open shift and can only request admin-approved release', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const state = await mockWorkerApi(page);
     await page.goto('/?view=schedule');
-    await page.getByRole('button', { name: /Übernehmen/ }).click();
+
+    const workerSchedule = page.getByTestId('wiw-employee-schedule');
+    await workerSchedule.locator('ion-segment-button[value="open"]').click();
+    await page.getByTestId('schedule-day-view').getByRole('button', { name: /Servicekraft/ }).click();
+    await page.getByRole('button', { name: 'Schicht übernehmen' }).click();
     await expect.poll(() => state.claimed).toBe(true);
 
-    await page.locator('ion-segment-button[value="mine"]').click();
+    await workerSchedule.locator('ion-segment-button[value="mine"]').click();
+    await page.getByTestId('schedule-day-view').getByRole('button', { name: /Servicekraft/ }).click();
     await page.getByRole('button', { name: 'Freigeben' }).click();
     await page.locator('ion-alert').getByRole('button', { name: 'Freigeben' }).click();
-    await expect.poll(() => state.claimed).toBe(false);
+    await expect.poll(() => state.releaseRequested).toBe(true);
+    await expect.poll(() => state.claimed).toBe(true);
+    await expect(page.getByText(/wartet auf Administration/i)).toBeVisible();
 
     expect(state.requests.some((r) => r.path === `shifts/${baseShift.id}/claim/` && r.method === 'POST')).toBe(true);
-    expect(state.requests.some((r) => r.path === `shifts/${baseShift.id}/release/` && r.method === 'POST')).toBe(true);
+    expect(state.requests.some((r) => r.path === `employee/shifts/${baseShift.id}/release-request/` && r.method === 'POST')).toBe(true);
+    expect(state.requests.some((r) => r.path === `shifts/${baseShift.id}/release/` && r.method === 'POST')).toBe(false);
     expect(forbiddenManagerFanout(state)).toEqual([]);
   });
 
-  test('clock in/out and correction use real worker states', async ({ page }) => {
+  test('clock in/out asks for location and correction uses real worker states', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const state = await mockWorkerApi(page);
     await page.goto('/');
     await page.getByTestId('phase8-mobile-dashboard').getByRole('button', { name: 'Einstempeln' }).click();
-    await expect(page.getByRole('heading', { name: 'Bereit für deinen Einsatz?' })).toBeVisible();
-    await page.getByRole('button', { name: 'Einstempeln' }).click();
+    await expect(page.getByRole('heading', { name: 'Für die Zeiterfassung ist eine Berechtigung zur Standortbestimmung erforderlich' })).toBeVisible();
+    await page.getByRole('button', { name: 'Standortdienste aktivieren' }).click();
     await expect.poll(() => state.activeClock).toBe(true);
     await expect(page.getByRole('button', { name: 'Ausstempeln' })).toBeVisible();
     await page.getByRole('button', { name: 'Ausstempeln' }).click();
+    await expect(page.getByRole('heading', { name: 'Für die Zeiterfassung ist eine Berechtigung zur Standortbestimmung erforderlich' })).toBeVisible();
+    await page.getByRole('button', { name: 'Standortdienste aktivieren' }).click();
     await expect.poll(() => state.activeClock).toBe(false);
 
+    await page.evaluate(() => sessionStorage.setItem('phase8:attendance-clock', '1'));
+    await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeiterfassung' }).click();
+    await expect(page.getByRole('button', { name: 'Korrektur' })).toBeVisible();
     await page.getByRole('button', { name: 'Korrektur' }).click();
     await page.getByLabel('Warum soll der Eintrag geändert werden?').fill('QA Korrektur');
     await page.getByRole('button', { name: 'Anfrage senden' }).click();
