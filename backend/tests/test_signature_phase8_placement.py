@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from reportlab.pdfgen import canvas
 
 from core.models import ContractSignature
-from core.signature_pdf import _resolve_signature_placements
+from core.signature_pdf import _ROLE_LABELS, _resolve_signature_placements
 
 
 def _sample_pdf():
@@ -58,3 +58,9 @@ def test_template_signature_coordinates_override_pdf_detection():
     assert employee['source'] == 'template'
     assert employee['position']['x'] == 0.66
     assert employee['position']['y'] == 0.22
+
+
+def test_signature_audit_role_labels_remain_canonical():
+    assert _ROLE_LABELS[ContractSignature.Role.EMPLOYEE] == 'Mitarbeiter'
+    assert _ROLE_LABELS[ContractSignature.Role.EMPLOYER] == 'Arbeitgeber'
+    assert _ROLE_LABELS[ContractSignature.Role.CLIENT] == 'Kunde'
