@@ -174,6 +174,9 @@ class WhenIWorkClient:
         return headers
 
     def request(self, method, path, params=None, json=None, retry=True):
+        method = str(method or 'GET').upper()
+        if getattr(settings, 'WIW_READ_ONLY', True) and method not in {'GET', 'HEAD'}:
+            raise WhenIWorkError('WIW ist als schreibgeschützte Quelle konfiguriert; schreibende API-Aufrufe sind blockiert.')
         url = path if path.startswith('http') else f'{self.API_BASE}/{path.lstrip("/")}'
         response = self.session.request(
             method,
