@@ -24,6 +24,8 @@ import WorkflowCompletionEnhancer from './WorkflowCompletionEnhancer';
 import ApiHealthBanner from './ApiHealthBanner';
 import HeaderQuickAccess from './HeaderQuickAccess';
 import ScheduleMobileEnhancer from './ScheduleMobileEnhancer';
+import WiwScheduleMobile from './WiwScheduleMobile';
+import CheckoutReviewEnhancer from './CheckoutReviewEnhancer';
 import DesktopAttendanceHistoryEnhancer from './DesktopAttendanceHistoryEnhancer';
 import NativePushRegistration from './NativePushRegistration';
 import { installBerlinLocaleDefaults } from './berlinLocale';
@@ -50,6 +52,8 @@ function renderApp() {
           <App />
           <HeaderQuickAccess />
           <ScheduleMobileEnhancer />
+          <WiwScheduleMobile />
+          <CheckoutReviewEnhancer />
           <DesktopAttendanceHistoryEnhancer />
           <NativePushRegistration />
           <StoreComplianceLinks />
