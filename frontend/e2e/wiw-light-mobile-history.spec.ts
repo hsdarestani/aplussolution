@@ -56,6 +56,9 @@ test('admin dashboard and attendance follow the supplied WIW mobile hierarchy', 
   expect(attendance).toContain('monthDistance');
   expect(attendance).toContain('const earliest=');
   expect(attendance).not.toContain('Array.from({length:13}');
+  expect(attendance).toContain('entry.worked_minutes');
   expect(attendanceShell).toContain("api('attendance/history/')");
+  expect(attendanceShell).toContain('const archiveHistory = Array.isArray(archive?.history)');
+  expect(attendanceShell).toContain('[...archiveHistory, ...mainHistory]');
   expect(attendanceShell).toContain('showWorker={isManager(user)}');
 });
