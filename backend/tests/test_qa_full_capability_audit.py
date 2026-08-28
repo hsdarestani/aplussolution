@@ -161,10 +161,34 @@ def test_qa_staffing_publish_claim_release_roundtrip(auth_admin, auth_worker, co
     mine_rows = mine.data['results'] if isinstance(mine.data, dict) else mine.data
     assert any(str(item['id']) == str(shift_id) for item in mine_rows)
 
-    released = auth_worker.post(f'/api/shifts/{shift_id}/release/', {}, format='json')
-    assert released.status_code == 200
-    assert released.data['filled_count'] == 0
-    assert released.data['open_count'] == 1
+    # Employees cannot directly give back an accepted shift anymore.
+    direct_release = auth_worker.post(f'/api/shifts/{shift_id}/release/', {}, format='json')
+    assert direct_release.status_code == 400
+
+    requested = auth_worker.post(f'/api/employee/shifts/{shift_id}/release-request/', {}, format='json')
+    assert requested.status_code == 202
+    assert requested.data['pending_approval'] is True
+
+    still_mine = auth_worker.get('/api/shifts/mine/')
+    still_mine_rows = still_mine.data['results'] if isinstance(still_mine.data, dict) else still_mine.data
+    assert any(str(item['id']) == str(shift_id) for item in still_mine_rows)
+
+    pending = auth_admin.get('/api/premium/release-requests/')
+    assert pending.status_code == 200
+    row = next(item for item in pending.data if str(item['shift_id']) == str(shift_id))
+    approved = auth_admin.post(
+        f"/api/premium/release-requests/{row['id']}/decide/",
+        {'status': 'approved'},
+        format='json',
+    )
+    assert approved.status_code == 200
+    assert approved.data['status'] == 'approved'
+
+    reopened = auth_worker.get('/api/shifts/available/')
+    reopened_rows = reopened.data['results'] if isinstance(reopened.data, dict) else reopened.data
+    reopened_shift = next(item for item in reopened_rows if str(item['id']) == str(shift_id))
+    assert reopened_shift['filled_count'] == 0
+    assert reopened_shift['open_count'] == 1
 
 
 @pytest.mark.django_db
