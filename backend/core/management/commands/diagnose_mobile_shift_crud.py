@@ -44,10 +44,19 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING('MOBILE_SHIFT_PROBE skipped: no reference shift exists'))
             return
 
+        # Prefer somebody who has already worked the same position. This probes
+        # the assignment endpoint without deliberately tripping required-skill
+        # policy rules that should legitimately reject an unsuitable worker.
         worker = (
             WorkerProfile.objects.select_related('user')
-            .filter(active=True, user__is_active=True)
+            .filter(
+                active=True,
+                user__is_active=True,
+                shift_slots__status=ShiftSlot.Status.CLAIMED,
+                shift_slots__shift__position_id=reference.position_id,
+            )
             .exclude(user__email__iendswith='@sync.invalid')
+            .distinct()
             .order_by('created_at')
             .first()
         )
@@ -180,7 +189,8 @@ class Command(BaseCommand):
                     pk=str(published_response.data['id']),
                 )
 
-                # 4) Direct worker assignment, if a real active worker exists.
+                # 4) Direct worker assignment, when production has a worker who
+                # has already demonstrated eligibility for this position.
                 if worker:
                     assigned_start = base + timedelta(days=4)
                     assigned_create = factory.post(
@@ -213,6 +223,8 @@ class Command(BaseCommand):
                         'assign-worker',
                         pk=str(assigned_response.data['id']),
                     )
+                else:
+                    self.stdout.write('MOBILE_SHIFT_PROBE assign-worker skipped: no position-proven active worker found')
 
                 transaction.set_rollback(True)
         except Exception as exc:
@@ -221,5 +233,5 @@ class Command(BaseCommand):
             raise CommandError(f'MOBILE_SHIFT_PROBE failed: {exc.__class__.__name__}: {exc}') from exc
 
         self.stdout.write(self.style.SUCCESS(
-            'MOBILE_SHIFT_PROBE success: real WIW edit, draft create, overnight OpenShift, empty assignment, and direct assignment paths completed; all writes rolled back.'
+            'MOBILE_SHIFT_PROBE success: real WIW edit, draft create, overnight OpenShift, empty assignment, and eligible direct-assignment path completed; all writes rolled back.'
         ))
