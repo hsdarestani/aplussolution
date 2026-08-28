@@ -106,18 +106,22 @@ export default function WiwEmployeeScheduleMobile() {
     return () => { cancelled = true; };
   }, [active, mobile]);
 
-  const load = async () => {
+  const load = async (): Promise<{ mine: any[]; open: any[] }> => {
     setBusy(true);
     try {
       const [mineData, openData] = await Promise.all([
         api('shifts/mine/?ordering=starts_at'),
         api('shifts/available/?ordering=starts_at'),
       ]);
-      setMine(unpack(mineData));
-      setOpen(unpack(openData));
+      const nextMine = unpack(mineData);
+      const nextOpen = unpack(openData);
+      setMine(nextMine);
+      setOpen(nextOpen);
       setMessage('');
+      return { mine: nextMine, open: nextOpen };
     } catch (error: any) {
       setMessage(error?.message || 'Dienstplan konnte nicht geladen werden.');
+      return { mine: [], open: [] };
     } finally {
       setBusy(false);
     }
@@ -125,6 +129,7 @@ export default function WiwEmployeeScheduleMobile() {
 
   useEffect(() => {
     if (!active || !mobile || !worker) return;
+    let cancelled = false;
     document.body.classList.add('wiw-employee-schedule-active');
 
     // The legacy ScheduleV2 stays mounted underneath the worker-specific WIW
@@ -140,9 +145,15 @@ export default function WiwEmployeeScheduleMobile() {
     const requested = sessionStorage.getItem('aplus:schedule-entry-filter');
     sessionStorage.removeItem('aplus:schedule-entry-filter');
     setMode(requested === 'open' ? 'open' : 'mine');
-    void load();
+    void load().then(({ open: availableRows }) => {
+      if (cancelled || requested !== 'open' || !availableRows.length) return;
+      const now = Date.now();
+      const firstAvailable = availableRows.find((shift) => new Date(shift.starts_at).getTime() >= now) || availableRows[0];
+      if (firstAvailable?.starts_at) setAnchor(dateKey(firstAvailable.starts_at));
+    });
 
     return () => {
+      cancelled = true;
       document.body.classList.remove('wiw-employee-schedule-active');
       legacyHooks[0]?.setAttribute('data-testid', 'phase8-week-strip');
       legacyHooks[1]?.setAttribute('data-testid', 'schedule-day-view');
