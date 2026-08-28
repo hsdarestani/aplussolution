@@ -128,7 +128,15 @@ def claim_shift(shift_id, worker: WorkerProfile, bypass_approval=False) -> Shift
 
 
 @transaction.atomic
-def release_shift(shift_id, worker: WorkerProfile) -> ShiftSlot:
+def release_shift(shift_id, worker: WorkerProfile, admin_approved=False) -> ShiftSlot:
+    """Release a claimed slot only after an explicit admin/manager decision.
+
+    Keeping this guard in the service layer closes the old direct API path too:
+    a worker cannot bypass the release-request flow by calling /shifts/:id/release/.
+    """
+    if not admin_approved:
+        raise ValidationError('Eine übernommene Schicht kann nur nach Freigabe durch die Administration abgegeben werden.')
+
     shift = Shift.objects.select_for_update().get(pk=shift_id)
     slot = ShiftSlot.objects.select_for_update().filter(
         shift=shift, worker=worker, status=ShiftSlot.Status.CLAIMED
@@ -137,7 +145,7 @@ def release_shift(shift_id, worker: WorkerProfile) -> ShiftSlot:
         raise ValidationError('Für dich wurde keine aktive Belegung dieser Schicht gefunden.')
     slot.worker = None
     slot.status = ShiftSlot.Status.OPEN
-    slot.source = 'worker_release'
+    slot.source = 'admin_approved_release'
     slot.released_at = timezone.now()
     slot.confirmation_status = ShiftSlot.ConfirmationStatus.CONFIRMED
     slot.confirmation_requested_at = None
