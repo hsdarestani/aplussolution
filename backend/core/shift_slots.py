@@ -33,6 +33,25 @@ class ShiftSlot(TimestampedModel):
         ordering = ['shift__starts_at', 'created_at']
 
 
+def _reserve_wiw_slot_identity(instance: Shift, target_slot=None) -> None:
+    """Keep the external WIW id on exactly one authoritative active slot.
+
+    Historic imports can leave a cancelled/stale ShiftSlot carrying the same
+    ``wiw_shift_id``. Editing the current shift then re-runs this post-save
+    signal; assigning the id to the active slot used to hit the database unique
+    constraint and surface as an opaque HTTP 500 in the mobile editor.
+
+    The Shift row is the authoritative owner of the external id. Before moving
+    that id to its current active card, release any stale slot-level mapping.
+    """
+    if not instance.wiw_shift_id:
+        return
+    duplicates = ShiftSlot.objects.filter(wiw_shift_id=instance.wiw_shift_id)
+    if target_slot is not None and getattr(target_slot, 'pk', None):
+        duplicates = duplicates.exclude(pk=target_slot.pk)
+    duplicates.update(wiw_shift_id=None)
+
+
 @receiver(post_save, sender=Shift)
 def ensure_shift_capacity(sender, instance, raw=False, **kwargs):
     if raw:
@@ -42,10 +61,14 @@ def ensure_shift_capacity(sender, instance, raw=False, **kwargs):
     source = 'wiw' if instance.wiw_shift_id else 'system'
     if len(active) < requested:
         for index in range(requested - len(active)):
+            external_id = None
+            if instance.wiw_shift_id and not active and index == 0:
+                _reserve_wiw_slot_identity(instance)
+                external_id = instance.wiw_shift_id
             slot = ShiftSlot.objects.create(
                 shift=instance,
                 source=source,
-                wiw_shift_id=instance.wiw_shift_id if not active and index == 0 else None,
+                wiw_shift_id=external_id,
             )
             active.append(slot)
     elif len(active) > requested:
@@ -56,18 +79,32 @@ def ensure_shift_capacity(sender, instance, raw=False, **kwargs):
 
     if instance.wiw_shift_id and requested == 1 and active:
         slot = active[0]
+        _reserve_wiw_slot_identity(instance, slot)
         if instance.worker_id:
-            if slot.worker_id != instance.worker_id or slot.status != ShiftSlot.Status.CLAIMED:
+            changed = (
+                slot.worker_id != instance.worker_id
+                or slot.status != ShiftSlot.Status.CLAIMED
+                or slot.wiw_shift_id != instance.wiw_shift_id
+                or slot.source != 'wiw'
+            )
+            if changed:
                 slot.worker_id = instance.worker_id
                 slot.status = ShiftSlot.Status.CLAIMED
                 slot.source = 'wiw'
                 slot.wiw_shift_id = instance.wiw_shift_id
                 slot.claimed_at = slot.claimed_at or timezone.now()
                 slot.save(update_fields=['worker', 'status', 'source', 'wiw_shift_id', 'claimed_at', 'updated_at'])
-        elif slot.source in {'wiw', 'migration', 'system'} and slot.status != ShiftSlot.Status.OPEN:
-            slot.worker = None
-            slot.status = ShiftSlot.Status.OPEN
-            slot.source = 'wiw'
-            slot.wiw_shift_id = instance.wiw_shift_id
-            slot.released_at = timezone.now()
-            slot.save(update_fields=['worker', 'status', 'source', 'wiw_shift_id', 'released_at', 'updated_at'])
+        elif slot.source in {'wiw', 'migration', 'system'}:
+            changed = (
+                slot.worker_id is not None
+                or slot.status != ShiftSlot.Status.OPEN
+                or slot.wiw_shift_id != instance.wiw_shift_id
+                or slot.source != 'wiw'
+            )
+            if changed:
+                slot.worker = None
+                slot.status = ShiftSlot.Status.OPEN
+                slot.source = 'wiw'
+                slot.wiw_shift_id = instance.wiw_shift_id
+                slot.released_at = timezone.now()
+                slot.save(update_fields=['worker', 'status', 'source', 'wiw_shift_id', 'released_at', 'updated_at'])
