@@ -1,0 +1,38 @@
+name: Diagnose WIW attendance history
+
+on:
+  push:
+    branches:
+      - fix/wiw-mobile-light-attendance-history
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare SSH authentication
+        env:
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_PASSWORD"
+          cat > /tmp/aplus-askpass.sh <<'ASKPASS'
+          #!/bin/sh
+          printf '%s\n' "$DEPLOY_PASSWORD"
+          ASKPASS
+          chmod 700 /tmp/aplus-askpass.sh
+      - name: Inspect production WIW time history
+        env:
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
+          HOST: ${{ secrets.HOST }}
+          SSH_ASKPASS: /tmp/aplus-askpass.sh
+          SSH_ASKPASS_REQUIRE: force
+          DISPLAY: :0
+        run: |
+          set -euo pipefail
+          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
+          setsid -w ssh -qT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 root@"$HOST" \
+            "cd /opt/aplussolution && docker compose exec -T backend python manage.py shell -c \"from django.db.models import Min,Max,Count; from core.models import TimeEntry; q=TimeEntry.objects.filter(wiw_time_id__isnull=False); print('WIW_TIME_COUNT',q.count()); print('WIW_TIME_RANGE',q.aggregate(earliest=Min('clock_in'),latest=Max('clock_in'))); print('WIW_WORKERS',q.values('worker_id').distinct().count()); print('ALL_TIME_COUNT',TimeEntry.objects.count())\""
