@@ -54,6 +54,26 @@ function noteRow() {
   return directActionRows().find((row) => /Notiz|Hinweis/.test(text(row))) || null;
 }
 
+function decorateStandardColorRow() {
+  const rows = Array.from(findForm()?.querySelectorAll<HTMLElement>('.wiw-form-row') || []);
+  const row = rows.find((item) => text(item).includes('Standardfarbe'));
+  if (!row) return;
+  row.classList.add('wiw-standard-color-row');
+  row.setAttribute('aria-label', 'Standardfarbe: A+ Navy, automatisch');
+  row.setAttribute('title', 'Die Schichtfarbe folgt automatisch dem A+ Navy Design.');
+  const copy = row.querySelector<HTMLElement>('.wiw-form-row-copy');
+  if (!copy || copy.querySelector('.wiw-standard-color-hint')) return;
+  const hint = document.createElement('b');
+  hint.className = 'wiw-standard-color-hint';
+  const swatch = document.createElement('i');
+  swatch.className = 'wiw-standard-color-swatch';
+  swatch.setAttribute('aria-hidden', 'true');
+  const label = document.createElement('span');
+  label.textContent = 'A+ Navy · automatisch';
+  hint.append(swatch, label);
+  copy.appendChild(hint);
+}
+
 function openLocationAfterClientChoice() {
   window.setTimeout(() => locationRow()?.click(), 90);
 }
@@ -115,6 +135,7 @@ export default function WiwShiftFormUxEnhancer() {
       setOpen(isOpen);
       setScrollHost(currentForm?.querySelector<HTMLElement>('.wiw-form-scroll') || null);
       document.body.classList.toggle('wiw-shift-form-active', isOpen);
+      if (isOpen) window.setTimeout(decorateStandardColorRow, 0);
       if (!isOpen) {
         setTemplateOpen(false);
         setLocationOpen(false);
