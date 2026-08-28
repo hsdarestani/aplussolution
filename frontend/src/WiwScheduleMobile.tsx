@@ -8,6 +8,7 @@ import {
   checkmarkOutline,
   chevronForwardOutline,
   colorPaletteOutline,
+  copyOutline,
   documentTextOutline,
   filterOutline,
   layersOutline,
@@ -15,6 +16,7 @@ import {
   peopleOutline,
   personOutline,
   timeOutline,
+  trashOutline,
 } from 'ionicons/icons';
 import { api } from './api';
 import './wiw-schedule-mobile.css';
@@ -340,8 +342,11 @@ export default function WiwScheduleMobile() {
     isOpen: Boolean(slot.is_open || (slot.status === 'open' && !slot.worker)),
   }))), [rows]);
   const visibleCards = useMemo(() => cards.filter((card) => {
-    if (!days.includes(dateKeyFromIso(card.shift.starts_at))) return false;
-    if (tab === 'open' && !card.isOpen) return false;
+    const shiftDay = dateKeyFromIso(card.shift.starts_at);
+    if (tab === 'open') {
+      if (!card.isOpen) return false;
+      if (card.shift.ends_at && new Date(card.shift.ends_at).getTime() < Date.now()) return false;
+    } else if (!days.includes(shiftDay)) return false;
     if (tab === 'filled' && (!card.worker || card.shift.status === 'draft')) return false;
     if (tab === 'draft' && card.shift.status !== 'draft') return false;
     if (query.trim()) {
@@ -350,12 +355,16 @@ export default function WiwScheduleMobile() {
     }
     return true;
   }), [cards, days, query, tab]);
+  const visibleDays = useMemo(() => {
+    if (tab !== 'open') return days;
+    return Array.from(new Set(visibleCards.map((card) => dateKeyFromIso(card.shift.starts_at)))).sort();
+  }, [days, tab, visibleCards]);
   const byDay = useMemo(() => {
     const map: Record<string, CardRow[]> = {};
-    days.forEach((day) => { map[day] = []; });
+    visibleDays.forEach((day) => { map[day] = []; });
     visibleCards.forEach((card) => { (map[dateKeyFromIso(card.shift.starts_at)] ||= []).push(card); });
     return map;
-  }, [days, visibleCards]);
+  }, [visibleDays, visibleCards]);
   const weekHours = useMemo(() => visibleCards.reduce((sum, card) => {
     const gross = Math.max(0, (new Date(card.shift.ends_at).getTime() - new Date(card.shift.starts_at).getTime()) / 3600000);
     return sum + Math.max(0, gross - Number(card.shift.break_minutes || 0) / 60);
@@ -408,6 +417,66 @@ export default function WiwScheduleMobile() {
     if (form.startMinute != null && form.endAbsolute != null) return;
     const start = initialTime();
     setForm((current) => ({ ...current, startMinute: start, endAbsolute: start + 360 }));
+  }
+
+  async function deleteEditingShift() {
+    if (!editing || busy) return;
+    const label = editing.workerName ? `Schicht von ${editing.workerName}` : 'OpenShift';
+    if (!window.confirm(`${label} wirklich löschen?`)) return;
+    setBusy(true);
+    try {
+      await api(`shifts/${editing.shiftId}/cards/${editing.slotId}/delete/`, { method: 'DELETE' });
+      setFormOpen(false);
+      setEditing(undefined);
+      setToast('Schicht gelöscht.');
+      window.dispatchEvent(new Event('aplus:dashboard-invalidated'));
+      await load();
+    } catch (error: any) {
+      setToast(error.message || 'Schicht konnte nicht gelöscht werden.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyEditingAsOpenShift() {
+    if (!editing || busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null) return;
+    setBusy(true);
+    let createdId = '';
+    try {
+      const payload: any = {
+        client: form.client,
+        location: form.location,
+        position: form.position,
+        starts_at: localDateTime(form.date, form.startMinute),
+        ends_at: localDateTime(form.date, form.endAbsolute),
+        break_minutes: automaticBreak(form.startMinute, form.endAbsolute),
+        notes: form.notes || '',
+        confirmation_required: form.confirmation_required,
+        schedule_groups: form.schedule_groups,
+        required_count: 1,
+        status: 'published',
+      };
+      const created: any = await api('shifts/', { method: 'POST', body: JSON.stringify(payload) });
+      createdId = String(created.id || '');
+      await api(`shifts/${created.id}/assign/`, {
+        method: 'POST',
+        body: JSON.stringify({ workers: [], publish_remaining: true }),
+      });
+      createdId = '';
+      setFormOpen(false);
+      setEditing(undefined);
+      setTab('open');
+      setToast('Schicht wurde ohne Mitarbeiter als OpenShift kopiert.');
+      window.dispatchEvent(new Event('aplus:dashboard-invalidated'));
+      await load();
+    } catch (error: any) {
+      if (createdId) {
+        try { await api(`shifts/${createdId}/`, { method: 'DELETE' }); } catch {}
+      }
+      setToast(error.message || 'Schicht konnte nicht kopiert werden.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function save() {
@@ -473,7 +542,7 @@ export default function WiwScheduleMobile() {
         <div className="wiw-search-row"><IonIcon icon={filterOutline} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filtern …" /><button type="button" onClick={() => void load()}>{busy ? '…' : '↻'}</button></div>
       </div>
 
-      <div className="wiw-week-strip">
+      {tab !== 'open' ? <div className="wiw-week-strip">
         <button type="button" onClick={() => setAnchor(addDays(anchor, -7))}>‹</button>
         {days.map((day) => {
           const activeDay = day === anchor;
@@ -481,7 +550,7 @@ export default function WiwScheduleMobile() {
           return <button type="button" key={day} className={`${activeDay ? 'active ' : ''}${day === berlinToday() ? 'today' : ''}`} onClick={() => { setAnchor(day); document.getElementById(`wiw-day-${day}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}><small>{label.weekday.slice(0, 2)}</small><b>{keyDate(day).getUTCDate()}</b></button>;
         })}
         <button type="button" onClick={() => setAnchor(addDays(anchor, 7))}>›</button>
-      </div>
+      </div> : null}
 
       <div
         className="wiw-week-scroll"
@@ -492,10 +561,10 @@ export default function WiwScheduleMobile() {
           const dx = touch.clientX - swipe.current.x;
           const dy = touch.clientY - swipe.current.y;
           swipe.current = undefined;
-          if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.2) setAnchor(addDays(anchor, dx < 0 ? 7 : -7));
+          if (tab !== 'open' && Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.2) setAnchor(addDays(anchor, dx < 0 ? 7 : -7));
         }}
       >
-        {days.map((day) => {
+        {visibleDays.map((day) => {
           const header = formatDayHeader(day);
           const dayCards = byDay[day] || [];
           return <section className="wiw-day-section" id={`wiw-day-${day}`} key={day}>
@@ -504,12 +573,13 @@ export default function WiwScheduleMobile() {
               <div className="wiw-card-line primary"><b>{card.shift.position_name || 'Schicht'}</b><span>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</span></div>
               <div className="wiw-card-line secondary"><span className={card.isOpen ? 'open' : ''}>{card.worker?.name || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}</span><small>{card.shift.client_name || ''}{card.shift.location_name ? ` · ${card.shift.location_name}` : ''}</small></div>
             </button>)}
-            {!dayCards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
+            {tab !== 'open' && !dayCards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
           </section>;
         })}
+        {tab === 'open' && !visibleDays.length ? <div className="wiw-day-empty">Keine verfügbaren OpenShifts</div> : null}
       </div>
 
-      <div className="wiw-week-total"><span>Gesamtstunden</span><strong>{weekHours.toFixed(1)}</strong></div>
+      {tab !== 'open' ? <div className="wiw-week-total"><span>Gesamtstunden</span><strong>{weekHours.toFixed(1)}</strong></div> : null}
       <button type="button" className="wiw-create-fab" aria-label="Schicht erstellen" onClick={() => openCreate(anchor)}>+</button>
 
       {formOpen ? <div className="wiw-shift-form-screen" data-testid="wiw-shift-form">
@@ -542,6 +612,12 @@ export default function WiwScheduleMobile() {
           <Row icon={colorPaletteOutline} label="Standardfarbe" />
           <Row icon={documentTextOutline} label={form.notes ? 'Notiz bearbeiten' : 'Füge Notiz hinzu'} onClick={() => setExtrasOpen((value) => !value)} />
           {extrasOpen ? <div className="wiw-extra-options"><label>Notiz<textarea value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Hinweis für Mitarbeiter …" /></label></div> : null}
+
+          {editing ? <>
+            <div className="wiw-form-separator" />
+            <Row icon={copyOutline} label="Schicht als OpenShift kopieren" value="Ohne Mitarbeiter" onClick={() => void copyEditingAsOpenShift()} />
+            <Row icon={trashOutline} label="Schicht löschen" onClick={() => void deleteEditingShift()} />
+          </> : null}
         </div>
 
         {dateOpen ? <div className="wiw-sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setDateOpen(false); }}><section className="wiw-date-sheet"><header><b>Datum</b><button type="button" onClick={() => setDateOpen(false)}>Fertig</button></header><input type="date" value={form.date} onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))} /><div><button type="button" onClick={() => setForm((current) => ({ ...current, date: berlinToday() }))}>Heute</button><button type="button" onClick={() => setForm((current) => ({ ...current, date: addDays(berlinToday(), 1) }))}>Morgen</button></div></section></div> : null}
