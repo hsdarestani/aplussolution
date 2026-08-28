@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from './api';
 import './admin-schedule-tools.css';
@@ -38,6 +38,7 @@ export default function AdminScheduleTools() {
   const [manager, setManager] = useState(false);
   const [mobile, setMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches);
   const [host, setHost] = useState<Element | null>(null);
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
   const [orderText, setOrderText] = useState('');
@@ -45,6 +46,7 @@ export default function AdminScheduleTools() {
   const [shifts, setShifts] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const bypassFab = useRef(false);
 
   useEffect(() => {
     const root = document.getElementById('root');
@@ -81,15 +83,37 @@ export default function AdminScheduleTools() {
       return;
     }
     const sync = () => {
-      const next = mobile
-        ? document.querySelector('.wiw-schedule-mobile .wiw-schedule-tools')
-        : document.querySelector('.sv2 .sv2-title');
-      setHost(next);
+      if (mobile) {
+        setHost(document.body);
+        return;
+      }
+      setHost(document.querySelector('.sv2 .sv2-title'));
     };
     sync();
     const observer = new MutationObserver(sync);
     observer.observe(document.body, { subtree: true, childList: true });
     return () => observer.disconnect();
+  }, [active, manager, mobile]);
+
+  // Keep the main mobile screen visually identical to WIW: one floating + button.
+  // Intercept that native-looking FAB and offer our extra Manual/AI choices in a
+  // compact bottom sheet. Manual then continues into the existing WIW-style form.
+  useEffect(() => {
+    if (!active || !manager || !mobile) return;
+    const interceptFab = (event: MouseEvent) => {
+      const target = event.target as Element | null;
+      const fab = target?.closest?.('.wiw-create-fab');
+      if (!fab) return;
+      if (bypassFab.current) {
+        bypassFab.current = false;
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setCreateMenuOpen(true);
+    };
+    document.addEventListener('click', interceptFab, true);
+    return () => document.removeEventListener('click', interceptFab, true);
   }, [active, manager, mobile]);
 
   const cards = useMemo(() => shifts.flatMap(cardsForShift).sort((a, b) => new Date(a.shift.starts_at).getTime() - new Date(b.shift.starts_at).getTime()), [shifts]);
@@ -114,14 +138,29 @@ export default function AdminScheduleTools() {
   };
 
   const openManage = () => {
+    setCreateMenuOpen(false);
     setManageOpen(true);
     void loadShifts();
   };
 
   const openManual = () => {
+    setCreateMenuOpen(false);
     const button = document.querySelector<HTMLButtonElement>('.wiw-create-fab');
-    if (button) button.click();
-    else document.querySelector<HTMLButtonElement>('[data-testid="schedule-create-manual"]')?.click();
+    if (button) {
+      bypassFab.current = true;
+      button.click();
+      window.setTimeout(() => { bypassFab.current = false; }, 250);
+      return;
+    }
+    document.querySelector<HTMLButtonElement>('[data-testid="schedule-create-manual"]')?.click();
+  };
+
+  const openAi = () => {
+    setCreateMenuOpen(false);
+    setParsed(undefined);
+    setOrderText('');
+    setMessage('');
+    setAiOpen(true);
   };
 
   async function parseOrder() {
@@ -182,11 +221,18 @@ export default function AdminScheduleTools() {
 
   return createPortal(
     <>
-      <div className={`admin-schedule-actions ${mobile ? 'mobile' : 'desktop'}`}>
-        {mobile ? <button type="button" className="primary" onClick={openManual}>+ Manuell</button> : null}
-        {mobile ? <button type="button" onClick={() => { setParsed(undefined); setOrderText(''); setAiOpen(true); }}>AI</button> : null}
-        <button type="button" onClick={openManage}>Schichten verwalten</button>
-      </div>
+      {!mobile ? <div className="admin-schedule-actions desktop"><button type="button" onClick={openManage}>Schichten verwalten</button></div> : null}
+
+      {mobile && createMenuOpen ? createPortal(
+        <div className="admin-create-menu-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreateMenuOpen(false); }}>
+          <section className="admin-create-menu" role="dialog" aria-modal="true" aria-label="Schicht erstellen">
+            <header><strong>Schicht erstellen</strong><button type="button" onClick={() => setCreateMenuOpen(false)}>Abbrechen</button></header>
+            <button type="button" className="primary" onClick={openManual}><span className="menu-icon">+</span><span><b>Manuell</b><small>WIW-Formular öffnen</small></span><em>›</em></button>
+            <button type="button" onClick={openAi}><span className="menu-icon">AI</span><span><b>Mit AI</b><small>Auftrag analysieren und Schichten erstellen</small></span><em>›</em></button>
+            <button type="button" onClick={openManage}><span className="menu-icon">⋯</span><span><b>Schichten verwalten</b><small>Einzelne Schichtkarten verwalten oder löschen</small></span><em>›</em></button>
+          </section>
+        </div>, document.body,
+      ) : null}
 
       {aiOpen ? createPortal(<div className="admin-schedule-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setAiOpen(false); }}>
         <section className="admin-schedule-sheet ai" role="dialog" aria-modal="true" aria-label="Schichten mit AI erstellen">
