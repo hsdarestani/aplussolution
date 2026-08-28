@@ -24,6 +24,7 @@ import WorkflowCompletionEnhancer from './WorkflowCompletionEnhancer';
 import ApiHealthBanner from './ApiHealthBanner';
 import HeaderQuickAccess from './HeaderQuickAccess';
 import ScheduleMobileEnhancer from './ScheduleMobileEnhancer';
+import ScheduleEntryFilterEnhancer from './ScheduleEntryFilterEnhancer';
 import WiwScheduleMobile from './WiwScheduleMobile';
 import CheckoutReviewEnhancer from './CheckoutReviewEnhancer';
 import DesktopAttendanceHistoryEnhancer from './DesktopAttendanceHistoryEnhancer';
@@ -52,6 +53,7 @@ function renderApp() {
           <App />
           <HeaderQuickAccess />
           <ScheduleMobileEnhancer />
+          <ScheduleEntryFilterEnhancer />
           <WiwScheduleMobile />
           <CheckoutReviewEnhancer />
           <DesktopAttendanceHistoryEnhancer />
@@ -78,7 +80,7 @@ async function retireLegacyPwa() {
 
     if ('caches' in window) {
       const keys = await caches.keys();
-      await Promise.all(keys.map((key) => caches.delete(key)));
+      await Promise.all(keys.map((key) => caches.delete(key));
     }
 
     // unregister() does not release the controller from the current page. Reload
