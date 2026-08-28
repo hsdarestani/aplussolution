@@ -226,6 +226,61 @@ def test_admin_edit_preserves_claimed_worker_on_wiw_imported_shift(auth_admin, c
 
 
 @pytest.mark.django_db
+def test_admin_edit_repairs_stale_cancelled_wiw_slot_identity(auth_admin, company, location, position, worker_user):
+    """Production imports can leave the external id on a cancelled legacy card."""
+    starts = timezone.now() + timedelta(days=5, hours=4)
+    worker = worker_user.worker_profile
+    shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        worker=worker,
+        starts_at=starts,
+        ends_at=starts + timedelta(hours=6),
+        required_count=1,
+        status=Shift.Status.CONFIRMED,
+        wiw_shift_id='qa-wiw-stale-slot-1',
+        schedule_groups=['service'],
+    )
+    stale = ShiftSlot.objects.get(shift=shift)
+    stale.status = ShiftSlot.Status.CANCELLED
+    stale.worker = None
+    stale.save(update_fields=['status', 'worker', 'updated_at'])
+    active = ShiftSlot.objects.create(
+        shift=shift,
+        worker=worker,
+        status=ShiftSlot.Status.CLAIMED,
+        source='wiw',
+        wiw_shift_id=None,
+    )
+
+    response = auth_admin.patch(
+        f'/api/shifts/{shift.id}/cards/{active.id}/',
+        {
+            'client': str(company.id),
+            'location': str(location.id),
+            'position': str(position.id),
+            'starts_at': (starts + timedelta(minutes=15)).isoformat(),
+            'ends_at': (starts + timedelta(hours=6, minutes=15)).isoformat(),
+            'notes': 'stale id repaired',
+            'confirmation_required': False,
+            'schedule_groups': ['service'],
+            'status': 'published',
+            'apply_all': False,
+        },
+        format='json',
+    )
+
+    assert response.status_code == 200, response.data
+    stale.refresh_from_db()
+    active.refresh_from_db()
+    assert stale.wiw_shift_id is None
+    assert active.wiw_shift_id == 'qa-wiw-stale-slot-1'
+    assert active.worker_id == worker.id
+    assert active.status == ShiftSlot.Status.CLAIMED
+
+
+@pytest.mark.django_db
 def test_admin_can_bulk_save_edit_for_multi_card_shift(auth_admin, company, location, position):
     starts = timezone.now() + timedelta(days=6)
     shift = Shift.objects.create(
@@ -262,3 +317,136 @@ def test_admin_can_bulk_save_edit_for_multi_card_shift(auth_admin, company, loca
     assert shift.notes == 'Bulk edit saved'
     assert shift.required_count == 2
     assert ShiftSlot.objects.filter(shift=shift).exclude(status=ShiftSlot.Status.CANCELLED).count() == 2
+
+
+@pytest.mark.django_db
+def test_admin_can_split_and_edit_one_card_without_changing_other_cards(auth_admin, company, location, position):
+    starts = timezone.now() + timedelta(days=7)
+    shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        starts_at=starts,
+        ends_at=starts + timedelta(hours=6),
+        required_count=2,
+        status=Shift.Status.PUBLISHED,
+        notes='original',
+    )
+    slots = list(ShiftSlot.objects.filter(shift=shift).order_by('created_at'))
+
+    response = auth_admin.patch(
+        f'/api/shifts/{shift.id}/cards/{slots[0].id}/',
+        {
+            'client': str(company.id),
+            'location': str(location.id),
+            'position': str(position.id),
+            'starts_at': (starts + timedelta(minutes=30)).isoformat(),
+            'ends_at': (starts + timedelta(hours=6, minutes=30)).isoformat(),
+            'notes': 'only first card',
+            'confirmation_required': False,
+            'schedule_groups': ['service'],
+            'status': 'published',
+            'apply_all': False,
+        },
+        format='json',
+    )
+
+    assert response.status_code == 200, response.data
+    assert response.data['split'] is True
+    shift.refresh_from_db()
+    clone = Shift.objects.get(pk=response.data['shift']['id'])
+    assert shift.required_count == 1
+    assert shift.notes == 'original'
+    assert clone.required_count == 1
+    assert clone.notes == 'only first card'
+
+
+@pytest.mark.django_db
+def test_admin_can_create_new_draft_shift_from_mobile_fields(auth_admin, company, location, position):
+    starts = timezone.now() + timedelta(days=8)
+    response = auth_admin.post(
+        '/api/shifts/',
+        {
+            'client': str(company.id),
+            'location': str(location.id),
+            'position': str(position.id),
+            'starts_at': starts.isoformat(),
+            'ends_at': (starts + timedelta(hours=6)).isoformat(),
+            'notes': 'mobile draft',
+            'confirmation_required': False,
+            'schedule_groups': ['service'],
+            'required_count': 1,
+            'status': 'draft',
+        },
+        format='json',
+    )
+
+    assert response.status_code == 201, response.data
+    shift = Shift.objects.get(pk=response.data['id'])
+    assert shift.status == Shift.Status.DRAFT
+    assert shift.required_count == 1
+    assert ShiftSlot.objects.filter(shift=shift).exclude(status=ShiftSlot.Status.CANCELLED).count() == 1
+
+
+@pytest.mark.django_db
+def test_admin_can_create_cross_midnight_open_shift_from_mobile_fields(auth_admin, company, location, position):
+    day = timezone.localtime(timezone.now() + timedelta(days=9)).replace(hour=21, minute=45, second=0, microsecond=0)
+    response = auth_admin.post(
+        '/api/shifts/',
+        {
+            'client': str(company.id),
+            'location': str(location.id),
+            'position': str(position.id),
+            'starts_at': day.isoformat(),
+            'ends_at': (day + timedelta(hours=6)).isoformat(),
+            'notes': 'overnight mobile shift',
+            'confirmation_required': False,
+            'schedule_groups': ['service'],
+            'required_count': 1,
+            'status': 'published',
+        },
+        format='json',
+    )
+
+    assert response.status_code == 201, response.data
+    shift = Shift.objects.get(pk=response.data['id'])
+    assert shift.ends_at > shift.starts_at
+    assert shift.break_minutes == 30
+    assert shift.is_open is True
+    assert response.data['open_count'] == 1
+
+
+@pytest.mark.django_db
+def test_admin_can_create_and_assign_new_shift_to_worker(auth_admin, company, location, position, second_worker):
+    starts = timezone.now() + timedelta(days=10)
+    created = auth_admin.post(
+        '/api/shifts/',
+        {
+            'client': str(company.id),
+            'location': str(location.id),
+            'position': str(position.id),
+            'starts_at': starts.isoformat(),
+            'ends_at': (starts + timedelta(hours=5)).isoformat(),
+            'notes': 'mobile assigned shift',
+            'confirmation_required': True,
+            'schedule_groups': ['service'],
+            'required_count': 1,
+            'status': 'published',
+        },
+        format='json',
+    )
+    assert created.status_code == 201, created.data
+
+    assigned = auth_admin.post(
+        f"/api/shifts/{created.data['id']}/assign/",
+        {'workers': [str(second_worker.id)], 'publish_remaining': True},
+        format='json',
+    )
+
+    assert assigned.status_code == 200, assigned.data
+    shift = Shift.objects.get(pk=created.data['id'])
+    slot = ShiftSlot.objects.get(shift=shift, status=ShiftSlot.Status.CLAIMED)
+    assert slot.worker_id == second_worker.id
+    assert slot.confirmation_status == ShiftSlot.ConfirmationStatus.PENDING
+    assert assigned.data['filled_count'] == 1
+    assert assigned.data['open_count'] == 0
