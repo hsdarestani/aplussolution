@@ -1,0 +1,108 @@
+name: Patch OpenShift assignment and dashboard
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-open-shift-dashboard.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply focused patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def patch(path, replacements, append=''):
+              p = Path(path)
+              text = p.read_text()
+              for old, new in replacements:
+                  if old not in text:
+                      raise SystemExit(f'Expected snippet not found in {path}: {old[:120]!r}')
+                  text = text.replace(old, new, 1)
+              if append:
+                  if append.strip() not in text:
+                      text += append
+              p.write_text(text)
+
+          patch('frontend/src/WiwScheduleMobile.tsx', [
+              (
+                  "type EditingCard = { shiftId: string; slotId: string; parentCount: number; workerName?: string };",
+                  "type EditingCard = { shiftId: string; slotId: string; parentCount: number; workerName?: string; isOpen: boolean };",
+              ),
+              (
+                  "setEditing({ shiftId: String(card.shift.id), slotId: String(card.slot.id), parentCount: Number(card.shift.required_count || 1), workerName: card.worker?.name });",
+                  "setEditing({ shiftId: String(card.shift.id), slotId: String(card.slot.id), parentCount: Number(card.shift.required_count || 1), workerName: card.worker?.name, isOpen: card.isOpen });",
+              ),
+              (
+                  "        await api(`shifts/${editing.shiftId}/cards/${editing.slotId}/`, { method: 'PATCH', body: JSON.stringify(payload) });\n        setToast(form.apply_all ? 'Änderungen auf alle Karten angewendet.' : 'Nur diese Schichtkarte wurde geändert.');",
+                  "        const edited: any = await api(`shifts/${editing.shiftId}/cards/${editing.slotId}/`, { method: 'PATCH', body: JSON.stringify(payload) });\n        if (editing.isOpen && form.workers.length) {\n          const targetShiftId = String(edited?.shift?.id || editing.shiftId);\n          await api(`shifts/${targetShiftId}/assign/`, {\n            method: 'POST',\n            body: JSON.stringify({ workers: [form.workers[0]], publish_remaining: form.publish_now }),\n          });\n          setToast('Mitarbeiter wurde der OpenShift zugewiesen.');\n        } else {\n          setToast(form.apply_all ? 'Änderungen auf alle Karten angewendet.' : 'Nur diese Schichtkarte wurde geändert.');\n        }",
+              ),
+              (
+                  "      setFormOpen(false);\n      await load();",
+                  "      setFormOpen(false);\n      window.dispatchEvent(new Event('aplus:dashboard-invalidated'));\n      await load();",
+              ),
+              (
+                  "          {!editing ? <Row icon={peopleOutline} label={form.workers.length ? `${form.workers.length} Benutzer direkt zugewiesen` : 'Geeignete Benutzer anzeigen'} muted={!form.workers.length} onClick={() => setSheet('workers')} /> : null}\n\n          {editing && editing.parentCount > 1 ? <div className=\"wiw-bulk-edit-row\"><div><b>Alle Karten dieser Schicht mitändern</b><span>Wenn aus, wird nur diese Person / OpenShift-Karte geändert.</span></div><Switch checked={form.apply_all} onChange={(value) => setForm((current) => ({ ...current, apply_all: value }))} /></div> : null}",
+                  "          {(!editing || editing.isOpen) ? <Row icon={peopleOutline} label={editing ? (form.workers.length ? 'Mitarbeiter ändern' : 'Mitarbeiter zuweisen') : (form.workers.length ? `${form.workers.length} Benutzer direkt zugewiesen` : 'Geeignete Benutzer anzeigen')} value={editing && form.workers.length ? workerChoices.find((choice) => choice.value === form.workers[0])?.label : undefined} muted={!form.workers.length} onClick={() => setSheet('workers')} /> : null}\n\n          {editing && editing.parentCount > 1 && !editing.isOpen ? <div className=\"wiw-bulk-edit-row\"><div><b>Alle Karten dieser Schicht mitändern</b><span>Wenn aus, wird nur diese Person / OpenShift-Karte geändert.</span></div><Switch checked={form.apply_all} onChange={(value) => setForm((current) => ({ ...current, apply_all: value }))} /></div> : null}",
+              ),
+              (
+                  "        {sheet === 'workers' ? <MultiChoiceSheet title=\"Geeignete Benutzer\" choices={workerChoices} selected={form.workers} limit={form.required_count} onClose={() => setSheet('')} onChange={(values) => setForm((current) => ({ ...current, workers: values }))} /> : null}",
+                  "        {sheet === 'workers' ? <MultiChoiceSheet title={editing?.isOpen ? 'Mitarbeiter zuweisen' : 'Geeignete Benutzer'} choices={workerChoices} selected={form.workers} limit={editing ? 1 : form.required_count} onClose={() => setSheet('')} onChange={(values) => setForm((current) => ({ ...current, workers: values }))} /> : null}",
+              ),
+          ])
+
+          patch('frontend/src/AdminHomeV4.tsx', [
+              (
+                  "  useEffect(() => {\n    const timer = window.setTimeout(() => void load(), query ? 250 : 0);\n    return () => window.clearTimeout(timer);\n  }, [category, severity, query]);",
+                  "  useEffect(() => {\n    const timer = window.setTimeout(() => void load(), query ? 250 : 0);\n    return () => window.clearTimeout(timer);\n  }, [category, severity, query]);\n\n  useEffect(() => {\n    const refresh = () => { void load(); };\n    const refreshWhenVisible = () => { if (document.visibilityState === 'visible') refresh(); };\n    const interval = window.setInterval(refresh, 30000);\n    window.addEventListener('focus', refresh);\n    window.addEventListener('aplus:dashboard-invalidated', refresh);\n    document.addEventListener('visibilitychange', refreshWhenVisible);\n    return () => {\n      window.clearInterval(interval);\n      window.removeEventListener('focus', refresh);\n      window.removeEventListener('aplus:dashboard-invalidated', refresh);\n      document.removeEventListener('visibilitychange', refreshWhenVisible);\n    };\n  }, [category, severity, query]);",
+              ),
+          ])
+
+          patch('backend/core/wiw_dashboard.py', [
+              (
+                  "from django.core.cache import cache\nfrom django.utils import timezone",
+                  "from django.core.cache import cache\nfrom django.db.models import Q\nfrom django.utils import timezone",
+              ),
+              (
+                  "from .premium_approval_models import ShiftPickupRequest\nfrom .wiw import WhenIWorkClient, WhenIWorkError",
+                  "from .premium_approval_models import ShiftPickupRequest\nfrom .shift_slots import ShiftSlot\nfrom .wiw import WhenIWorkClient, WhenIWorkError",
+              ),
+              (
+                  "def _local_open_shift_count(now):\n    rows = Shift.objects.filter(\n        is_open=True,\n        worker__isnull=True,\n        status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],\n        ends_at__gte=now,\n    ).values('wiw_payload')\n    total = 0\n    for row in rows:\n        payload = row.get('wiw_payload') or {}\n        try:\n            total += max(1, int(payload.get('instances') or 1))\n        except (TypeError, ValueError):\n            total += 1\n    return total",
+                  "def _local_open_shift_count(now, *, native_only=False):\n    # Open capacity is represented by ShiftSlot. Counting slots keeps native\n    # multi-person needs accurate and lets the dashboard react immediately to\n    # a local assignment/release without waiting for the read-only WIW cache.\n    rows = ShiftSlot.objects.filter(\n        shift__status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],\n        shift__ends_at__gte=now,\n        status=ShiftSlot.Status.OPEN,\n        worker__isnull=True,\n    )\n    if native_only:\n        rows = rows.filter(Q(shift__wiw_shift_id__isnull=True) | Q(shift__wiw_shift_id=''))\n    return rows.count()",
+              ),
+              (
+                  "    now = timezone.now()\n    snapshot = _local_snapshot(now)\n    live_error = ''",
+                  "    now = timezone.now()\n    snapshot = _local_snapshot(now)\n    # WIW is intentionally read-only. Native A+ OpenShifts therefore never\n    # appear in the live WIW result and must be added without double-counting\n    # imported WIW shifts that also exist locally.\n    native_open_shifts = _local_open_shift_count(now, native_only=True)\n    live_error = ''",
+              ),
+              (
+                  "            live = _live_wiw_snapshot(now)\n            live_error = str(live.get('live_error') or '')\n            snapshot.update(live)",
+                  "            live = dict(_live_wiw_snapshot(now))\n            live_error = str(live.get('live_error') or '')\n            if 'open_shifts_available' in live:\n                live['open_shifts_available'] = int(live.get('open_shifts_available') or 0) + native_open_shifts\n            snapshot.update(live)",
+              ),
+          ])
+
+          patch('backend/tests/test_wiw_dashboard_counts.py', [
+              (
+                  "from core import wiw_dashboard\nfrom core.wiw import WhenIWorkError",
+                  "from core import wiw_dashboard\nfrom core.models import Shift\nfrom core.wiw import WhenIWorkError",
+              ),
+          ], append='''\n\n@pytest.mark.django_db\ndef test_local_open_shift_count_counts_native_capacity_cards(company, location, position):\n    starts = timezone.now() + timedelta(days=4)\n    Shift.objects.create(\n        client=company,\n        location=location,\n        position=position,\n        starts_at=starts,\n        ends_at=starts + timedelta(hours=6),\n        required_count=2,\n        status=Shift.Status.PUBLISHED,\n    )\n\n    assert wiw_dashboard._local_open_shift_count(timezone.now(), native_only=True) == 2\n\n\n@pytest.mark.django_db\ndef test_mobile_dashboard_adds_native_open_shifts_to_live_wiw_count(monkeypatch, auth_admin, company, location, position):\n    starts = timezone.now() + timedelta(days=5)\n    Shift.objects.create(\n        client=company,\n        location=location,\n        position=position,\n        starts_at=starts,\n        ends_at=starts + timedelta(hours=6),\n        required_count=1,\n        status=Shift.Status.PUBLISHED,\n    )\n    monkeypatch.setattr(wiw_dashboard.settings, 'WIW_SYNC_ENABLED', True)\n    monkeypatch.setattr(wiw_dashboard.settings, 'WIW_DEV_KEY', 'test-key', raising=False)\n    monkeypatch.setattr(wiw_dashboard.settings, 'WIW_EMAIL', 'test@example.com', raising=False)\n    monkeypatch.setattr(wiw_dashboard.settings, 'WIW_PASSWORD', 'test-password', raising=False)\n    monkeypatch.setattr(wiw_dashboard, '_live_wiw_snapshot', lambda now: {\n        'open_shifts_available': 17,\n        'source': 'wiw-live-readonly',\n        'live_error': '',\n    })\n\n    response = auth_admin.get('/api/admin/mobile-dashboard/')\n\n    assert response.status_code == 200\n    assert response.data['open_shifts_available'] == 18\n''')
+          PY
+
+          git diff --check
+          git diff --stat
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/src/WiwScheduleMobile.tsx frontend/src/AdminHomeV4.tsx backend/core/wiw_dashboard.py backend/tests/test_wiw_dashboard_counts.py
+          git commit -m 'Add manual OpenShift assignment and live dashboard counts'
+          git push origin HEAD:main
