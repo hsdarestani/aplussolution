@@ -186,7 +186,7 @@ test.describe('Phase 6 mobile QA', () => {
     await expectNoHorizontalPageOverflow(page);
 
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Dienstplan' }).click();
-    await expect(page.getByRole('heading', { name: 'Schichten' })).toBeVisible();
+    await expect(page.getByTestId('phase8-week-strip')).toBeVisible();
     await expect(page.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Main Suites Frankfurt', { exact: true }).first()).toBeVisible();
     await expectNoHorizontalPageOverflow(page);
@@ -200,8 +200,8 @@ test.describe('Phase 6 mobile QA', () => {
     await expect(page.getByText('Schicht freigeben?', { exact: true })).toBeHidden();
 
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeiterfassung' }).click();
-    await expect(page.getByRole('heading', { name: 'Bereit für deinen Einsatz?' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Einstempeln' })).toBeEnabled();
+    await expect(page.getByTestId('phase8-pay-periods')).toBeVisible();
+    await expect(page.getByText('Abrechnungszeiträume', { exact: true })).toBeVisible();
     await expectNoHorizontalPageOverflow(page);
 
     await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
@@ -210,6 +210,7 @@ test.describe('Phase 6 mobile QA', () => {
     await expect(moreMenu.getByRole('button', { name: 'Meine Verträge', exact: true })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: 'Dokumente', exact: true })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: 'Ranking', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Mitteilungen', exact: true })).toBeVisible();
   });
 
   test('worker deep links survive refresh and browser history while role guards stay enforced', async ({ page }) => {
@@ -217,23 +218,23 @@ test.describe('Phase 6 mobile QA', () => {
     await mockApi(page, worker);
     await page.goto('/?view=schedule');
 
-    await expect(page.getByRole('heading', { name: 'Schichten' })).toBeVisible();
+    await expect(page.getByTestId('phase8-week-strip')).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
 
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Schichten' })).toBeVisible();
+    await expect(page.getByTestId('phase8-week-strip')).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
 
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeiterfassung' }).click();
-    await expect(page.getByRole('heading', { name: 'Bereit für deinen Einsatz?' })).toBeVisible();
+    await expect(page.getByTestId('phase8-pay-periods')).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('time');
 
     await page.goBack();
-    await expect(page.getByRole('heading', { name: 'Schichten' })).toBeVisible();
+    await expect(page.getByTestId('phase8-week-strip')).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
 
     await page.goForward();
-    await expect(page.getByRole('heading', { name: 'Bereit für deinen Einsatz?' })).toBeVisible();
+    await expect(page.getByTestId('phase8-pay-periods')).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('time');
 
     await page.goto('/?view=people');

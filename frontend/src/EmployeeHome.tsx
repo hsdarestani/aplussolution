@@ -58,7 +58,7 @@ export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:a
         <div>
           {nextShift?<><strong>{nextShift.position_name}</strong><span>{nextShift.client_name} · {day(nextShift.starts_at)} {time(nextShift.starts_at)}</span></>:<span>Keine anstehenden Schichten</span>}
         </div>
-        <button type="button" onClick={()=>navigate('time')}>Einstempeln</button>
+        <button type="button" onClick={()=>{sessionStorage.setItem('phase8:attendance-clock','1');navigate('time');}}>Einstempeln</button>
       </div>
     </div>
 

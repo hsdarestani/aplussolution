@@ -80,6 +80,16 @@ export default function AttendanceV3({ user }: { user: User }) {
   const [correction, setCorrection] = useState<any>();
   const [absence, setAbsence] = useState<any>();
   const [closeTarget, setCloseTarget] = useState<any>();
+  const [mobileClockMode] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const requested = sessionStorage.getItem('phase8:attendance-clock') === '1';
+      if (requested) sessionStorage.removeItem('phase8:attendance-clock');
+      return requested;
+    } catch {
+      return false;
+    }
+  });
 
   const load = async () => {
     const [main, timeOff] = await Promise.all([
@@ -212,7 +222,7 @@ export default function AttendanceV3({ user }: { user: User }) {
 
   if (!data) return <div className="attendance-loading"><IonSpinner /></div>;
 
-  if (user.role === 'worker' && typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches) {
+  if (user.role === 'worker' && !mobileClockMode && typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches) {
     return <Phase8MobileAttendance data={data} />;
   }
 
