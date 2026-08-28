@@ -4,7 +4,7 @@ import pytest
 from django.utils import timezone
 
 from core.models import Availability, Shift
-from core.shift_service import ensure_slots
+from core.shift_service import ensure_slots, refresh_shift_state
 from core.shift_slots import ShiftSlot
 
 
@@ -120,3 +120,93 @@ def test_admin_deleting_last_card_removes_empty_shift(auth_admin, company, locat
     assert response.status_code == 200
     assert response.data['whole_shift'] is True
     assert not Shift.objects.filter(pk=shift.id).exists()
+
+
+@pytest.mark.django_db
+def test_admin_can_save_edit_for_claimed_single_shift_card(auth_admin, company, location, position, worker_user):
+    starts = timezone.now() + timedelta(days=5)
+    shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        starts_at=starts,
+        ends_at=starts + timedelta(hours=6),
+        required_count=1,
+        status=Shift.Status.PUBLISHED,
+        confirmation_required=False,
+        schedule_groups=['service'],
+    )
+    ensure_slots(shift)
+    slot = ShiftSlot.objects.get(shift=shift)
+    slot.worker = worker_user.worker_profile
+    slot.status = ShiftSlot.Status.CLAIMED
+    slot.save(update_fields=['worker', 'status', 'updated_at'])
+    refresh_shift_state(shift)
+
+    new_start = starts + timedelta(hours=1)
+    new_end = new_start + timedelta(hours=6)
+    response = auth_admin.patch(
+        f'/api/shifts/{shift.id}/cards/{slot.id}/',
+        {
+            'client': str(company.id),
+            'location': str(location.id),
+            'position': str(position.id),
+            'starts_at': new_start.isoformat(),
+            'ends_at': new_end.isoformat(),
+            'notes': 'Mobile edit saved',
+            'confirmation_required': True,
+            'schedule_groups': ['service'],
+            'status': 'published',
+            'apply_all': False,
+        },
+        format='json',
+    )
+
+    assert response.status_code == 200, response.data
+    shift.refresh_from_db()
+    slot.refresh_from_db()
+    assert shift.starts_at == new_start
+    assert shift.ends_at == new_end
+    assert shift.notes == 'Mobile edit saved'
+    assert shift.confirmation_required is True
+    assert slot.worker_id == worker_user.worker_profile.id
+    assert slot.status == ShiftSlot.Status.CLAIMED
+
+
+@pytest.mark.django_db
+def test_admin_can_bulk_save_edit_for_multi_card_shift(auth_admin, company, location, position):
+    starts = timezone.now() + timedelta(days=6)
+    shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        starts_at=starts,
+        ends_at=starts + timedelta(hours=5),
+        required_count=2,
+        status=Shift.Status.PUBLISHED,
+    )
+    ensure_slots(shift)
+    slot = ShiftSlot.objects.filter(shift=shift).first()
+
+    response = auth_admin.patch(
+        f'/api/shifts/{shift.id}/cards/{slot.id}/',
+        {
+            'client': str(company.id),
+            'location': str(location.id),
+            'position': str(position.id),
+            'starts_at': (starts + timedelta(minutes=15)).isoformat(),
+            'ends_at': (starts + timedelta(hours=5, minutes=15)).isoformat(),
+            'notes': 'Bulk edit saved',
+            'confirmation_required': False,
+            'schedule_groups': ['service'],
+            'status': 'published',
+            'apply_all': True,
+        },
+        format='json',
+    )
+
+    assert response.status_code == 200, response.data
+    shift.refresh_from_db()
+    assert shift.notes == 'Bulk edit saved'
+    assert shift.required_count == 2
+    assert ShiftSlot.objects.filter(shift=shift).exclude(status=ShiftSlot.Status.CANCELLED).count() == 2
