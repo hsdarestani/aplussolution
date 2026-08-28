@@ -354,12 +354,15 @@ def stamp_drawn_signatures(contract):
             except Exception:
                 continue
 
-            if placement.get('source') == 'legacy-fallback':
-                role_label = _ROLE_LABELS.get(signature.role, role)
+            # Preserve the canonical signer role and identity as searchable/auditable
+            # text for every placement. Avoid duplicating a role label that the form
+            # already prints itself.
+            role_label = _ROLE_LABELS.get(signature.role, role)
+            existing_text = (page.get_text('text') or '').lower()
+            if role_label.lower() not in existing_text:
                 label_y = max(7.0, rect.y0 - 8.0)
                 page.insert_text((rect.x0, label_y), role_label, fontsize=7, color=(0.35, 0.39, 0.45), overlay=True)
 
-            # Keep signer identity as searchable/auditable text for every placement.
             name_y = min(page.rect.height - 5.0, rect.y1 + 9.0)
             page.insert_text((rect.x0, name_y), signature.signer_name[:70], fontsize=7, color=(0.15, 0.18, 0.22), overlay=True)
 
