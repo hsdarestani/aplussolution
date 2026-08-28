@@ -1,0 +1,22 @@
+/* Month view only: keep the Phase 5 information order, but remove repeated labels.
+   The icon already carries the semantic cue; the value gets the visual space. */
+.sv2-month-grid .sv2-event-details.compact .sv2-field-copy>small{display:none}
+.sv2-month-grid .sv2-event.compact{padding:7px 8px;border-radius:9px}
+.sv2-month-grid .sv2-event.compact .sv2-event-head{gap:5px;margin-bottom:5px}
+.sv2-month-grid .sv2-event.compact .sv2-event-head strong{font-size:11px;line-height:1.2}
+.sv2-month-grid .sv2-event.compact .sv2-event-head>span{font-size:7px;padding:1px 4px}
+.sv2-month-grid .sv2-event-details.compact{gap:4px}
+.sv2-month-grid .sv2-event-details.compact .sv2-event-line{grid-template-columns:14px minmax(0,1fr);gap:5px;align-items:center}
+.sv2-month-grid .sv2-event-details.compact .sv2-event-line>ion-icon{font-size:12px;margin-top:0}
+.sv2-month-grid .sv2-event-details.compact .sv2-field-copy{display:block;min-width:0;font-size:10px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sv2-month-grid .sv2-event-details.compact .sv2-entity-link,.sv2-month-grid .sv2-event-details.compact .sv2-worker-names{display:block;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sv2-month-grid .sv2-profile-line .sv2-field-copy{overflow:visible}
+.sv2-month-grid .sv2-worker-avatars.compact{margin-top:0;min-height:24px}
+.sv2-month-grid .sv2-worker-avatars.compact .sv2-worker-avatar,.sv2-month-grid .sv2-worker-avatars.compact .sv2-worker-more{width:24px;height:24px;font-size:8px}
+.sv2-month-day>div{gap:6px}
+
+@media(min-width:701px){
+  .sv2-month-weekdays,.sv2-month-grid{grid-template-columns:repeat(7,minmax(145px,1fr));min-width:1015px}
+  .sv2-month-day{min-height:160px;padding:8px}
+  .sv2-month-day>header{font-size:13px;margin-bottom:6px}
+}
