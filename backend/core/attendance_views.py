@@ -91,10 +91,12 @@ def employee_attendance_home(request):
     )
     active = None if stale_active else open_entry
 
+    # Keep the complete closed history, including imported WIW rows. The mobile
+    # Pay Periods view derives its range from the oldest available entry.
     history_qs = TimeEntry.objects.select_related('shift__position', 'worker__user').filter(
         worker=worker,
         clock_out__isnull=False,
-    ).order_by('-clock_in')[:30]
+    ).order_by('-clock_in')
 
     # Closed historical entries still belong in payroll/history. Forgotten open
     # timers, however, must never inflate the monthly total.
