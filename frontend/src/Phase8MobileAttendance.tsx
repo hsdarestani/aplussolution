@@ -46,6 +46,12 @@ function inputDateTime(value?: string) {
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value || '';
   return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}`;
 }
+function addInputMinutes(value: string, minutes: number) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  if (!match) return value;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]) + minutes));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}T${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`;
+}
 function defaultInput(period?: { start: Date; end: Date }) {
   const now = new Date();
   const candidate = period && (now < period.start || now >= period.end) ? new Date(period.start.getTime() + 10 * 60 * 60 * 1000) : now;
@@ -90,6 +96,14 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
   const [historyOpen, setHistoryOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    document.body.classList.add('wiw-attendance-active');
+    return () => {
+      document.body.classList.remove('wiw-attendance-active');
+      document.body.classList.remove('wiw-attendance-drilldown');
+    };
+  }, []);
 
   useEffect(() => {
     setHistory(Array.isArray(data.history) ? data.history : []);
@@ -166,14 +180,14 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
   }
 
   function openCreate(worker = '') {
+    if (!showWorker) return;
     const start = defaultInput(period);
-    const finish = start ? `${start.slice(0, 11)}${String(Math.min(23, Number(start.slice(11, 13)) + 4)).padStart(2, '0')}${start.slice(13)}` : '';
-    setForm({ mode: 'create', worker, clock_in: start, clock_out: finish, edit_reason: '' });
+    setForm({ mode: 'create', worker, clock_in: start, clock_out: addInputMinutes(start, 240), edit_reason: '' });
     setMessage('');
   }
 
   function openEdit(entry: any) {
-    if (entry?.wiw_time_id) return;
+    if (!showWorker || entry?.wiw_time_id) return;
     setForm({
       mode: 'edit', id: String(entry.id), worker: workerId(entry), clock_in: inputDateTime(entry.clock_in), clock_out: inputDateTime(entry.clock_out), edit_reason: entry.edit_reason || '',
     });
@@ -181,7 +195,7 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
   }
 
   async function saveForm() {
-    if (!form) return;
+    if (!form || !showWorker) return;
     if (!form.worker || !form.clock_in || !form.clock_out) { setMessage('Bitte Mitarbeiter, Beginn und Ende vollständig ausfüllen.'); return; }
     if (new Date(form.clock_out).getTime() <= new Date(form.clock_in).getTime()) { setMessage('Das Ende muss nach dem Beginn liegen.'); return; }
     if (form.mode === 'edit' && form.edit_reason.trim().length < 3) { setMessage('Bitte einen kurzen Änderungsgrund angeben.'); return; }
@@ -196,7 +210,7 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
       setForm(undefined);
       setMessage('');
       if (form.mode === 'create') {
-        if (showWorker) setSelectedWorker(String(saved.worker || form.worker));
+        setSelectedWorker(String(saved.worker || form.worker));
       } else {
         setSelectedEntry(saved);
       }
@@ -208,7 +222,7 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
   }
 
   async function removeEntry(entry: any) {
-    if (!entry?.id || entry?.wiw_time_id) return;
+    if (!showWorker || !entry?.id || entry?.wiw_time_id) return;
     if (!window.confirm('Diesen Zeiteintrag wirklich löschen?')) return;
     setBusy(true);
     try {
@@ -249,8 +263,8 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
         <button type="button" className="back" aria-label="Zurück" onClick={() => setSelectedEntry(undefined)}><IonIcon icon={chevronBackOutline} /></button>
         <strong>Zeiteintrag</strong>
         <div className="wiw-entry-actions">
-          {!readonly && <button type="button" aria-label="Zeiteintrag löschen" disabled={busy} onClick={() => void removeEntry(selectedEntry)}><IonIcon icon={trashOutline} /></button>}
-          {!readonly && <button type="button" aria-label="Zeiteintrag bearbeiten" onClick={() => openEdit(selectedEntry)}><IonIcon icon={createOutline} /></button>}
+          {showWorker && !readonly && <button type="button" aria-label="Zeiteintrag löschen" disabled={busy} onClick={() => void removeEntry(selectedEntry)}><IonIcon icon={trashOutline} /></button>}
+          {showWorker && !readonly && <button type="button" aria-label="Zeiteintrag bearbeiten" onClick={() => openEdit(selectedEntry)}><IonIcon icon={createOutline} /></button>}
         </div>
       </div>
       {readonly && <div className="wiw-readonly-banner"><IonIcon icon={informationCircleOutline} /> WIW-Import · historischer Eintrag, schreibgeschützt</div>}
