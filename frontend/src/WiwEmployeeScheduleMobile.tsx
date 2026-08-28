@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { IonIcon } from '@ionic/react';
+import { IonAlert, IonIcon, IonLabel, IonSegment, IonSegmentButton } from '@ionic/react';
 import {
   briefcaseOutline,
   calendarOutline,
@@ -75,6 +75,7 @@ export default function WiwEmployeeScheduleMobile() {
   const [open, setOpen] = useState<any[]>([]);
   const [anchor, setAnchor] = useState(berlinToday());
   const [selected, setSelected] = useState<any>();
+  const [releaseTarget, setReleaseTarget] = useState<any>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const swipe = useRef<{ x: number; y: number }>();
@@ -125,11 +126,29 @@ export default function WiwEmployeeScheduleMobile() {
   useEffect(() => {
     if (!active || !mobile || !worker) return;
     document.body.classList.add('wiw-employee-schedule-active');
+
+    // The legacy ScheduleV2 stays mounted underneath the worker-specific WIW
+    // surface. Remove only its QA hooks while this replacement is active so
+    // accessibility/testing locators resolve to the visible worker planner.
+    const legacyHooks = Array.from(document.querySelectorAll<HTMLElement>(
+      '.sv2 [data-testid="phase8-week-strip"], .sv2 [data-testid="schedule-day-view"], .sv2 [data-testid="phase8-week-total"]',
+    ));
+    const legacySegments = Array.from(document.querySelectorAll<HTMLElement>('.sv2 ion-segment-button[value="mine"]'));
+    legacyHooks.forEach((element) => element.removeAttribute('data-testid'));
+    legacySegments.forEach((element) => element.removeAttribute('value'));
+
     const requested = sessionStorage.getItem('aplus:schedule-entry-filter');
     sessionStorage.removeItem('aplus:schedule-entry-filter');
     setMode(requested === 'open' ? 'open' : 'mine');
     void load();
-    return () => document.body.classList.remove('wiw-employee-schedule-active');
+
+    return () => {
+      document.body.classList.remove('wiw-employee-schedule-active');
+      legacyHooks[0]?.setAttribute('data-testid', 'phase8-week-strip');
+      legacyHooks[1]?.setAttribute('data-testid', 'schedule-day-view');
+      legacyHooks[2]?.setAttribute('data-testid', 'phase8-week-total');
+      legacySegments.forEach((element) => element.setAttribute('value', 'mine'));
+    };
   }, [active, mobile, worker?.id]);
 
   const weekStart = monday(anchor);
@@ -168,6 +187,7 @@ export default function WiwEmployeeScheduleMobile() {
     try {
       await api(`employee/shifts/${shift.id}/release-request/`, { method: 'POST', body: '{}' });
       setMessage('Freigabe angefragt. Die Schicht bleibt dir zugewiesen, bis die Administration zustimmt.');
+      setReleaseTarget(undefined);
       await load();
       setSelected((current: any) => current ? { ...current, my_release_request: { status: 'pending' } } : current);
     } catch (error: any) {
@@ -202,25 +222,25 @@ export default function WiwEmployeeScheduleMobile() {
         ) : selected.my_release_request?.status === 'pending' ? (
           <button type="button" disabled>Freigabe angefragt · wartet auf Administration</button>
         ) : (
-          <button type="button" className="release" disabled={busy} onClick={() => void requestRelease(selected)}>{busy ? 'Bitte warten …' : 'Schichtfreigabe anfragen'}</button>
+          <button type="button" className="release" disabled={busy} onClick={() => setReleaseTarget(selected)}>{busy ? 'Bitte warten …' : 'Freigeben'}</button>
         )}
       </div>
       {message && <div className="wiw-employee-message">{message}</div>}
     </div>
   ) : (
     <div className="wiw-employee-schedule" data-testid="wiw-employee-schedule">
-      <div className="wiw-employee-tabs">
-        <button type="button" className={mode === 'mine' ? 'active' : ''} onClick={() => setMode('mine')}>Meine Schichten</button>
-        <button type="button" className={mode === 'open' ? 'active' : ''} onClick={() => setMode('open')}>OpenShifts <b>{open.length}</b></button>
-      </div>
+      <IonSegment value={mode} className="wiw-employee-tabs" onIonChange={(event) => setMode((event.detail.value as Mode) || 'mine')}>
+        <IonSegmentButton value="mine"><IonLabel>Meine Schichten</IonLabel></IonSegmentButton>
+        <IonSegmentButton value="open"><IonLabel>OpenShifts <b>{open.length}</b></IonLabel></IonSegmentButton>
+      </IonSegment>
 
-      <div className="wiw-employee-week-strip">
+      <div className="wiw-employee-week-strip" data-testid="phase8-week-strip">
         <button type="button" className="nav" onClick={() => setAnchor(addDays(anchor, -7))}>‹</button>
         {days.map((day) => <button type="button" key={day} className={`${day === anchor ? 'active ' : ''}${day === berlinToday() ? 'today' : ''}`} onClick={() => setAnchor(day)}><small>{dayLabel(day).slice(0, 2)}</small><b>{keyDate(day).getUTCDate()}</b></button>)}
         <button type="button" className="nav" onClick={() => setAnchor(addDays(anchor, 7))}>›</button>
       </div>
 
-      <div className="wiw-employee-week-scroll"
+      <div className="wiw-employee-week-scroll" data-testid="schedule-day-view"
         onTouchStart={(event) => { const touch = event.touches[0]; swipe.current = { x: touch.clientX, y: touch.clientY }; }}
         onTouchEnd={(event) => {
           if (!swipe.current || !event.changedTouches.length) return;
@@ -243,10 +263,22 @@ export default function WiwEmployeeScheduleMobile() {
         </section>)}
       </div>
 
-      <div className="wiw-employee-week-total"><span>Gesamtstunden</span><strong>{weekHours.toFixed(1)}</strong></div>
+      <div className="wiw-employee-week-total" data-testid="phase8-week-total"><span>Gesamtstunden</span><strong>{weekHours.toFixed(1)}</strong></div>
       {message && <div className="wiw-employee-message sticky">{message}</div>}
     </div>
   );
 
-  return createPortal(screen, host);
+  return createPortal(<>
+    {screen}
+    <IonAlert
+      isOpen={Boolean(releaseTarget)}
+      header="Schicht freigeben?"
+      message="Nach Freigabe durch die Administration wird sie wieder für andere Mitarbeiter verfügbar. Bis dahin bleibt die Schicht dir fest zugewiesen."
+      onDidDismiss={() => setReleaseTarget(undefined)}
+      buttons={[
+        { text: 'Abbrechen', role: 'cancel' },
+        { text: 'Freigeben', handler: () => { if (releaseTarget) void requestRelease(releaseTarget); } },
+      ]}
+    />
+  </>, host);
 }
