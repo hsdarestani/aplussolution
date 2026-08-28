@@ -10,6 +10,7 @@ import {
   IonToast,
 } from '@ionic/react';
 import { api, User } from './api';
+import Phase8MobileAttendance from './Phase8MobileAttendance';
 import './attendance-v3.css';
 
 const isManager = (user: User) => user.role === 'admin' || user.role === 'manager';
@@ -210,6 +211,10 @@ export default function AttendanceV3({ user }: { user: User }) {
   }, [data]);
 
   if (!data) return <div className="attendance-loading"><IonSpinner /></div>;
+
+  if (user.role === 'worker' && typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches) {
+    return <Phase8MobileAttendance data={data} />;
+  }
 
   if (isManager(user)) {
     return (

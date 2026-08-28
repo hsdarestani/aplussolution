@@ -8,6 +8,7 @@ import {
   documentTextOutline,
   peopleOutline,
   refreshOutline,
+  notificationsOutline,
   syncOutline,
   timeOutline,
   walletOutline,
@@ -58,7 +59,7 @@ const priorityActions = [
   { view: 'time', label: 'Zeiterfassung', hint: 'Zeiten prüfen', icon: timeOutline },
   { view: 'operations', label: 'Lohn & Anfragen', hint: 'Freigaben, Saldo & Berichte', icon: walletOutline },
   { view: 'people', label: 'Personal & Kunden', hint: 'Stammdaten & Zugänge', icon: peopleOutline },
-  { view: 'orders', label: 'Aufträge & AI', hint: 'Anfragen einlesen', icon: briefcaseOutline },
+  { view: 'messages', label: 'Mitteilungen', hint: 'Hinweise an Mitarbeiter senden', icon: notificationsOutline },
 ];
 
 function dueText(value?: string) {

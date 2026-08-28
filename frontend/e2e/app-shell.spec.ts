@@ -181,7 +181,7 @@ test.describe('Phase 6 mobile QA', () => {
 
     await expect(page.getByRole('heading', { name: 'Mina Berger' })).toBeVisible();
     await expect(page.locator('.mobile-tabbar')).toBeVisible();
-    await expect(page.locator('.mobile-tabbar button')).toHaveCount(5);
+    await expect(page.locator('.mobile-tabbar button')).toHaveCount(4);
     await expect(page.locator('aside')).toBeHidden();
     await expectNoHorizontalPageOverflow(page);
 
@@ -199,7 +199,7 @@ test.describe('Phase 6 mobile QA', () => {
     await page.getByRole('button', { name: 'Abbrechen' }).click();
     await expect(page.getByText('Schicht freigeben?', { exact: true })).toBeHidden();
 
-    await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeit' }).click();
+    await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeiterfassung' }).click();
     await expect(page.getByRole('heading', { name: 'Bereit für deinen Einsatz?' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Einstempeln' })).toBeEnabled();
     await expectNoHorizontalPageOverflow(page);
@@ -224,7 +224,7 @@ test.describe('Phase 6 mobile QA', () => {
     await expect(page.getByRole('heading', { name: 'Schichten' })).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
 
-    await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeit' }).click();
+    await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeiterfassung' }).click();
     await expect(page.getByRole('heading', { name: 'Bereit für deinen Einsatz?' })).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('time');
 
@@ -249,10 +249,10 @@ test.describe('Phase 6 mobile QA', () => {
     await expect(page.getByTestId('admin-exception-center')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Nur das, was heute Aufmerksamkeit braucht.' })).toBeVisible();
     await expect(page.getByText('Schicht noch nicht vollständig besetzt')).toBeVisible();
-    await expect(page.locator('.mobile-tabbar button')).toHaveCount(5);
+    await expect(page.locator('.mobile-tabbar button')).toHaveCount(4);
     await expectNoHorizontalPageOverflow(page);
 
-    await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeit' }).click();
+    await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeiterfassung' }).click();
     await expect(page.getByRole('heading', { name: /Ungewöhnlich lange (laufende Timer|offene Zeiterfassungen)/ })).toBeVisible();
     await page.getByRole('button', { name: /Timer beenden|Prüfen & schließen/ }).click();
     const closeAlert = page.locator('ion-alert');
