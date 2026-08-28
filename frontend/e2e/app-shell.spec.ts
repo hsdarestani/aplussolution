@@ -191,7 +191,7 @@ test.describe('Phase 6 mobile QA', () => {
     await expect(workerSchedule.getByTestId('phase8-week-strip')).toBeVisible();
     const dayView = workerSchedule.getByTestId('schedule-day-view');
     await expect(dayView.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
-    await expect(dayView.getByText('Main Suites Frankfurt', { exact: true }).first()).toBeVisible();
+    await expect(dayView.getByText(/Main Suites Frankfurt.*Frankfurt Innenstadt/).first()).toBeVisible();
     await expectNoHorizontalPageOverflow(page);
 
     await workerSchedule.locator('ion-segment-button[value="mine"]').click();
@@ -223,11 +223,12 @@ test.describe('Phase 6 mobile QA', () => {
     await mockApi(page, worker);
     await page.goto('/?view=schedule');
 
-    await expect(page.getByTestId('phase8-week-strip')).toBeVisible();
+    const workerSchedule = page.getByTestId('wiw-employee-schedule');
+    await expect(workerSchedule.getByTestId('phase8-week-strip')).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
 
     await page.reload();
-    await expect(page.getByTestId('phase8-week-strip')).toBeVisible();
+    await expect(workerSchedule.getByTestId('phase8-week-strip')).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
 
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeiterfassung' }).click();
@@ -235,7 +236,7 @@ test.describe('Phase 6 mobile QA', () => {
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('time');
 
     await page.goBack();
-    await expect(page.getByTestId('phase8-week-strip')).toBeVisible();
+    await expect(workerSchedule.getByTestId('phase8-week-strip')).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
 
     await page.goForward();
