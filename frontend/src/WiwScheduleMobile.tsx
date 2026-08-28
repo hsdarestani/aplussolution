@@ -150,7 +150,7 @@ function activeSlots(shift: any) {
 
 function WheelColumn({ items, value, onChange }: { items: Array<{ value: number; label: string }>; value: number; onChange: (value: number) => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  const timer = useRef<number>();
+  const timer = useRef<number | undefined>(undefined);
   useEffect(() => {
     const index = Math.max(0, items.findIndex((item) => item.value === value));
     if (ref.current) ref.current.scrollTop = index * WHEEL_ROW;
@@ -258,7 +258,7 @@ export default function WiwScheduleMobile() {
   const [dateOpen, setDateOpen] = useState(false);
   const [sheet, setSheet] = useState<'client' | 'position' | 'location' | 'workers' | 'groups' | ''>('');
   const [extrasOpen, setExtrasOpen] = useState(false);
-  const swipe = useRef<{ x: number; y: number }>();
+  const swipe = useRef<{ x: number; y: number } | undefined>(undefined);
 
   useEffect(() => {
     const handler = (event: Event) => {
