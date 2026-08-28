@@ -29,7 +29,7 @@ CORS_ALLOW_CREDENTIALS=True; SECURE_PROXY_SSL_HEADER=('HTTP_X_FORWARDED_PROTO','
 REST_FRAMEWORK={'DEFAULT_AUTHENTICATION_CLASSES':('rest_framework_simplejwt.authentication.JWTAuthentication',),'DEFAULT_PERMISSION_CLASSES':('rest_framework.permissions.IsAuthenticated',),'DEFAULT_FILTER_BACKENDS':('django_filters.rest_framework.DjangoFilterBackend','rest_framework.filters.SearchFilter','rest_framework.filters.OrderingFilter'),'DEFAULT_PAGINATION_CLASS':'core.pagination.PathAwarePagination','PAGE_SIZE':50,'DEFAULT_RENDERER_CLASSES':('rest_framework.renderers.JSONRenderer',) if not DEBUG else ('rest_framework.renderers.JSONRenderer','rest_framework.renderers.BrowsableAPIRenderer')}
 SIMPLE_JWT={'ACCESS_TOKEN_LIFETIME':timedelta(minutes=30),'REFRESH_TOKEN_LIFETIME':timedelta(days=30),'ROTATE_REFRESH_TOKENS':True,'BLACKLIST_AFTER_ROTATION':False}
 CELERY_BROKER_URL=os.getenv('REDIS_URL','redis://localhost:6379/0'); CELERY_RESULT_BACKEND=CELERY_BROKER_URL
-CELERY_BEAT_SCHEDULE={'contract-reminders-daily':{'task':'core.tasks.send_contract_reminders','schedule':86400},'shift-reminders-hourly':{'task':'core.tasks.send_shift_reminders','schedule':3600},'client-contract-generation-hourly':{'task':'core.tasks.generate_due_client_contracts','schedule':3600},'working-time-sync-daily':{'task':'core.tasks.sync_working_time_current_year','schedule':86400},'working-time-backup-weekly':{'task':'core.tasks.backup_working_time','schedule':604800}}
+CELERY_BEAT_SCHEDULE={'contract-reminders-daily':{'task':'core.tasks.send_contract_reminders','schedule':86400},'shift-reminders-hourly':{'task':'core.tasks.send_shift_reminders','schedule':3600},'client-contract-generation-hourly':{'task':'core.tasks.generate_due_client_contracts','schedule':3600},'working-time-sync-daily':{'task':'core.tasks.sync_working_time_current_year','schedule':86400},'working-time-backup-weekly':{'task':'core.tasks.backup_working_time','schedule':604800},'wiw-readonly-sync-5min':{'task':'core.tasks.sync_when_i_work','schedule':300,'args':['incremental']}}
 EMAIL_BACKEND='django.core.mail.backends.smtp.EmailBackend' if os.getenv('EMAIL_HOST') else 'django.core.mail.backends.console.EmailBackend'
 EMAIL_HOST=os.getenv('EMAIL_HOST',''); EMAIL_PORT=int(os.getenv('EMAIL_PORT','587')); EMAIL_HOST_USER=os.getenv('EMAIL_HOST_USER',''); EMAIL_HOST_PASSWORD=os.getenv('EMAIL_HOST_PASSWORD',''); EMAIL_USE_TLS=os.getenv('EMAIL_USE_TLS','1')=='1'
 DEFAULT_FROM_EMAIL=os.getenv('DEFAULT_FROM_EMAIL','A+ Solution <noreply@aplus-solution.de>'); ADMIN_NOTIFICATION_EMAIL=os.getenv('ADMIN_NOTIFICATION_EMAIL','info@aplus-solution.de'); APP_URL=os.getenv('APP_URL','http://localhost:8080')
@@ -37,7 +37,7 @@ GOOGLE_OAUTH_CLIENT_ID=os.getenv('GOOGLE_OAUTH_CLIENT_ID',''); GOOGLE_OAUTH_CLIE
 APPLE_SERVICE_ID=os.getenv('APPLE_SERVICE_ID',''); APPLE_TEAM_ID=os.getenv('APPLE_TEAM_ID',''); APPLE_KEY_ID=os.getenv('APPLE_KEY_ID',''); APPLE_PRIVATE_KEY=os.getenv('APPLE_PRIVATE_KEY','').replace('\\n','\n'); APPLE_PRIVATE_KEY_PATH=os.getenv('APPLE_PRIVATE_KEY_PATH',''); APPLE_OAUTH_REDIRECT_URI=os.getenv('APPLE_OAUTH_REDIRECT_URI','')
 COMPANY_NAME=os.getenv('COMPANY_NAME','A+ Solution GmbH'); COMPANY_ADDRESS=os.getenv('COMPANY_ADDRESS',''); AUEG_LICENSE_AUTHORITY=os.getenv('AUEG_LICENSE_AUTHORITY',''); AUEG_LICENSE_DATE=os.getenv('AUEG_LICENSE_DATE','')
 
-# A+ Workforce is the operational source of truth. WIW settings are retained only for the one-time migration/audit path.
+# During the migration window WIW is a read-only upstream feed. A+ never writes back.
 OPENAI_API_KEY=os.getenv('OPENAI_API_KEY',os.getenv('WIW_OPENAI_KEY',''))
 OPENAI_MODEL=os.getenv('OPENAI_MODEL',os.getenv('WIW_OPENAI_MODEL','gpt-4o-mini'))
 OPENAI_HTTP_TIMEOUT=int(os.getenv('OPENAI_HTTP_TIMEOUT','30'))
@@ -50,6 +50,7 @@ WIW_OPENAI_KEY=OPENAI_API_KEY
 WIW_HTTP_TIMEOUT=int(os.getenv('WIW_HTTP_TIMEOUT',str(OPENAI_HTTP_TIMEOUT)))
 WIW_TOKEN_CACHE_SECONDS=int(os.getenv('WIW_TOKEN_CACHE_SECONDS','3300'))
 WIW_SYNC_ENABLED=os.getenv('WIW_SYNC_ENABLED','0')=='1'
+WIW_READ_ONLY=os.getenv('WIW_READ_ONLY','1')=='1'
 LIBREOFFICE_BINARY=os.getenv('LIBREOFFICE_BINARY','libreoffice')
 COMPANY_BUSINESS_NUMBER=os.getenv('COMPANY_BUSINESS_NUMBER','')
 
