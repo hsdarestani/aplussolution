@@ -37,6 +37,9 @@ test('Phase 8 scheduler exposes WIW week strip, total hours and mobile create co
   expect(schedule).toContain('phase8-week-total');
   expect(schedule).toContain('Gesamtstunden');
   expect(schedule).toContain('sv2-wiw-fab');
+  expect(schedule).toContain('sv2-mini-actions');
+  expect(schedule).toContain('Schicht übernommen.');
+  expect(schedule).toContain('Freigeben');
 });
 
 test('Phase 8 mobile visual override is mobile-only and keeps A+ identity', async()=>{
@@ -46,4 +49,5 @@ test('Phase 8 mobile visual override is mobile-only and keeps A+ identity', asyn
   expect(css).toContain('grid-template-columns: repeat(4,minmax(0,1fr))');
   expect(css).toContain('.wiw-section-label');
   expect(css).toContain('.sv2-wiw-week-strip');
+  expect(css).toContain('.sv2-mini-actions');
 });
