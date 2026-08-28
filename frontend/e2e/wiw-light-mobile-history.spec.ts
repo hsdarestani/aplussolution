@@ -18,7 +18,7 @@ test('all schedule views use icon plus value without customer legend noise', asy
   expect(schedule).toContain('renderShiftDetails');
 });
 
-test('mobile defaults to light, keeps optional dark mode and uses a WIW-style More page', async () => {
+test('mobile is locked to light mode and uses a WIW-style More page', async () => {
   const css = source('src/wiw-mobile-light.css');
   const appearance = source('src/mobileAppearance.ts');
   const more = source('src/MobileMoreMenu.tsx');
@@ -26,14 +26,18 @@ test('mobile defaults to light, keeps optional dark mode and uses a WIW-style Mo
   const main = source('src/main.tsx');
 
   expect(css).toContain('--wiw-bg:#fff');
-  expect(css).toContain("html[data-aplus-appearance='dark']");
-  expect(appearance).toContain("return window.localStorage.getItem(STORAGE_KEY) === 'dark' ? 'dark' : 'light'");
+  expect(appearance).toContain("export type MobileAppearance = 'light'");
+  expect(appearance).toContain("document.documentElement.dataset.aplusAppearance = 'light'");
+  expect(appearance).toContain("document.documentElement.style.colorScheme = 'light'");
+  expect(appearance).toContain('window.localStorage.removeItem(STORAGE_KEY)');
   expect(main).toContain("import './wiw-mobile-light.css';");
   expect(main).toContain('installMobileAppearance();');
   expect(more).toContain('Profil & Einstellungen');
-  expect(more).toContain('Darstellung');
-  expect(more).toContain('Hell');
-  expect(more).toContain('Dunkel');
+  expect(more).not.toContain('Darstellung');
+  expect(more).not.toContain('Hell');
+  expect(more).not.toContain('Dunkel');
+  expect(more).not.toContain('moonOutline');
+  expect(more).not.toContain('sunnyOutline');
   expect(more).not.toContain('WorkChat');
   expect(app).toContain("data-view={mobileMenuOpen ? 'more' : view}");
   expect(app).toContain('if (mobileMenuOpen)');
