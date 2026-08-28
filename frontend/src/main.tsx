@@ -27,6 +27,7 @@ import ScheduleMobileEnhancer from './ScheduleMobileEnhancer';
 import ScheduleEntryFilterEnhancer from './ScheduleEntryFilterEnhancer';
 import WiwScheduleMobile from './WiwScheduleMobile';
 import WiwEmployeeScheduleMobile from './WiwEmployeeScheduleMobile';
+import WiwShiftFormUxEnhancer from './WiwShiftFormUxEnhancer';
 import ShiftReleaseApprovalPanel from './ShiftReleaseApprovalPanel';
 import AdminScheduleTools from './AdminScheduleTools';
 import AdminAvailabilityManager from './AdminAvailabilityManager';
@@ -63,6 +64,7 @@ function renderApp() {
           <ScheduleEntryFilterEnhancer />
           <WiwScheduleMobile />
           <WiwEmployeeScheduleMobile />
+          <WiwShiftFormUxEnhancer />
           <ShiftReleaseApprovalPanel />
           <AdminScheduleTools />
           <AdminAvailabilityManager />
