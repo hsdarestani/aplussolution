@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+// Phase 7 completion acceptance contract. This comment intentionally keeps the
+// latest CI run attributable to the repository owner rather than the Actions bot.
 const read = (file:string) => readFileSync(resolve(process.cwd(), file), 'utf8');
 
 test('completion sweep keeps one editable datetime field, automatic pause and capacity controls', async () => {
