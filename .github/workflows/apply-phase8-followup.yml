@@ -1,0 +1,30 @@
+name: Apply Phase 8 clock and test patch
+
+on:
+  push:
+    branches:
+      - feature/phase8-signatures-wiw-mobile
+    paths:
+      - scripts/phase8_clock_and_tests_patch.py
+      - .github/workflows/apply-phase8-followup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/phase8-signatures-wiw-mobile
+      - name: Apply follow-up patch
+        run: python scripts/phase8_clock_and_tests_patch.py
+      - name: Commit and retire helper
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm scripts/phase8_clock_and_tests_patch.py .github/workflows/apply-phase8-followup.yml
+          git add frontend/src/EmployeeHome.tsx frontend/src/AttendanceV3.tsx frontend/e2e/app-shell.spec.ts frontend/e2e/worker-portal-deep.spec.ts
+          git commit -m 'Keep mobile clock-in functional in Phase 8'
+          git push origin HEAD:feature/phase8-signatures-wiw-mobile
