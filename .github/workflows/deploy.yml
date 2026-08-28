@@ -93,7 +93,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           body=$(printf 'Production deployment is running.\n\n- Commit: %s\n- Validation: **success**\n- Phase: **deploying**\n- Workflow run: %s\n' "$COMMIT_SHA" "$RUN_URL")
-          gh api --method PATCH "repos/${{ github.repository }}/issues/84" -f body="$body" -f state=open >/dev/null
+          gh api --method PATCH "repos/hsdarestani/aplussolution/issues/84" -f body="$body" -f state=open >/dev/null
       - uses: actions/checkout@v4
       - name: Prepare password SSH authentication
         timeout-minutes: 1
@@ -190,9 +190,14 @@ jobs:
             chmod 600 /root/aplussolution-initial-admin.txt
           fi
           if grep -q '^WIW_SYNC_ENABLED=' .env; then
-            sed -i 's/^WIW_SYNC_ENABLED=.*/WIW_SYNC_ENABLED=0/' .env
+            sed -i 's/^WIW_SYNC_ENABLED=.*/WIW_SYNC_ENABLED=1/' .env
           else
-            printf 'WIW_SYNC_ENABLED=0\n' >> .env
+            printf 'WIW_SYNC_ENABLED=1\n' >> .env
+          fi
+          if grep -q '^WIW_READ_ONLY=' .env; then
+            sed -i 's/^WIW_READ_ONLY=.*/WIW_READ_ONLY=1/' .env
+          else
+            printf 'WIW_READ_ONLY=1\n' >> .env
           fi
           if ! command -v docker >/dev/null 2>&1; then curl -fsSL https://get.docker.com | sh; fi
           docker compose pull db redis caddy || true
@@ -218,7 +223,11 @@ jobs:
 
           docker compose exec -T backend python manage.py migrate --check
           docker compose exec -T backend python manage.py check
-          docker compose exec -T backend python manage.py shell -c "from django.conf import settings; assert settings.WIW_SYNC_ENABLED is False; print('A+ Workforce source-of-truth mode OK')"
+          docker compose exec -T backend python manage.py shell -c "from django.conf import settings; assert settings.WIW_SYNC_ENABLED is True; assert settings.WIW_READ_ONLY is True; print('WIW one-way read-only feed OK')"
+          # Prime current WIW data immediately. The 5-minute Celery beat task keeps
+          # it refreshed afterwards. An upstream WIW outage must not block a safe
+          # application deployment; the dashboard falls back to local data.
+          docker compose exec -T backend python manage.py sync_wiw --full || echo 'WARNING: initial WIW refresh failed; scheduled read-only sync will retry.' >&2
           # Temporary rollback-only production probe. It exercises the exact
           # Client Order -> Shift path against real QA data and prints the real
           # production exception without persisting a Shift.

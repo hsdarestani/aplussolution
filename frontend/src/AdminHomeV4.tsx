@@ -29,6 +29,17 @@ type ExceptionItem = {
   meta?: Record<string, any>;
 };
 
+type MobileDashboard = {
+  attendance_notices?: number;
+  time_off_requests?: number;
+  shift_requests?: number;
+  open_shift_requests?: number;
+  open_shifts_available?: number;
+  source?: string;
+  sync_enabled?: boolean;
+  read_only?: boolean;
+};
+
 const categoryLabels: Record<string, string> = {
   all: 'Alle',
   staffing: 'Besetzung',
@@ -76,6 +87,7 @@ function dueText(value?: string) {
 
 export default function AdminHomeV4({ navigate }: { navigate: Navigate }) {
   const [data, setData] = useState<any>();
+  const [mobileDashboard, setMobileDashboard] = useState<MobileDashboard>();
   const [category, setCategory] = useState('all');
   const [severity, setSeverity] = useState('all');
   const [query, setQuery] = useState('');
@@ -91,7 +103,12 @@ export default function AdminHomeV4({ navigate }: { navigate: Navigate }) {
       if (severity !== 'all') params.set('severity', severity);
       if (query.trim()) params.set('q', query.trim());
       params.set('limit', '120');
-      setData(await api(`admin/exceptions/?${params.toString()}`));
+      const [exceptionData, dashboardData] = await Promise.all([
+        api(`admin/exceptions/?${params.toString()}`),
+        api('admin/mobile-dashboard/').catch(() => undefined),
+      ]);
+      setData(exceptionData);
+      if (dashboardData) setMobileDashboard(dashboardData);
     } catch (reason: any) {
       setError(reason.message || 'Handlungsbedarf konnte nicht geladen werden.');
     } finally {
@@ -109,6 +126,18 @@ export default function AdminHomeV4({ navigate }: { navigate: Navigate }) {
   const byCategory = summary.by_category || {};
   const criticalFirst = useMemo(() => results.filter((item) => item.severity === 'critical'), [results]);
 
+  const count = (key: keyof MobileDashboard, fallback = 0) => {
+    const value = mobileDashboard?.[key];
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : fallback;
+  };
+
+  const attendanceNotices = count('attendance_notices', byCategory.attendance || 0);
+  const timeOffRequests = count('time_off_requests', byCategory.requests || 0);
+  const shiftRequests = count('shift_requests', 0);
+  const openShiftRequests = count('open_shift_requests', 0);
+  const openShiftsAvailable = count('open_shifts_available', byCategory.staffing || 0);
+
   function open(item: ExceptionItem) {
     sessionStorage.setItem('aplus:focus', JSON.stringify({ view: item.view, id: item.object_id, category: item.category }));
     navigate(item.view);
@@ -118,18 +147,18 @@ export default function AdminHomeV4({ navigate }: { navigate: Navigate }) {
     <div className="admin-home-v4" data-testid="admin-exception-center">
       <div className="wiw-mobile-admin-dashboard" data-testid="wiw-mobile-admin-dashboard">
         <div className="wiw-section-label">Heute</div>
-        <button type="button" className="wiw-mobile-row" aria-label="Arbeitszeit-Hinweise" onClick={() => navigate('time')}><span className="wiw-count">{byCategory.attendance || 0}</span><strong>Arbeitszeit-Hinweise</strong></button>
+        <button type="button" className="wiw-mobile-row" aria-label="Arbeitszeit-Hinweise" onClick={() => navigate('time')}><span className="wiw-count">{attendanceNotices}</span><strong>Arbeitszeit-Hinweise</strong></button>
         <button type="button" className="wiw-mobile-row" aria-label="Mitarbeiteraktivität" onClick={() => navigate('people')}><span className="wiw-row-icon"><IonIcon icon={peopleOutline}/></span><strong>Mitarbeiteraktivität</strong></button>
 
         <div className="wiw-section-label">Anfragen</div>
-        <button type="button" className="wiw-mobile-row" aria-label="Abwesenheitsanträge" onClick={() => navigate('operations')}><span className="wiw-count">{byCategory.requests || 0}</span><strong>Abwesenheitsanträge</strong></button>
-        <button type="button" className="wiw-mobile-row" aria-label="Schichtanfragen" onClick={() => navigate('operations')}><span className="wiw-count">{byCategory.staffing || 0}</span><strong>Schichtanfragen</strong></button>
-        <button type="button" className="wiw-mobile-row" aria-label="OpenShift-Anfragen" onClick={() => navigate('schedule')}><span className="wiw-count">{byCategory.staffing || 0}</span><strong>OpenShift-Anfragen</strong></button>
+        <button type="button" className="wiw-mobile-row" aria-label="Abwesenheitsanträge" onClick={() => navigate('operations')}><span className="wiw-count">{timeOffRequests}</span><strong>Abwesenheitsanträge</strong></button>
+        <button type="button" className="wiw-mobile-row" aria-label="Schichtanfragen" onClick={() => navigate('operations')}><span className="wiw-count">{shiftRequests}</span><strong>Schichtanfragen</strong></button>
+        <button type="button" className="wiw-mobile-row" aria-label="OpenShift-Anfragen" onClick={() => navigate('schedule')}><span className="wiw-count">{openShiftRequests}</span><strong>OpenShift-Anfragen</strong></button>
 
         <div className="wiw-section-label">Dienstplan</div>
         <button type="button" className="wiw-next-shift" aria-label="Dienstplan öffnen" onClick={() => navigate('schedule')}><small>Nächster Einsatz:</small><strong>Dienstplan öffnen</strong></button>
         <button type="button" className="wiw-mobile-row" aria-label="Schichten" onClick={() => navigate('schedule')}><span className="wiw-row-icon"><IonIcon icon={calendarOutline}/></span><strong>Schichten</strong></button>
-        <button type="button" className="wiw-mobile-row" aria-label="OpenShifts verfügbar" onClick={() => navigate('schedule')}><span className="wiw-count">{byCategory.staffing || 0}</span><strong>OpenShifts verfügbar</strong></button>
+        <button type="button" className="wiw-mobile-row" aria-label="OpenShifts verfügbar" onClick={() => navigate('schedule')}><span className="wiw-count">{openShiftsAvailable}</span><strong>OpenShifts verfügbar</strong></button>
 
         <div className="wiw-section-label">Wichtige anstehende Termine</div>
         <div className="wiw-upcoming"><div>{(criticalFirst[0] || results[0]) ? <><strong>{(criticalFirst[0] || results[0]).title}</strong><span>{(criticalFirst[0] || results[0]).message}</span></> : <span>Keine offenen Vorgänge</span>}</div>{(criticalFirst[0] || results[0]) && <button type="button" onClick={() => open(criticalFirst[0] || results[0])}>Öffnen</button>}</div>

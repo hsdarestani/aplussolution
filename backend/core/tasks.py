@@ -56,7 +56,9 @@ def send_shift_reminders():
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3})
 def sync_when_i_work(self, mode='incremental', triggered_by_id=None):
-    """Legacy migration task. It is no longer scheduled when A+ Workforce is the source of truth."""
+    """Refresh the temporary one-way WIW -> A+ migration feed."""
+    if not settings.WIW_SYNC_ENABLED:
+        return {'status': 'disabled', 'counts': {}, 'errors': []}
     from .models import User
     from .wiw_sync import WhenIWorkSynchronizer
     user = User.objects.filter(pk=triggered_by_id).first() if triggered_by_id else None
