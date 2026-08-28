@@ -198,10 +198,11 @@ test.describe('Phase 6 mobile QA', () => {
     await dayView.getByRole('button', { name: /Servicekraft/ }).first().click();
     await expect(page.getByRole('button', { name: 'Freigeben' })).toBeVisible();
     await page.getByRole('button', { name: 'Freigeben' }).click();
-    await expect(page.getByText('Schicht freigeben?', { exact: true })).toBeVisible();
-    await expect(page.getByText('wird wieder für andere Mitarbeiter verfügbar.', { exact: false })).toBeVisible();
-    await page.getByRole('button', { name: 'Abbrechen' }).click();
-    await expect(page.getByText('Schicht freigeben?', { exact: true })).toBeHidden();
+    const releaseAlert = page.locator('ion-alert').filter({ hasText: 'Schicht freigeben?' }).last();
+    await expect(releaseAlert).toBeVisible();
+    await expect(releaseAlert.getByText('wird wieder für andere Mitarbeiter verfügbar.', { exact: false })).toBeVisible();
+    await releaseAlert.getByRole('button', { name: 'Abbrechen' }).click();
+    await expect(releaseAlert).toBeHidden();
 
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeiterfassung' }).click();
     await expect(page.getByTestId('phase8-pay-periods')).toBeVisible();
