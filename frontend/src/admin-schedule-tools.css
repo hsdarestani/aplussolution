@@ -3,9 +3,10 @@
 /* Mobile stays visually WIW-first: no large A+ action row. Restore the original
    floating green + even though an earlier compatibility layer hid it. The
    underlying ScheduleV2 view still renders its old navy FAB, so hide only that
-   legacy button while the WIW mobile schedule overlay is active. */
+   legacy button while the WIW mobile schedule overlay is active. Keep the green
+   FAB above both the fixed bottom navigation and the Gesamtstunden bar. */
 @media(max-width:900px){
-  .wiw-create-fab{display:block!important;position:fixed!important;z-index:110!important;right:16px!important;bottom:calc(76px + env(safe-area-inset-bottom))!important;width:49px!important;height:49px!important;border:0!important;border-radius:50%!important;background:#6bad50!important;color:#fff!important;box-shadow:0 4px 13px rgba(0,0,0,.25)!important;font-size:30px!important;font-weight:300!important;line-height:49px!important;padding:0!important}
+  .wiw-create-fab{display:block!important;position:fixed!important;z-index:110!important;right:16px!important;bottom:calc(132px + env(safe-area-inset-bottom))!important;width:49px!important;height:49px!important;border:0!important;border-radius:50%!important;background:#6bad50!important;color:#fff!important;box-shadow:0 4px 13px rgba(0,0,0,.25)!important;font-size:30px!important;font-weight:300!important;line-height:49px!important;padding:0!important}
   body.wiw-native-schedule-active .sv2-wiw-fab{display:none!important}
 }
 
