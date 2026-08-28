@@ -40,6 +40,7 @@ import { installLocationPicker } from './locationPicker';
 import { installMobileAppearance } from './mobileAppearance';
 import './brand-navy.css';
 import './mobile-readable-typography.css';
+import './mobile-page-gutters.css';
 
 installBerlinLocaleDefaults();
 installOperationalFetchResilience();
