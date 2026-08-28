@@ -17,7 +17,6 @@ def test_worker_attendance_home_returns_complete_imported_wiw_history(auth_worke
             shift=shift,
             clock_in=clock_in,
             clock_out=clock_in + timedelta(hours=7),
-            break_minutes=30,
             approved=True,
             wiw_time_id=f'full-history-{index}',
             wiw_synced_at=now,
@@ -52,7 +51,7 @@ def test_attendance_history_archive_is_role_scoped(auth_admin, auth_worker, auth
     assert worker.status_code == 200
     assert worker.data['count'] == 3
     assert len(worker.data['history']) == 3
-    assert {row['worker'] for row in worker.data['history']} == {str(worker_user.worker_profile.id)}
+    assert {str(row['worker']) for row in worker.data['history']} == {str(worker_user.worker_profile.id)}
 
     admin = auth_admin.get('/api/attendance/history/')
     assert admin.status_code == 200
