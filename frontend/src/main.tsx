@@ -15,6 +15,7 @@ import './mobile-header-actions-fix.css';
 import './phase8-wiw-mobile.css';
 import './wiw-mobile-light.css';
 import './schedule-month-compact.css';
+import './brand-navy.css';
 import App from './App';
 import StoreComplianceLinks from './StoreComplianceLinks';
 import StoreLegalPage, { legalPageFromPath } from './StoreLegalPages';
@@ -24,6 +25,7 @@ import WorkflowCompletionEnhancer from './WorkflowCompletionEnhancer';
 import ApiHealthBanner from './ApiHealthBanner';
 import HeaderQuickAccess from './HeaderQuickAccess';
 import ScheduleMobileEnhancer from './ScheduleMobileEnhancer';
+import DesktopAttendanceHistoryEnhancer from './DesktopAttendanceHistoryEnhancer';
 import NativePushRegistration from './NativePushRegistration';
 import { installBerlinLocaleDefaults } from './berlinLocale';
 import { installOperationalFetchResilience } from './operationalFetchResilience';
@@ -48,6 +50,7 @@ function renderApp() {
           <App />
           <HeaderQuickAccess />
           <ScheduleMobileEnhancer />
+          <DesktopAttendanceHistoryEnhancer />
           <NativePushRegistration />
           <StoreComplianceLinks />
           <FriendlyDateTimePicker />
