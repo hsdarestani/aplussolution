@@ -1,0 +1,28 @@
+name: Apply WIW mobile regression fixes
+
+on:
+  push:
+    branches:
+      - fix/wiw-mobile-light-attendance-history
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/wiw-mobile-light-attendance-history
+      - name: Apply product and regression alignment
+        run: python scripts/wiw_mobile_ci_alignment.py
+      - name: Commit and remove helper
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/wiw-mobile-ci-alignment.yml scripts/wiw_mobile_ci_alignment.py
+          git add frontend/src/AttendanceV3.tsx frontend/src/Phase8MobileAttendance.tsx frontend/e2e/admin-priority-navigation.spec.ts frontend/e2e/phase8-wiw-mobile.spec.ts frontend/e2e/app-shell.spec.ts frontend/e2e/client-portal-deep.spec.ts
+          git commit -m 'Preserve live clock history and align WIW mobile regression coverage'
+          git push origin HEAD:fix/wiw-mobile-light-attendance-history
