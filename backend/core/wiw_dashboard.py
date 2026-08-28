@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from dateutil.parser import parse as parse_flexible_datetime
 from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
@@ -38,10 +39,14 @@ def _as_datetime(value):
         except (OverflowError, OSError, TypeError, ValueError):
             return None
     else:
+        raw = str(value).strip()
         try:
-            result = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+            result = datetime.fromisoformat(raw.replace('Z', '+00:00'))
         except (TypeError, ValueError):
-            return None
+            try:
+                result = parse_flexible_datetime(raw)
+            except (OverflowError, TypeError, ValueError):
+                return None
     if timezone.is_naive(result):
         result = timezone.make_aware(result, timezone.get_current_timezone())
     return result
