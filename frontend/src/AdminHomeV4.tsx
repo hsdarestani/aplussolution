@@ -118,18 +118,18 @@ export default function AdminHomeV4({ navigate }: { navigate: Navigate }) {
     <div className="admin-home-v4" data-testid="admin-exception-center">
       <div className="wiw-mobile-admin-dashboard" data-testid="wiw-mobile-admin-dashboard">
         <div className="wiw-section-label">Heute</div>
-        <button type="button" className="wiw-mobile-row" onClick={() => navigate('time')}><span className="wiw-count">{byCategory.attendance || 0}</span><strong>Arbeitszeit-Hinweise</strong></button>
-        <button type="button" className="wiw-mobile-row" onClick={() => navigate('people')}><span className="wiw-row-icon"><IonIcon icon={peopleOutline}/></span><strong>Mitarbeiteraktivität</strong></button>
+        <button type="button" className="wiw-mobile-row" aria-label="Arbeitszeit-Hinweise" onClick={() => navigate('time')}><span className="wiw-count">{byCategory.attendance || 0}</span><strong>Arbeitszeit-Hinweise</strong></button>
+        <button type="button" className="wiw-mobile-row" aria-label="Mitarbeiteraktivität" onClick={() => navigate('people')}><span className="wiw-row-icon"><IonIcon icon={peopleOutline}/></span><strong>Mitarbeiteraktivität</strong></button>
 
         <div className="wiw-section-label">Anfragen</div>
-        <button type="button" className="wiw-mobile-row" onClick={() => navigate('operations')}><span className="wiw-count">{byCategory.requests || 0}</span><strong>Abwesenheitsanträge</strong></button>
-        <button type="button" className="wiw-mobile-row" onClick={() => navigate('operations')}><span className="wiw-count">{byCategory.staffing || 0}</span><strong>Schichtanfragen</strong></button>
-        <button type="button" className="wiw-mobile-row" onClick={() => navigate('schedule')}><span className="wiw-count">{byCategory.staffing || 0}</span><strong>OpenShift-Anfragen</strong></button>
+        <button type="button" className="wiw-mobile-row" aria-label="Abwesenheitsanträge" onClick={() => navigate('operations')}><span className="wiw-count">{byCategory.requests || 0}</span><strong>Abwesenheitsanträge</strong></button>
+        <button type="button" className="wiw-mobile-row" aria-label="Schichtanfragen" onClick={() => navigate('operations')}><span className="wiw-count">{byCategory.staffing || 0}</span><strong>Schichtanfragen</strong></button>
+        <button type="button" className="wiw-mobile-row" aria-label="OpenShift-Anfragen" onClick={() => navigate('schedule')}><span className="wiw-count">{byCategory.staffing || 0}</span><strong>OpenShift-Anfragen</strong></button>
 
         <div className="wiw-section-label">Dienstplan</div>
-        <button type="button" className="wiw-next-shift" onClick={() => navigate('schedule')}><small>Nächster Einsatz:</small><strong>Dienstplan öffnen</strong></button>
-        <button type="button" className="wiw-mobile-row" onClick={() => navigate('schedule')}><span className="wiw-row-icon"><IonIcon icon={calendarOutline}/></span><strong>Schichten</strong></button>
-        <button type="button" className="wiw-mobile-row" onClick={() => navigate('schedule')}><span className="wiw-count">{byCategory.staffing || 0}</span><strong>OpenShifts verfügbar</strong></button>
+        <button type="button" className="wiw-next-shift" aria-label="Dienstplan öffnen" onClick={() => navigate('schedule')}><small>Nächster Einsatz:</small><strong>Dienstplan öffnen</strong></button>
+        <button type="button" className="wiw-mobile-row" aria-label="Schichten" onClick={() => navigate('schedule')}><span className="wiw-row-icon"><IonIcon icon={calendarOutline}/></span><strong>Schichten</strong></button>
+        <button type="button" className="wiw-mobile-row" aria-label="OpenShifts verfügbar" onClick={() => navigate('schedule')}><span className="wiw-count">{byCategory.staffing || 0}</span><strong>OpenShifts verfügbar</strong></button>
 
         <div className="wiw-section-label">Wichtige anstehende Termine</div>
         <div className="wiw-upcoming"><div>{(criticalFirst[0] || results[0]) ? <><strong>{(criticalFirst[0] || results[0]).title}</strong><span>{(criticalFirst[0] || results[0]).message}</span></> : <span>Keine offenen Vorgänge</span>}</div>{(criticalFirst[0] || results[0]) && <button type="button" onClick={() => open(criticalFirst[0] || results[0])}>Öffnen</button>}</div>
