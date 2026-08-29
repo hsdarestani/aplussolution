@@ -6,9 +6,10 @@ from rest_framework.response import Response
 
 from .models import Shift
 from .permissions import IsAdminOrManager
+from .operational_notifications import notify_claimed_workers_shift_changed, notify_open_shift_available
 from .services import audit
 from .shift_api import ShiftApiSerializer
-from .shift_service import ensure_slots, refresh_shift_state
+from .shift_service import ensure_slots, open_slots, refresh_shift_state
 from .shift_slots import ShiftSlot
 
 
@@ -86,6 +87,10 @@ def edit_shift_slot(request, shift_id, slot_id):
                 'slot': str(slot.id),
                 'apply_all': apply_all,
             })
+            if edited.status == Shift.Status.PUBLISHED and open_slots(edited).exists():
+                notify_open_shift_available(edited, 'card-update')
+            else:
+                notify_claimed_workers_shift_changed(edited)
             result = ShiftApiSerializer(
                 _shift_with_counts(edited.id), context={'request': request}
             ).data
@@ -166,6 +171,10 @@ def edit_shift_slot(request, shift_id, slot_id):
             'from_slot': str(slot.id),
             'worker': str(selected['worker_id'] or ''),
         })
+        if clone.status == Shift.Status.PUBLISHED and open_slots(clone).exists():
+            notify_open_shift_available(clone, 'card-update')
+        else:
+            notify_claimed_workers_shift_changed(clone)
 
         return Response({
             'shift': ShiftApiSerializer(

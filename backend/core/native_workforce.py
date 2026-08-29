@@ -32,6 +32,7 @@ from .models import (
     WorkingTimeSetting,
     WorkingTimeSyncLog,
 )
+from .operational_notifications import notify_open_shift_available
 from .order_automation import (
     _best_model_match,
     _parse_local_datetime,
@@ -259,6 +260,11 @@ def approve_order(parsed: dict, raw_text: str, actor=None, client_id=None) -> di
             old_payload=old_payload,
             new_payload=saved_payload,
         )
+
+    for item in created_shifts:
+        created_shift = Shift.objects.filter(pk=item['local_shift_id']).first()
+        if created_shift:
+            notify_open_shift_available(created_shift, 'ai-order')
 
     return {
         'status': 'ok',

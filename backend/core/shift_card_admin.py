@@ -4,6 +4,7 @@ from rest_framework.response import Response
 
 from .models import Shift
 from .permissions import IsAdminOrManager
+from .operational_notifications import notify_worker_shift_event
 from .services import audit
 from .shift_service import refresh_shift_state
 from .shift_slots import ShiftSlot
@@ -35,6 +36,10 @@ def delete_shift_card(request, shift_id, slot_id):
         active_count = ShiftSlot.objects.select_for_update().filter(
             shift=shift,
         ).exclude(status=ShiftSlot.Status.CANCELLED).count()
+
+        if slot.worker_id:
+            slot = ShiftSlot.objects.select_related('worker__user').get(pk=slot.pk)
+            notify_worker_shift_event(slot.worker.user, shift, 'Schicht aus deinem Dienstplan entfernt', 'card-delete')
 
         if active_count <= 1 or int(shift.required_count or 1) <= 1:
             audit(request, 'shift.card_deleted', shift, {'slot': str(slot.id), 'whole_shift': True})

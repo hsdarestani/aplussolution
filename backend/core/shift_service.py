@@ -5,6 +5,7 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from .models import Shift, WorkerProfile
+from .operational_notifications import notify_open_shift_available
 from .shift_slots import ShiftSlot
 
 
@@ -156,4 +157,5 @@ def release_shift(shift_id, worker: WorkerProfile, admin_approved=False) -> Shif
         shift.published_at = shift.published_at or timezone.now()
         shift.save(update_fields=['status', 'published_at', 'updated_at'])
     refresh_shift_state(shift)
+    notify_open_shift_available(shift, 'release')
     return slot

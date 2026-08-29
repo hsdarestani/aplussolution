@@ -8,6 +8,7 @@ from rest_framework.response import Response
 
 from .models import Notification, Shift, User, WorkerProfile
 from .permissions import IsAdminOrManager
+from .operational_notifications import notify_claimed_workers_shift_changed, notify_open_shift_available, notify_worker_shift_event
 from .premium_approval_models import ShiftPickupRequest
 from .premium_services import get_policy
 from .services import audit
@@ -102,6 +103,12 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                 'required_count': obj.required_count,
                 'confirmation_required': obj.confirmation_required,
             })
+            notify_claimed_workers_shift_changed(obj)
+
+    def perform_destroy(self, instance):
+        notify_claimed_workers_shift_changed(instance, title='Schicht entfernt', reason='deleted')
+        audit(self.request, 'staffing_demand.deleted', instance)
+        instance.delete()
 
     def _list_response(self, qs):
         page = self.paginate_queryset(qs)
@@ -193,6 +200,9 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
             desired_ids = {str(worker.pk) for worker in desired_workers}
             for slot in current_slots:
                 if str(slot.worker_id) not in desired_ids:
+                    released_user = slot.worker.user if slot.worker_id else None
+                    if released_user:
+                        notify_worker_shift_event(released_user, shift, 'Schicht aus deinem Dienstplan entfernt', 'admin-release')
                     slot.worker = None
                     slot.status = ShiftSlot.Status.OPEN
                     slot.source = 'admin_release'
@@ -254,6 +264,8 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                 'workers': requested_ids,
                 'publish_remaining': publish_remaining,
             })
+            if free_count > 0 and shift.status == Shift.Status.PUBLISHED:
+                notify_open_shift_available(shift, 'assignment')
 
         return Response(self.get_serializer(self.base_queryset().get(pk=shift.pk)).data)
 
