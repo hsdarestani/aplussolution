@@ -34,10 +34,10 @@ def test_live_wiw_snapshot_counts_open_shifts_and_dedicated_pending_requests(set
         def get(self, path, params=None):
             if path == '/shifts':
                 return {'shifts': [
-                    {'id': 1, 'user_id': 0, 'is_open': True, 'published': True, 'instances': 1, 'end_time': (now + timedelta(hours=2)).isoformat()},
-                    {'id': 2, 'user_id': 99, 'is_open': False, 'published': True, 'end_time': (now + timedelta(hours=2)).isoformat()},
-                    {'id': 3, 'user_id': 0, 'is_open': True, 'published': False, 'end_time': (now + timedelta(hours=2)).isoformat()},
-                    {'id': 4, 'user_id': 0, 'is_open': True, 'published': True, 'end_time': (now - timedelta(hours=2)).isoformat()},
+                    {'id': 1, 'user_id': 0, 'is_open': True, 'published': True, 'instances': 1, 'start_time': (now + timedelta(hours=1)).isoformat(), 'end_time': (now + timedelta(hours=2)).isoformat()},
+                    {'id': 2, 'user_id': 99, 'is_open': False, 'published': True, 'start_time': (now + timedelta(hours=1)).isoformat(), 'end_time': (now + timedelta(hours=2)).isoformat()},
+                    {'id': 3, 'user_id': 0, 'is_open': True, 'published': False, 'start_time': (now + timedelta(hours=1)).isoformat(), 'end_time': (now + timedelta(hours=2)).isoformat()},
+                    {'id': 4, 'user_id': 0, 'is_open': True, 'published': True, 'start_time': (now - timedelta(hours=3)).isoformat(), 'end_time': (now - timedelta(hours=2)).isoformat()},
                 ]}
             if path == '/requests':
                 return {'requests': [{'id': 10, 'status': 0}], 'more': False}
