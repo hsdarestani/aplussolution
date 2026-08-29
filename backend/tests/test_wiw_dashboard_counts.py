@@ -116,7 +116,7 @@ def test_local_open_shift_count_counts_native_capacity_cards(company, location, 
 
 
 @pytest.mark.django_db
-def test_mobile_dashboard_open_shift_badge_matches_local_schedule(monkeypatch, auth_admin, company, location, position):
+def test_mobile_dashboard_adds_native_open_shifts_to_live_wiw_count(monkeypatch, auth_admin, company, location, position):
     starts = timezone.now() + timedelta(days=5)
     Shift.objects.create(
         client=company,
@@ -140,4 +140,4 @@ def test_mobile_dashboard_open_shift_badge_matches_local_schedule(monkeypatch, a
     response = auth_admin.get('/api/admin/mobile-dashboard/')
 
     assert response.status_code == 200
-    assert response.data['open_shifts_available'] == 1
+    assert response.data['open_shifts_available'] == 18
