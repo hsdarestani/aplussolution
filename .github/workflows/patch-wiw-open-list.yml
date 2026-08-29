@@ -1,0 +1,281 @@
+name: Patch WIW OpenShift list parity
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-wiw-open-list.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Make OpenShifts list match combined dashboard total
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=1):
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              actual = text.count(old)
+              assert actual == count, f'{path}: expected {count} occurrence(s), found {actual}'
+              file.write_text(text.replace(old, new, count), encoding='utf-8')
+
+          # Backend: expose the exact live WIW OpenShift instances used by the dashboard count.
+          replace(
+              'backend/core/wiw_dashboard.py',
+              "from .models import IntegrationSyncRun, Shift, ShiftSwapRequest, TimeOffRequest, User\n",
+              "from .models import IntegrationSyncRun, Location, Position, Shift, ShiftSwapRequest, TimeOffRequest, User\n",
+          )
+          replace(
+              'backend/core/wiw_dashboard.py',
+              "CACHE_KEY = 'wiw:admin-home-snapshot:v2'\nCACHE_SECONDS = 60\n",
+              "CACHE_KEY = 'wiw:admin-home-snapshot:v2'\nOPEN_SHIFT_ROWS_CACHE_KEY = 'wiw:admin-open-shift-rows:v1'\nCACHE_SECONDS = 60\n",
+          )
+
+          helper = r'''
+
+def _external_id(value):
+    if isinstance(value, dict):
+        value = value.get('id') or value.get('shift_id') or value.get('location_id') or value.get('site_id') or value.get('position_id')
+    return str(value) if value not in (None, '') else ''
+
+
+def _live_wiw_open_shift_rows(now):
+    cached = cache.get(OPEN_SHIFT_ROWS_CACHE_KEY)
+    if cached is not None:
+        return cached
+
+    client = WhenIWorkClient()
+    end_at = now + timedelta(days=WIW_DASHBOARD_FUTURE_DAYS)
+    payload = client.get('/shifts', params={
+        'start': now.isoformat(),
+        'end': end_at.isoformat(),
+        'include_open': 'true',
+        'include_onlyopen': 'true',
+        'include_allopen': 'true',
+        'all_locations': 'true',
+        'unpublished': 'false',
+        'limit': 500,
+    })
+    shifts = client.extract_collection(payload, 'shifts')
+    rows = []
+    for item in shifts:
+        instances = _open_shift_instances(item)
+        if not instances:
+            continue
+        starts_at = _as_datetime(_value(item, 'start_time', 'start', 'starts_at'))
+        ends_at = _as_datetime(_value(item, 'end_time', 'end', 'ends_at'))
+        if not starts_at or not ends_at or ends_at < now:
+            continue
+
+        wiw_id = _external_id(_value(item, 'id', 'shift_id'))
+        location_id = _external_id(_value(item, 'location_id', 'location'))
+        site_id = _external_id(_value(item, 'site_id', 'site'))
+        position_id = _external_id(_value(item, 'position_id', 'position'))
+        location = (
+            Location.objects.filter(wiw_site_id=site_id).select_related('client').first() if site_id else None
+        ) or (
+            Location.objects.filter(wiw_location_id=location_id).select_related('client').first() if location_id else None
+        )
+        position = Position.objects.filter(wiw_position_id=position_id).first() if position_id else None
+
+        raw_position = _value(item, 'position')
+        nested_position_name = raw_position.get('name') if isinstance(raw_position, dict) else ''
+        client_name = location.client.name if location else str(_value(item, 'client_name', 'company_name', default='WIW') or 'WIW')
+        location_name = location.name if location else str(_value(item, 'site_name', 'location_name', default='WIW') or 'WIW')
+        position_name = position.name if position else str(_value(item, 'position_name', 'position_label', default=nested_position_name or 'Schicht') or 'Schicht')
+
+        for index in range(instances):
+            card_id = f'wiw-live-{wiw_id or "shift"}-{index + 1}'
+            rows.append({
+                'id': card_id,
+                'wiw_shift_id': wiw_id,
+                'external_read_only': True,
+                'source': 'wiw-live',
+                'client': str(location.client_id) if location else None,
+                'client_name': client_name,
+                'location': str(location.id) if location else None,
+                'location_name': location_name,
+                'position': str(position.id) if position else None,
+                'position_name': position_name,
+                'starts_at': starts_at.isoformat(),
+                'ends_at': ends_at.isoformat(),
+                'status': 'published',
+                'required_count': 1,
+                'open_count': 1,
+                'color_hue': None,
+                'slot_cards': [{
+                    'id': card_id,
+                    'status': 'open',
+                    'worker': None,
+                    'is_open': True,
+                }],
+            })
+
+    cache.set(OPEN_SHIFT_ROWS_CACHE_KEY, rows, CACHE_SECONDS)
+    return rows
+'''
+          marker = "\ndef _live_wiw_snapshot(now):\n"
+          file = Path('backend/core/wiw_dashboard.py')
+          text = file.read_text(encoding='utf-8')
+          assert text.count(marker) == 1
+          file.write_text(text.replace(marker, helper + marker, 1), encoding='utf-8')
+
+          old_open_block = '''    # WIW does NOT return OpenShifts from a plain /shifts call. Its default
+    # window is only now..+3 days and open shifts require the include_* flags.
+    # Count `instances`, because a single OpenShift object can represent more
+    # than one available slot in the WIW dashboard.
+    try:
+        shift_payload = client.get('/shifts', params={
+            'start': now.isoformat(),
+            'end': end_at.isoformat(),
+            'include_open': 'true',
+            'include_onlyopen': 'true',
+            'include_allopen': 'true',
+            'all_locations': 'true',
+            'unpublished': 'false',
+            'limit': 500,
+        })
+        shifts = client.extract_collection(shift_payload, 'shifts')
+        open_shifts = 0
+        for item in shifts:
+            end = _as_datetime(_value(item, 'end_time', 'end', 'ends_at'))
+            if end and end < now:
+                continue
+            open_shifts += _open_shift_instances(item)
+        snapshot['open_shifts_available'] = open_shifts
+    except Exception as exc:
+        errors.append(f'OpenShifts: {exc}')
+'''
+          new_open_block = '''    # Use the same expanded live rows that the mobile OpenShifts tab renders.
+    # This keeps the dashboard badge and the destination list mathematically identical.
+    try:
+        snapshot['open_shifts_available'] = len(_live_wiw_open_shift_rows(now))
+    except Exception as exc:
+        errors.append(f'OpenShifts: {exc}')
+'''
+          replace('backend/core/wiw_dashboard.py', old_open_block, new_open_block)
+
+          endpoint = r'''
+
+@api_view(['GET'])
+def mobile_open_shifts(request):
+    if request.user.role not in MANAGER_ROLES:
+        return Response({'detail': 'Nur Administration und Disposition dürfen diese Ansicht verwenden.'}, status=403)
+
+    if not (settings.WIW_SYNC_ENABLED and settings.WIW_DEV_KEY and settings.WIW_EMAIL and settings.WIW_PASSWORD):
+        return Response({'results': [], 'count': 0, 'source': 'wiw-disabled', 'live_error': ''})
+
+    try:
+        rows = _live_wiw_open_shift_rows(timezone.now())
+        return Response({'results': rows, 'count': len(rows), 'source': 'wiw-live-readonly', 'live_error': ''})
+    except Exception as exc:
+        # Local A+ shifts must remain usable even during a temporary WIW outage.
+        return Response({'results': [], 'count': 0, 'source': 'wiw-live-error', 'live_error': str(exc)})
+'''
+          marker = "\n\n@api_view(['GET'])\ndef mobile_dashboard(request):\n"
+          file = Path('backend/core/wiw_dashboard.py')
+          text = file.read_text(encoding='utf-8')
+          assert text.count(marker) == 1
+          file.write_text(text.replace(marker, endpoint + marker, 1), encoding='utf-8')
+
+          replace(
+              'backend/core/urls.py',
+              "    path('admin/mobile-dashboard/', wiw_dashboard.mobile_dashboard),\n",
+              "    path('admin/mobile-dashboard/', wiw_dashboard.mobile_dashboard),\n    path('admin/mobile-open-shifts/', wiw_dashboard.mobile_open_shifts),\n",
+          )
+
+          # Tests: the list must expand WIW `instances` into the same 17 cards counted by the badge.
+          test_file = Path('backend/tests/test_wiw_dashboard_counts.py')
+          test_text = test_file.read_text(encoding='utf-8')
+          test_text = test_text.replace(
+              "{'id': 10, 'user_id': 0, 'is_open': True, 'published': True, 'instances': 16, 'end_time': (timezone.now() + timedelta(days=2)).isoformat()},",
+              "{'id': 10, 'user_id': 0, 'is_open': True, 'published': True, 'instances': 16, 'start_time': (timezone.now() + timedelta(days=2, hours=-6)).isoformat(), 'end_time': (timezone.now() + timedelta(days=2)).isoformat(), 'position_name': 'Servicekraft', 'location_name': 'WIW Standort'},",
+              1,
+          )
+          test_text = test_text.replace(
+              "{'id': 11, 'user_id': 0, 'is_open': True, 'published': True, 'instances': 1, 'end_time': (timezone.now() + timedelta(days=3)).isoformat()},",
+              "{'id': 11, 'user_id': 0, 'is_open': True, 'published': True, 'instances': 1, 'start_time': (timezone.now() + timedelta(days=3, hours=-6)).isoformat(), 'end_time': (timezone.now() + timedelta(days=3)).isoformat(), 'position_name': 'Servicekraft', 'location_name': 'WIW Standort'},",
+              1,
+          )
+          test_text = test_text.replace(
+              "{'id': 12, 'user_id': 99, 'is_open': False, 'published': True, 'instances': 50, 'end_time': (timezone.now() + timedelta(days=3)).isoformat()},",
+              "{'id': 12, 'user_id': 99, 'is_open': False, 'published': True, 'instances': 50, 'start_time': (timezone.now() + timedelta(days=3, hours=-6)).isoformat(), 'end_time': (timezone.now() + timedelta(days=3)).isoformat()},",
+              1,
+          )
+          insert_after = "    assert '/openshiftapprovalrequests' in calls\n"
+          assert test_text.count(insert_after) == 1
+          test_text = test_text.replace(insert_after, insert_after + r'''
+
+
+@pytest.mark.django_db
+def test_mobile_open_shift_list_expands_same_live_wiw_instances(monkeypatch, auth_admin):
+    cache.clear()
+    monkeypatch.setattr(wiw_dashboard.settings, 'WIW_SYNC_ENABLED', True)
+    monkeypatch.setattr(wiw_dashboard.settings, 'WIW_DEV_KEY', 'test-key', raising=False)
+    monkeypatch.setattr(wiw_dashboard.settings, 'WIW_EMAIL', 'test@example.com', raising=False)
+    monkeypatch.setattr(wiw_dashboard.settings, 'WIW_PASSWORD', 'test-password', raising=False)
+    monkeypatch.setattr(wiw_dashboard, 'WhenIWorkClient', FakeWhenIWorkClient)
+
+    response = auth_admin.get('/api/admin/mobile-open-shifts/')
+
+    assert response.status_code == 200
+    assert response.data['count'] == 17
+    assert len(response.data['results']) == 17
+    assert len({row['id'] for row in response.data['results']}) == 17
+    assert all(row['external_read_only'] is True for row in response.data['results'])
+    assert all(row['open_count'] == 1 for row in response.data['results'])
+''', 1)
+          test_file.write_text(test_text, encoding='utf-8')
+
+          # Frontend: merge live WIW cards with native A+ cards only; imported WIW rows are replaced by live rows.
+          replace(
+              'frontend/src/WiwScheduleMobile.tsx',
+              "  const [rows, setRows] = useState<any[]>([]);\n",
+              "  const [rows, setRows] = useState<any[]>([]);\n  const [wiwOpenRows, setWiwOpenRows] = useState<any[]>([]);\n",
+          )
+          replace(
+              'frontend/src/WiwScheduleMobile.tsx',
+              """      const [shiftData, clientData, locationData, positionData, workerData] = await Promise.all([\n        api('shifts/?ordering=starts_at'),\n        api('clients/'),\n        api('locations/'),\n        api('positions/'),\n        api('workers/?ordering=user__last_name'),\n      ]);\n      setRows(unpack(shiftData));\n""",
+              """      const [shiftData, wiwOpenData, clientData, locationData, positionData, workerData] = await Promise.all([\n        api('shifts/?ordering=starts_at'),\n        api('admin/mobile-open-shifts/'),\n        api('clients/'),\n        api('locations/'),\n        api('positions/'),\n        api('workers/?ordering=user__last_name'),\n      ]);\n      setRows(unpack(shiftData));\n      setWiwOpenRows(unpack(wiwOpenData));\n""",
+          )
+          replace(
+              'frontend/src/WiwScheduleMobile.tsx',
+              """  const cards = useMemo<CardRow[]>(() => rows.flatMap((shift: any) => activeSlots(shift).map((slot: any) => ({\n    key: `${shift.id}:${slot.id}`,\n    shift,\n    slot,\n    worker: slot.worker || undefined,\n    isOpen: Boolean(slot.is_open || (slot.status === 'open' && !slot.worker)),\n  }))), [rows]);\n  const clientHueMap = useMemo(() => {\n    const keys = Array.from(new Set(rows.map(clientKey))).sort();\n    return new Map(keys.map((key, index) => [key, (18 + index * 137.508) % 360]));\n  }, [rows]);\n""",
+              """  const cards = useMemo<CardRow[]>(() => rows.flatMap((shift: any) => activeSlots(shift).map((slot: any) => ({\n    key: `${shift.id}:${slot.id}`,\n    shift,\n    slot,\n    worker: slot.worker || undefined,\n    isOpen: Boolean(slot.is_open || (slot.status === 'open' && !slot.worker)),\n  }))), [rows]);\n  const wiwOpenCards = useMemo<CardRow[]>(() => wiwOpenRows.flatMap((shift: any) => activeSlots(shift).map((slot: any) => ({\n    key: `${shift.id}:${slot.id}`,\n    shift,\n    slot,\n    worker: undefined,\n    isOpen: true,\n  }))), [wiwOpenRows]);\n  const openCards = useMemo(() => [\n    ...cards.filter((card) => !String(card.shift?.wiw_shift_id || '').trim()),\n    ...wiwOpenCards,\n  ], [cards, wiwOpenCards]);\n  const candidateCards = tab === 'open' ? openCards : cards;\n  const clientHueMap = useMemo(() => {\n    const keys = Array.from(new Set([...rows, ...wiwOpenRows].map(clientKey))).sort();\n    return new Map(keys.map((key, index) => [key, (18 + index * 137.508) % 360]));\n  }, [rows, wiwOpenRows]);\n""",
+          )
+          replace(
+              'frontend/src/WiwScheduleMobile.tsx',
+              "  const visibleCards = useMemo(() => cards.filter((card) => {\n",
+              "  const visibleCards = useMemo(() => candidateCards.filter((card) => {\n",
+          )
+          replace(
+              'frontend/src/WiwScheduleMobile.tsx',
+              "  }), [cards, days, query, tab]);\n",
+              "  }), [candidateCards, days, query, tab]);\n",
+          )
+          replace(
+              'frontend/src/WiwScheduleMobile.tsx',
+              "key={card.key} onClick={() => openEdit(card)}>",
+              "key={card.key} onClick={() => card.shift?.external_read_only ? setToast('WIW-Schicht · schreibgeschützt.') : openEdit(card)}>",
+          )
+
+          # The workflow is intentionally one-shot; remove it in the patch commit itself.
+          Path('.github/workflows/patch-wiw-open-list.yml').unlink()
+          PY
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Show live WIW OpenShifts in mobile Dienstplan'
+          git push
