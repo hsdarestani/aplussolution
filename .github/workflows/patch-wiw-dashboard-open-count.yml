@@ -1,0 +1,61 @@
+name: Patch WIW dashboard OpenShift total
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-wiw-dashboard-open-count.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore aggregated OpenShift dashboard count
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=1):
+              file = Path(path)
+              text = file.read_text()
+              actual = text.count(old)
+              assert actual == count, f'{path}: expected {count} occurrence(s), found {actual}'
+              file.write_text(text.replace(old, new, count))
+
+          replace(
+              'backend/core/wiw_dashboard.py',
+              """    snapshot = _local_snapshot(now)\n    # This badge navigates to the local Dienstplan, so it must count exactly\n    # the local OpenShift cards that are actually visible after tapping it.\n    local_open_shifts = int(snapshot.get('open_shifts_available') or 0)\n    live_error = ''\n""",
+              """    snapshot = _local_snapshot(now)\n    # The dashboard total is the combined availability from WIW plus native\n    # A+ OpenShifts. Imported WIW shifts also exist locally, so only add local\n    # shifts that do not carry a WIW id to avoid double-counting.\n    native_open_shifts = _local_open_shift_count(now, native_only=True)\n    live_error = ''\n""",
+          )
+
+          replace(
+              'backend/core/wiw_dashboard.py',
+              """            # Keep WIW request counters live, but never replace the local\n            # OpenShift badge with remote WIW shifts that this screen cannot show.\n            live.pop('open_shifts_available', None)\n            snapshot.update(live)\n            snapshot['open_shifts_available'] = local_open_shifts\n""",
+              """            if 'open_shifts_available' in live:\n                live['open_shifts_available'] = int(live.get('open_shifts_available') or 0) + native_open_shifts\n            snapshot.update(live)\n""",
+          )
+
+          replace(
+              'backend/tests/test_wiw_dashboard_counts.py',
+              'def test_mobile_dashboard_open_shift_badge_matches_local_schedule(monkeypatch, auth_admin, company, location, position):',
+              'def test_mobile_dashboard_adds_native_open_shifts_to_live_wiw_count(monkeypatch, auth_admin, company, location, position):',
+          )
+          replace(
+              'backend/tests/test_wiw_dashboard_counts.py',
+              "    assert response.data['open_shifts_available'] == 1\n",
+              "    assert response.data['open_shifts_available'] == 18\n",
+          )
+          PY
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/patch-wiw-dashboard-open-count.yml
+          git add backend/core/wiw_dashboard.py backend/tests/test_wiw_dashboard_counts.py
+          git commit -m 'Restore combined WIW and native OpenShift count'
+          git push
