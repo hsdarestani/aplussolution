@@ -19,6 +19,7 @@ def test_wiw_request_pending_filter_and_flexible_datetime():
     assert timezone.is_aware(parsed)
 
 
+@pytest.mark.django_db
 def test_live_wiw_snapshot_counts_open_shifts_and_dedicated_pending_requests(settings):
     cache.clear()
     settings.WIW_DEV_KEY = 'dev'
