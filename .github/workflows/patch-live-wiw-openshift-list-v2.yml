@@ -1,0 +1,83 @@
+name: Patch live WIW OpenShift list v2
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-live-wiw-openshift-list-v2.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Merge live WIW OpenShifts into mobile list
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=1):
+              p = Path(path)
+              text = p.read_text()
+              actual = text.count(old)
+              assert actual == count, f'{path}: expected {count} occurrence(s), found {actual}'
+              p.write_text(text.replace(old, new, count))
+
+          path = 'backend/core/wiw_dashboard.py'
+          replace(
+              path,
+              'from .models import IntegrationSyncRun, Shift, ShiftSwapRequest, TimeOffRequest, User\n',
+              'from .models import IntegrationSyncRun, Location, Position, Shift, ShiftSwapRequest, TimeOffRequest, User\n',
+          )
+
+          marker = '''def _local_open_shift_count(now, *, native_only=False):\n'''
+          helper = '''def _display_label(value, fallback=''):\n    if isinstance(value, dict):\n        return str(value.get('name') or value.get('label') or value.get('title') or fallback)\n    return str(value or fallback)\n\n\ndef _live_open_shift_rows(items, now):\n    candidates = []\n    external_ids = []\n    location_ids = set()\n    site_ids = set()\n    position_ids = set()\n\n    for item in items:\n        instances = _open_shift_instances(item)\n        if not instances:\n            continue\n        starts_at = _as_datetime(_value(item, 'start_time', 'start', 'starts_at'))\n        ends_at = _as_datetime(_value(item, 'end_time', 'end', 'ends_at'))\n        if not starts_at or not ends_at or ends_at < now:\n            continue\n        external_id = str(_value(item, 'id', 'shift_id', default='') or '').strip()\n        location_id = str(_value(item, 'location_id', default='') or '').strip()\n        site_id = str(_value(item, 'site_id', default='') or '').strip()\n        position_id = str(_value(item, 'position_id', default='') or '').strip()\n        if external_id:\n            external_ids.append(external_id)\n        if location_id:\n            location_ids.add(location_id)\n        if site_id:\n            site_ids.add(site_id)\n        if position_id:\n            position_ids.add(position_id)\n        candidates.append((item, external_id, location_id, site_id, position_id, starts_at, ends_at, instances))\n\n    local_by_external = {\n        str(row.wiw_shift_id): row\n        for row in Shift.objects.filter(wiw_shift_id__in=external_ids).select_related('client', 'location', 'position')\n        if row.wiw_shift_id\n    }\n    locations = Location.objects.filter(Q(wiw_location_id__in=location_ids) | Q(wiw_site_id__in=site_ids)).select_related('client')\n    location_by_id = {}\n    for row in locations:\n        if row.wiw_location_id:\n            location_by_id[f'location:{row.wiw_location_id}'] = row\n        if row.wiw_site_id:\n            location_by_id[f'site:{row.wiw_site_id}'] = row\n    position_by_id = {str(row.wiw_position_id): row for row in Position.objects.filter(wiw_position_id__in=position_ids)}\n\n    rows = []\n    for item, external_id, location_id, site_id, position_id, starts_at, ends_at, instances in candidates:\n        local = local_by_external.get(external_id)\n        location = (local.location if local else None) or location_by_id.get(f'site:{site_id}') or location_by_id.get(f'location:{location_id}')\n        position = (local.position if local else None) or position_by_id.get(position_id)\n        client_name = (local.client.name if local and local.client_id else '') or (location.client.name if location and location.client_id else '')\n        if not client_name:\n            client_name = _display_label(_value(item, 'client_name', 'company_name', 'company', 'client', 'site'), 'WIW')\n        location_name = (local.location.name if local and local.location_id else '') or (location.name if location else '')\n        if not location_name:\n            location_name = _display_label(_value(item, 'site_name', 'location_name', 'site', 'location'), 'WIW')\n        position_name = (local.position.name if local and local.position_id else '') or (position.name if position else '')\n        if not position_name:\n            position_name = _display_label(_value(item, 'position_name', 'position'), 'Schicht')\n        rows.append({\n            'id': f'wiw-live-{external_id or len(rows)}',\n            'wiw_shift_id': external_id,\n            'local_shift_id': str(local.id) if local else '',\n            'starts_at': starts_at.isoformat(),\n            'ends_at': ends_at.isoformat(),\n            'status': 'published',\n            'open_count': instances,\n            'filled_count': 0,\n            'assigned_workers': [],\n            'client_name': client_name,\n            'location_name': location_name,\n            'position_name': position_name,\n            'break_minutes': int(_value(item, 'break_minutes', 'break', default=0) or 0),\n            'color_hue': None,\n            'source': 'wiw-live',\n            'read_only': True,\n        })\n    return rows\n\n\n'''
+          replace(path, marker, helper + marker)
+
+          old = '''        shifts = client.extract_collection(shift_payload, 'shifts')\n        open_shifts = 0\n        for item in shifts:\n            end = _as_datetime(_value(item, 'end_time', 'end', 'ends_at'))\n            if end and end < now:\n                continue\n            open_shifts += _open_shift_instances(item)\n        snapshot['open_shifts_available'] = open_shifts\n'''
+          new = '''        shifts = client.extract_collection(shift_payload, 'shifts')\n        open_shift_rows = _live_open_shift_rows(shifts, now)\n        snapshot['open_shift_rows'] = open_shift_rows\n        snapshot['open_shifts_available'] = sum(int(row.get('open_count') or 0) for row in open_shift_rows)\n'''
+          replace(path, old, new)
+
+          test_path = 'backend/tests/test_wiw_dashboard_counts.py'
+          replace(
+              test_path,
+              "{'id': 10, 'user_id': 0, 'is_open': True, 'published': True, 'instances': 16, 'end_time': (timezone.now() + timedelta(days=2)).isoformat()},",
+              "{'id': 10, 'user_id': 0, 'is_open': True, 'published': True, 'instances': 16, 'start_time': (timezone.now() + timedelta(days=2, hours=-6)).isoformat(), 'end_time': (timezone.now() + timedelta(days=2)).isoformat(), 'position_name': 'Servicekraft', 'location_name': 'Marthas Finest'},",
+          )
+          replace(
+              test_path,
+              "{'id': 11, 'user_id': 0, 'is_open': True, 'published': True, 'instances': 1, 'end_time': (timezone.now() + timedelta(days=3)).isoformat()},",
+              "{'id': 11, 'user_id': 0, 'is_open': True, 'published': True, 'instances': 1, 'start_time': (timezone.now() + timedelta(days=3, hours=-6)).isoformat(), 'end_time': (timezone.now() + timedelta(days=3)).isoformat(), 'position_name': 'Servicekraft', 'location_name': 'Marthas Finest'},",
+          )
+
+          frontend = 'frontend/src/WiwScheduleMobile.tsx'
+          old_load = '''      const [shiftData, clientData, locationData, positionData, workerData] = await Promise.all([\n        api('shifts/?ordering=starts_at'),\n        api('clients/'),\n        api('locations/'),\n        api('positions/'),\n        api('workers/?ordering=user__last_name'),\n      ]);\n      setRows(unpack(shiftData));\n'''
+          new_load = '''      const [shiftData, clientData, locationData, positionData, workerData, dashboardData] = await Promise.all([\n        api('shifts/?ordering=starts_at'),\n        api('clients/'),\n        api('locations/'),\n        api('positions/'),\n        api('workers/?ordering=user__last_name'),\n        api('admin/mobile-dashboard/'),\n      ]);\n      const localRows = unpack(shiftData);\n      const liveOpenRows = Array.isArray(dashboardData?.open_shift_rows) ? dashboardData.open_shift_rows : [];\n      setRows([...localRows, ...liveOpenRows]);\n'''
+          replace(frontend, old_load, new_load)
+
+          old_cards = '''  const visibleCards = useMemo(() => cards.filter((card) => {\n    const shiftDay = dateKeyFromIso(card.shift.starts_at);\n    if (tab === 'open') {\n      if (!card.isOpen) return false;\n      if (!['published', 'confirmed'].includes(String(card.shift.status || ''))) return false;\n      if (card.shift.ends_at && new Date(card.shift.ends_at).getTime() < Date.now()) return false;\n    } else if (!days.includes(shiftDay)) return false;\n'''
+          new_cards = '''  const liveLocalShiftIds = useMemo(() => new Set(rows.filter((row: any) => row?.source === 'wiw-live' && row?.local_shift_id).map((row: any) => String(row.local_shift_id))), [rows]);\n  const visibleCards = useMemo(() => cards.filter((card) => {\n    const shiftDay = dateKeyFromIso(card.shift.starts_at);\n    if (tab === 'open') {\n      if (card.shift.source !== 'wiw-live' && liveLocalShiftIds.has(String(card.shift.id))) return false;\n      if (!card.isOpen) return false;\n      if (!['published', 'confirmed'].includes(String(card.shift.status || ''))) return false;\n      if (card.shift.ends_at && new Date(card.shift.ends_at).getTime() < Date.now()) return false;\n    } else {\n      if (card.shift.source === 'wiw-live') return false;\n      if (!days.includes(shiftDay)) return false;\n    }\n'''
+          replace(frontend, old_cards, new_cards)
+          replace(
+              frontend,
+              '''  }), [cards, days, query, tab]);\n''',
+              '''  }), [cards, days, liveLocalShiftIds, query, tab]);\n''',
+          )
+          replace(
+              frontend,
+              '''            {dayCards.map((card) => <button type="button" className="wiw-shift-card" style={{ '--wiw-shift-hue': String(effectiveHue(card.shift)) } as React.CSSProperties} key={card.key} onClick={() => openEdit(card)}>\n''',
+              '''            {dayCards.map((card) => <button type="button" className="wiw-shift-card" style={{ '--wiw-shift-hue': String(effectiveHue(card.shift)) } as React.CSSProperties} key={card.key} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>\n''',
+          )
+          PY
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/core/wiw_dashboard.py backend/tests/test_wiw_dashboard_counts.py frontend/src/WiwScheduleMobile.tsx
+          git commit -m 'Show live WIW OpenShifts in mobile schedule'
+          git push
