@@ -177,6 +177,32 @@ def dispatch_attendance_reminders() -> dict:
     return {'checkin': checkin, 'checkout': checkout, 'grace_minutes': grace}
 
 
+def ensure_registration_completed_notification(user: User) -> int:
+    """Notify managers once when an employee/customer has actually entered the portal.
+
+    New invitation/onboarding flows call this via the onboarding state transition.
+    Legacy accounts that were historically created as already-onboarded are covered
+    by calling the same idempotent helper after their first successful login.
+    """
+    if user.role not in {User.Role.WORKER, User.Role.CLIENT}:
+        return 0
+    role_label = 'Mitarbeiter' if user.role == User.Role.WORKER else 'Kunde'
+    name = user.get_full_name() or user.email
+    created_count = 0
+    for recipient in User.objects.filter(role__in=[User.Role.ADMIN, User.Role.MANAGER], is_active=True):
+        _, created = Notification.objects.get_or_create(
+            user=recipient,
+            kind=f'portal-registration-complete-{user.id}',
+            defaults={
+                'title': f'{role_label} registriert',
+                'body': f'{name} hat die Registrierung abgeschlossen.',
+                'action_url': '/people',
+            },
+        )
+        created_count += int(created)
+    return created_count
+
+
 @receiver(pre_save, sender=User)
 def remember_onboarding_state(sender, instance, **kwargs):
     if not instance.pk:
@@ -193,15 +219,4 @@ def notify_registration_completed(sender, instance, created=False, **kwargs):
         return
     if not instance.is_onboarded or getattr(instance, '_aplus_was_onboarded', False):
         return
-    role_label = 'Mitarbeiter' if instance.role == User.Role.WORKER else 'Kunde'
-    name = instance.get_full_name() or instance.email
-    for recipient in User.objects.filter(role__in=[User.Role.ADMIN, User.Role.MANAGER], is_active=True):
-        Notification.objects.get_or_create(
-            user=recipient,
-            kind=f'portal-registration-complete-{instance.id}',
-            defaults={
-                'title': f'{role_label} registriert',
-                'body': f'{name} hat die Registrierung abgeschlossen.',
-                'action_url': '/people',
-            },
-        )
+    ensure_registration_completed_notification(instance)
