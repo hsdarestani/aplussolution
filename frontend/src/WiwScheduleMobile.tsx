@@ -570,8 +570,8 @@ export default function WiwScheduleMobile() {
           return <section className="wiw-day-section" id={`wiw-day-${day}`} key={day}>
             <header><strong>{header.weekday}</strong><span>{header.date}</span><em>{dayCards.length}</em></header>
             {dayCards.map((card) => <button type="button" className="wiw-shift-card" key={card.key} onClick={() => openEdit(card)}>
-              <div className="wiw-card-line primary"><b>{card.shift.position_name || 'Schicht'}</b><span>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</span></div>
-              <div className="wiw-card-line secondary"><span className={card.isOpen ? 'open' : ''}>{card.worker?.name || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}</span><small>{card.shift.client_name || ''}{card.shift.location_name ? ` · ${card.shift.location_name}` : ''}</small></div>
+              <div className="wiw-card-line primary"><b>{card.worker?.name || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}</b><span>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</span></div>
+              <div className="wiw-card-line secondary"><span className={card.isOpen ? 'open' : ''}>{card.shift.position_name || 'Schicht'}</span><small>{card.shift.client_name || ''}{card.shift.location_name ? ` · ${card.shift.location_name}` : ''}</small></div>
             </button>)}
             {tab !== 'open' && !dayCards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
           </section>;
