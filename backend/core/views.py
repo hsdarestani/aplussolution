@@ -20,6 +20,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .models import *
 from .serializers import *
 from .permissions import IsAdminOrManager
+from .operational_notifications import ensure_registration_completed_notification
 from .services import audit, sign_contract
 from .document_engine import DocumentGenerationError, contract_data, generate_contract_files, generate_worker_packet, validate_required_fields
 from . import oauth
@@ -187,6 +188,10 @@ def login(request):
     )
     if not user:
         return Response({'detail': 'E-Mail oder Passwort ist falsch.'}, status=400)
+    # Invitation/onboarding flows notify on the is_onboarded transition. Older
+    # employee/customer accounts were historically created as already onboarded;
+    # this idempotent fallback records their first real successful portal login.
+    ensure_registration_completed_notification(user)
     refresh = RefreshToken.for_user(user)
     return Response({
         'access': str(refresh.access_token),
