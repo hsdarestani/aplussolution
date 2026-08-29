@@ -7,6 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from .models import Notification, Shift, TimeEntry, User
+from .operational_notifications import notify_managers_attendance
 from .permissions import IsAdminOrManager
 from .services import audit
 from .views import TimeEntryViewSet as LegacyTimeEntryViewSet, geofence_error
@@ -67,6 +68,7 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
             clock_in_lat=request.data.get('lat'),
             clock_in_lng=request.data.get('lng'),
         )
+        notify_managers_attendance(entry, 'check_in')
         audit(request, 'time.clock_in', entry)
         return Response(self.get_serializer(entry).data, status=201)
 
@@ -98,6 +100,8 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
             'clock_out', 'clock_out_lat', 'clock_out_lng', 'approved', 'approved_by',
             'edit_reason', 'updated_at',
         ])
+
+        notify_managers_attendance(entry, 'check_out')
 
         if geofence_issue:
             worker_name = entry.worker.user.get_full_name() or entry.worker.user.email
