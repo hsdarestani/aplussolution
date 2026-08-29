@@ -37,7 +37,7 @@
   .wiw-day-section>header strong{font-size:12px;font-weight:600}
   .wiw-day-section>header span{font-size:12px;font-weight:500}
   .wiw-day-section>header em{margin-left:auto;font-size:10px;font-style:normal;color:#a0a0a0}
-  .wiw-shift-card{width:100%;min-height:54px;padding:7px 12px 7px 10px;display:grid;gap:5px;border:0;border-left:4px solid #6bad50;border-bottom:1px solid #dedede;background:#fff;color:#333;text-align:left;font:inherit}
+  .wiw-shift-card{width:100%;min-height:54px;padding:7px 12px 7px 10px;display:grid;gap:5px;border:0;border-left:4px solid hsl(var(--wiw-shift-hue,215) 68% 44%);border-bottom:1px solid #dedede;background:linear-gradient(90deg,hsl(var(--wiw-shift-hue,215) 80% 97%) 0,#fff 24%);color:#333;text-align:left;font:inherit}
   .wiw-card-line{min-width:0;display:flex;align-items:center;gap:8px}
   .wiw-card-line.primary b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:600}
   .wiw-card-line.primary span{margin-left:auto;white-space:nowrap;font-size:14px;font-weight:500;color:#3f3f3f}
@@ -68,6 +68,10 @@
   .wiw-form-row-copy b{margin-left:auto;font-size:11px;font-weight:500;color:#8e8e8e}
   .wiw-form-row.muted .wiw-form-row-copy span{color:#b1b1b1}
   .wiw-row-chevron{font-size:16px!important;color:#c4c4c4!important}
+  .wiw-color-row-tail{min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:7px}
+  .wiw-color-row-tail>i,.wiw-color-choice>i{width:14px;height:14px;border-radius:50%;background:hsl(var(--wiw-color-hue,215) 68% 44%);box-shadow:0 0 0 1px rgba(0,0,0,.14);flex:0 0 auto}
+  .wiw-color-row-tail>b{max-width:156px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#8e8e8e;font-size:11px;font-weight:500}
+  .wiw-color-row-tail>.wiw-row-chevron{flex:0 0 auto}
   .wiw-form-separator{height:20px;background:#efefef;border-bottom:1px solid #e5e5e5}
   .wiw-time-row-wrap{position:relative;background:#fff}
 
@@ -101,6 +105,9 @@
   .wiw-choice-sheet>header button,.wiw-date-sheet>header button{border:0;background:transparent;color:#5d9f45;font-size:14px}
   .wiw-choice-sheet>div>button{width:100%;min-height:46px;padding:0 15px;display:flex;align-items:center;justify-content:space-between;border:0;border-bottom:1px solid #e0e0e0;background:#fff;color:#444;text-align:left;font:inherit;font-size:14px}
   .wiw-choice-sheet>div>button.selected{color:#5d9f45;font-weight:600}
+  .wiw-color-choice{display:flex;align-items:center;gap:10px;min-width:0}
+  .wiw-color-choice>i{width:20px;height:20px}
+  .wiw-color-choice>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .wiw-date-sheet{padding-bottom:calc(18px + env(safe-area-inset-bottom))}
   .wiw-date-sheet>input{width:calc(100% - 28px);height:48px;margin:14px;padding:0 12px;border:1px solid #ddd;border-radius:8px;background:#fff;color:#333;font:inherit;font-size:16px}
   .wiw-date-sheet>div{padding:0 14px;display:flex;gap:8px}

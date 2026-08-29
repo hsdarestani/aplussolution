@@ -57,7 +57,7 @@ function noteRow() {
 function decorateStandardColorRow() {
   const rows = Array.from(findForm()?.querySelectorAll<HTMLElement>('.wiw-form-row') || []);
   const row = rows.find((item) => text(item).includes('Standardfarbe'));
-  if (!row) return;
+  if (!row || row.dataset.colorManaged === 'true') return;
   row.classList.add('wiw-standard-color-row');
   row.setAttribute('aria-label', 'Standardfarbe: A+ Navy, automatisch');
   row.setAttribute('title', 'Die Schichtfarbe folgt automatisch dem A+ Navy Design.');

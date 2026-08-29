@@ -192,6 +192,9 @@ class Shift(TimestampedModel):
     required_count = models.PositiveIntegerField(default=1)
     confirmation_required = models.BooleanField(default=False)
     schedule_groups = models.JSONField(default=list, blank=True)
+    color_hue = models.PositiveSmallIntegerField(
+        blank=True, null=True, validators=[MinValueValidator(0), MaxValueValidator(359)]
+    )
     published_at = models.DateTimeField(blank=True, null=True)
     wiw_shift_id = models.CharField(max_length=80, unique=True, blank=True, null=True)
     wiw_payload = models.JSONField(default=dict, blank=True)

@@ -114,7 +114,7 @@ export default function ScheduleV2({user}:{user:User}) {
     const keys=Array.from(new Set(rows.map(clientKey))).sort();
     return new Map(keys.map((key,index)=>[key,(18+index*137.508)%360]));
   },[rows]);
-  const clientStyle=(item:any)=>({'--sv2-client-hue':String(clientHueMap.get(clientKey(item))??215)} as React.CSSProperties);
+  const clientStyle=(item:any)=>({'--sv2-client-hue':String(item?.color_hue ?? clientHueMap.get(clientKey(item)) ?? 215)} as React.CSSProperties);
 
   const visible=useMemo(()=>rows.filter((x:any)=>{
     if(!matchesServiceFilter(x,serviceFilter)) return false;

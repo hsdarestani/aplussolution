@@ -178,6 +178,6 @@ class ShiftApiSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'order', 'order_title', 'client', 'client_name', 'location', 'location_name',
             'position', 'position_name', 'starts_at', 'ends_at', 'break_minutes', 'status', 'notes',
-            'required_count', 'confirmation_required', 'schedule_groups', 'open_count', 'filled_count',
+            'required_count', 'confirmation_required', 'schedule_groups', 'color_hue', 'open_count', 'filled_count',
             'assigned_workers', 'slot_cards', 'my_release_request',
         ]

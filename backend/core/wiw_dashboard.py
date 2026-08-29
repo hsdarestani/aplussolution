@@ -258,19 +258,20 @@ def mobile_dashboard(request):
 
     now = timezone.now()
     snapshot = _local_snapshot(now)
-    # WIW is intentionally read-only. Native A+ OpenShifts therefore never
-    # appear in the live WIW result and must be added without double-counting
-    # imported WIW shifts that also exist locally.
-    native_open_shifts = _local_open_shift_count(now, native_only=True)
+    # This badge navigates to the local Dienstplan, so it must count exactly
+    # the local OpenShift cards that are actually visible after tapping it.
+    local_open_shifts = int(snapshot.get('open_shifts_available') or 0)
     live_error = ''
 
     if settings.WIW_SYNC_ENABLED and settings.WIW_DEV_KEY and settings.WIW_EMAIL and settings.WIW_PASSWORD:
         try:
             live = dict(_live_wiw_snapshot(now))
             live_error = str(live.get('live_error') or '')
-            if 'open_shifts_available' in live:
-                live['open_shifts_available'] = int(live.get('open_shifts_available') or 0) + native_open_shifts
+            # Keep WIW request counters live, but never replace the local
+            # OpenShift badge with remote WIW shifts that this screen cannot show.
+            live.pop('open_shifts_available', None)
             snapshot.update(live)
+            snapshot['open_shifts_available'] = local_open_shifts
         except WhenIWorkError as exc:
             live_error = str(exc)
         except Exception as exc:  # dashboard must still work if WIW is temporarily unavailable
