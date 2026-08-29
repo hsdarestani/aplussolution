@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from .document_center import dispatch_contract_reminders
 from .models import Notification, Shift, ShiftImportPackage
+from .operational_notifications import dispatch_attendance_reminders
 from .shift_slots import ShiftSlot
 
 
@@ -14,6 +15,11 @@ from .shift_slots import ShiftSlot
 def send_contract_reminders():
     """Dispatch contract reminders while preserving the historical integer task result."""
     return dispatch_contract_reminders()['notifications']
+
+
+@shared_task
+def send_attendance_reminders():
+    return dispatch_attendance_reminders()
 
 
 @shared_task
