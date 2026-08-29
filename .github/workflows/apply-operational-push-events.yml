@@ -1,0 +1,396 @@
+name: Apply operational push notification events
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-operational-push-events.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Add shift, attendance and activation push events
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=1):
+              file = Path(path)
+              text = file.read_text()
+              actual = text.count(old)
+              assert actual == count, f'{path}: expected {count} occurrence(s), found {actual}'
+              file.write_text(text.replace(old, new, count))
+
+          Path('backend/core/operational_notifications.py').write_text('''from __future__ import annotations
+
+import uuid
+from datetime import timedelta
+
+from django.conf import settings
+from django.db.models.signals import post_save, pre_save
+from django.dispatch import receiver
+from django.utils import timezone
+
+from .models import Notification, Shift, TimeEntry, User, WorkerProfile
+from .shift_rules import shift_visible_to_worker
+from .shift_slots import ShiftSlot
+
+
+SYNTHETIC_MIGRATION_EMAIL_SUFFIX = '@sync.invalid'
+
+
+def _event_key(prefix: str) -> str:
+    return f'{prefix}-{uuid.uuid4().hex[:12]}'
+
+
+def _shift_body(shift: Shift) -> str:
+    local_start = timezone.localtime(shift.starts_at)
+    location = getattr(shift.location, 'name', '') or 'Einsatzort'
+    position = getattr(shift.position, 'name', '') or 'Schicht'
+    return f'{local_start:%d.%m.%Y %H:%M} · {position} · {location}'
+
+
+def notify_open_shift_available(shift: Shift, reason: str = 'available') -> int:
+    """Push one availability event to every eligible active employee.
+
+    This is intentionally A+ native only: imported migration users are excluded,
+    employees already assigned to the same demand are excluded, and the same
+    workforce-visibility rules used by the employee OpenShift list are applied.
+    """
+    try:
+        shift = Shift.objects.select_related('client', 'location', 'position').get(pk=shift.pk)
+    except Shift.DoesNotExist:
+        return 0
+    if shift.status != Shift.Status.PUBLISHED or shift.ends_at <= timezone.now():
+        return 0
+    if not ShiftSlot.objects.filter(shift=shift, status=ShiftSlot.Status.OPEN, worker__isnull=True).exists():
+        return 0
+
+    assigned_ids = set(
+        ShiftSlot.objects.filter(shift=shift, status=ShiftSlot.Status.CLAIMED, worker__isnull=False)
+        .values_list('worker_id', flat=True)
+    )
+    event = _event_key(reason)
+    created = 0
+    workers = (
+        WorkerProfile.objects.filter(active=True, user__is_active=True)
+        .exclude(user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX)
+        .select_related('user')
+    )
+    for worker in workers:
+        if worker.id in assigned_ids:
+            continue
+        try:
+            if not shift_visible_to_worker(shift, worker):
+                continue
+        except Exception:
+            continue
+        Notification.objects.create(
+            user=worker.user,
+            kind=f'open-shift-{event}-{shift.id}',
+            title='Neue OpenShift verfügbar',
+            body=_shift_body(shift),
+            action_url='/schedule',
+        )
+        created += 1
+    return created
+
+
+def notify_worker_shift_event(user: User | None, shift: Shift, title: str, reason: str) -> int:
+    if not user or not user.is_active:
+        return 0
+    Notification.objects.create(
+        user=user,
+        kind=f'shift-event-{reason}-{shift.id}-{uuid.uuid4().hex[:10]}',
+        title=title,
+        body=_shift_body(shift),
+        action_url='/schedule',
+    )
+    return 1
+
+
+def notify_claimed_workers_shift_changed(shift: Shift, title: str = 'Schicht aktualisiert', reason: str = 'updated') -> int:
+    users = []
+    seen = set()
+    for slot in (
+        ShiftSlot.objects.filter(shift=shift, status=ShiftSlot.Status.CLAIMED, worker__isnull=False)
+        .select_related('worker__user')
+    ):
+        user = slot.worker.user
+        if user.id not in seen:
+            users.append(user)
+            seen.add(user.id)
+    if shift.worker_id and shift.worker.user_id not in seen:
+        users.append(shift.worker.user)
+    return sum(notify_worker_shift_event(user, shift, title, reason) for user in users)
+
+
+def notify_managers_attendance(entry: TimeEntry, event: str) -> int:
+    worker_name = entry.worker.user.get_full_name() or entry.worker.user.email
+    shift = entry.shift
+    if event == 'check_in':
+        title = 'Mitarbeiter eingecheckt'
+        moment = entry.clock_in
+    else:
+        title = 'Mitarbeiter ausgecheckt'
+        moment = entry.clock_out or timezone.now()
+    when = timezone.localtime(moment).strftime('%d.%m.%Y %H:%M')
+    location = shift.location.name if shift and shift.location_id else 'ohne Einsatzort'
+    body = f'{worker_name} · {when} · {location}'
+    count = 0
+    for recipient in User.objects.filter(role__in=[User.Role.ADMIN, User.Role.MANAGER], is_active=True):
+        Notification.objects.create(
+            user=recipient,
+            kind=f'attendance-{event}-{entry.id}',
+            title=title,
+            body=body,
+            action_url='/time',
+        )
+        count += 1
+    return count
+
+
+def dispatch_attendance_reminders() -> dict:
+    now = timezone.now()
+    grace = max(5, int(getattr(settings, 'ATTENDANCE_REMINDER_MINUTES', 15)))
+    threshold = now - timedelta(minutes=grace)
+    checkin = checkout = 0
+
+    slots = (
+        ShiftSlot.objects.filter(
+            status=ShiftSlot.Status.CLAIMED,
+            worker__isnull=False,
+            shift__starts_at__lte=threshold,
+            shift__starts_at__gte=now - timedelta(hours=6),
+            shift__ends_at__gte=now,
+            shift__status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
+        )
+        .select_related('worker__user', 'shift__location', 'shift__position')
+    )
+    for slot in slots:
+        if TimeEntry.objects.filter(worker=slot.worker, shift=slot.shift, wiw_time_id__isnull=True).exists():
+            continue
+        _, created = Notification.objects.get_or_create(
+            user=slot.worker.user,
+            kind=f'attendance-checkin-reminder-{slot.id}',
+            defaults={
+                'title': 'Check-in nicht vergessen',
+                'body': f'Deine Schicht hat vor {grace} Minuten begonnen. Bitte jetzt einchecken.',
+                'action_url': '/time',
+            },
+        )
+        checkin += int(created)
+
+    entries = (
+        TimeEntry.objects.filter(
+            wiw_time_id__isnull=True,
+            clock_out__isnull=True,
+            shift__isnull=False,
+            shift__ends_at__lte=threshold,
+            shift__ends_at__gte=now - timedelta(hours=12),
+        )
+        .select_related('worker__user', 'shift__location')
+    )
+    for entry in entries:
+        _, created = Notification.objects.get_or_create(
+            user=entry.worker.user,
+            kind=f'attendance-checkout-reminder-{entry.id}',
+            defaults={
+                'title': 'Check-out nicht vergessen',
+                'body': f'Deine Schicht ist seit {grace} Minuten beendet. Bitte jetzt auschecken.',
+                'action_url': '/time',
+            },
+        )
+        checkout += int(created)
+    return {'checkin': checkin, 'checkout': checkout, 'grace_minutes': grace}
+
+
+@receiver(pre_save, sender=User)
+def remember_onboarding_state(sender, instance, **kwargs):
+    if not instance.pk:
+        instance._aplus_was_onboarded = False
+        return
+    instance._aplus_was_onboarded = bool(
+        User.objects.filter(pk=instance.pk).values_list('is_onboarded', flat=True).first()
+    )
+
+
+@receiver(post_save, sender=User)
+def notify_registration_completed(sender, instance, created=False, **kwargs):
+    if created or instance.role not in {User.Role.WORKER, User.Role.CLIENT}:
+        return
+    if not instance.is_onboarded or getattr(instance, '_aplus_was_onboarded', False):
+        return
+    role_label = 'Mitarbeiter' if instance.role == User.Role.WORKER else 'Kunde'
+    name = instance.get_full_name() or instance.email
+    for recipient in User.objects.filter(role__in=[User.Role.ADMIN, User.Role.MANAGER], is_active=True):
+        Notification.objects.get_or_create(
+            user=recipient,
+            kind=f'portal-registration-complete-{instance.id}',
+            defaults={
+                'title': f'{role_label} registriert',
+                'body': f'{name} hat die Registrierung abgeschlossen.',
+                'action_url': '/people',
+            },
+        )
+''')
+
+          replace(
+              'backend/core/apps.py',
+              "        from . import push_models, push_signals, shift_slots  # noqa: F401\n",
+              "        from . import operational_notifications, push_models, push_signals, shift_slots  # noqa: F401\n",
+          )
+
+          replace(
+              'backend/core/time_views.py',
+              "from .permissions import IsAdminOrManager\n",
+              "from .permissions import IsAdminOrManager\nfrom .operational_notifications import notify_managers_attendance\n",
+          )
+          replace(
+              'backend/core/time_views.py',
+              "        audit(request, 'time.clock_in', entry)\n        return Response(self.get_serializer(entry).data, status=201)\n",
+              "        notify_managers_attendance(entry, 'check_in')\n        audit(request, 'time.clock_in', entry)\n        return Response(self.get_serializer(entry).data, status=201)\n",
+          )
+          replace(
+              'backend/core/time_views.py',
+              "        if geofence_issue:\n            worker_name = entry.worker.user.get_full_name() or entry.worker.user.email\n",
+              "        notify_managers_attendance(entry, 'check_out')\n\n        if geofence_issue:\n            worker_name = entry.worker.user.get_full_name() or entry.worker.user.email\n",
+          )
+
+          replace(
+              'backend/core/tasks.py',
+              "from .document_center import dispatch_contract_reminders\n",
+              "from .document_center import dispatch_contract_reminders\nfrom .operational_notifications import dispatch_attendance_reminders\n",
+          )
+          replace(
+              'backend/core/tasks.py',
+              "@shared_task\ndef send_shift_reminders():\n",
+              "@shared_task\ndef send_attendance_reminders():\n    return dispatch_attendance_reminders()\n\n\n@shared_task\ndef send_shift_reminders():\n",
+          )
+
+          replace(
+              'backend/config/settings.py',
+              "CELERY_BEAT_SCHEDULE={'contract-reminders-daily':{'task':'core.tasks.send_contract_reminders','schedule':86400},'shift-reminders-hourly':{'task':'core.tasks.send_shift_reminders','schedule':3600},",
+              "ATTENDANCE_REMINDER_MINUTES=int(os.getenv('ATTENDANCE_REMINDER_MINUTES','15'))\nCELERY_BEAT_SCHEDULE={'attendance-reminders-5min':{'task':'core.tasks.send_attendance_reminders','schedule':300},'contract-reminders-daily':{'task':'core.tasks.send_contract_reminders','schedule':86400},'shift-reminders-hourly':{'task':'core.tasks.send_shift_reminders','schedule':3600},",
+          )
+          replace(
+              '.env.example',
+              "APNS_USE_SANDBOX=0\n",
+              "APNS_USE_SANDBOX=0\n# Check-in/check-out reminder delay. Celery Beat checks every 5 minutes.\nATTENDANCE_REMINDER_MINUTES=15\n",
+          )
+
+          replace(
+              'backend/core/shift_views.py',
+              "from .permissions import IsAdminOrManager\n",
+              "from .permissions import IsAdminOrManager\nfrom .operational_notifications import notify_claimed_workers_shift_changed, notify_open_shift_available, notify_worker_shift_event\n",
+          )
+          replace(
+              'backend/core/shift_views.py',
+              "            audit(self.request, 'staffing_demand.updated', obj, {\n                'required_count': obj.required_count,\n                'confirmation_required': obj.confirmation_required,\n            })\n\n    def _list_response(self, qs):\n",
+              "            audit(self.request, 'staffing_demand.updated', obj, {\n                'required_count': obj.required_count,\n                'confirmation_required': obj.confirmation_required,\n            })\n            notify_claimed_workers_shift_changed(obj)\n\n    def perform_destroy(self, instance):\n        notify_claimed_workers_shift_changed(instance, title='Schicht entfernt', reason='deleted')\n        audit(self.request, 'staffing_demand.deleted', instance)\n        instance.delete()\n\n    def _list_response(self, qs):\n",
+          )
+          replace(
+              'backend/core/shift_views.py',
+              "            for slot in current_slots:\n                if str(slot.worker_id) not in desired_ids:\n                    slot.worker = None\n",
+              "            for slot in current_slots:\n                if str(slot.worker_id) not in desired_ids:\n                    released_user = slot.worker.user if slot.worker_id else None\n                    if released_user:\n                        notify_worker_shift_event(released_user, shift, 'Schicht aus deinem Dienstplan entfernt', 'admin-release')\n                    slot.worker = None\n",
+          )
+          replace(
+              'backend/core/shift_views.py',
+              "            audit(request, 'shift.admin_assigned', shift, {\n                'workers': requested_ids,\n                'publish_remaining': publish_remaining,\n            })\n\n        return Response(self.get_serializer(self.base_queryset().get(pk=shift.pk)).data)\n",
+              "            audit(request, 'shift.admin_assigned', shift, {\n                'workers': requested_ids,\n                'publish_remaining': publish_remaining,\n            })\n            if free_count > 0 and shift.status == Shift.Status.PUBLISHED:\n                notify_open_shift_available(shift, 'assignment')\n\n        return Response(self.get_serializer(self.base_queryset().get(pk=shift.pk)).data)\n",
+          )
+
+          replace(
+              'backend/core/shift_service.py',
+              "from .models import Shift, WorkerProfile\n",
+              "from .models import Shift, WorkerProfile\nfrom .operational_notifications import notify_open_shift_available\n",
+          )
+          replace(
+              'backend/core/shift_service.py',
+              "    refresh_shift_state(shift)\n    return slot\n",
+              "    refresh_shift_state(shift)\n    notify_open_shift_available(shift, 'release')\n    return slot\n",
+              count=1,
+          )
+
+          replace(
+              'backend/core/native_workforce.py',
+              "from .order_automation import (\n",
+              "from .operational_notifications import notify_open_shift_available\nfrom .order_automation import (\n",
+          )
+          replace(
+              'backend/core/native_workforce.py',
+              "    return {\n        'status': 'ok',\n        'source': 'aplus',\n        'action': 'created' if created else 'updated',\n",
+              "    for item in created_shifts:\n        created_shift = Shift.objects.filter(pk=item['local_shift_id']).first()\n        if created_shift:\n            notify_open_shift_available(created_shift, 'ai-order')\n\n    return {\n        'status': 'ok',\n        'source': 'aplus',\n        'action': 'created' if created else 'updated',\n",
+          )
+
+          replace(
+              'backend/core/shift_slot_actions.py',
+              "from .permissions import IsAdminOrManager\n",
+              "from .permissions import IsAdminOrManager\nfrom .operational_notifications import notify_claimed_workers_shift_changed, notify_open_shift_available\n",
+          )
+          replace(
+              'backend/core/shift_slot_actions.py',
+              "            result = ShiftApiSerializer(\n                _shift_with_counts(edited.id), context={'request': request}\n            ).data\n            return Response({'shift': result, 'split': False, 'apply_all': apply_all})\n",
+              "            if edited.status == Shift.Status.PUBLISHED and open_slots(edited).exists():\n                notify_open_shift_available(edited, 'card-update')\n            else:\n                notify_claimed_workers_shift_changed(edited)\n            result = ShiftApiSerializer(\n                _shift_with_counts(edited.id), context={'request': request}\n            ).data\n            return Response({'shift': result, 'split': False, 'apply_all': apply_all})\n",
+          )
+          replace(
+              'backend/core/shift_slot_actions.py',
+              "from .shift_service import ensure_slots, refresh_shift_state\n",
+              "from .shift_service import ensure_slots, open_slots, refresh_shift_state\n",
+          )
+          replace(
+              'backend/core/shift_slot_actions.py',
+              "        audit(request, 'shift.card_split_updated', clone, {\n            'from_shift': str(shift.id),\n            'from_slot': str(slot.id),\n            'worker': str(selected['worker_id'] or ''),\n        })\n\n        return Response({\n",
+              "        audit(request, 'shift.card_split_updated', clone, {\n            'from_shift': str(shift.id),\n            'from_slot': str(slot.id),\n            'worker': str(selected['worker_id'] or ''),\n        })\n        if clone.status == Shift.Status.PUBLISHED and open_slots(clone).exists():\n            notify_open_shift_available(clone, 'card-update')\n        else:\n            notify_claimed_workers_shift_changed(clone)\n\n        return Response({\n",
+          )
+
+          replace(
+              'backend/core/shift_card_admin.py',
+              "from .permissions import IsAdminOrManager\n",
+              "from .permissions import IsAdminOrManager\nfrom .operational_notifications import notify_worker_shift_event\n",
+          )
+          replace(
+              'backend/core/shift_card_admin.py',
+              "        if active_count <= 1 or int(shift.required_count or 1) <= 1:\n            audit(request, 'shift.card_deleted', shift, {'slot': str(slot.id), 'whole_shift': True})\n",
+              "        if slot.worker_id:\n            slot = ShiftSlot.objects.select_related('worker__user').get(pk=slot.pk)\n            notify_worker_shift_event(slot.worker.user, shift, 'Schicht aus deinem Dienstplan entfernt', 'card-delete')\n\n        if active_count <= 1 or int(shift.required_count or 1) <= 1:\n            audit(request, 'shift.card_deleted', shift, {'slot': str(slot.id), 'whole_shift': True})\n",
+          )
+
+          # Ensure Android store builds actively require the Firebase client config.
+          replace(
+              '.github/workflows/mobile-store-release.yml',
+              "    env:\n      VITE_API_URL: https://solution.smarbiz.sbs/api\n      ANDROID_KEYSTORE_PASSWORD:",
+              "    env:\n      VITE_API_URL: https://solution.smarbiz.sbs/api\n      REQUIRE_NATIVE_PUSH: '1'\n      GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}\n      ANDROID_KEYSTORE_PASSWORD:",
+          )
+
+          # The checked-in Firebase client config is a safe fallback. The readiness
+          # workflow should therefore distinguish optional secret packaging from a
+          # genuinely missing Android client configuration.
+          replace(
+              '.github/workflows/native-push-readiness.yml',
+              "          [ -n \"$GOOGLE_SERVICES_JSON_BASE64\" ] || missing=1\n",
+              "          if [ -z \"$GOOGLE_SERVICES_JSON_BASE64\" ] && [ ! -f frontend/firebase/google-services.json ]; then missing=1; fi\n",
+          )
+          replace(
+              '.github/workflows/native-push-readiness.yml',
+              "      - name: Report credential readiness without exposing secrets\n",
+              "      - uses: actions/checkout@v4\n      - name: Report credential readiness without exposing secrets\n",
+          )
+
+          # Self-delete the one-shot patch workflow before committing the real change.
+          Path('.github/workflows/apply-operational-push-events.yml').unlink()
+          PY
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'Add operational native push notification events'
+          git push origin HEAD:main
