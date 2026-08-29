@@ -336,14 +336,17 @@ export default function WiwScheduleMobile() {
     if (!manager) return;
     setBusy(true);
     try {
-      const [shiftData, clientData, locationData, positionData, workerData] = await Promise.all([
+      const [shiftData, clientData, locationData, positionData, workerData, dashboardData] = await Promise.all([
         api('shifts/?ordering=starts_at'),
         api('clients/'),
         api('locations/'),
         api('positions/'),
         api('workers/?ordering=user__last_name'),
+        api('admin/mobile-dashboard/'),
       ]);
-      setRows(unpack(shiftData));
+      const localRows = unpack(shiftData);
+      const liveOpenRows = Array.isArray(dashboardData?.open_shift_rows) ? dashboardData.open_shift_rows : [];
+      setRows([...localRows, ...liveOpenRows]);
       setClients(unpack(clientData).filter((item: any) => item.active !== false));
       setLocations(unpack(locationData).filter((item: any) => item.active !== false));
       setPositions(unpack(positionData).filter((item: any) => item.active !== false));
@@ -380,13 +383,18 @@ export default function WiwScheduleMobile() {
   }, [rows]);
   const effectiveHue = (shift: any) => shift?.color_hue == null ? (clientHueMap.get(clientKey(shift)) ?? 215) : Number(shift.color_hue);
   const formAutoHue = clientHueMap.get(form.client || 'ohne-kunde') ?? 215;
+  const liveLocalShiftIds = useMemo(() => new Set(rows.filter((row: any) => row?.source === 'wiw-live' && row?.local_shift_id).map((row: any) => String(row.local_shift_id))), [rows]);
   const visibleCards = useMemo(() => cards.filter((card) => {
     const shiftDay = dateKeyFromIso(card.shift.starts_at);
     if (tab === 'open') {
+      if (card.shift.source !== 'wiw-live' && liveLocalShiftIds.has(String(card.shift.id))) return false;
       if (!card.isOpen) return false;
       if (!['published', 'confirmed'].includes(String(card.shift.status || ''))) return false;
       if (card.shift.ends_at && new Date(card.shift.ends_at).getTime() < Date.now()) return false;
-    } else if (!days.includes(shiftDay)) return false;
+    } else {
+      if (card.shift.source === 'wiw-live') return false;
+      if (!days.includes(shiftDay)) return false;
+    }
     if (tab === 'filled' && (!card.worker || card.shift.status === 'draft')) return false;
     if (tab === 'draft' && card.shift.status !== 'draft') return false;
     if (query.trim()) {
@@ -394,7 +402,7 @@ export default function WiwScheduleMobile() {
       if (!haystack.includes(query.trim().toLowerCase())) return false;
     }
     return true;
-  }), [cards, days, query, tab]);
+  }), [cards, days, liveLocalShiftIds, query, tab]);
   const visibleDays = useMemo(() => {
     if (tab !== 'open') return days;
     return Array.from(new Set(visibleCards.map((card) => dateKeyFromIso(card.shift.starts_at)))).sort();
@@ -612,7 +620,7 @@ export default function WiwScheduleMobile() {
           const dayCards = byDay[day] || [];
           return <section className="wiw-day-section" id={`wiw-day-${day}`} key={day}>
             <header><strong>{header.weekday}</strong><span>{header.date}</span><em>{dayCards.length}</em></header>
-            {dayCards.map((card) => <button type="button" className="wiw-shift-card" style={{ '--wiw-shift-hue': String(effectiveHue(card.shift)) } as React.CSSProperties} key={card.key} onClick={() => openEdit(card)}>
+            {dayCards.map((card) => <button type="button" className="wiw-shift-card" style={{ '--wiw-shift-hue': String(effectiveHue(card.shift)) } as React.CSSProperties} key={card.key} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
               <div className="wiw-card-line primary"><b>{card.worker?.name || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}</b><span>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</span></div>
               <div className="wiw-card-line secondary"><span className={card.isOpen ? 'open' : ''}>{card.shift.position_name || 'Schicht'}</span><small>{card.shift.client_name || ''}{card.shift.location_name ? ` · ${card.shift.location_name}` : ''}</small></div>
             </button>)}

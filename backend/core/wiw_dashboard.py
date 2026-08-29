@@ -11,7 +11,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from . import admin_center_views as admin_base
-from .models import IntegrationSyncRun, Shift, ShiftSwapRequest, TimeOffRequest, User
+from .models import IntegrationSyncRun, Location, Position, Shift, ShiftSwapRequest, TimeOffRequest, User
 from .premium_approval_models import ShiftPickupRequest
 from .shift_slots import ShiftSlot
 from .wiw import WhenIWorkClient, WhenIWorkError
@@ -133,6 +133,90 @@ def _open_shift_instances(item):
         return 1
 
 
+def _display_label(value, fallback=''):
+    if isinstance(value, dict):
+        return str(value.get('name') or value.get('label') or value.get('title') or fallback)
+    return str(value or fallback)
+
+
+def _live_open_shift_rows(items, now):
+    candidates = []
+    external_ids = []
+    location_ids = set()
+    site_ids = set()
+    position_ids = set()
+
+    for item in items:
+        instances = _open_shift_instances(item)
+        if not instances:
+            continue
+        starts_at = _as_datetime(_value(item, 'start_time', 'start', 'starts_at'))
+        ends_at = _as_datetime(_value(item, 'end_time', 'end', 'ends_at'))
+        if not starts_at or not ends_at or ends_at < now:
+            continue
+        external_id = str(_value(item, 'id', 'shift_id', default='') or '').strip()
+        location_id = str(_value(item, 'location_id', default='') or '').strip()
+        site_id = str(_value(item, 'site_id', default='') or '').strip()
+        position_id = str(_value(item, 'position_id', default='') or '').strip()
+        if external_id:
+            external_ids.append(external_id)
+        if location_id:
+            location_ids.add(location_id)
+        if site_id:
+            site_ids.add(site_id)
+        if position_id:
+            position_ids.add(position_id)
+        candidates.append((item, external_id, location_id, site_id, position_id, starts_at, ends_at, instances))
+
+    local_by_external = {
+        str(row.wiw_shift_id): row
+        for row in Shift.objects.filter(wiw_shift_id__in=external_ids).select_related('client', 'location', 'position')
+        if row.wiw_shift_id
+    }
+    locations = Location.objects.filter(Q(wiw_location_id__in=location_ids) | Q(wiw_site_id__in=site_ids)).select_related('client')
+    location_by_id = {}
+    for row in locations:
+        if row.wiw_location_id:
+            location_by_id[f'location:{row.wiw_location_id}'] = row
+        if row.wiw_site_id:
+            location_by_id[f'site:{row.wiw_site_id}'] = row
+    position_by_id = {str(row.wiw_position_id): row for row in Position.objects.filter(wiw_position_id__in=position_ids)}
+
+    rows = []
+    for item, external_id, location_id, site_id, position_id, starts_at, ends_at, instances in candidates:
+        local = local_by_external.get(external_id)
+        location = (local.location if local else None) or location_by_id.get(f'site:{site_id}') or location_by_id.get(f'location:{location_id}')
+        position = (local.position if local else None) or position_by_id.get(position_id)
+        client_name = (local.client.name if local and local.client_id else '') or (location.client.name if location and location.client_id else '')
+        if not client_name:
+            client_name = _display_label(_value(item, 'client_name', 'company_name', 'company', 'client', 'site'), 'WIW')
+        location_name = (local.location.name if local and local.location_id else '') or (location.name if location else '')
+        if not location_name:
+            location_name = _display_label(_value(item, 'site_name', 'location_name', 'site', 'location'), 'WIW')
+        position_name = (local.position.name if local and local.position_id else '') or (position.name if position else '')
+        if not position_name:
+            position_name = _display_label(_value(item, 'position_name', 'position'), 'Schicht')
+        rows.append({
+            'id': f'wiw-live-{external_id or len(rows)}',
+            'wiw_shift_id': external_id,
+            'local_shift_id': str(local.id) if local else '',
+            'starts_at': starts_at.isoformat(),
+            'ends_at': ends_at.isoformat(),
+            'status': 'published',
+            'open_count': instances,
+            'filled_count': 0,
+            'assigned_workers': [],
+            'client_name': client_name,
+            'location_name': location_name,
+            'position_name': position_name,
+            'break_minutes': int(_value(item, 'break_minutes', 'break', default=0) or 0),
+            'color_hue': None,
+            'source': 'wiw-live',
+            'read_only': True,
+        })
+    return rows
+
+
 def _local_open_shift_count(now, *, native_only=False):
     # Open capacity is represented by ShiftSlot. Counting slots keeps native
     # multi-person needs accurate and lets the dashboard react immediately to
@@ -191,13 +275,9 @@ def _live_wiw_snapshot(now):
             'limit': 500,
         })
         shifts = client.extract_collection(shift_payload, 'shifts')
-        open_shifts = 0
-        for item in shifts:
-            end = _as_datetime(_value(item, 'end_time', 'end', 'ends_at'))
-            if end and end < now:
-                continue
-            open_shifts += _open_shift_instances(item)
-        snapshot['open_shifts_available'] = open_shifts
+        open_shift_rows = _live_open_shift_rows(shifts, now)
+        snapshot['open_shift_rows'] = open_shift_rows
+        snapshot['open_shifts_available'] = sum(int(row.get('open_count') or 0) for row in open_shift_rows)
     except Exception as exc:
         errors.append(f'OpenShifts: {exc}')
 

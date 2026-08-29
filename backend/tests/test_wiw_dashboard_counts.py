@@ -25,8 +25,8 @@ class FakeWhenIWorkClient:
         if path == '/shifts':
             return {
                 'shifts': [
-                    {'id': 10, 'user_id': 0, 'is_open': True, 'published': True, 'instances': 16, 'end_time': (timezone.now() + timedelta(days=2)).isoformat()},
-                    {'id': 11, 'user_id': 0, 'is_open': True, 'published': True, 'instances': 1, 'end_time': (timezone.now() + timedelta(days=3)).isoformat()},
+                    {'id': 10, 'user_id': 0, 'is_open': True, 'published': True, 'instances': 16, 'start_time': (timezone.now() + timedelta(days=2, hours=-6)).isoformat(), 'end_time': (timezone.now() + timedelta(days=2)).isoformat(), 'position_name': 'Servicekraft', 'location_name': 'Marthas Finest'},
+                    {'id': 11, 'user_id': 0, 'is_open': True, 'published': True, 'instances': 1, 'start_time': (timezone.now() + timedelta(days=3, hours=-6)).isoformat(), 'end_time': (timezone.now() + timedelta(days=3)).isoformat(), 'position_name': 'Servicekraft', 'location_name': 'Marthas Finest'},
                     {'id': 12, 'user_id': 99, 'is_open': False, 'published': True, 'instances': 50, 'end_time': (timezone.now() + timedelta(days=3)).isoformat()},
                 ]
             }
