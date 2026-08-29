@@ -9,6 +9,7 @@ class CoreConfig(AppConfig):
         from . import (  # noqa: F401
             attendance_models,
             document_source_recovery,
+            operational_notifications,
             portal_models,
             premium_approval_models,
             premium_models,
