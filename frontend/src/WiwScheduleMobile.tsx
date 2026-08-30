@@ -308,6 +308,7 @@ export default function WiwScheduleMobile() {
   const [workers, setWorkers] = useState<any[]>([]);
   const [anchor, setAnchor] = useState(berlinToday());
   const [tab, setTab] = useState<TabKey>('all');
+  const [weekDirection, setWeekDirection] = useState<'next' | 'prev' | ''>('');
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
@@ -453,6 +454,22 @@ export default function WiwScheduleMobile() {
     const map: Record<string, CardRow[]> = {};
     visibleDays.forEach((day) => { map[day] = []; });
     visibleCards.forEach((card) => { (map[dateKeyFromIso(card.shift.starts_at)] ||= []).push(card); });
+    Object.values(map).forEach((dayCards) => {
+      const firstStartByClient = new Map<string, number>();
+      dayCards.forEach((card) => {
+        const key = clientKey(card.shift);
+        const start = new Date(card.shift.starts_at).getTime();
+        firstStartByClient.set(key, Math.min(firstStartByClient.get(key) ?? Number.POSITIVE_INFINITY, start));
+      });
+      dayCards.sort((left, right) => {
+        const leftKey = clientKey(left.shift);
+        const rightKey = clientKey(right.shift);
+        const groupOrder = (firstStartByClient.get(leftKey) ?? 0) - (firstStartByClient.get(rightKey) ?? 0);
+        if (groupOrder) return groupOrder;
+        if (leftKey !== rightKey) return String(left.shift.client_name || '').localeCompare(String(right.shift.client_name || ''), 'de');
+        return new Date(left.shift.starts_at).getTime() - new Date(right.shift.starts_at).getTime();
+      });
+    });
     return map;
   }, [visibleDays, visibleCards]);
   const weekHours = useMemo(() => visibleCards.reduce((sum, card) => {
@@ -605,6 +622,11 @@ export default function WiwScheduleMobile() {
     }
   }
 
+  function changeWeek(delta: number) {
+    setWeekDirection(delta > 0 ? 'next' : 'prev');
+    setAnchor((current) => addDays(current, delta));
+  }
+
   if (!active || !mobile || !manager) return null;
   const host = document.querySelector('.app-main') || document.body;
 
@@ -612,23 +634,24 @@ export default function WiwScheduleMobile() {
     <div className="wiw-schedule-mobile" data-testid="wiw-native-schedule">
       <div className="wiw-schedule-tools">
         <div className="wiw-tabs" role="tablist">
-          {([['all', 'Alle'], ['open', 'OpenShifts'], ['filled', 'Besetzt'], ['draft', 'Entwürfe']] as Array<[TabKey, string]>).map(([key, label]) => <button type="button" role="tab" aria-selected={tab === key} key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}</button>)}
+          {([['all', 'Alle'], ['open', 'OpenShifts']] as Array<[TabKey, string]>).map(([key, label]) => <button type="button" role="tab" aria-selected={tab === key} key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}</button>)}
         </div>
         <div className="wiw-search-row"><IonIcon icon={filterOutline} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filtern …" /><button type="button" onClick={() => void load()}>{busy ? '…' : '↻'}</button></div>
       </div>
 
       {tab !== 'open' ? <div className="wiw-week-strip">
-        <button type="button" onClick={() => setAnchor(addDays(anchor, -7))}>‹</button>
+        <button type="button" onClick={() => changeWeek(-7)}>‹</button>
         {days.map((day) => {
           const activeDay = day === anchor;
           const label = formatDayHeader(day);
           return <button type="button" key={day} className={`${activeDay ? 'active ' : ''}${day === berlinToday() ? 'today' : ''}`} onClick={() => { setAnchor(day); document.getElementById(`wiw-day-${day}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}><small>{label.weekday.slice(0, 2)}</small><b>{keyDate(day).getUTCDate()}</b></button>;
         })}
-        <button type="button" onClick={() => setAnchor(addDays(anchor, 7))}>›</button>
+        <button type="button" onClick={() => changeWeek(7)}>›</button>
       </div> : null}
 
       <div
-        className="wiw-week-scroll"
+        key={weekStart}
+        className={`wiw-week-scroll ${weekDirection ? `wiw-week-turn-${weekDirection}` : ''}`}
         onTouchStart={(event) => { const touch = event.touches[0]; swipe.current = { x: touch.clientX, y: touch.clientY }; }}
         onTouchEnd={(event) => {
           if (!swipe.current || !event.changedTouches.length) return;
@@ -636,7 +659,7 @@ export default function WiwScheduleMobile() {
           const dx = touch.clientX - swipe.current.x;
           const dy = touch.clientY - swipe.current.y;
           swipe.current = undefined;
-          if (tab !== 'open' && Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.2) setAnchor(addDays(anchor, dx < 0 ? 7 : -7));
+          if (tab !== 'open' && Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.2) changeWeek(dx < 0 ? 7 : -7);
         }}
       >
         {visibleDays.map((day) => {
@@ -646,7 +669,7 @@ export default function WiwScheduleMobile() {
             <header><strong>{header.weekday}</strong><span>{header.date}</span><em>{dayCards.length}</em></header>
             {dayCards.map((card) => <button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'}`} style={shiftCardStyle(card.shift)} key={card.key} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
               <div className="wiw-card-line primary"><b>{card.worker?.name || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}{card.isOpen && card.shift.status !== 'draft' ? <span className="wiw-open-alert">!</span> : null}</b><span>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</span></div>
-              <div className="wiw-card-line secondary"><span className={card.isOpen ? 'open' : ''}>{card.shift.position_name || 'Schicht'}</span><small>{card.shift.client_name || ''}{card.shift.location_name ? ` · ${card.shift.location_name}` : ''}</small></div>
+              <div className="wiw-card-line secondary"><span className={card.isOpen ? 'open' : ''}>{card.shift.position_name || 'Schicht'}</span><small>{card.shift.location_name || ''}</small></div>
             </button>)}
             {tab !== 'open' && !dayCards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
           </section>;

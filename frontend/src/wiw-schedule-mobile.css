@@ -140,3 +140,24 @@
   .wiw-toast{animation:wiw-toast-in .12s ease-out}
   @keyframes wiw-toast-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 }
+
+/* Week-change page turn 2026-08-30 */
+@media (max-width:900px){
+  .wiw-week-scroll{transform-origin:50% 0;backface-visibility:hidden;perspective:1000px}
+  .wiw-week-turn-next{animation:wiw-week-page-next .28s cubic-bezier(.2,.72,.25,1)}
+  .wiw-week-turn-prev{animation:wiw-week-page-prev .28s cubic-bezier(.2,.72,.25,1)}
+  @keyframes wiw-week-page-next{
+    0%{opacity:.45;transform:translateX(18px) rotateY(-5deg) scale(.992)}
+    62%{opacity:.92;transform:translateX(-2px) rotateY(.7deg) scale(1)}
+    100%{opacity:1;transform:translateX(0) rotateY(0) scale(1)}
+  }
+  @keyframes wiw-week-page-prev{
+    0%{opacity:.45;transform:translateX(-18px) rotateY(5deg) scale(.992)}
+    62%{opacity:.92;transform:translateX(2px) rotateY(-.7deg) scale(1)}
+    100%{opacity:1;transform:translateX(0) rotateY(0) scale(1)}
+  }
+  .wiw-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (prefers-reduced-motion:reduce){
+  .wiw-week-turn-next,.wiw-week-turn-prev{animation:none!important}
+}
