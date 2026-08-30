@@ -1,0 +1,102 @@
+name: Hotfix legacy native CORS
+
+on:
+  push:
+    branches:
+      - ops/android-push-test-20260830
+    paths:
+      - '.github/workflows/hotfix-legacy-native-cors.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  hotfix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Prepare SSH authentication
+        env:
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_PASSWORD"
+          cat > /tmp/aplus-askpass.sh <<'ASKPASS'
+          #!/bin/sh
+          printf '%s\n' "$DEPLOY_PASSWORD"
+          ASKPASS
+          chmod 700 /tmp/aplus-askpass.sh
+
+      - name: Apply exact native origins and verify production
+        env:
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
+          HOST: ${{ secrets.HOST }}
+          SSH_ASKPASS: /tmp/aplus-askpass.sh
+          SSH_ASKPASS_REQUIRE: force
+          DISPLAY: :0
+        run: |
+          set -euo pipefail
+          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
+          setsid -w ssh -qT \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 \
+            root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.env')
+          key = 'NATIVE_APP_CORS_ORIGINS'
+          value = 'https://localhost,capacitor://localhost,http://localhost'
+          lines = path.read_text(encoding='utf-8').splitlines() if path.exists() else []
+          out = []
+          found = False
+          for line in lines:
+              if line.startswith(key + '='):
+                  out.append(f'{key}={value}')
+                  found = True
+              else:
+                  out.append(line)
+          if not found:
+              out.append(f'{key}={value}')
+          path.write_text('\n'.join(out) + '\n', encoding='utf-8')
+          PY
+
+          docker compose up -d --force-recreate backend celery celery-beat >/dev/null
+          ready=0
+          for i in $(seq 1 30); do
+            if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+          docker compose exec -T backend python manage.py shell -c "from django.conf import settings; assert 'https://localhost' in settings.CORS_ALLOWED_ORIGINS; assert 'capacitor://localhost' in settings.CORS_ALLOWED_ORIGINS; assert 'http://localhost' in settings.CORS_ALLOWED_ORIGINS; print('native_cors_settings_ok=true')"
+          REMOTE
+
+          probe() {
+            origin="$1"
+            expected="$2"
+            headers=$(curl -sS -o /dev/null -D - --connect-timeout 10 --max-time 20 -X OPTIONS \
+              -H "Origin: $origin" \
+              -H 'Access-Control-Request-Method: POST' \
+              -H 'Access-Control-Request-Headers: content-type,authorization' \
+              https://solution.smarbiz.sbs/api/auth/login/)
+            printf '%s\n' "$headers" | grep -Fqi "access-control-allow-origin: $expected"
+          }
+          probe 'https://localhost' 'https://localhost'
+          probe 'capacitor://localhost' 'capacitor://localhost'
+          probe 'http://localhost' 'http://localhost'
+
+          evil=$(curl -sS -o /dev/null -D - --connect-timeout 10 --max-time 20 -X OPTIONS \
+            -H 'Origin: https://evil.example' \
+            -H 'Access-Control-Request-Method: POST' \
+            https://solution.smarbiz.sbs/api/auth/login/)
+          if printf '%s\n' "$evil" | grep -Fqi 'access-control-allow-origin:'; then
+            echo 'Unexpected untrusted CORS origin allowed' >&2
+            exit 1
+          fi
+          curl -fsS --connect-timeout 10 --max-time 20 https://solution.smarbiz.sbs/health/ >/dev/null
+          echo 'production_native_cors_hotfix_ok=true'
