@@ -27,7 +27,7 @@ jobs:
           ASKPASS
           chmod 700 /tmp/aplus-askpass.sh
 
-      - name: Diagnose APNs credentials and retry with app team
+      - name: Test portal APNs key id with current private key
         env:
           DEPLOY_PASSWORD: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
@@ -51,21 +51,10 @@ jobs:
           from core.push_models import PushDevice
           import core.push_notifications as push
 
-          expected_team = '884MVA2MD5'
           expected_push_key_id = '7ZH6Y6V744'
-          current_team, key_id, private_key, bundle_id, sandbox = push._apns_values()
-          apple_team = os.getenv('APPLE_TEAM_ID', '').strip()
-          apple_key_id = os.getenv('APPLE_KEY_ID', '').strip()
-          apple_private = push._multiline(os.getenv('APPLE_PRIVATE_KEY', ''))
-
-          print(f"ios_provider_ready={push.push_provider_status().get('ios', False)}")
-          print(f"apns_team_matches_app_team={current_team == expected_team}")
-          print(f"apns_key_matches_portal_key={key_id == expected_push_key_id}")
-          print(f"apple_team_matches_app_team={apple_team == expected_team}")
-          print(f"apns_key_matches_signin_key_id={bool(key_id and apple_key_id and key_id == apple_key_id)}")
-          print(f"apns_private_matches_signin_private={bool(private_key and apple_private and private_key == apple_private)}")
-          print(f"apns_bundle_id_ok={bundle_id == 'de.aplussolution.workforce'}")
-          print(f"apns_uses_sandbox={sandbox}")
+          current_team, current_key_id, private_key, bundle_id, sandbox = push._apns_values()
+          print(f"current_key_is_portal_key={current_key_id == expected_push_key_id}")
+          print(f"private_key_present={bool(private_key)}")
 
           devices = PushDevice.objects.filter(
               active=True,
@@ -74,7 +63,6 @@ jobs:
           ).order_by('-last_seen_at')
           device = devices.first()
           print(f"active_admin_ios_devices={devices.count()}")
-          print(f"selected_device_last_seen={device.last_seen_at.isoformat() if device else 'none'}")
           if not device:
               raise SystemExit('No active iOS push device is registered for an admin account.')
 
@@ -86,12 +74,14 @@ jobs:
               body='Push-Test erfolgreich – iPhone-Benachrichtigungen funktionieren.',
           )
 
+          os.environ['APNS_KEY_ID'] = expected_push_key_id
+          push._APNS_CACHE.update(token='', expires_at=0.0, key_id='', team_id='')
           ok, error, invalid = push._send_ios(device, notification)
-          print(f"current_apns_send_ok={ok}")
-          print(f"current_invalid_token={invalid}")
-          print(f"current_error_kind={'InvalidProviderToken' if 'InvalidProviderToken' in (error or '') else 'other' if error else 'none'}")
+          print(f"portal_key_id_retry_ok={ok}")
+          print(f"portal_key_id_retry_invalid_token={invalid}")
+          print(f"portal_key_id_retry_error_kind={'InvalidProviderToken' if 'InvalidProviderToken' in (error or '') else 'other' if error else 'none'}")
           raise SystemExit(0 if ok else 1)
           PY
           REMOTE
 
-# verify portal APNs key id after user screenshot: 2026-08-30
+# test portal key id against current private key: 2026-08-30
