@@ -1,0 +1,134 @@
+name: Patch admin push and shift UX
+
+on:
+  push:
+    branches:
+      - fix/admin-push-shift-ux-20260830
+    paths:
+      - .github/workflows/patch-admin-push-shift-ux.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/admin-push-shift-ux-20260830
+          fetch-depth: 0
+
+      - name: Apply requested changes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f'pattern not found in {path}: {old[:120]!r}')
+              p.write_text(text.replace(old, new, 1))
+
+          # 1) Mirror every worker notification into the admin notification stream.
+          Path('backend/core/push_signals.py').write_text('''from django.db import transaction\nfrom django.db.models.signals import post_save\nfrom django.dispatch import receiver\n\nfrom .models import Notification, User\nfrom .push_notifications import push_provider_configured, send_notification_push\n\n\ndef _mirror_worker_notification_to_admins(instance: Notification) -> None:\n    """Give admins a visible confirmation copy for every worker notification.\n\n    The original notification remains addressed to the worker. The admin copy is\n    a separate Notification, so it reaches every registered admin device through\n    the same FCM/APNs pipeline and also remains visible in the notification list.\n    """\n    if instance.user.role != User.Role.WORKER:\n        return\n    worker_name = instance.user.get_full_name() or instance.user.email\n    for admin in User.objects.filter(role=User.Role.ADMIN, is_active=True):\n        Notification.objects.get_or_create(\n            user=admin,\n            kind=f'admin-worker-copy-{instance.id}',\n            defaults={\n                'title': f'Push an Mitarbeiter · {worker_name}',\n                'body': f'{instance.title} · {instance.body}',\n                'action_url': instance.action_url,\n            },\n        )\n\n\n@receiver(post_save, sender=Notification, dispatch_uid='aplus_native_push_notification')\ndef dispatch_native_push(sender, instance: Notification, created: bool, **kwargs):\n    if not created:\n        return\n\n    # Create the admin verification copy inside the same DB transaction. Because\n    # the copy belongs to an admin, this signal does not mirror it again.\n    _mirror_worker_notification_to_admins(instance)\n\n    if not push_provider_configured():\n        return\n\n    notification_id = str(instance.id)\n\n    def enqueue():\n        try:\n            send_notification_push.delay(notification_id)\n        except Exception:\n            # Native push is an enhancement. A temporary broker/provider issue must\n            # never roll back the operational action that created the notification.\n            return\n\n    transaction.on_commit(enqueue)\n''')
+
+          # 2) Optional worker notification on delete + manual reminder endpoint.
+          Path('backend/core/shift_card_admin.py').write_text('''from django.db import transaction\nfrom rest_framework.decorators import api_view, permission_classes\nfrom rest_framework.response import Response\n\nfrom .models import Shift\nfrom .permissions import IsAdminOrManager\nfrom .operational_notifications import notify_worker_shift_event\nfrom .services import audit\nfrom .shift_service import refresh_shift_state\nfrom .shift_slots import ShiftSlot\n\n\ndef _truthy(value, default=True):\n    if value is None:\n        return default\n    return str(value).strip().lower() not in {'0', 'false', 'no', 'off'}\n\n\n@api_view(['POST'])\n@permission_classes([IsAdminOrManager])\ndef remind_shift_card(request, shift_id, slot_id):\n    shift = Shift.objects.filter(pk=shift_id).first()\n    if not shift:\n        return Response({'detail': 'Schicht wurde nicht gefunden.'}, status=404)\n    slot = (\n        ShiftSlot.objects.filter(pk=slot_id, shift=shift)\n        .exclude(status=ShiftSlot.Status.CANCELLED)\n        .select_related('worker__user')\n        .first()\n    )\n    if not slot:\n        return Response({'detail': 'Schichtkarte wurde nicht gefunden.'}, status=404)\n    if not slot.worker_id:\n        return Response({'detail': 'Diese OpenShift ist noch keinem Mitarbeiter zugewiesen.'}, status=400)\n\n    user = slot.worker.user\n    notify_worker_shift_event(user, shift, 'Erinnerung an deine Schicht', 'manual-reminder')\n    audit(request, 'shift.card_reminder_sent', shift, {\n        'slot': str(slot.id),\n        'worker': str(slot.worker_id),\n    })\n    return Response({\n        'sent': True,\n        'worker': user.get_full_name() or user.email,\n    })\n\n\n@api_view(['DELETE'])\n@permission_classes([IsAdminOrManager])\ndef delete_shift_card(request, shift_id, slot_id):\n    """Delete one visible staffing card without deleting sibling cards.\n\n    The caller explicitly decides whether an assigned employee should receive a\n    push about the removal using ?notify_worker=1/0. Existing callers remain\n    backward compatible and notify by default.\n    """\n    notify_worker = _truthy(request.query_params.get('notify_worker'), default=True)\n    with transaction.atomic():\n        shift = Shift.objects.select_for_update().filter(pk=shift_id).first()\n        if not shift:\n            return Response({'detail': 'Schicht wurde nicht gefunden.'}, status=404)\n        if shift.time_entries.exists():\n            return Response({'detail': 'Schichten mit Zeiterfassung können nicht gelöscht werden. Bitte Zeiten zuerst prüfen.'}, status=400)\n\n        slot = ShiftSlot.objects.select_for_update().filter(\n            pk=slot_id,\n            shift=shift,\n        ).exclude(status=ShiftSlot.Status.CANCELLED).first()\n        if not slot:\n            return Response({'detail': 'Schichtkarte wurde nicht gefunden.'}, status=404)\n\n        active_count = ShiftSlot.objects.select_for_update().filter(\n            shift=shift,\n        ).exclude(status=ShiftSlot.Status.CANCELLED).count()\n\n        worker_notified = False\n        if slot.worker_id and notify_worker:\n            slot = ShiftSlot.objects.select_related('worker__user').get(pk=slot.pk)\n            notify_worker_shift_event(slot.worker.user, shift, 'Schicht aus deinem Dienstplan entfernt', 'card-delete')\n            worker_notified = True\n\n        if active_count <= 1 or int(shift.required_count or 1) <= 1:\n            audit(request, 'shift.card_deleted', shift, {\n                'slot': str(slot.id),\n                'whole_shift': True,\n                'worker_notified': worker_notified,\n            })\n            shift.delete()\n            return Response({'deleted': True, 'whole_shift': True, 'worker_notified': worker_notified})\n\n        slot.delete()\n        shift.required_count = max(1, min(int(shift.required_count or 1) - 1, active_count - 1))\n        shift.save(update_fields=['required_count', 'updated_at'])\n        refresh_shift_state(shift)\n        audit(request, 'shift.card_deleted', shift, {\n            'slot': str(slot_id),\n            'whole_shift': False,\n            'worker_notified': worker_notified,\n        })\n        return Response({\n            'deleted': True,\n            'whole_shift': False,\n            'shift': str(shift.id),\n            'required_count': shift.required_count,\n            'worker_notified': worker_notified,\n        })\n''')
+
+          replace(
+              'backend/core/urls.py',
+              "    path('shifts/<uuid:shift_id>/cards/<uuid:slot_id>/delete/', shift_card_admin.delete_shift_card),\n",
+              "    path('shifts/<uuid:shift_id>/cards/<uuid:slot_id>/delete/', shift_card_admin.delete_shift_card),\n    path('shifts/<uuid:shift_id>/cards/<uuid:slot_id>/remind/', shift_card_admin.remind_shift_card),\n",
+          )
+
+          # 3) Richer invitation email with the live store links and onboarding steps.
+          old_mail = """            send_mail(\n                'A+ Solution – Mitarbeiterportal aktivieren',\n                'Hallo,\\n\\nbitte aktiviere dein A+ Solution Mitarbeiterportal über diesen Link:\\n'\n                f'{activation_url}\\n\\nDer Link ist einmalig und 72 Stunden gültig.',\n                settings.DEFAULT_FROM_EMAIL,\n                [user.email],\n                fail_silently=False,\n            )"""
+          new_mail = """            employee_name = user.get_full_name() or user.first_name or 'Mitarbeiter/in'\n            send_mail(\n                'A+ Solution App – Zugang aktivieren',\n                f'Hallo {employee_name},\\n\\n'\n                'dein Zugang zur A+ Solution Workforce-App ist vorbereitet. Über die App kannst du unter anderem deine Schichten und OpenShifts sehen, Arbeitszeiten erfassen, Verfügbarkeiten verwalten sowie Dokumente und Mitteilungen abrufen.\\n\\n'\n                '1. App installieren\\n'\n                'iPhone / iPad (App Store):\\n'\n                'https://apps.apple.com/de/app/a-solution/id6799468007\\n\\n'\n                'Android (Google Play):\\n'\n                'https://play.google.com/store/apps/details?id=de.aplussolution.workforce\\n\\n'\n                '2. Zugang einmalig aktivieren\\n'\n                'Öffne diesen persönlichen Aktivierungslink und lege dein Passwort fest:\\n'\n                f'{activation_url}\\n\\n'\n                '3. Danach in der App anmelden\\n'\n                f'E-Mail: {user.email}\\n'\n                'Melde dich mit dieser E-Mail-Adresse und dem gerade festgelegten Passwort an. Bitte erlaube Benachrichtigungen, damit du neue Schichten, Änderungen und Erinnerungen direkt erhältst.\\n\\n'\n                'Der Aktivierungslink ist einmalig und 72 Stunden gültig. Wenn der Link abgelaufen ist oder du Hilfe brauchst, melde dich bitte bei A+ Solution.\\n\\n'\n                'Viele Grüße\\nA+ Solution GmbH',\n                settings.DEFAULT_FROM_EMAIL,\n                [user.email],\n                fail_silently=False,\n            )"""
+          replace('backend/core/portal_service.py', old_mail, new_mail)
+
+          # 4) Mobile shift form: larger employee name, explicit delete choice, manual reminder.
+          p = Path('frontend/src/WiwScheduleMobile.tsx')
+          text = p.read_text()
+          text = text.replace(
+              "  locationOutline,\n  peopleOutline,",
+              "  locationOutline,\n  notificationsOutline,\n  peopleOutline,",
+              1,
+          )
+          old_row = """function Row({ icon, label, value, muted, green, onClick, trailing, colorManaged }: { icon: string; label: string; value?: string; muted?: boolean; green?: boolean; onClick?: () => void; trailing?: React.ReactNode; colorManaged?: boolean }) {\n  const Component: any = onClick ? 'button' : 'div';\n  return (\n    <Component type={onClick ? 'button' : undefined} data-color-managed={colorManaged ? 'true' : undefined} className={`wiw-form-row ${muted ? 'muted' : ''} ${green ? 'green' : ''}`} onClick={onClick}>"""
+          new_row = """function Row({ icon, label, value, muted, green, onClick, trailing, colorManaged, emphasizeValue }: { icon: string; label: string; value?: string; muted?: boolean; green?: boolean; onClick?: () => void; trailing?: React.ReactNode; colorManaged?: boolean; emphasizeValue?: boolean }) {\n  const Component: any = onClick ? 'button' : 'div';\n  return (\n    <Component type={onClick ? 'button' : undefined} data-color-managed={colorManaged ? 'true' : undefined} className={`wiw-form-row ${muted ? 'muted' : ''} ${green ? 'green' : ''} ${emphasizeValue ? 'employee-emphasis' : ''}`} onClick={onClick}>"""
+          if old_row not in text:
+              raise SystemExit('Row pattern not found')
+          text = text.replace(old_row, new_row, 1)
+
+          worker_choices = "  const workerChoices = useMemo<Choice[]>(() => workers.map((item: any) => ({ value: String(item.id), label: item.user_detail?.name || item.user_detail?.email || item.employee_number || 'Mitarbeiter' })), [workers]);\n"
+          if worker_choices not in text:
+              raise SystemExit('worker choices pattern not found')
+          text = text.replace(worker_choices, worker_choices + "  const selectedWorkerNames = form.workers.map((workerId) => workerChoices.find((choice) => choice.value === workerId)?.label).filter(Boolean).join(', ');\n", 1)
+
+          old_delete = """  async function deleteEditingShift() {\n    if (!editing || busy) return;\n    const label = editing.workerName ? `Schicht von ${editing.workerName}` : 'OpenShift';\n    if (!window.confirm(`${label} wirklich löschen?`)) return;\n    setBusy(true);\n    try {\n      await api(`shifts/${editing.shiftId}/cards/${editing.slotId}/delete/`, { method: 'DELETE' });\n      setFormOpen(false);\n      setEditing(undefined);\n      setToast('Schicht gelöscht.');\n      window.dispatchEvent(new Event('aplus:dashboard-invalidated'));\n      await load();\n    } catch (error: any) {\n      setToast(error.message || 'Schicht konnte nicht gelöscht werden.');\n    } finally {\n      setBusy(false);\n    }\n  }"""
+          new_delete = """  async function sendManualReminder() {\n    if (!editing || !editing.workerName || busy) return;\n    setBusy(true);\n    try {\n      const result: any = await api(`shifts/${editing.shiftId}/cards/${editing.slotId}/remind/`, { method: 'POST', body: '{}' });\n      setToast(`Erinnerung an ${result?.worker || editing.workerName} gesendet.`);\n    } catch (error: any) {\n      setToast(error.message || 'Erinnerung konnte nicht gesendet werden.');\n    } finally {\n      setBusy(false);\n    }\n  }\n\n  async function deleteEditingShift() {\n    if (!editing || busy) return;\n    const label = editing.workerName ? `Schicht von ${editing.workerName}` : 'OpenShift';\n    if (!window.confirm(`${label} wirklich löschen?`)) return;\n    const notifyWorker = editing.workerName\n      ? window.confirm(`Soll ${editing.workerName} eine Push-Benachrichtigung über die Löschung erhalten?\\n\\nOK = Push senden\\nAbbrechen = ohne Push löschen`)\n      : false;\n    setBusy(true);\n    try {\n      await api(`shifts/${editing.shiftId}/cards/${editing.slotId}/delete/?notify_worker=${notifyWorker ? '1' : '0'}`, { method: 'DELETE' });\n      setFormOpen(false);\n      setEditing(undefined);\n      setToast(notifyWorker ? 'Schicht gelöscht · Mitarbeiter wurde informiert.' : 'Schicht gelöscht · ohne Mitarbeiter-Push.');\n      window.dispatchEvent(new Event('aplus:dashboard-invalidated'));\n      await load();\n    } catch (error: any) {\n      setToast(error.message || 'Schicht konnte nicht gelöscht werden.');\n    } finally {\n      setBusy(false);\n    }\n  }"""
+          if old_delete not in text:
+              raise SystemExit('delete function pattern not found')
+          text = text.replace(old_delete, new_delete, 1)
+
+          old_shift_row = """          {!editing ? <Row icon={layersOutline} label={`${form.required_count} Schicht${form.required_count === 1 ? '' : 'en'}`} trailing={<div className=\"wiw-count-stepper\"><button type=\"button\" onClick={() => setForm((current) => ({ ...current, required_count: Math.max(current.workers.length || 1, current.required_count - 1) }))}>−</button><b>{form.required_count}</b><button type=\"button\" onClick={() => setForm((current) => ({ ...current, required_count: current.required_count + 1 }))}>+</button></div>} /> : <Row icon={layersOutline} label=\"1 Schichtkarte\" value={editing.workerName || 'OpenShift'} />}"""
+          new_shift_row = """          {!editing ? <Row icon={layersOutline} label={`${form.required_count} Schicht${form.required_count === 1 ? '' : 'en'}`} trailing={<div className=\"wiw-count-stepper\"><button type=\"button\" onClick={() => setForm((current) => ({ ...current, required_count: Math.max(current.workers.length || 1, current.required_count - 1) }))}>−</button><b>{form.required_count}</b><button type=\"button\" onClick={() => setForm((current) => ({ ...current, required_count: current.required_count + 1 }))}>+</button></div>} /> : <Row icon={layersOutline} label=\"1 Schichtkarte\" value={editing.workerName || 'OpenShift'} emphasizeValue={Boolean(editing.workerName)} />}"""
+          if old_shift_row not in text:
+              raise SystemExit('shift card row pattern not found')
+          text = text.replace(old_shift_row, new_shift_row, 1)
+
+          old_worker_row = """          {(!editing || editing.isOpen) ? <Row icon={peopleOutline} label={editing ? (form.workers.length ? 'Mitarbeiter ändern' : 'Mitarbeiter zuweisen') : (form.workers.length ? `${form.workers.length} Benutzer direkt zugewiesen` : 'Geeignete Benutzer anzeigen')} value={editing && form.workers.length ? workerChoices.find((choice) => choice.value === form.workers[0])?.label : undefined} muted={!form.workers.length} onClick={() => setSheet('workers')} /> : null}"""
+          new_worker_row = """          {(!editing || editing.isOpen) ? <Row icon={peopleOutline} label={editing ? (form.workers.length ? 'Mitarbeiter ändern' : 'Mitarbeiter zuweisen') : (form.workers.length ? `${form.workers.length} Benutzer direkt zugewiesen` : 'Geeignete Benutzer anzeigen')} value={selectedWorkerNames || undefined} emphasizeValue={Boolean(selectedWorkerNames)} muted={!form.workers.length} onClick={() => setSheet('workers')} /> : null}"""
+          if old_worker_row not in text:
+              raise SystemExit('worker row pattern not found')
+          text = text.replace(old_worker_row, new_worker_row, 1)
+
+          old_actions = """          {editing ? <>\n            <div className=\"wiw-form-separator\" />\n            <Row icon={copyOutline} label=\"Schicht als OpenShift kopieren\" value=\"Danach bearbeiten & sichern\" onClick={prepareCopyAsOpenShift} />\n            <Row icon={trashOutline} label=\"Schicht löschen\" onClick={() => void deleteEditingShift()} />\n          </> : null}"""
+          new_actions = """          {editing ? <>\n            <div className=\"wiw-form-separator\" />\n            {editing.workerName ? <Row icon={notificationsOutline} label=\"Erinnerung senden\" value={editing.workerName} emphasizeValue onClick={() => void sendManualReminder()} /> : null}\n            <Row icon={copyOutline} label=\"Schicht als OpenShift kopieren\" value=\"Danach bearbeiten & sichern\" onClick={prepareCopyAsOpenShift} />\n            <Row icon={trashOutline} label=\"Schicht löschen\" onClick={() => void deleteEditingShift()} />\n          </> : null}"""
+          if old_actions not in text:
+              raise SystemExit('actions pattern not found')
+          text = text.replace(old_actions, new_actions, 1)
+          p.write_text(text)
+
+          # 5) Readability, spacing and slightly larger typography.
+          css = Path('frontend/src/wiw-schedule-mobile.css')
+          css.write_text(css.read_text() + '''\n\n/* A+ admin notification verification + readability pass 2026-08-30 */\n@media (max-width:900px){\n  .wiw-tabs button{font-size:14px}\n  .wiw-search-row input{font-size:14px}\n  .wiw-day-section>header strong{font-size:16px}\n  .wiw-day-section>header span{font-size:15px}\n  .wiw-shift-card{min-height:60px;padding-top:9px;padding-bottom:9px}\n  .wiw-card-line.primary b,.wiw-card-line.primary span{font-size:15px}\n  .wiw-card-line.secondary>span{font-size:12px}\n  .wiw-card-line.secondary small{font-size:12px}\n  .wiw-shift-card.is-filled{\n    background:linear-gradient(90deg,color-mix(in srgb,var(--wiw-card-accent,#0b4d6b) 18%,#fff) 0%,color-mix(in srgb,var(--wiw-card-accent,#0b4d6b) 10%,#fff) 100%);\n    color:#173448;\n  }\n  .wiw-shift-card.is-filled .wiw-card-line.primary b,\n  .wiw-shift-card.is-filled .wiw-card-line.primary span{color:#173448!important;font-weight:800}\n  .wiw-shift-card.is-filled .wiw-card-line.secondary>span,\n  .wiw-shift-card.is-filled .wiw-card-line.secondary small{color:#45606f!important;font-weight:650}\n  .wiw-open-alert{margin-left:11px}\n  .wiw-form-topbar strong{font-size:17px;font-weight:650}\n  .wiw-form-topbar button{font-size:15px}\n  .wiw-form-row{min-height:51px}\n  .wiw-form-row-copy span{font-size:16px}\n  .wiw-form-row-copy b{font-size:12px}\n  .wiw-form-row.employee-emphasis .wiw-form-row-copy b{font-size:15px;font-weight:850;color:#173448;white-space:normal;line-height:1.25;text-align:right}\n  .wiw-form-row.employee-emphasis{min-height:56px}\n  .wiw-choice-sheet>header b,.wiw-date-sheet>header b{font-size:16px}\n  .wiw-choice-sheet>div>button{min-height:50px;font-size:15px}\n  .wiw-bulk-edit-row b{font-size:14px}\n  .wiw-bulk-edit-row span{font-size:11px}\n  .wiw-toast{font-size:13px}\n}\n''')
+
+          # 6) Lightweight branded splash shown on every native app launch.
+          Path('frontend/src/AppLaunchSplash.tsx').write_text('''import { useEffect, useState } from 'react';\nimport './app-launch-splash.css';\n\nexport default function AppLaunchSplash() {\n  const [phase, setPhase] = useState<'show' | 'hide' | 'done'>('show');\n  const native = typeof window !== 'undefined' && Boolean((window as any).Capacitor?.isNativePlatform?.());\n\n  useEffect(() => {\n    if (!native) {\n      setPhase('done');\n      return;\n    }\n    const hide = window.setTimeout(() => setPhase('hide'), 1350);\n    const done = window.setTimeout(() => setPhase('done'), 1720);\n    return () => {\n      window.clearTimeout(hide);\n      window.clearTimeout(done);\n    };\n  }, [native]);\n\n  if (!native || phase === 'done') return null;\n  return (\n    <div className={`app-launch-splash ${phase === 'hide' ? 'is-hiding' : ''}`} aria-hidden=\"true\">\n      <div className=\"app-launch-glow app-launch-glow-one\" />\n      <div className=\"app-launch-glow app-launch-glow-two\" />\n      <div className=\"app-launch-logo-wrap\">\n        <span className=\"app-launch-ring ring-one\" />\n        <span className=\"app-launch-ring ring-two\" />\n        <img src=\"/5.png\" alt=\"\" />\n      </div>\n      <strong>A+ SOLUTION GMBH</strong>\n      <small>Alles organisiert. Alles im Griff.</small>\n      <div className=\"app-launch-progress\"><i /></div>\n    </div>\n  );\n}\n''')
+          Path('frontend/src/app-launch-splash.css').write_text('''.app-launch-splash{position:fixed;z-index:999999;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;background:radial-gradient(circle at 50% 34%,#174c7a 0,#0d3158 33%,#071e3b 70%,#06172e 100%);color:#fff;opacity:1;transition:opacity .34s ease,transform .34s ease}.app-launch-splash.is-hiding{opacity:0;transform:scale(1.018);pointer-events:none}.app-launch-logo-wrap{position:relative;width:min(54vw,220px);height:min(54vw,220px);display:grid;place-items:center;animation:aplus-launch-float 1.7s cubic-bezier(.2,.8,.2,1) both}.app-launch-logo-wrap img{position:relative;z-index:3;width:78%;max-height:78%;object-fit:contain;filter:drop-shadow(0 12px 28px rgba(0,0,0,.28));animation:aplus-logo-in .8s cubic-bezier(.16,.84,.34,1) both}.app-launch-ring{position:absolute;inset:14%;border:1px solid rgba(209,174,79,.44);border-radius:50%;animation:aplus-ring 1.7s ease-out infinite}.app-launch-ring.ring-two{inset:4%;opacity:.45;animation-delay:.3s}.app-launch-splash>strong{margin-top:16px;font-size:15px;letter-spacing:.17em;font-weight:750;color:#e7c96e}.app-launch-splash>small{margin-top:8px;font-size:12px;letter-spacing:.04em;color:rgba(255,255,255,.76)}.app-launch-progress{width:min(40vw,150px);height:2px;margin-top:28px;border-radius:99px;overflow:hidden;background:rgba(255,255,255,.13)}.app-launch-progress i{display:block;width:100%;height:100%;background:linear-gradient(90deg,transparent,#dfbe5d,#fff0b8);transform:translateX(-100%);animation:aplus-progress 1.35s ease-in-out forwards}.app-launch-glow{position:absolute;border-radius:50%;filter:blur(50px);opacity:.24}.app-launch-glow-one{width:220px;height:220px;top:14%;left:-100px;background:#1d75b7}.app-launch-glow-two{width:250px;height:250px;right:-140px;bottom:10%;background:#caa84f}@keyframes aplus-logo-in{from{opacity:0;transform:scale(.78) translateY(12px)}to{opacity:1;transform:scale(1) translateY(0)}}@keyframes aplus-ring{0%{opacity:.7;transform:scale(.78)}85%,100%{opacity:0;transform:scale(1.28)}}@keyframes aplus-progress{0%{transform:translateX(-100%)}100%{transform:translateX(0)}}@keyframes aplus-launch-float{0%,100%{transform:translateY(0)}55%{transform:translateY(-4px)}}@media(prefers-reduced-motion:reduce){.app-launch-logo-wrap,.app-launch-logo-wrap img,.app-launch-ring,.app-launch-progress i{animation:none!important}}\n''')
+
+          replace(
+              'frontend/src/main.tsx',
+              "import NativePushRegistration from './NativePushRegistration';\n",
+              "import NativePushRegistration from './NativePushRegistration';\nimport AppLaunchSplash from './AppLaunchSplash';\n",
+          )
+          replace(
+              'frontend/src/main.tsx',
+              "        <>\n          <App />\n",
+              "        <>\n          <AppLaunchSplash />\n          <App />\n",
+          )
+          PY
+
+      - name: Validate frontend build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Validate backend syntax
+        run: |
+          python -m compileall -q backend/core
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/core frontend/src
+          git commit -m "Improve admin push verification and shift mobile UX"
+          git push origin HEAD:fix/admin-push-shift-ux-20260830
