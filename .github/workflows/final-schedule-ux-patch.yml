@@ -23,7 +23,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Apply final follow-up
-        run: python scripts/final_schedule_ux_followup.py
+        run: |
+          sed -i 's/ = source(/ = read(/g' scripts/final_schedule_ux_followup.py
+          python scripts/final_schedule_ux_followup.py
       - name: Verify patch
         run: |
           git diff --check
