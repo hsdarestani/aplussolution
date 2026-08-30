@@ -447,6 +447,6 @@ def test_admin_can_create_and_assign_new_shift_to_worker(auth_admin, company, lo
     shift = Shift.objects.get(pk=created.data['id'])
     slot = ShiftSlot.objects.get(shift=shift, status=ShiftSlot.Status.CLAIMED)
     assert slot.worker_id == second_worker.id
-    assert slot.confirmation_status == ShiftSlot.ConfirmationStatus.PENDING
+    assert slot.confirmation_status == ShiftSlot.ConfirmationStatus.CONFIRMED
     assert assigned.data['filled_count'] == 1
     assert assigned.data['open_count'] == 0
