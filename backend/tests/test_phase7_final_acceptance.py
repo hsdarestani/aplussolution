@@ -46,8 +46,8 @@ def test_phase7_mitteilungen_are_one_way_and_recipient_scoped(
 
 
 @pytest.mark.django_db
-def test_phase7_confirmation_requires_an_explicit_worker_decision(
-    auth_admin, auth_worker, worker_user, company, location, position
+def test_phase7_direct_admin_assignment_needs_no_worker_decision(
+    auth_admin, worker_user, company, location, position
 ):
     starts_at = timezone.now() + timedelta(days=3)
     created = auth_admin.post('/api/shifts/', {
@@ -69,22 +69,8 @@ def test_phase7_confirmation_requires_an_explicit_worker_decision(
     }, format='json')
     assert assigned.status_code == 200, assigned.data
     assignee = assigned.data['assigned_workers'][0]
-    assert assignee['confirmation_status'] == 'pending'
-    assert assignee['confirmation_label'] == 'Ausstehend'
-
-    rejected = auth_worker.post(
-        f"/api/shifts/{created.data['id']}/confirmation/",
-        {'status': 'rejected'},
-        format='json',
-    )
-    assert rejected.status_code == 200, rejected.data
-    mine = next(item for item in rejected.data['assigned_workers'] if item['is_me'])
-    assert mine['confirmation_status'] == 'rejected'
-    assert mine['confirmation_label'] == 'Abgelehnt'
-
-    reset = auth_admin.post(f"/api/shifts/{created.data['id']}/confirmation/", {
-        'slot_id': assignee['slot_id'],
-        'status': 'pending',
-    }, format='json')
-    assert reset.status_code == 200, reset.data
-    assert reset.data['assigned_workers'][0]['confirmation_status'] == 'pending'
+    assert assignee['confirmation_status'] == 'confirmed'
+    assert assignee['confirmation_label'] == 'Bestätigt'
+    notice = Notification.objects.get(user=worker_user, kind__startswith='shift-admin-assigned-')
+    assert notice.title == 'Anna Becker übernimmt folgende Schicht:'
+    assert not Notification.objects.filter(user=worker_user, title='Bitte Schicht bestätigen').exists()
