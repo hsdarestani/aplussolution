@@ -8,6 +8,7 @@ urlpatterns = [
     path('premium/pickup-requests/<uuid:pk>/decide/', premium_extra_views.decide_pickup_request),
     path('premium/release-requests/', shift_release_views.pending_release_requests),
     path('premium/release-requests/<uuid:pk>/decide/', shift_release_views.decide_release_request),
+    path('employee/shifts/<uuid:shift_id>/release-candidates/', shift_release_views.release_candidates),
     path('employee/shifts/<uuid:shift_id>/release-request/', shift_release_views.request_release),
     path('premium/worker-locations/', premium_extra_views.worker_location_memberships),
     path('premium/schedule-timezone/', premium_extra_views.schedule_timezone),
