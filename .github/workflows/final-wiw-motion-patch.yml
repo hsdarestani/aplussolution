@@ -1,0 +1,41 @@
+name: Final WIW motion patch
+
+on:
+  push:
+    branches:
+      - feature/final-notification-copy-splash
+    paths:
+      - scripts/final_wiw_motion_patch.py
+      - .github/workflows/final-wiw-motion-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/final-notification-copy-splash
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply WIW motion and modal fix
+        run: python scripts/final_wiw_motion_patch.py
+      - name: Verify patch
+        run: |
+          git diff --check
+          python -m compileall backend/core backend/tests
+      - name: Commit source changes
+        run: |
+          if git diff --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend
+          git commit -m 'Polish WIW swipe and time wheel motion'
+          git push origin HEAD:feature/final-notification-copy-splash
