@@ -78,31 +78,37 @@ jobs:
               "                refresh_shift_state(shift)\n                if not was_published:\n                    notify_open_shift_available(shift, 'bulk-publish')\n\n                for worker in _assigned_workers(shift):\n",
           )
 
-          # Keep future production integration syncs paired with the proven APNs private key.
-          # Apple Key IDs are public identifiers, not secret material.
           integrations = Path('.github/workflows/configure-production-integrations.yml')
           text = integrations.read_text(encoding='utf-8')
           old = 'APNS_KEY_ID: $' + '{{ secrets.APNS_KEY_ID }}'
-          count = text.count(old)
-          if count != 2:
-              raise SystemExit(f'{integrations}: expected two APNS_KEY_ID secret mappings, found {count}')
+          if text.count(old) != 2:
+              raise SystemExit('Expected exactly two APNS_KEY_ID secret mappings')
           integrations.write_text(text.replace(old, "APNS_KEY_ID: '7ZH6Y6V744'"), encoding='utf-8')
+          PY
 
-          test_text = r'''from datetime import timedelta
+      - name: Add regression tests
+        run: |
+          cat > backend/tests/test_operational_push_wiring.py <<'PYTEST'
+          from datetime import timedelta
           from unittest.mock import patch
 
           import pytest
           from django.utils import timezone
 
-          from core.models import Shift
+          from core.models import Position, Shift
 
 
-          def _future_shift(company, location, position, status=Shift.Status.DRAFT):
+          @pytest.fixture
+          def push_position(db):
+              return Position.objects.create(name='Push Wiring Regression Position')
+
+
+          def _future_shift(company, location, push_position, status=Shift.Status.DRAFT):
               start = timezone.now() + timedelta(days=2)
               return Shift.objects.create(
                   client=company,
                   location=location,
-                  position=position,
+                  position=push_position,
                   starts_at=start,
                   ends_at=start + timedelta(hours=6),
                   status=status,
@@ -111,24 +117,23 @@ jobs:
 
 
           @pytest.mark.django_db
-          def test_direct_publish_notifies_eligible_open_shift_workers(auth_admin, company, location, position):
-              shift = _future_shift(company, location, position)
+          def test_direct_publish_notifies_open_shift_workers(auth_admin, company, location, push_position):
+              shift = _future_shift(company, location, push_position)
               with patch('core.shift_views.notify_open_shift_available') as notify:
                   response = auth_admin.post(f'/api/shifts/{shift.id}/publish/', {}, format='json')
               assert response.status_code == 200
               notify.assert_called_once()
-              called_shift, reason = notify.call_args.args
-              assert called_shift.id == shift.id
-              assert reason == 'publish'
+              assert notify.call_args.args[0].id == shift.id
+              assert notify.call_args.args[1] == 'publish'
 
 
           @pytest.mark.django_db
-          def test_create_as_published_notifies_eligible_open_shift_workers(auth_admin, company, location, position):
+          def test_create_published_shift_notifies_open_shift_workers(auth_admin, company, location, push_position):
               start = timezone.now() + timedelta(days=3)
               payload = {
                   'client': str(company.id),
                   'location': str(location.id),
-                  'position': str(position.id),
+                  'position': str(push_position.id),
                   'starts_at': start.isoformat(),
                   'ends_at': (start + timedelta(hours=5)).isoformat(),
                   'status': Shift.Status.PUBLISHED,
@@ -136,31 +141,25 @@ jobs:
               }
               with patch('core.shift_views.notify_open_shift_available') as notify:
                   response = auth_admin.post('/api/shifts/', payload, format='json')
-              assert response.status_code == 201
+              assert response.status_code == 201, response.data
               notify.assert_called_once()
               assert notify.call_args.args[1] == 'created'
 
 
           @pytest.mark.django_db
-          def test_bulk_publish_notifies_open_capacity_from_copied_drafts(auth_admin, company, location, position):
-              shift = _future_shift(company, location, position)
+          def test_bulk_publish_notifies_open_capacity(auth_admin, company, location, push_position):
+              shift = _future_shift(company, location, push_position)
               with patch('core.native_operations.notify_open_shift_available') as notify:
                   response = auth_admin.post(
                       '/api/operations/bulk-publish/',
                       {'ids': [str(shift.id)]},
                       format='json',
                   )
-              assert response.status_code == 200
+              assert response.status_code == 200, response.data
               notify.assert_called_once()
-              called_shift, reason = notify.call_args.args
-              assert called_shift.id == shift.id
-              assert reason == 'bulk-publish'
-          '''
-          Path('backend/tests/test_operational_push_wiring.py').write_text(
-              test_text.replace('\n          ', '\n').lstrip(),
-              encoding='utf-8',
-          )
-          PY
+              assert notify.call_args.args[0].id == shift.id
+              assert notify.call_args.args[1] == 'bulk-publish'
+          PYTEST
 
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt
