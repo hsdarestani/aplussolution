@@ -28,7 +28,9 @@ class ShiftReleaseRequest(TimestampedModel):
     """Worker request to give an already accepted shift back to the open pool.
 
     A claimed shift must never be released directly by the worker. The assignment
-    stays untouched until an admin/manager explicitly approves this request.
+    stays untouched until an admin/manager explicitly approves this request. A
+    worker may optionally nominate another active colleague as the preferred
+    replacement; the replacement is revalidated at approval time.
     """
 
     class Status(models.TextChoices):
@@ -39,6 +41,13 @@ class ShiftReleaseRequest(TimestampedModel):
 
     shift = models.ForeignKey(Shift, on_delete=models.CASCADE, related_name='release_requests')
     worker = models.ForeignKey(WorkerProfile, on_delete=models.CASCADE, related_name='shift_release_requests')
+    requested_worker = models.ForeignKey(
+        WorkerProfile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='requested_shift_releases',
+    )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     decided_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='release_requests_decided')
     decision_note = models.TextField(blank=True)
