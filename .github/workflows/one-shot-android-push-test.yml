@@ -1,0 +1,84 @@
+name: One-shot Android push test
+
+on:
+  push:
+    branches:
+      - ops/android-push-test-20260830
+    paths:
+      - '.github/workflows/one-shot-android-push-test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  send-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prepare SSH authentication
+        env:
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_PASSWORD"
+          cat > /tmp/aplus-askpass.sh <<'ASKPASS'
+          #!/bin/sh
+          printf '%s\n' "$DEPLOY_PASSWORD"
+          ASKPASS
+          chmod 700 /tmp/aplus-askpass.sh
+
+      - name: Send one Android push to most recently seen admin device
+        env:
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
+          HOST: ${{ secrets.HOST }}
+          SSH_ASKPASS: /tmp/aplus-askpass.sh
+          SSH_ASKPASS_REQUIRE: force
+          DISPLAY: :0
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$DEPLOY_PASSWORD"
+          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
+          setsid -w ssh -qT \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 \
+            root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell <<'PY'
+          import uuid
+          from types import SimpleNamespace
+          from core.push_models import PushDevice
+          from core.push_notifications import push_provider_status, _send_android
+
+          providers = push_provider_status()
+          print(f"android_provider_ready={providers.get('android', False)}")
+          if not providers.get('android', False):
+              raise SystemExit('Android FCM provider is not configured in production.')
+
+          devices = PushDevice.objects.filter(
+              active=True,
+              platform=PushDevice.Platform.ANDROID,
+              user__role='admin',
+          ).order_by('-last_seen_at')
+          print(f"active_admin_android_devices={devices.count()}")
+          device = devices.first()
+          if not device:
+              raise SystemExit('No active Android push device is registered for an admin account.')
+
+          notification = SimpleNamespace(
+              id=uuid.uuid4(),
+              kind='general',
+              action_url='',
+              title='A+ Solution Test',
+              body='Push-Test erfolgreich – Android-Benachrichtigungen funktionieren.',
+          )
+          ok, error, invalid = _send_android(device, notification)
+          print(f"selected_device_last_seen={device.last_seen_at.isoformat()}")
+          print(f"fcm_send_ok={ok}")
+          print(f"invalid_token={invalid}")
+          if not ok:
+              print(f"fcm_error={error[:500]}")
+              raise SystemExit(1)
+          PY
+          REMOTE
