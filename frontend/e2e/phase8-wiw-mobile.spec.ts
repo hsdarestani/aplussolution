@@ -88,3 +88,17 @@ test('final Dienstplan UX keeps requested client order, hotel presets, copy labe
   expect(css).toContain('.wiw-client-divider{height:3px;background:#111');
   expect(palette).toContain('fallbackHues');
 });
+
+
+test('WIW motion uses live quarter-hour ticks and strong swipe feedback', async()=>{
+  const schedule=read('src/WiwScheduleMobile.tsx');
+  const css=read('src/wiw-schedule-mobile.css');
+  const employee=read('src/WiwEmployeeScheduleMobile.tsx');
+  expect(schedule).toContain('window.requestAnimationFrame(emitTick)');
+  expect(schedule).toContain('navigator.vibrate?.(4)');
+  expect(schedule).toContain("classList.add('is-swipe-dragging')");
+  expect(css).toContain('scroll-snap-type:y mandatory');
+  expect(css).toContain('scroll-snap-stop:always');
+  expect(css).toContain('translate3d(24vw,0,0)');
+  expect(employee).toContain('</div>, document.body) : null}');
+});

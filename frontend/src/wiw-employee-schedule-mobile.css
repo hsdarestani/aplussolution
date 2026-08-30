@@ -203,7 +203,8 @@
 
   .wiw-release-backdrop {
     position: fixed;
-    z-index: 10020;
+    z-index: 30000;
+    isolation: isolate;
     inset: 0;
     display: flex;
     align-items: flex-end;
@@ -215,7 +216,7 @@
     width: 100%;
     max-height: min(86dvh, 760px);
     overflow: auto;
-    padding: 8px 18px calc(18px + env(safe-area-inset-bottom));
+    padding: 8px 18px calc(24px + env(safe-area-inset-bottom));
     border-radius: 22px 22px 0 0;
     background: #fff;
     color: #243446;

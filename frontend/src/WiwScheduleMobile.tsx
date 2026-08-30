@@ -177,34 +177,59 @@ function activeSlots(shift: any) {
 
 function WheelColumn({ items, value, onChange }: { items: Array<{ value: number; label: string }>; value: number; onChange: (value: number) => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  const timer = useRef<number | undefined>(undefined);
+  const settleTimer = useRef<number | undefined>(undefined);
+  const frame = useRef<number | undefined>(undefined);
   const userScrolling = useRef(false);
   const programmatic = useRef(false);
   const latestValue = useRef(value);
+  const lastTickIndex = useRef(-1);
 
   useEffect(() => { latestValue.current = value; }, [value]);
   useEffect(() => {
     if (!ref.current || userScrolling.current) return;
     const index = Math.max(0, items.findIndex((item) => item.value === value));
+    lastTickIndex.current = index;
     const target = index * WHEEL_ROW;
     if (Math.abs(ref.current.scrollTop - target) > 1) ref.current.scrollTop = target;
   }, [items, value]);
+  useEffect(() => () => {
+    window.clearTimeout(settleTimer.current);
+    if (frame.current) window.cancelAnimationFrame(frame.current);
+  }, []);
+
+  const indexAtScroll = () => {
+    if (!ref.current || !items.length) return 0;
+    return Math.max(0, Math.min(items.length - 1, Math.round(ref.current.scrollTop / WHEEL_ROW)));
+  };
+
+  const emitTick = () => {
+    frame.current = undefined;
+    const index = indexAtScroll();
+    if (index === lastTickIndex.current) return;
+    lastTickIndex.current = index;
+    const next = items[index]?.value;
+    if (next == null || next === latestValue.current) return;
+    latestValue.current = next;
+    onChange(next);
+    try { navigator.vibrate?.(4); } catch { /* haptic is best-effort */ }
+  };
 
   const settle = () => {
     if (!ref.current || !items.length) return;
-    const index = Math.max(0, Math.min(items.length - 1, Math.round(ref.current.scrollTop / WHEEL_ROW)));
+    const index = indexAtScroll();
     const target = index * WHEEL_ROW;
     const next = items[index].value;
-    programmatic.current = true;
-    ref.current.scrollTo({ top: target, behavior: 'smooth' });
+    lastTickIndex.current = index;
     if (next !== latestValue.current) {
       latestValue.current = next;
       onChange(next);
     }
+    programmatic.current = true;
+    ref.current.scrollTo({ top: target, behavior: 'smooth' });
     window.setTimeout(() => {
       programmatic.current = false;
       userScrolling.current = false;
-    }, 190);
+    }, 115);
   };
 
   return (
@@ -214,15 +239,21 @@ function WheelColumn({ items, value, onChange }: { items: Array<{ value: number;
       onScroll={() => {
         if (programmatic.current) return;
         userScrolling.current = true;
-        window.clearTimeout(timer.current);
-        timer.current = window.setTimeout(settle, 150);
+        if (!frame.current) frame.current = window.requestAnimationFrame(emitTick);
+        window.clearTimeout(settleTimer.current);
+        settleTimer.current = window.setTimeout(settle, 72);
       }}
     >
       {items.map((item) => (
         <button type="button" key={item.value} className={item.value === value ? 'active' : ''} onClick={() => {
+          const index = items.findIndex((candidate) => candidate.value === item.value);
           latestValue.current = item.value;
+          lastTickIndex.current = index;
           onChange(item.value);
-          ref.current?.scrollTo({ top: items.findIndex((candidate) => candidate.value === item.value) * WHEEL_ROW, behavior: 'smooth' });
+          try { navigator.vibrate?.(4); } catch { /* best-effort */ }
+          programmatic.current = true;
+          ref.current?.scrollTo({ top: index * WHEEL_ROW, behavior: 'smooth' });
+          window.setTimeout(() => { programmatic.current = false; userScrolling.current = false; }, 115);
         }}>{item.label}</button>
       ))}
     </div>
@@ -678,14 +709,38 @@ export default function WiwScheduleMobile() {
       <div
         key={weekStart}
         className={`wiw-week-scroll ${weekDirection ? `wiw-week-turn-${weekDirection}` : ''}`}
-        onTouchStart={(event) => { const touch = event.touches[0]; swipe.current = { x: touch.clientX, y: touch.clientY }; }}
+        onTouchStart={(event) => {
+          const touch = event.touches[0];
+          swipe.current = { x: touch.clientX, y: touch.clientY };
+          event.currentTarget.classList.add('is-swipe-dragging');
+        }}
+        onTouchMove={(event) => {
+          if (!swipe.current || !event.touches.length || tab === 'open') return;
+          const touch = event.touches[0];
+          const dx = touch.clientX - swipe.current.x;
+          const dy = touch.clientY - swipe.current.y;
+          if (Math.abs(dx) < Math.abs(dy) * 1.05) return;
+          const travel = Math.max(-118, Math.min(118, dx * .56));
+          const rotate = Math.max(-9, Math.min(9, dx / 18));
+          event.currentTarget.style.transform = `translate3d(${travel}px,0,0) rotateY(${rotate}deg) scale(.985)`;
+          event.currentTarget.style.opacity = String(Math.max(.58, 1 - Math.abs(dx) / 520));
+        }}
         onTouchEnd={(event) => {
+          event.currentTarget.classList.remove('is-swipe-dragging');
+          event.currentTarget.style.transform = '';
+          event.currentTarget.style.opacity = '';
           if (!swipe.current || !event.changedTouches.length) return;
           const touch = event.changedTouches[0];
           const dx = touch.clientX - swipe.current.x;
           const dy = touch.clientY - swipe.current.y;
           swipe.current = undefined;
-          if (tab !== 'open' && Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.2) changeWeek(dx < 0 ? 7 : -7);
+          if (tab !== 'open' && Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.15) changeWeek(dx < 0 ? 7 : -7);
+        }}
+        onTouchCancel={(event) => {
+          swipe.current = undefined;
+          event.currentTarget.classList.remove('is-swipe-dragging');
+          event.currentTarget.style.transform = '';
+          event.currentTarget.style.opacity = '';
         }}
       >
         {visibleDays.map((day) => {
