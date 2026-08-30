@@ -1,4 +1,4 @@
-name: One-shot iOS push test
+name: Wire remaining operational push events
 
 on:
   push:
@@ -8,104 +8,179 @@ on:
       - '.github/workflows/one-shot-ios-push-test.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  send-test:
+  patch-test-publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
     steps:
-      - name: Prepare SSH authentication
-        env:
-          DEPLOY_PASSWORD: ${{ secrets.PASS }}
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Patch missing OpenShift notification wiring
         run: |
           set -euo pipefail
-          test -n "$DEPLOY_PASSWORD"
-          cat > /tmp/aplus-askpass.sh <<'ASKPASS'
-          #!/bin/sh
-          printf '%s\n' "$DEPLOY_PASSWORD"
-          ASKPASS
-          chmod 700 /tmp/aplus-askpass.sh
-
-      - name: Persist correct APNs key id and send final test
-        env:
-          DEPLOY_PASSWORD: ${{ secrets.PASS }}
-          HOST: ${{ secrets.HOST }}
-          SSH_ASKPASS: /tmp/aplus-askpass.sh
-          SSH_ASKPASS_REQUIRE: force
-          DISPLAY: :0
-        run: |
-          set -euo pipefail
-          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
-          setsid -w ssh -qT \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=15 \
-            root@"$HOST" 'bash -s' <<'REMOTE'
-          set -euo pipefail
-          cd /opt/aplussolution
-
-          python3 - <<'PY'
+          python - <<'PY'
           from pathlib import Path
-          path = Path('.env')
-          lines = path.read_text(encoding='utf-8').splitlines()
-          key = 'APNS_KEY_ID'
-          value = '7ZH6Y6V744'
-          out = []
-          replaced = False
-          for line in lines:
-              if line.startswith(key + '='):
-                  out.append(f'{key}={value}')
-                  replaced = True
-              else:
-                  out.append(line)
-          if not replaced:
-              out.append(f'{key}={value}')
-          path.write_text('\n'.join(out) + '\n', encoding='utf-8')
-          PY
 
-          docker compose up -d --force-recreate backend
-          for i in $(seq 1 30); do
-            if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
-              break
-            fi
-            sleep 2
-          done
+          def replace_once(path: Path, old: str, new: str):
+              text = path.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one match, found {count}')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
 
-          docker compose exec -T backend python manage.py shell <<'PY'
-          import uuid
-          from types import SimpleNamespace
-          from core.push_models import PushDevice
-          import core.push_notifications as push
-
-          team_id, key_id, private_key, bundle_id, sandbox = push._apns_values()
-          print(f"production_key_id_ok={key_id == '7ZH6Y6V744'}")
-          print(f"production_team_id_ok={team_id == '884MVA2MD5'}")
-          print(f"production_bundle_id_ok={bundle_id == 'de.aplussolution.workforce'}")
-          print(f"production_sandbox={sandbox}")
-          print(f"production_private_key_present={bool(private_key)}")
-
-          device = PushDevice.objects.filter(
-              active=True,
-              platform=PushDevice.Platform.IOS,
-              user__role='admin',
-          ).order_by('-last_seen_at').first()
-          if not device:
-              raise SystemExit('No active iOS admin device')
-
-          notification = SimpleNamespace(
-              id=uuid.uuid4(),
-              kind='general',
-              action_url='',
-              title='A+ Solution Test',
-              body='iPhone Push funktioniert jetzt korrekt.',
+          shift_views = Path('backend/core/shift_views.py')
+          replace_once(
+              shift_views,
+              "            audit(self.request, 'staffing_demand.created', obj, {'required_count': obj.required_count})\n\n    def perform_update(self, serializer):\n        previous_confirmation_required = bool(serializer.instance.confirmation_required)\n",
+              "            audit(self.request, 'staffing_demand.created', obj, {'required_count': obj.required_count})\n        if obj.status == Shift.Status.PUBLISHED:\n            notify_open_shift_available(obj, 'created')\n\n    def perform_update(self, serializer):\n        previous_status = serializer.instance.status\n        previous_confirmation_required = bool(serializer.instance.confirmation_required)\n",
           )
-          ok, error, invalid = push._send_ios(device, notification)
-          print(f"final_apns_send_ok={ok}")
-          print(f"final_invalid_token={invalid}")
-          print(f"final_error={'none' if not error else error[:120]}")
-          raise SystemExit(0 if ok else 1)
-          PY
-          REMOTE
+          replace_once(
+              shift_views,
+              "            notify_claimed_workers_shift_changed(obj)\n\n    def perform_destroy(self, instance):\n",
+              "            notify_claimed_workers_shift_changed(obj)\n        if previous_status != Shift.Status.PUBLISHED and obj.status == Shift.Status.PUBLISHED:\n            notify_open_shift_available(obj, 'updated-published')\n\n    def perform_destroy(self, instance):\n",
+          )
+          replace_once(
+              shift_views,
+              "    def publish(self, request, pk=None):\n        shift = self.get_object()\n        with transaction.atomic():\n",
+              "    def publish(self, request, pk=None):\n        shift = self.get_object()\n        was_published = shift.status == Shift.Status.PUBLISHED\n        with transaction.atomic():\n",
+          )
+          replace_once(
+              shift_views,
+              "        audit(request, 'staffing_demand.published', shift)\n        return Response(self.get_serializer(self.base_queryset().get(pk=shift.pk)).data)\n",
+              "        audit(request, 'staffing_demand.published', shift)\n        if not was_published:\n            notify_open_shift_available(shift, 'publish')\n        return Response(self.get_serializer(self.base_queryset().get(pk=shift.pk)).data)\n",
+          )
 
-# persisted production APNs key id from Apple Developer portal: 2026-08-30
+          native_ops = Path('backend/core/native_operations.py')
+          replace_once(
+              native_ops,
+              "from .models import Notification, Shift\nfrom .services import audit\n",
+              "from .models import Notification, Shift\nfrom .operational_notifications import notify_open_shift_available\nfrom .services import audit\n",
+          )
+          replace_once(
+              native_ops,
+              "            for shift in shifts:\n                if shift.status in {Shift.Status.CANCELLED, Shift.Status.COMPLETED}:\n",
+              "            for shift in shifts:\n                was_published = shift.status == Shift.Status.PUBLISHED\n                if shift.status in {Shift.Status.CANCELLED, Shift.Status.COMPLETED}:\n",
+          )
+          replace_once(
+              native_ops,
+              "                refresh_shift_state(shift)\n\n                for worker in _assigned_workers(shift):\n",
+              "                refresh_shift_state(shift)\n                if not was_published:\n                    notify_open_shift_available(shift, 'bulk-publish')\n\n                for worker in _assigned_workers(shift):\n",
+          )
+
+          # Keep future production integration syncs paired with the already-proven
+          # APNs private key. Apple Key IDs are identifiers, not secrets.
+          integrations = Path('.github/workflows/configure-production-integrations.yml')
+          text = integrations.read_text(encoding='utf-8')
+          old = "APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}"
+          count = text.count(old)
+          if count != 2:
+              raise SystemExit(f'{integrations}: expected two APNS_KEY_ID secret mappings, found {count}')
+          integrations.write_text(
+              text.replace(old, "APNS_KEY_ID: '7ZH6Y6V744'"),
+              encoding='utf-8',
+          )
+
+          Path('backend/tests/test_operational_push_wiring.py').write_text(r'''from datetime import timedelta
+          from unittest.mock import patch
+
+          import pytest
+          from django.utils import timezone
+
+          from core.models import Shift
+
+
+          def _future_shift(company, location, position, status=Shift.Status.DRAFT):
+              start = timezone.now() + timedelta(days=2)
+              return Shift.objects.create(
+                  client=company,
+                  location=location,
+                  position=position,
+                  starts_at=start,
+                  ends_at=start + timedelta(hours=6),
+                  status=status,
+                  required_count=1,
+              )
+
+
+          @pytest.mark.django_db
+          def test_direct_publish_notifies_eligible_open_shift_workers(auth_admin, company, location, position):
+              shift = _future_shift(company, location, position)
+              with patch('core.shift_views.notify_open_shift_available') as notify:
+                  response = auth_admin.post(f'/api/shifts/{shift.id}/publish/', {}, format='json')
+              assert response.status_code == 200
+              notify.assert_called_once()
+              called_shift, reason = notify.call_args.args
+              assert called_shift.id == shift.id
+              assert reason == 'publish'
+
+
+          @pytest.mark.django_db
+          def test_create_as_published_notifies_eligible_open_shift_workers(auth_admin, company, location, position):
+              start = timezone.now() + timedelta(days=3)
+              payload = {
+                  'client': str(company.id),
+                  'location': str(location.id),
+                  'position': str(position.id),
+                  'starts_at': start.isoformat(),
+                  'ends_at': (start + timedelta(hours=5)).isoformat(),
+                  'status': Shift.Status.PUBLISHED,
+                  'required_count': 1,
+              }
+              with patch('core.shift_views.notify_open_shift_available') as notify:
+                  response = auth_admin.post('/api/shifts/', payload, format='json')
+              assert response.status_code == 201
+              notify.assert_called_once()
+              assert notify.call_args.args[1] == 'created'
+
+
+          @pytest.mark.django_db
+          def test_bulk_publish_notifies_open_capacity_from_copied_drafts(auth_admin, company, location, position):
+              shift = _future_shift(company, location, position)
+              with patch('core.native_operations.notify_open_shift_available') as notify:
+                  response = auth_admin.post(
+                      '/api/operations/bulk-publish/',
+                      {'ids': [str(shift.id)]},
+                      format='json',
+                  )
+              assert response.status_code == 200
+              notify.assert_called_once()
+              called_shift, reason = notify.call_args.args
+              assert called_shift.id == shift.id
+              assert reason == 'bulk-publish'
+          ''').replace('\n          ', '\n').lstrip(), encoding='utf-8')
+          PY
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Validate backend and notification wiring
+        env:
+          DEBUG: '1'
+          DJANGO_SECRET_KEY: ci-secret
+          ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+        run: |
+          set -euo pipefail
+          cd backend
+          python manage.py check
+          pytest -q tests/test_operational_push_wiring.py tests/test_push_notifications.py
+
+      - name: Commit and publish to main
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/core/shift_views.py backend/core/native_operations.py backend/tests/test_operational_push_wiring.py .github/workflows/configure-production-integrations.yml
+          git diff --cached --check
+          git commit -m 'Complete operational push event wiring'
+          git push origin HEAD:main
