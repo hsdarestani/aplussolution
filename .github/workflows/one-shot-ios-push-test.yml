@@ -1,4 +1,4 @@
-name: Preserve manual location customer links
+name: Dienstplan mobile UX package
 
 on:
   push:
@@ -6,44 +6,60 @@ on:
       - ops/android-push-test-20260830
     paths:
       - '.github/workflows/one-shot-ios-push-test.yml'
+      - '.github/scripts/schedule_ux_20260830.py'
 
 permissions:
   contents: write
 
 jobs:
-  fix:
+  patch-test-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout production source
+        uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
+          path: repo
 
-      - name: Patch WIW sync ownership rule
+      - name: Checkout patch tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ops/android-push-test-20260830
+          path: tools
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: repo/frontend/package-lock.json
+
+      - name: Apply UX package
         run: |
           set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('backend/core/wiw_sync.py')
-          text = path.read_text(encoding='utf-8')
-          old = "                obj.client = client\n                obj.name = name"
-          count = text.count(old)
-          if count != 2:
-              raise SystemExit(f'Expected 2 client overwrite sites, found {count}')
-          new = "                # Existing A+ location/customer links are locally managed.\n                # WIW may seed the client only when the Location is first created;\n                # subsequent syncs must never overwrite a manual assignment.\n                obj.name = name"
-          path.write_text(text.replace(old, new), encoding='utf-8')
-          PY
+          cd repo
+          python ../tools/.github/scripts/schedule_ux_20260830.py
           git diff --check
-          git diff -- backend/core/wiw_sync.py
+          git status --short
 
-      - name: Commit fix to main
+      - name: Build and test frontend
+        working-directory: repo/frontend
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          npm test -- --passWithNoTests
+
+      - name: Commit tested changes to main
+        working-directory: repo
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add backend/core/wiw_sync.py
-          git commit -m 'Preserve manual location client assignments during WIW sync'
+          git add frontend/src
+          git diff --cached --check
+          git commit -m 'Polish Dienstplan mobile shift workflow and client colors'
           git push origin HEAD:main
 
       - name: Prepare SSH authentication
@@ -58,7 +74,7 @@ jobs:
           ASKPASS
           chmod 700 /tmp/aplus-askpass.sh
 
-      - name: Apply production hotfix and repair Spenerhaus mapping
+      - name: Hot deploy frontend to production
         env:
           DEPLOY_PASSWORD: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
@@ -68,58 +84,35 @@ jobs:
         run: |
           set -euo pipefail
           export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
-          tar -czf /tmp/wiw-location-link-fix.tgz backend/core/wiw_sync.py
-          setsid -w scp -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 /tmp/wiw-location-link-fix.tgz root@"$HOST":/tmp/wiw-location-link-fix.tgz
-          setsid -w ssh -qT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 root@"$HOST" 'bash -s' <<'REMOTE'
+          tar -C repo -czf /tmp/dienstplan-ux.tgz frontend/src
+          setsid -w scp -q \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 \
+            /tmp/dienstplan-ux.tgz root@"$HOST":/tmp/dienstplan-ux.tgz
+          setsid -w ssh -qT \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=10 \
+            -o ServerAliveCountMax=6 \
+            root@"$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
-          tar -xzf /tmp/wiw-location-link-fix.tgz -C /opt/aplussolution
-          rm -f /tmp/wiw-location-link-fix.tgz
-          docker compose up -d --build backend celery celery-beat
-          ready=0
-          for i in $(seq 1 45); do
-            if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
-              ready=1
-              break
+          tar -xzf /tmp/dienstplan-ux.tgz -C /opt/aplussolution
+          rm -f /tmp/dienstplan-ux.tgz
+          grep -q "Kopie bearbeiten" frontend/src/WiwScheduleMobile.tsx
+          grep -q "setTab('all')" frontend/src/WiwScheduleMobile.tsx
+          grep -q "Offen !" frontend/src/ScheduleV2.tsx
+          grep -q "schedulePalette" frontend/src/ScheduleV2.tsx
+          docker compose up -d --build frontend
+          for i in $(seq 1 40); do
+            if curl -fsS --max-time 12 https://solution.smarbiz.sbs/ >/dev/null; then
+              echo 'Production frontend healthy'
+              exit 0
             fi
             sleep 2
           done
-          test "$ready" -eq 1
-          docker compose exec -T backend python manage.py check
-
-          docker compose exec -T backend python manage.py shell <<'PY'
-          from django.db import transaction
-          from core.models import ClientCompany, Location
-          from core.wiw_sync import WhenIWorkSynchronizer
-
-          target = ClientCompany.objects.filter(name__iexact='Hotel Spenerhaus', active=True).first()
-          legacy = ClientCompany.objects.filter(name__icontains='Spenerhaus').exclude(pk=getattr(target, 'pk', None)).first()
-          assert target, 'active Hotel Spenerhaus client missing'
-          locations = list(Location.objects.filter(active=True, client=legacy)) if legacy else []
-          repaired = []
-          for loc in locations:
-              if 'spener' in loc.name.lower():
-                  loc.client = target
-                  loc.save(update_fields=['client', 'updated_at'])
-                  repaired.append(str(loc.id))
-          linked = Location.objects.filter(active=True, client=target).order_by('name').first()
-          assert linked, 'Hotel Spenerhaus has no active linked location after repair'
-          print('REPAIRED_SPENER_LOCATION_IDS', repaired)
-          print('SPENER_ACTIVE_LINK', linked.id, linked.name, linked.client_id)
-
-          payload = dict(linked.wiw_payload or {})
-          if linked.wiw_site_id and payload:
-              original_client = linked.client_id
-              with transaction.atomic():
-                  WhenIWorkSynchronizer(client=object()).sync_sites([payload])
-                  linked.refresh_from_db()
-                  print('POST_SYNC_CLIENT', linked.client_id)
-                  assert linked.client_id == original_client, 'WIW sync overwrote manual client link'
-                  transaction.set_rollback(True)
-              linked.refresh_from_db()
-              assert linked.client_id == original_client
-              print('MANUAL_LINK_PRESERVED_AFTER_SYNC=True')
-          PY
-
-          curl -fsS --max-time 20 https://solution.smarbiz.sbs/health/ >/dev/null
+          echo 'Production frontend health check failed' >&2
+          exit 1
           REMOTE
