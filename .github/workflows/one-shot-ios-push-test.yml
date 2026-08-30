@@ -1,4 +1,4 @@
-name: Dienstplan mobile UX package
+name: Dienstplan follow-up UX
 
 on:
   push:
@@ -6,17 +6,17 @@ on:
       - ops/android-push-test-20260830
     paths:
       - '.github/workflows/one-shot-ios-push-test.yml'
-      - '.github/scripts/schedule_ux_20260830.py'
+      - '.github/scripts/schedule_followup_20260830.py'
 
 permissions:
   contents: write
 
 jobs:
-  patch-test-deploy:
+  patch-test:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Checkout production source
+      - name: Checkout current production source
         uses: actions/checkout@v4
         with:
           ref: main
@@ -33,15 +33,15 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Apply UX package
+      - name: Apply follow-up changes
         run: |
           set -euo pipefail
           cd repo
-          python ../tools/.github/scripts/schedule_ux_20260830.py
+          python ../tools/.github/scripts/schedule_followup_20260830.py
           git diff --check
           git status --short
 
-      - name: Build and test frontend
+      - name: Build and test web frontend
         working-directory: repo/frontend
         run: |
           set -euo pipefail
@@ -49,68 +49,13 @@ jobs:
           npm run build
           npm test -- --passWithNoTests
 
-      - name: Commit tested changes to main
+      - name: Commit tested web changes to main
         working-directory: repo
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add frontend/src
+          git add frontend/src/WiwScheduleMobile.tsx frontend/src/wiw-schedule-mobile.css
           git diff --cached --check
-          git commit -m 'Polish Dienstplan mobile shift workflow and client colors'
+          git commit -m 'Refine mobile Dienstplan grouping and week navigation'
           git push origin HEAD:main
-
-      - name: Prepare SSH authentication
-        env:
-          DEPLOY_PASSWORD: ${{ secrets.PASS }}
-        run: |
-          set -euo pipefail
-          test -n "$DEPLOY_PASSWORD"
-          cat > /tmp/aplus-askpass.sh <<'ASKPASS'
-          #!/bin/sh
-          printf '%s\n' "$DEPLOY_PASSWORD"
-          ASKPASS
-          chmod 700 /tmp/aplus-askpass.sh
-
-      - name: Hot deploy frontend to production
-        env:
-          DEPLOY_PASSWORD: ${{ secrets.PASS }}
-          HOST: ${{ secrets.HOST }}
-          SSH_ASKPASS: /tmp/aplus-askpass.sh
-          SSH_ASKPASS_REQUIRE: force
-          DISPLAY: :0
-        run: |
-          set -euo pipefail
-          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
-          tar -C repo -czf /tmp/dienstplan-ux.tgz frontend/src
-          setsid -w scp -q \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=15 \
-            /tmp/dienstplan-ux.tgz root@"$HOST":/tmp/dienstplan-ux.tgz
-          setsid -w ssh -qT \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=15 \
-            -o ServerAliveInterval=10 \
-            -o ServerAliveCountMax=6 \
-            root@"$HOST" 'bash -s' <<'REMOTE'
-          set -euo pipefail
-          cd /opt/aplussolution
-          tar -xzf /tmp/dienstplan-ux.tgz -C /opt/aplussolution
-          rm -f /tmp/dienstplan-ux.tgz
-          grep -q "Kopie bearbeiten" frontend/src/WiwScheduleMobile.tsx
-          grep -q "setTab('all')" frontend/src/WiwScheduleMobile.tsx
-          grep -q "Offen !" frontend/src/ScheduleV2.tsx
-          grep -q "schedulePalette" frontend/src/ScheduleV2.tsx
-          docker compose up -d --build frontend
-          for i in $(seq 1 40); do
-            if curl -fsS --max-time 12 https://solution.smarbiz.sbs/ >/dev/null; then
-              echo 'Production frontend healthy'
-              exit 0
-            fi
-            sleep 2
-          done
-          echo 'Production frontend health check failed' >&2
-          exit 1
-          REMOTE
