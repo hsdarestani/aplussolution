@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { IonAlert, IonIcon, IonLabel, IonSegment, IonSegmentButton } from '@ionic/react';
+import { IonIcon, IonLabel, IonSegment, IonSegmentButton } from '@ionic/react';
 import {
   briefcaseOutline,
   calendarOutline,
@@ -76,6 +76,10 @@ export default function WiwEmployeeScheduleMobile() {
   const [anchor, setAnchor] = useState(berlinToday());
   const [selected, setSelected] = useState<any>();
   const [releaseTarget, setReleaseTarget] = useState<any>();
+  const [releaseCandidates, setReleaseCandidates] = useState<any[]>([]);
+  const [requestedWorkerId, setRequestedWorkerId] = useState('');
+  const [releaseLoading, setReleaseLoading] = useState(false);
+  const [releaseError, setReleaseError] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const swipe = useRef<{ x: number; y: number } | undefined>(undefined);
@@ -193,16 +197,55 @@ export default function WiwEmployeeScheduleMobile() {
     }
   }
 
+  async function openReleaseChooser(shift: any) {
+    setReleaseTarget(shift);
+    setReleaseCandidates([]);
+    setRequestedWorkerId('');
+    setReleaseError('');
+    setReleaseLoading(true);
+    try {
+      const result: any = await api(`employee/shifts/${shift.id}/release-candidates/`);
+      setReleaseCandidates(result?.candidates || []);
+    } catch (error: any) {
+      setReleaseError(error?.message || 'Mitarbeiter konnten nicht geladen werden.');
+    } finally {
+      setReleaseLoading(false);
+    }
+  }
+
+  function closeReleaseChooser() {
+    if (busy) return;
+    setReleaseTarget(undefined);
+    setReleaseCandidates([]);
+    setRequestedWorkerId('');
+    setReleaseError('');
+  }
+
   async function requestRelease(shift: any) {
     setBusy(true);
+    setReleaseError('');
     try {
-      await api(`employee/shifts/${shift.id}/release-request/`, { method: 'POST', body: '{}' });
-      setMessage('Freigabe angefragt. Die Schicht bleibt dir zugewiesen, bis die Administration zustimmt.');
+      const result: any = await api(`employee/shifts/${shift.id}/release-request/`, {
+        method: 'POST',
+        body: JSON.stringify({ requested_worker: requestedWorkerId || null }),
+      });
+      const requestedName = result?.requested_worker;
+      setMessage(requestedName
+        ? `Freigabe angefragt. Gewünschte Übernahme: ${requestedName}. Die Schicht bleibt dir zugewiesen, bis die Administration zustimmt.`
+        : 'Freigabe angefragt. Die Schicht bleibt dir zugewiesen, bis die Administration zustimmt.');
       setReleaseTarget(undefined);
+      setReleaseCandidates([]);
+      setRequestedWorkerId('');
       await load();
-      setSelected((current: any) => current ? { ...current, my_release_request: { status: 'pending' } } : current);
+      setSelected((current: any) => current ? {
+        ...current,
+        my_release_request: {
+          status: 'pending',
+          requested_worker: requestedName || null,
+        },
+      } : current);
     } catch (error: any) {
-      setMessage(error?.message || 'Freigabe konnte nicht angefragt werden.');
+      setReleaseError(error?.message || 'Freigabe konnte nicht angefragt werden.');
     } finally {
       setBusy(false);
     }
@@ -231,9 +274,13 @@ export default function WiwEmployeeScheduleMobile() {
         {mode === 'open' ? (
           <button type="button" className="primary" disabled={busy} onClick={() => void claim(selected)}>{busy ? 'Bitte warten …' : 'Schicht übernehmen'}</button>
         ) : selected.my_release_request?.status === 'pending' ? (
-          <button type="button" disabled>Freigabe angefragt · wartet auf Administration</button>
+          <button type="button" disabled>
+            {selected.my_release_request?.requested_worker
+              ? `Freigabe angefragt · Wunsch: ${selected.my_release_request.requested_worker}`
+              : 'Freigabe angefragt · wartet auf Administration'}
+          </button>
         ) : (
-          <button type="button" className="release" disabled={busy} onClick={() => setReleaseTarget(selected)}>{busy ? 'Bitte warten …' : 'Freigeben'}</button>
+          <button type="button" className="release" disabled={busy} onClick={() => void openReleaseChooser(selected)}>{busy ? 'Bitte warten …' : 'Freigeben'}</button>
         )}
       </div>
       {message && <div className="wiw-employee-message">{message}</div>}
@@ -281,15 +328,43 @@ export default function WiwEmployeeScheduleMobile() {
 
   return createPortal(<>
     {screen}
-    <IonAlert
-      isOpen={Boolean(releaseTarget)}
-      header="Schicht freigeben?"
-      message="Nach Freigabe durch die Administration wird sie wieder für andere Mitarbeiter verfügbar. Bis dahin bleibt die Schicht dir fest zugewiesen."
-      onDidDismiss={() => setReleaseTarget(undefined)}
-      buttons={[
-        { text: 'Abbrechen', role: 'cancel' },
-        { text: 'Freigeben', handler: () => { if (releaseTarget) void requestRelease(releaseTarget); } },
-      ]}
-    />
+    {releaseTarget && <div className="wiw-release-backdrop" role="presentation" onClick={closeReleaseChooser}>
+      <section className="wiw-release-sheet" role="dialog" aria-modal="true" aria-labelledby="wiw-release-title" onClick={(event) => event.stopPropagation()}>
+        <div className="wiw-release-handle" />
+        <header>
+          <div>
+            <small>FREIGABE</small>
+            <h2 id="wiw-release-title">Schicht freigeben</h2>
+          </div>
+          <button type="button" aria-label="Schließen" disabled={busy} onClick={closeReleaseChooser}>×</button>
+        </header>
+        <div className="wiw-release-shift-summary">
+          <strong>{releaseTarget.position_name || 'Einsatz'}</strong>
+          <span>{fullDate(releaseTarget.starts_at)} · {time(releaseTarget.starts_at)}–{time(releaseTarget.ends_at)}</span>
+          <small>{releaseTarget.client_name || 'A+'} · {releaseTarget.location_name || 'Einsatzort'}</small>
+        </div>
+        <div className="wiw-release-copy">
+          <strong>Wer soll die Schicht übernehmen?</strong>
+          <p>Du kannst einen anderen verfügbaren Mitarbeiter vorschlagen. Die Schicht bleibt bis zur Genehmigung durch die Administration weiterhin dir zugewiesen.</p>
+        </div>
+        {releaseLoading ? <div className="wiw-release-loading">Verfügbare Mitarbeiter werden geprüft …</div> : <div className="wiw-release-candidates">
+          <button type="button" className={!requestedWorkerId ? 'selected' : ''} onClick={() => setRequestedWorkerId('')}>
+            <span><b>Ohne Wunsch</b><small>Nach Genehmigung als OpenShift freigeben</small></span>
+            <i>{!requestedWorkerId ? '✓' : ''}</i>
+          </button>
+          {releaseCandidates.map((candidate) => <button type="button" key={candidate.id} className={requestedWorkerId === candidate.id ? 'selected' : ''} onClick={() => setRequestedWorkerId(candidate.id)}>
+            <span><b>{candidate.name}</b><small>{candidate.employee_number || 'Mitarbeiter'}</small></span>
+            <i>{requestedWorkerId === candidate.id ? '✓' : ''}</i>
+          </button>)}
+          {!releaseCandidates.length && !releaseLoading && <div className="wiw-release-no-candidates">Für diese Schicht ist aktuell kein anderer Mitarbeiter nach den Planungsregeln verfügbar.</div>}
+        </div>}
+        <small className="wiw-release-rule-note">Es werden nur aktive Mitarbeiter angezeigt, die diese Schicht aktuell ohne Überschneidung oder Planungsregel-Verstoß übernehmen könnten. Bei der Genehmigung wird das erneut geprüft.</small>
+        {releaseError && <div className="wiw-release-error">{releaseError}</div>}
+        <div className="wiw-release-actions">
+          <button type="button" disabled={busy} onClick={closeReleaseChooser}>Abbrechen</button>
+          <button type="button" className="primary" disabled={busy || releaseLoading} onClick={() => void requestRelease(releaseTarget)}>{busy ? 'Wird gesendet …' : 'Freigabe anfragen'}</button>
+        </div>
+      </section>
+    </div>}
   </>, host);
 }

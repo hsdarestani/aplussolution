@@ -50,12 +50,18 @@ export default function ShiftReleaseApprovalPanel() {
     return () => { cancelled = true; };
   }, [active]);
 
-  async function decide(id: string, status: 'approved' | 'rejected') {
-    setBusy(id);
+  async function decide(row: any, status: 'approved' | 'rejected') {
+    setBusy(row.id);
     setMessage('');
     try {
-      await api(`premium/release-requests/${id}/decide/`, { method: 'POST', body: JSON.stringify({ status }) });
-      setMessage(status === 'approved' ? 'Schicht wurde freigegeben und wieder als OpenShift verfügbar.' : 'Freigabe wurde abgelehnt; die Schicht bleibt zugewiesen.');
+      const result: any = await api(`premium/release-requests/${row.id}/decide/`, { method: 'POST', body: JSON.stringify({ status }) });
+      if (status === 'approved') {
+        setMessage(result?.transferred_to
+          ? `Schicht wurde an ${row.requested_worker} übertragen.`
+          : 'Schicht wurde freigegeben und wieder als OpenShift verfügbar.');
+      } else {
+        setMessage('Freigabe wurde abgelehnt; die Schicht bleibt zugewiesen.');
+      }
       await load();
     } catch (error: any) {
       setMessage(error?.message || 'Entscheidung konnte nicht gespeichert werden.');
@@ -74,10 +80,14 @@ export default function ShiftReleaseApprovalPanel() {
         <b>{rows.length}</b>
       </header>
       {rows.map((row) => <div className="shift-release-approval-row" key={row.id}>
-        <div><strong>{row.worker}</strong><span>{fmt(row.starts_at)} · {row.position} · {row.location}</span></div>
+        <div>
+          <strong>{row.worker}</strong>
+          <span>{fmt(row.starts_at)} · {row.client || 'A+ Solution'} · {row.position} · {row.location}</span>
+          <span><b>Gewünschte Übernahme:</b> {row.requested_worker || 'Kein Mitarbeiter ausgewählt – als OpenShift freigeben'}</span>
+        </div>
         <div className="shift-release-approval-actions">
-          <button type="button" className="approve" disabled={busy === row.id} onClick={() => void decide(row.id, 'approved')}>Genehmigen</button>
-          <button type="button" disabled={busy === row.id} onClick={() => void decide(row.id, 'rejected')}>Ablehnen</button>
+          <button type="button" className="approve" disabled={busy === row.id} onClick={() => void decide(row, 'approved')}>Genehmigen</button>
+          <button type="button" disabled={busy === row.id} onClick={() => void decide(row, 'rejected')}>Ablehnen</button>
         </div>
       </div>)}
       {!rows.length && <div className="shift-release-empty">Keine offenen Schichtfreigaben.</div>}

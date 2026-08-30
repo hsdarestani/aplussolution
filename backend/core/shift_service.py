@@ -129,21 +129,58 @@ def claim_shift(shift_id, worker: WorkerProfile, bypass_approval=False) -> Shift
 
 
 @transaction.atomic
-def release_shift(shift_id, worker: WorkerProfile, admin_approved=False) -> ShiftSlot:
-    """Release a claimed slot only after an explicit admin/manager decision.
+def release_shift(
+    shift_id,
+    worker: WorkerProfile,
+    admin_approved=False,
+    replacement_worker: WorkerProfile | None = None,
+) -> ShiftSlot:
+    """Release or transfer a claimed slot after an explicit admin decision.
 
-    Keeping this guard in the service layer closes the old direct API path too:
-    a worker cannot bypass the release-request flow by calling /shifts/:id/release/.
+    A worker cannot bypass the release-request flow by calling /shifts/:id/release/.
+    When a replacement was nominated, the replacement is validated again at the
+    moment of approval and receives the exact same slot atomically. Otherwise the
+    slot returns to the OpenShift pool.
     """
     if not admin_approved:
         raise ValidationError('Eine übernommene Schicht kann nur nach Freigabe durch die Administration abgegeben werden.')
 
-    shift = Shift.objects.select_for_update().get(pk=shift_id)
+    shift = Shift.objects.select_for_update().select_related('location', 'position').get(pk=shift_id)
     slot = ShiftSlot.objects.select_for_update().filter(
         shift=shift, worker=worker, status=ShiftSlot.Status.CLAIMED
     ).first()
     if not slot:
         raise ValidationError('Für dich wurde keine aktive Belegung dieser Schicht gefunden.')
+
+    if replacement_worker:
+        if replacement_worker.pk == worker.pk:
+            raise ValidationError('Die Schicht kann nicht an denselben Mitarbeiter übertragen werden.')
+        replacement_worker = WorkerProfile.objects.select_related('user').get(pk=replacement_worker.pk)
+        if not replacement_worker.active or not replacement_worker.user.is_active:
+            raise ValidationError('Der gewünschte Mitarbeiter ist nicht mehr aktiv.')
+        ensure_worker_can_claim(replacement_worker, shift)
+
+        now = timezone.now()
+        slot.worker = replacement_worker
+        slot.status = ShiftSlot.Status.CLAIMED
+        slot.source = 'admin_approved_transfer'
+        slot.claimed_at = now
+        slot.released_at = None
+        slot.confirmation_status = (
+            ShiftSlot.ConfirmationStatus.PENDING
+            if shift.confirmation_required
+            else ShiftSlot.ConfirmationStatus.CONFIRMED
+        )
+        slot.confirmation_requested_at = now if shift.confirmation_required else None
+        slot.confirmation_decided_at = None if shift.confirmation_required else now
+        slot.save(update_fields=[
+            'worker', 'status', 'source', 'claimed_at', 'released_at',
+            'confirmation_status', 'confirmation_requested_at',
+            'confirmation_decided_at', 'updated_at',
+        ])
+        refresh_shift_state(shift)
+        return slot
+
     slot.worker = None
     slot.status = ShiftSlot.Status.OPEN
     slot.source = 'admin_approved_release'
