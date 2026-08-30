@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   send-test:
@@ -27,18 +28,21 @@ jobs:
           ASKPASS
           chmod 700 /tmp/aplus-askpass.sh
 
-      - name: Send one Android push to most recently seen admin device
+      - name: Send and record Android push test
         env:
           DEPLOY_PASSWORD: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
           SSH_ASKPASS: /tmp/aplus-askpass.sh
           SSH_ASKPASS_REQUIRE: force
           DISPLAY: :0
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           test -n "$HOST" && test -n "$DEPLOY_PASSWORD"
           export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
-          setsid -w ssh -qT \
+
+          set +e
+          OUTPUT=$(setsid -w ssh -qT \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=15 \
@@ -53,6 +57,7 @@ jobs:
 
           providers = push_provider_status()
           print(f"android_provider_ready={providers.get('android', False)}")
+          print(f"ios_provider_ready={providers.get('ios', False)}")
           if not providers.get('android', False):
               raise SystemExit('Android FCM provider is not configured in production.')
 
@@ -78,7 +83,22 @@ jobs:
           print(f"fcm_send_ok={ok}")
           print(f"invalid_token={invalid}")
           if not ok:
-              print(f"fcm_error={error[:500]}")
               raise SystemExit(1)
           PY
           REMOTE
+          )
+          STATUS=$?
+          set -e
+
+          printf '%s\n' "$OUTPUT"
+          SAFE=$(printf '%s\n' "$OUTPUT" | grep -E '^(android_provider_ready|ios_provider_ready|active_admin_android_devices|selected_device_last_seen|fcm_send_ok|invalid_token)=' || true)
+          if [ "$STATUS" -eq 0 ]; then
+            RESULT=success
+            STATE=closed
+          else
+            RESULT=failed
+            STATE=open
+          fi
+          BODY=$(printf 'Automated one-shot Android admin push test.\n\n- Result: **%s**\n- Commit: `%s`\n\n```text\n%s\n```\n\nNo device token or credential is included.' "$RESULT" "${{ github.sha }}" "$SAFE")
+          gh api --method PATCH "repos/${{ github.repository }}/issues/161" -f body="$BODY" -f state="$STATE" >/dev/null
+          exit "$STATUS"
