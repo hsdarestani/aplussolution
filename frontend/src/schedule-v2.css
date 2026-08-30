@@ -49,3 +49,11 @@
   .sv2-wiw-week-strip button span{font-weight:800!important}
   .sv2-wiw-week-strip button b{font-weight:850!important}
 }
+
+
+/* Final schedule UX: stronger customer grouping and compact hotel presets */
+.sv2-client-divider{grid-column:1/-1;height:2px;min-height:2px;margin:6px 0;background:#111;border-radius:99px;opacity:.9}
+.sv2-hotel-presets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.sv2-hotel-presets button{min-height:52px;padding:8px 6px;border:1px solid #cdd5df;border-radius:10px;background:#f8fafc;color:#173448;font-weight:800;cursor:pointer}
+.sv2-hotel-presets small{display:block;margin-top:3px;font-size:10px;font-weight:650;color:#607287}
+@media(max-width:700px){.sv2-hotel-presets{grid-template-columns:1fr}.sv2-client-divider{margin:5px 0}}

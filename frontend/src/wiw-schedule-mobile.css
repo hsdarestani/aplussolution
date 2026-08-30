@@ -195,3 +195,14 @@
   .wiw-bulk-edit-row span{font-size:11px}
   .wiw-toast{font-size:13px}
 }
+
+
+/* Final requested Dienstplan polish */
+@media(max-width:900px){
+  .wiw-open-alert{margin-left:16px!important}
+  .wiw-client-divider{height:3px;background:#111;margin:5px 0;box-shadow:0 1px 0 rgba(255,255,255,.8)}
+  .wiw-hotel-presets{padding:8px 10px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;background:#fff;border-bottom:1px solid #dedede}
+  .wiw-hotel-presets button{min-width:0;padding:7px 3px;border:1px solid #cfd7df;border-radius:8px;background:#f7f9fb;color:#173448;font:inherit}
+  .wiw-hotel-presets b{display:block;font-size:11px;font-weight:850;white-space:nowrap}
+  .wiw-hotel-presets small{display:block;margin-top:2px;font-size:8.5px;font-weight:650;color:#697b89;white-space:nowrap}
+}

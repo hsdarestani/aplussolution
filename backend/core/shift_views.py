@@ -84,8 +84,10 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                     obj.save(update_fields=['published_at', 'updated_at'])
             if previous_confirmation_required != bool(obj.confirmation_required):
                 now = timezone.now()
+                accepted_sources = {'admin_assignment', 'worker_claim', 'approved_pickup', 'admin_approved_transfer'}
                 for slot in claimed_slots(obj).select_related('worker__user'):
-                    if obj.confirmation_required:
+                    requires_confirmation = bool(obj.confirmation_required) and slot.source not in accepted_sources
+                    if requires_confirmation:
                         slot.confirmation_status = ShiftSlot.ConfirmationStatus.PENDING
                         slot.confirmation_requested_at = now
                         slot.confirmation_decided_at = None
@@ -206,6 +208,13 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                 return Response({'detail': str(detail)}, status=400)
 
             desired_ids = {str(worker.pk) for worker in desired_workers}
+            now = timezone.now()
+            for slot in current_slots:
+                if str(slot.worker_id) in desired_ids:
+                    slot.confirmation_status = ShiftSlot.ConfirmationStatus.CONFIRMED
+                    slot.confirmation_requested_at = None
+                    slot.confirmation_decided_at = now
+                    slot.save(update_fields=['confirmation_status', 'confirmation_requested_at', 'confirmation_decided_at', 'updated_at'])
             for slot in current_slots:
                 if str(slot.worker_id) not in desired_ids:
                     released_user = slot.worker.user if slot.worker_id else None
@@ -237,12 +246,9 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                 now = timezone.now()
                 slot.claimed_at = now
                 slot.released_at = None
-                slot.confirmation_status = (
-                    ShiftSlot.ConfirmationStatus.PENDING if shift.confirmation_required
-                    else ShiftSlot.ConfirmationStatus.CONFIRMED
-                )
-                slot.confirmation_requested_at = now if shift.confirmation_required else None
-                slot.confirmation_decided_at = None if shift.confirmation_required else now
+                slot.confirmation_status = ShiftSlot.ConfirmationStatus.CONFIRMED
+                slot.confirmation_requested_at = None
+                slot.confirmation_decided_at = now
                 slot.save(update_fields=['worker', 'status', 'source', 'claimed_at', 'released_at', 'confirmation_status', 'confirmation_requested_at', 'confirmation_decided_at', 'updated_at'])
                 newly_assigned.append((slot, worker))
 
@@ -263,7 +269,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                     user=worker.user,
                     kind=f'shift-admin-assigned-{slot.id}',
                     defaults={
-                        'title': 'Schicht bestätigen' if shift.confirmation_required else 'Neue Schicht zugeteilt',
+                        'title': 'Neue Schicht zugeteilt',
                         'body': f'{timezone.localtime(shift.starts_at):%d.%m.%Y %H:%M} – {shift.location.name}',
                         'action_url': '/schedule',
                     },

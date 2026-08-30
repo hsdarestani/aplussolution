@@ -23,15 +23,15 @@ export default function AppLaunchSplash() {
 
     const play = () => {
       setPhase('show');
-      hide = window.setTimeout(() => setPhase('hide'), 1350);
+      hide = window.setTimeout(() => setPhase('hide'), 2050);
       done = window.setTimeout(() => {
         if (preview) {
           setPhase('done');
-          replay = window.setTimeout(play, 520);
+          replay = window.setTimeout(play, 650);
         } else {
           setPhase('done');
         }
-      }, 1720);
+      }, 2440);
     };
 
     play();
