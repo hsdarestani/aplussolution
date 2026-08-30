@@ -41,7 +41,8 @@ def test_shift_reminder_uses_berlin_local_time(monkeypatch, worker_user, company
     assert tasks.send_shift_reminders() == 1
 
     notification = Notification.objects.get(user=worker_user, kind=f'shift-24h-{slot.id}')
-    assert '23.08.2026 09:00' in notification.body
+    assert notification.title == 'Erinnerung:'
+    assert notification.body == 'Dein Einsatz beginnt morgen um 09:00 Uhr'
     assert len(mail.outbox) == 1
     assert '23.08.2026 09:00' in mail.outbox[0].body
     assert '23.08.2026 07:00' not in mail.outbox[0].body
