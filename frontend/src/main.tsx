@@ -35,7 +35,7 @@ import CheckoutReviewEnhancer from './CheckoutReviewEnhancer';
 import DesktopAttendanceHistoryEnhancer from './DesktopAttendanceHistoryEnhancer';
 import MobileAttendanceClarityEnhancer from './MobileAttendanceClarityEnhancer';
 import NativePushRegistration from './NativePushRegistration';
-import AppLaunchSplash from './AppLaunchSplash';
+import AppLaunchSplash, { isSplashPreviewMode } from './AppLaunchSplash';
 import { installBerlinLocaleDefaults } from './berlinLocale';
 import { installOperationalFetchResilience } from './operationalFetchResilience';
 import { installSignaturePad } from './signaturePad';
@@ -54,11 +54,14 @@ installMobileAppearance();
 setupIonicReact({ mode: 'md' });
 
 function renderApp() {
+  const splashPreview = isSplashPreviewMode();
   const legalPage = legalPageFromPath(window.location.pathname);
 
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      {legalPage ? (
+      {splashPreview ? (
+        <AppLaunchSplash />
+      ) : legalPage ? (
         <StoreLegalPage page={legalPage} />
       ) : (
         <>
