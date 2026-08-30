@@ -64,6 +64,6 @@ export default function Settings({user}:{user:User}){
       <IonSelect fill="outline" label="Datentyp" labelPlacement="floating" value={csvType} onIonChange={e=>setCsvType(String(value(e)))}><IonSelectOption value="workers">Mitarbeiter</IonSelectOption><IonSelectOption value="clients">Kunden</IonSelectOption></IonSelect>
       <label className="file-field full"><span>CSV-Datei auswählen</span><input type="file" accept=".csv,text/csv" onChange={e=>setCsvFile(e.target.files?.[0])}/><b>{csvFile?.name||'Keine Datei ausgewählt'}</b></label>
     </div><div className="sv2-modal-actions"><IonButton fill="outline" onClick={()=>setModal('')}>Abbrechen</IonButton><IonButton disabled={busy||!csvFile} onClick={()=>void importCsv()}>Importieren</IonButton></div></div></IonModal>
-    <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={()=>setToast('')}/>
+    <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={()=>setToast('')}/>
   </>;
 }

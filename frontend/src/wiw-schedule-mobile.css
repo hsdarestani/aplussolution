@@ -116,3 +116,27 @@
 }
 
 @media(min-width:901px){.wiw-schedule-mobile{display:none!important}}
+
+/* A+ schedule UX polish 2026-08-30 */
+@media (max-width:900px){
+  .wiw-day-section>header{height:42px;padding:0 13px;gap:8px}
+  .wiw-day-section>header strong{font-size:15px;font-weight:800;letter-spacing:.01em;color:#444}
+  .wiw-day-section>header span{font-size:14px;font-weight:800;color:#555}
+  .wiw-week-strip small{font-size:10px;font-weight:750}
+  .wiw-week-strip b{font-size:13px;font-weight:750}
+
+  .wiw-shift-card{border-left-color:var(--wiw-card-accent,#0b4d6b);transition:background .16s ease,border-color .16s ease,box-shadow .16s ease}
+  .wiw-shift-card.is-open{background:var(--wiw-card-open-bg,#f6fafc);color:var(--wiw-card-open-text,#27343b);border-left-color:color-mix(in srgb,var(--wiw-card-accent,#0b4d6b) 62%,#fff);box-shadow:inset 0 1px 0 rgba(255,255,255,.65)}
+  .wiw-shift-card.is-filled{background:var(--wiw-card-filled-bg,#dceaf0);color:var(--wiw-card-filled-text,#fff);border-left-color:var(--wiw-card-accent,#0b4d6b);box-shadow:0 1px 3px rgba(22,34,45,.16)}
+  .wiw-shift-card.is-draft{background:#f7f7f7;border-left-color:#aeb4ba}
+  .wiw-shift-card.is-open .wiw-card-line.primary b,.wiw-shift-card.is-open .wiw-card-line.primary span{color:var(--wiw-card-open-text,#27343b)}
+  .wiw-shift-card.is-open .wiw-card-line.secondary>span,.wiw-shift-card.is-open .wiw-card-line.secondary small{color:var(--wiw-card-open-muted,#6b7680)}
+  .wiw-shift-card.is-filled .wiw-card-line.primary b,.wiw-shift-card.is-filled .wiw-card-line.primary span{color:var(--wiw-card-filled-text,#fff);font-weight:750}
+  .wiw-shift-card.is-filled .wiw-card-line.secondary>span,.wiw-shift-card.is-filled .wiw-card-line.secondary small{color:var(--wiw-card-filled-muted,#eef4f7)}
+  .wiw-open-alert{display:inline-grid;place-items:center;margin-left:6px;width:18px;height:18px;border-radius:50%;background:#f59e0b;color:#fff;font-size:12px;font-weight:900;vertical-align:1px;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+
+  .wiw-wheel-column{scroll-snap-type:y proximity;overscroll-behavior-y:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch}
+  .wiw-wheel-column button{scroll-snap-stop:normal}
+  .wiw-toast{animation:wiw-toast-in .12s ease-out}
+  @keyframes wiw-toast-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+}

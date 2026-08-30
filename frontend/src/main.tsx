@@ -37,6 +37,7 @@ import MobileAttendanceClarityEnhancer from './MobileAttendanceClarityEnhancer';
 import NativePushRegistration from './NativePushRegistration';
 import { installBerlinLocaleDefaults } from './berlinLocale';
 import { installOperationalFetchResilience } from './operationalFetchResilience';
+import { installSignaturePad } from './signaturePad';
 import { installLocationPicker } from './locationPicker';
 import { installMobileAppearance } from './mobileAppearance';
 import './brand-navy.css';
@@ -46,6 +47,7 @@ import './wiw-shift-save-hotfix.css';
 
 installBerlinLocaleDefaults();
 installOperationalFetchResilience();
+installSignaturePad();
 installLocationPicker();
 installMobileAppearance();
 setupIonicReact({ mode: 'md' });

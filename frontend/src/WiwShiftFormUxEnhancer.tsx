@@ -129,6 +129,12 @@ export default function WiwShiftFormUxEnhancer() {
   const [message, setMessage] = useState('');
 
   useEffect(() => {
+    if (!message) return;
+    const timer = window.setTimeout(() => setMessage(''), 1000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
+
+  useEffect(() => {
     const sync = () => {
       const currentForm = findForm();
       const isOpen = Boolean(currentForm);

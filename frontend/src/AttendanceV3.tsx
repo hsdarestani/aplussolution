@@ -326,7 +326,7 @@ export default function AttendanceV3({ user }: { user: User }) {
             },
           ]}
         />
-        <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={() => setToast('')} />
+        <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={() => setToast('')} />
       </>
     );
   }
@@ -411,7 +411,7 @@ export default function AttendanceV3({ user }: { user: User }) {
         </div>
       </IonModal>
 
-      <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={() => setToast('')} />
+      <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={() => setToast('')} />
     </>
   );
 }

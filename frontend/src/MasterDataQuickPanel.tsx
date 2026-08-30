@@ -268,6 +268,6 @@ export default function MasterDataQuickPanel() {
       </div>
     </IonModal>
 
-    <IonToast isOpen={!!toast} message={toast} duration={4000} onDidDismiss={() => setToast('')} />
+    <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={() => setToast('')} />
   </>;
 }

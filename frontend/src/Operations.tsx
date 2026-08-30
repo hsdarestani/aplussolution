@@ -642,7 +642,7 @@ export default function Operations({ user }: { user: User }) {
         </div>
       </Modal>
 
-      <IonToast isOpen={!!toast} message={toast} duration={4500} onDidDismiss={() => setToast('')} />
+      <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={() => setToast('')} />
     </>
   );
 }

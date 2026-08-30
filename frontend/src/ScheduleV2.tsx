@@ -4,6 +4,7 @@ import { addOutline, briefcaseOutline, businessOutline, checkmarkCircleOutline, 
 import { api, User } from './api';
 import { akteHref, openAkte, AkteKind } from './entityNavigation';
 import { enrichLocationPayload } from './locationPicker';
+import { isHotelClientName, isHotelPositionName, schedulePalette } from './scheduleClientPalette';
 import './schedule-v2.css';
 
 const unpack = (x:any):any[] => x?.results || x || [];
@@ -55,7 +56,7 @@ const shiftDateKey = (input:string) => {
 const keyLabel = (key:string,options:Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('de-DE',{timeZone:BERLIN_TIME_ZONE,...options}).format(keyToDate(key));
 const statusInfo = (x:any) => {
   const open=x.status==='published'&&Number(x.open_count||0)>0;
-  return {open,label:x.status==='draft'?'Entwurf':open?'Offen':'Voll',color:x.status==='draft'?'medium':open?'primary':'success'};
+  return {open,label:x.status==='draft'?'Entwurf':open?'Offen !':'Voll',color:x.status==='draft'?'medium':open?'primary':'success'};
 };
 const clientKey = (item:any) => String(item?.client || item?.client_name || 'ohne-kunde');
 const workerInitials = (worker:any) => String(worker?.name || worker?.employee_number || 'MA').trim().split(/\s+/).slice(0,2).map((part:string)=>part[0]||'').join('').toUpperCase() || 'MA';
@@ -110,11 +111,18 @@ export default function ScheduleV2({user}:{user:User}) {
   }
   useEffect(()=>{void load();},[tab]);
 
-  const clientHueMap=useMemo(()=>{
-    const keys=Array.from(new Set(rows.map(clientKey))).sort();
-    return new Map(keys.map((key,index)=>[key,(18+index*137.508)%360]));
-  },[rows]);
-  const clientStyle=(item:any)=>({'--sv2-client-hue':String(item?.color_hue ?? clientHueMap.get(clientKey(item)) ?? 215)} as React.CSSProperties);
+  const clientStyle=(item:any)=>{
+    const palette=schedulePalette(item?.client_name,item?.position_name,item?.color_hue);
+    const open=item?.status==='published'&&Number(item?.open_count||0)>0;
+    return {
+      '--sv2-client-accent':palette.accent,
+      '--sv2-client-bg':open?palette.openBackground:palette.filledBackground,
+      '--sv2-client-text':open?palette.openText:palette.filledText,
+      '--sv2-client-muted':open?palette.openMuted:palette.filledMuted,
+      '--sv2-client-chip':palette.legendBackground,
+      '--sv2-client-chip-text':palette.legendText,
+    } as React.CSSProperties;
+  };
 
   const visible=useMemo(()=>rows.filter((x:any)=>{
     if(!matchesServiceFilter(x,serviceFilter)) return false;
@@ -276,9 +284,9 @@ export default function ScheduleV2({user}:{user:User}) {
     {isManager(user)&&<button type="button" className="sv2-wiw-fab" aria-label="Schicht anlegen" onClick={create}>+</button>}
 
     <IonModal isOpen={modal} onDidDismiss={()=>setModal(false)}><div className="sv2-modal"><div className="sv2-modal-head"><h2>{editing?'Personalbedarf bearbeiten':'Personalbedarf anlegen'}</h2><IonButton fill="clear" onClick={()=>setModal(false)}>Schließen</IonButton></div><div className="sv2-form">
-      <IonSelect fill="outline" label="Kunde *" labelPlacement="floating" value={form.client} onIonChange={e=>{const id=val(e);const selected=clients.find(x=>x.id===id);const groups=scheduleGroupsForClient(selected?.name);setForm({...form,client:id,location:undefined,schedule_groups:groups.length?groups:form.schedule_groups||[]});}}>{clients.map(x=><IonSelectOption key={x.id} value={x.id}>{x.name}</IonSelectOption>)}</IonSelect>
+      <IonSelect fill="outline" label="Kunde *" labelPlacement="floating" value={form.client} onIonChange={e=>{const id=val(e);const selected=clients.find(x=>x.id===id);const groups=scheduleGroupsForClient(selected?.name);const currentPosition=positions.find(x=>x.id===form.position);setForm({...form,client:id,location:undefined,position:isHotelClientName(selected?.name)&&!isHotelPositionName(currentPosition?.name)?undefined:form.position,schedule_groups:groups.length?groups:form.schedule_groups||[]});}}>{clients.map(x=><IonSelectOption key={x.id} value={x.id}>{x.name}</IonSelectOption>)}</IonSelect>
       <div className="sv2-location-field"><IonSelect fill="outline" label="Einsatzort *" labelPlacement="floating" value={form.location} disabled={!form.client} onIonChange={e=>setForm({...form,location:val(e)})}>{locations.filter(x=>form.client&&x.client===form.client).map(x=><IonSelectOption key={x.id} value={x.id}>{x.name}</IonSelectOption>)}</IonSelect><IonButton fill="outline" disabled={!form.client} onClick={()=>setLocationOpen(true)}><IonIcon slot="start" icon={addOutline}/>Neu</IonButton></div>
-      <IonSelect fill="outline" label="Position *" labelPlacement="floating" value={form.position} onIonChange={e=>{const id=val(e);const position=positions.find(x=>x.id===id);const client=clients.find(x=>x.id===form.client);const clientGroups=scheduleGroupsForClient(client?.name);setForm({...form,position:id,schedule_groups:clientGroups.length?clientGroups:scheduleGroupsForPosition(position?.name)});}}>{positions.map(x=><IonSelectOption key={x.id} value={x.id}>{x.name}</IonSelectOption>)}</IonSelect>
+      <IonSelect fill="outline" label="Position *" labelPlacement="floating" value={form.position} onIonChange={e=>{const id=val(e);const position=positions.find(x=>x.id===id);const client=clients.find(x=>x.id===form.client);const clientGroups=scheduleGroupsForClient(client?.name);const groups=isHotelClientName(client?.name)?scheduleGroupsForPosition(position?.name):(clientGroups.length?clientGroups:scheduleGroupsForPosition(position?.name));setForm({...form,position:id,schedule_groups:groups});}}>{positions.filter(x=>!isHotelClientName(clients.find(client=>client.id===form.client)?.name)||isHotelPositionName(x.name)).map(x=><IonSelectOption key={x.id} value={x.id}>{x.name}</IonSelectOption>)}</IonSelect>
       <FriendlyDateTime label="Beginn" value={form.starts_at} onChange={next=>setShiftDateTime('starts_at',next)}/><FriendlyDateTime label="Ende" value={form.ends_at} onChange={next=>setShiftDateTime('ends_at',next)}/>
       <div className="sv2-staff-stepper" data-testid="required-count-stepper"><span>Benötigte Mitarbeiter *</span><div><button type="button" aria-label="Mitarbeiter reduzieren" disabled={Number(form.required_count||1)<=Math.max(1,(form.workers||[]).length)} onClick={()=>setForm({...form,required_count:Math.max((form.workers||[]).length,Number(form.required_count||1)-1,1)})}>−</button><strong>{form.required_count||1}</strong><button type="button" aria-label="Mitarbeiter erhöhen" onClick={()=>setForm({...form,required_count:Number(form.required_count||1)+1})}>+</button></div></div><div className="sv2-auto-break"><span>Pause automatisch</span><strong>{automaticBreakMinutes(form.starts_at,form.ends_at)} Min.</strong><small>&lt; 6h: 0 · ab 6h: 30 · ab 9h: 45 · ab 11h: 60</small></div>
       <IonSelect className="full" multiple interface="alert" fill="outline" label="Mitarbeiter direkt zuweisen (optional)" labelPlacement="floating" value={form.workers||[]} onIonChange={e=>{const selected=Array.isArray(val(e))?val(e):[];const limit=Math.max(1,Number(form.required_count||1));if(selected.length>limit)setToast(`Maximal ${limit} Mitarbeiter auswählbar.`);setForm({...form,workers:selected.slice(0,limit)});}}>{workers.map(worker=><IonSelectOption key={worker.id} value={worker.id}>{workerLabel(worker)} · {worker.employee_number}</IonSelectOption>)}</IonSelect>
@@ -295,6 +303,6 @@ export default function ScheduleV2({user}:{user:User}) {
       {parsedOrder&&<div className="full sv2-assignment-note"><b>{parsedOrder.request_id||'Anfrage erkannt'}</b><p>Bitte die erkannten Schichten kurz prüfen:</p>{parsedOrder.shifts?.map((item:any,index:number)=><div key={index}>{item.date} · {item.start_time}–{item.end_time} · {item.count}× {item.role} · {item.site_text||item.location_text}</div>)}</div>}
     </div><div className="sv2-modal-actions"><IonButton fill="outline" onClick={()=>setAiOpen(false)}>Abbrechen</IonButton><IonButton disabled={busy} onClick={()=>void(parsedOrder?approveAiOrder():parseAiOrder())}>{parsedOrder?'Prüfen & OpenShifts erstellen':'Mit AI analysieren'}</IonButton></div></div></IonModal>
     <IonAlert isOpen={!!releaseTarget} onDidDismiss={()=>setReleaseTarget(undefined)} header="Schicht freigeben?" message={releaseTarget?`${releaseTarget.position_name || 'Diese Schicht'} wird wieder für andere Mitarbeiter verfügbar.`:''} buttons={[{text:'Abbrechen',role:'cancel'},{text:'Freigeben',role:'destructive',handler:confirmRelease}]}/>
-    <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={()=>setToast('')}/>
+    <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={()=>setToast('')}/>
   </div>;
 }

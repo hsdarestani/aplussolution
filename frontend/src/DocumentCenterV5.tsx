@@ -420,7 +420,7 @@ export default function DocumentCenterV5({ onChanged }: { onChanged?: () => void
           },
         ]}
       />
-      <IonToast isOpen={!!toast} message={toast} duration={4200} onDidDismiss={() => setToast('')} />
+      <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={() => setToast('')} />
     </section>
   );
 }

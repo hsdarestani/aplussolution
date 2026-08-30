@@ -120,6 +120,6 @@ export default function PortalAccessPanel() {
         { text: 'Einladungen erstellen', handler: () => { setConfirmBulk(false); void bulk(); } },
       ]}
     />
-    <IonToast isOpen={!!toast} message={toast} duration={4500} onDidDismiss={() => setToast('')} />
+    <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={() => setToast('')} />
   </>;
 }

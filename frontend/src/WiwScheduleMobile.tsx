@@ -19,6 +19,7 @@ import {
   trashOutline,
 } from 'ionicons/icons';
 import { api } from './api';
+import { isHotelClientName, isHotelPositionName, schedulePalette } from './scheduleClientPalette';
 import './wiw-schedule-mobile.css';
 
 type TabKey = 'all' | 'open' | 'filled' | 'draft';
@@ -168,28 +169,52 @@ function activeSlots(shift: any) {
 function WheelColumn({ items, value, onChange }: { items: Array<{ value: number; label: string }>; value: number; onChange: (value: number) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const timer = useRef<number | undefined>(undefined);
+  const userScrolling = useRef(false);
+  const programmatic = useRef(false);
+  const latestValue = useRef(value);
+
+  useEffect(() => { latestValue.current = value; }, [value]);
   useEffect(() => {
+    if (!ref.current || userScrolling.current) return;
     const index = Math.max(0, items.findIndex((item) => item.value === value));
-    if (ref.current) ref.current.scrollTop = index * WHEEL_ROW;
+    const target = index * WHEEL_ROW;
+    if (Math.abs(ref.current.scrollTop - target) > 1) ref.current.scrollTop = target;
   }, [items, value]);
+
   const settle = () => {
-    if (!ref.current) return;
+    if (!ref.current || !items.length) return;
     const index = Math.max(0, Math.min(items.length - 1, Math.round(ref.current.scrollTop / WHEEL_ROW)));
-    ref.current.scrollTo({ top: index * WHEEL_ROW, behavior: 'smooth' });
-    onChange(items[index].value);
+    const target = index * WHEEL_ROW;
+    const next = items[index].value;
+    programmatic.current = true;
+    ref.current.scrollTo({ top: target, behavior: 'smooth' });
+    if (next !== latestValue.current) {
+      latestValue.current = next;
+      onChange(next);
+    }
+    window.setTimeout(() => {
+      programmatic.current = false;
+      userScrolling.current = false;
+    }, 190);
   };
+
   return (
     <div
       ref={ref}
       className="wiw-wheel-column"
       onScroll={() => {
+        if (programmatic.current) return;
+        userScrolling.current = true;
         window.clearTimeout(timer.current);
-        timer.current = window.setTimeout(settle, 80);
+        timer.current = window.setTimeout(settle, 150);
       }}
-      onPointerUp={settle}
     >
       {items.map((item) => (
-        <button type="button" key={item.value} className={item.value === value ? 'active' : ''} onClick={() => onChange(item.value)}>{item.label}</button>
+        <button type="button" key={item.value} className={item.value === value ? 'active' : ''} onClick={() => {
+          latestValue.current = item.value;
+          onChange(item.value);
+          ref.current?.scrollTo({ top: items.findIndex((candidate) => candidate.value === item.value) * WHEEL_ROW, behavior: 'smooth' });
+        }}>{item.label}</button>
       ))}
     </div>
   );
@@ -288,12 +313,19 @@ export default function WiwScheduleMobile() {
   const [toast, setToast] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<EditingCard>();
+  const [copying, setCopying] = useState(false);
   const [form, setForm] = useState<FormState>(() => emptyForm(berlinToday()));
   const [timeOpen, setTimeOpen] = useState(false);
   const [dateOpen, setDateOpen] = useState(false);
   const [sheet, setSheet] = useState<'client' | 'position' | 'location' | 'workers' | 'groups' | 'color' | ''>('');
   const [extrasOpen, setExtrasOpen] = useState(false);
   const swipe = useRef<{ x: number; y: number } | undefined>(undefined);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(''), 1000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -377,12 +409,22 @@ export default function WiwScheduleMobile() {
     worker: slot.worker || undefined,
     isOpen: Boolean(slot.is_open || (slot.status === 'open' && !slot.worker)),
   }))), [rows]);
-  const clientHueMap = useMemo(() => {
-    const keys = Array.from(new Set(rows.map(clientKey))).sort();
-    return new Map(keys.map((key, index) => [key, (18 + index * 137.508) % 360]));
-  }, [rows]);
-  const effectiveHue = (shift: any) => shift?.color_hue == null ? (clientHueMap.get(clientKey(shift)) ?? 215) : Number(shift.color_hue);
-  const formAutoHue = clientHueMap.get(form.client || 'ohne-kunde') ?? 215;
+  const shiftCardStyle = (shift: any) => {
+    const palette = schedulePalette(shift?.client_name, shift?.position_name, shift?.color_hue);
+    return {
+      '--wiw-card-accent': palette.accent,
+      '--wiw-card-open-bg': palette.openBackground,
+      '--wiw-card-filled-bg': palette.filledBackground,
+      '--wiw-card-open-text': palette.openText,
+      '--wiw-card-filled-text': palette.filledText,
+      '--wiw-card-open-muted': palette.openMuted,
+      '--wiw-card-filled-muted': palette.filledMuted,
+    } as React.CSSProperties;
+  };
+  const selectedClientName = clients.find((item: any) => String(item.id) === form.client)?.name || '';
+  const selectedPositionName = positions.find((item: any) => String(item.id) === form.position)?.name || '';
+  const formPalette = schedulePalette(selectedClientName, selectedPositionName, form.color_hue);
+  const formAutoHue = 215;
   const liveLocalShiftIds = useMemo(() => new Set(rows.filter((row: any) => row?.source === 'wiw-live' && row?.local_shift_id).map((row: any) => String(row.local_shift_id))), [rows]);
   const visibleCards = useMemo(() => cards.filter((card) => {
     const shiftDay = dateKeyFromIso(card.shift.starts_at);
@@ -418,16 +460,22 @@ export default function WiwScheduleMobile() {
     return sum + Math.max(0, gross - Number(card.shift.break_minutes || 0) / 60);
   }, 0), [visibleCards]);
 
-  const positionChoices = useMemo<Choice[]>(() => POSITION_ORDER.flatMap((definition) => {
-    const match = positions.find((item: any) => definition.aliases.includes(normalize(item.name)));
-    return match ? [{ value: String(match.id), label: definition.label }] : [];
-  }), [positions]);
+  const positionChoices = useMemo<Choice[]>(() => {
+    const hotelOnly = isHotelClientName(clients.find((item: any) => String(item.id) === form.client)?.name);
+    return POSITION_ORDER.flatMap((definition) => {
+      const match = positions.find((item: any) => definition.aliases.includes(normalize(item.name)));
+      if (!match) return [];
+      if (hotelOnly && !isHotelPositionName(match.name)) return [];
+      return [{ value: String(match.id), label: definition.label }];
+    });
+  }, [positions, clients, form.client]);
   const clientChoices = useMemo<Choice[]>(() => clients.map((item: any) => ({ value: String(item.id), label: item.name })), [clients]);
   const locationChoices = useMemo<Choice[]>(() => locations.filter((item: any) => !form.client || String(item.client) === form.client).map((item: any) => ({ value: String(item.id), label: item.name })), [locations, form.client]);
   const workerChoices = useMemo<Choice[]>(() => workers.map((item: any) => ({ value: String(item.id), label: item.user_detail?.name || item.user_detail?.email || item.employee_number || 'Mitarbeiter' })), [workers]);
 
   function openCreate(date = anchor) {
     setEditing(undefined);
+    setCopying(false);
     setForm(emptyForm(date));
     setTimeOpen(false);
     setExtrasOpen(false);
@@ -435,6 +483,7 @@ export default function WiwScheduleMobile() {
   }
 
   function openEdit(card: CardRow) {
+    setCopying(false);
     const startDate = dateKeyFromIso(card.shift.starts_at);
     const endDate = dateKeyFromIso(card.shift.ends_at);
     const startMinute = timeMinuteFromIso(card.shift.starts_at);
@@ -487,49 +536,22 @@ export default function WiwScheduleMobile() {
     }
   }
 
-  async function copyEditingAsOpenShift() {
-    if (!editing || busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null) return;
-    setBusy(true);
-    let createdId = '';
-    try {
-      const payload: any = {
-        client: form.client,
-        location: form.location,
-        position: form.position,
-        starts_at: localDateTime(form.date, form.startMinute),
-        ends_at: localDateTime(form.date, form.endAbsolute),
-        break_minutes: automaticBreak(form.startMinute, form.endAbsolute),
-        notes: form.notes || '',
-        confirmation_required: form.confirmation_required,
-        schedule_groups: form.schedule_groups,
-        color_hue: form.color_hue,
-        required_count: 1,
-        status: 'published',
-      };
-      const created: any = await api('shifts/', { method: 'POST', body: JSON.stringify(payload) });
-      createdId = String(created.id || '');
-      await api(`shifts/${created.id}/assign/`, {
-        method: 'POST',
-        body: JSON.stringify({ workers: [], publish_remaining: true }),
-      });
-      createdId = '';
-      setFormOpen(false);
-      setEditing(undefined);
-      setTab('open');
-      setToast('Schicht wurde ohne Mitarbeiter als OpenShift kopiert.');
-      window.dispatchEvent(new Event('aplus:dashboard-invalidated'));
-      await load();
-    } catch (error: any) {
-      if (createdId) {
-        try { await api(`shifts/${createdId}/`, { method: 'DELETE' }); } catch {}
-      }
-      setToast(error.message || 'Schicht konnte nicht kopiert werden.');
-    } finally {
-      setBusy(false);
-    }
+  function prepareCopyAsOpenShift() {
+    if (!editing || busy) return;
+    setEditing(undefined);
+    setCopying(true);
+    setForm((current) => ({
+      ...current,
+      required_count: 1,
+      publish_now: true,
+      workers: [],
+      apply_all: false,
+    }));
+    setToast('Kopie bereit. Änderungen vornehmen und dann sichern.');
   }
 
   async function save() {
+    const savingCopy = copying;
     if (!form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null) {
       setToast('Bitte Kunde, Zeit, Position und Jobstandort auswählen.');
       return;
@@ -571,6 +593,8 @@ export default function WiwScheduleMobile() {
         });
         setToast(`${payload.required_count} separate Schichtkarte${payload.required_count === 1 ? '' : 'n'} erstellt.`);
       }
+      if (savingCopy) setTab('all');
+      setCopying(false);
       setFormOpen(false);
       window.dispatchEvent(new Event('aplus:dashboard-invalidated'));
       await load();
@@ -620,8 +644,8 @@ export default function WiwScheduleMobile() {
           const dayCards = byDay[day] || [];
           return <section className="wiw-day-section" id={`wiw-day-${day}`} key={day}>
             <header><strong>{header.weekday}</strong><span>{header.date}</span><em>{dayCards.length}</em></header>
-            {dayCards.map((card) => <button type="button" className="wiw-shift-card" style={{ '--wiw-shift-hue': String(effectiveHue(card.shift)) } as React.CSSProperties} key={card.key} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
-              <div className="wiw-card-line primary"><b>{card.worker?.name || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}</b><span>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</span></div>
+            {dayCards.map((card) => <button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'}`} style={shiftCardStyle(card.shift)} key={card.key} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
+              <div className="wiw-card-line primary"><b>{card.worker?.name || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}{card.isOpen && card.shift.status !== 'draft' ? <span className="wiw-open-alert">!</span> : null}</b><span>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</span></div>
               <div className="wiw-card-line secondary"><span className={card.isOpen ? 'open' : ''}>{card.shift.position_name || 'Schicht'}</span><small>{card.shift.client_name || ''}{card.shift.location_name ? ` · ${card.shift.location_name}` : ''}</small></div>
             </button>)}
             {tab !== 'open' && !dayCards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
@@ -634,7 +658,7 @@ export default function WiwScheduleMobile() {
       <button type="button" className="wiw-create-fab" aria-label="Schicht erstellen" onClick={() => openCreate(anchor)}>+</button>
 
       {formOpen ? <div className="wiw-shift-form-screen" data-testid="wiw-shift-form">
-        <header className="wiw-form-topbar"><button type="button" onClick={() => setFormOpen(false)}>Abbrechen</button><strong>{editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null} onClick={() => void save()}>Sichern</button></header>
+        <header className="wiw-form-topbar"><button type="button" onClick={() => setFormOpen(false)}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null} onClick={() => void save()}>Sichern</button></header>
         <div className="wiw-form-scroll">
           <Row icon={calendarOutline} label={formatDateRow(form.date)} onClick={() => setDateOpen(true)} />
           <div className="wiw-time-row-wrap">
@@ -665,20 +689,20 @@ export default function WiwScheduleMobile() {
             label="Standardfarbe"
             colorManaged
             onClick={() => setSheet('color')}
-            trailing={<span className="wiw-color-row-tail"><i style={{ '--wiw-color-hue': String(form.color_hue ?? formAutoHue) } as React.CSSProperties} /><b>{form.color_hue == null ? 'Kundenfarbe · automatisch' : (COLOR_CHOICES.find((choice) => choice.hue === form.color_hue)?.label || 'Individuell')}</b><IonIcon className="wiw-row-chevron" icon={chevronForwardOutline} /></span>}
+            trailing={<span className="wiw-color-row-tail"><i style={form.color_hue == null ? ({ background: formPalette.accent } as React.CSSProperties) : ({ '--wiw-color-hue': String(form.color_hue ?? formAutoHue) } as React.CSSProperties)} /><b>{form.color_hue == null ? 'Kundenfarbe · automatisch' : (COLOR_CHOICES.find((choice) => choice.hue === form.color_hue)?.label || 'Individuell')}</b><IonIcon className="wiw-row-chevron" icon={chevronForwardOutline} /></span>}
           />
           <Row icon={documentTextOutline} label={form.notes ? 'Notiz bearbeiten' : 'Füge Notiz hinzu'} onClick={() => setExtrasOpen((value) => !value)} />
           {extrasOpen ? <div className="wiw-extra-options"><label>Notiz<textarea value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Hinweis für Mitarbeiter …" /></label></div> : null}
 
           {editing ? <>
             <div className="wiw-form-separator" />
-            <Row icon={copyOutline} label="Schicht als OpenShift kopieren" value="Ohne Mitarbeiter" onClick={() => void copyEditingAsOpenShift()} />
+            <Row icon={copyOutline} label="Schicht als OpenShift kopieren" value="Danach bearbeiten & sichern" onClick={prepareCopyAsOpenShift} />
             <Row icon={trashOutline} label="Schicht löschen" onClick={() => void deleteEditingShift()} />
           </> : null}
         </div>
 
         {dateOpen ? <div className="wiw-sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setDateOpen(false); }}><section className="wiw-date-sheet"><header><b>Datum</b><button type="button" onClick={() => setDateOpen(false)}>Fertig</button></header><input type="date" value={form.date} onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))} /><div><button type="button" onClick={() => setForm((current) => ({ ...current, date: berlinToday() }))}>Heute</button><button type="button" onClick={() => setForm((current) => ({ ...current, date: addDays(berlinToday(), 1) }))}>Morgen</button></div></section></div> : null}
-        {sheet === 'client' ? <ChoiceSheet title="Kunde" choices={clientChoices} selected={form.client} onClose={() => setSheet('')} onSelect={(choice) => { setForm((current) => ({ ...current, client: choice.value, location: '' })); setSheet(''); }} /> : null}
+        {sheet === 'client' ? <ChoiceSheet title="Kunde" choices={clientChoices} selected={form.client} onClose={() => setSheet('')} onSelect={(choice) => { const nextName = clients.find((item: any) => String(item.id) === choice.value)?.name; setForm((current) => { const currentPosition = positions.find((item: any) => String(item.id) === current.position); return { ...current, client: choice.value, location: '', position: isHotelClientName(nextName) && !isHotelPositionName(currentPosition?.name) ? '' : current.position }; }); setSheet(''); }} /> : null}
         {sheet === 'position' ? <ChoiceSheet title="Position" choices={positionChoices} selected={form.position} onClose={() => setSheet('')} onSelect={(choice) => { setForm((current) => ({ ...current, position: choice.value })); setSheet(''); }} /> : null}
         {sheet === 'location' ? <ChoiceSheet title="Jobstandort" choices={locationChoices} selected={form.location} onClose={() => setSheet('')} onSelect={(choice) => { setForm((current) => ({ ...current, location: choice.value })); setSheet(''); }} /> : null}
         {sheet === 'groups' ? <MultiChoiceSheet title="Zeitplan" choices={SCHEDULE_GROUPS} selected={form.schedule_groups} onClose={() => setSheet('')} onChange={(values) => setForm((current) => ({ ...current, schedule_groups: values }))} /> : null}

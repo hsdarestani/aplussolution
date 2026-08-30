@@ -516,7 +516,7 @@ function Dashboard({
       )}
 
       <CredentialNotice data={credentials} close={() => setCredentials(undefined)} />
-      <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={() => setToast('')} />
+      <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={() => setToast('')} />
     </>
   );
 }
@@ -965,7 +965,7 @@ function People({ user }: { user: User }) {
       </FormModal>
 
       <CredentialNotice data={credentials} close={() => setCredentials(undefined)} />
-      <IonToast isOpen={!!toast} message={toast} duration={4000} onDidDismiss={() => setToast('')} />
+      <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={() => setToast('')} />
     </>
   );
 }
@@ -1332,7 +1332,7 @@ function Schedule({ user }: { user: User }) {
         />
       </FormModal>
 
-      <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={() => setToast('')} />
+      <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={() => setToast('')} />
     </>
   );
 }
@@ -1633,7 +1633,7 @@ function Time({ user }: { user: User }) {
         />
       </FormModal>
 
-      <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={() => setToast('')} />
+      <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={() => setToast('')} />
     </>
   );
 }
@@ -1975,7 +1975,7 @@ function Contracts({ user }: { user: User }) {
         />
       </FormModal>
 
-      <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={() => setToast('')} />
+      <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={() => setToast('')} />
     </>
   );
 }
@@ -2287,7 +2287,7 @@ function Documents({ user }: { user: User }) {
         </label>
       </FormModal>
 
-      <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={() => setToast('')} />
+      <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={() => setToast('')} />
     </>
   );
 }
@@ -2595,7 +2595,7 @@ function Orders({ user }: { user: User }) {
         />
       </FormModal>
 
-      <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={() => setToast('')} />
+      <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={() => setToast('')} />
     </>
   );
 }
@@ -2744,7 +2744,7 @@ function Announcements({ user }: { user: User }) {
         <small>Beim Versand wird für jeden Empfänger automatisch eine In-App Notification erstellt und – falls auf dem Gerät eingerichtet – per Push zugestellt.</small>
       </FormModal>}
 
-      <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={() => setToast('')} />
+      <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={() => setToast('')} />
     </>
   );
 }
@@ -2949,7 +2949,7 @@ function Ratings({ user }: { user: User }) {
         />
       </FormModal>
 
-      <IonToast isOpen={!!toast} message={toast} duration={3500} onDidDismiss={() => setToast('')} />
+      <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={() => setToast('')} />
     </>
   );
 }
@@ -3014,7 +3014,7 @@ function Profile({ user }: { user: User }) {
           <IonButton onClick={changePassword}>Passwort aktualisieren</IonButton>
         </div>
       </div>
-      <IonToast isOpen={!!toast} message={toast} duration={4000} onDidDismiss={() => setToast('')} />
+      <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={() => setToast('')} />
     </>
   );
 }
