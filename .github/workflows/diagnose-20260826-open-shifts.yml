@@ -1,0 +1,99 @@
+name: Diagnose 2026-08-26 OpenShift origins
+
+on:
+  push:
+    branches:
+      - ops/android-push-test-20260830
+    paths:
+      - '.github/workflows/diagnose-20260826-open-shifts.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prepare SSH
+        env:
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_PASSWORD"
+          cat > /tmp/aplus-askpass.sh <<'ASKPASS'
+          #!/bin/sh
+          printf '%s\n' "$DEPLOY_PASSWORD"
+          ASKPASS
+          chmod 700 /tmp/aplus-askpass.sh
+
+      - name: Read production OpenShift provenance
+        env:
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
+          HOST: ${{ secrets.HOST }}
+          SSH_ASKPASS: /tmp/aplus-askpass.sh
+          SSH_ASKPASS_REQUIRE: force
+          DISPLAY: :0
+        run: |
+          set -euo pipefail
+          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
+          setsid -w ssh -qT \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 \
+            root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from datetime import datetime, timedelta, timezone
+          from zoneinfo import ZoneInfo
+          from core.models import Shift
+          from core.shift_slots import ShiftSlot
+
+          berlin = ZoneInfo('Europe/Berlin')
+          local_start = datetime(2026, 8, 26, 0, 0, tzinfo=berlin)
+          local_end = local_start + timedelta(days=1)
+          start = local_start.astimezone(timezone.utc)
+          end = local_end.astimezone(timezone.utc)
+          shifts = Shift.objects.filter(starts_at__gte=start, starts_at__lt=end).select_related('client','location','position').prefetch_related('slots').order_by('starts_at','client__name')
+
+          open_rows = []
+          for shift in shifts:
+              slots = [slot for slot in shift.slots.all() if slot.status != ShiftSlot.Status.CANCELLED]
+              open_slots = [slot for slot in slots if slot.status == ShiftSlot.Status.OPEN and slot.worker_id is None]
+              if not open_slots:
+                  continue
+              slot_sources = sorted({slot.source for slot in open_slots})
+              wiw_slots = [slot for slot in open_slots if slot.source == 'wiw' or slot.wiw_shift_id]
+              origin = 'WIW' if shift.wiw_shift_id or shift.wiw_synced_at or wiw_slots else 'APLUS_LOCAL'
+              open_rows.append((shift, open_slots, slot_sources, origin))
+
+          print(f'total_shifts_2026_08_26={shifts.count()}')
+          print(f'open_shift_rows_2026_08_26={len(open_rows)}')
+          print('--- OPEN SHIFT ORIGINS ---')
+          for shift, open_slots, sources, origin in open_rows:
+              starts = shift.starts_at.astimezone(berlin).strftime('%Y-%m-%d %H:%M')
+              created = shift.created_at.astimezone(berlin).strftime('%Y-%m-%d %H:%M:%S')
+              synced = shift.wiw_synced_at.astimezone(berlin).strftime('%Y-%m-%d %H:%M:%S') if shift.wiw_synced_at else '-'
+              print('|'.join([
+                  f'origin={origin}',
+                  f'id={shift.id}',
+                  f'start={starts}',
+                  f'client={shift.client.name}',
+                  f'location={shift.location.name}',
+                  f'position={shift.position.name}',
+                  f'open_slots={len(open_slots)}',
+                  f'slot_sources={",".join(sources)}',
+                  f'wiw_shift_id={shift.wiw_shift_id or "-"}',
+                  f'wiw_synced_at={synced}',
+                  f'created_at={created}',
+                  f'notes={str(shift.notes or "")[:80].replace(chr(10)," ")}',
+              ]))
+
+          wiw_count = sum(1 for row in open_rows if row[3] == 'WIW')
+          local_count = len(open_rows) - wiw_count
+          print('--- SUMMARY ---')
+          print(f'wiw_open_rows={wiw_count}')
+          print(f'aplus_local_open_rows={local_count}')
+          PY
+          REMOTE
