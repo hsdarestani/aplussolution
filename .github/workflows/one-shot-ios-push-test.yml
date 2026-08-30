@@ -83,3 +83,5 @@ jobs:
               raise SystemExit(1)
           PY
           REMOTE
+
+# rerun after successful iOS login: 2026-08-30T12:15Z
