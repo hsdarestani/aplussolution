@@ -1,4 +1,4 @@
-name: Fix mobile client location mapping
+name: Preserve manual location customer links
 
 on:
   push:
@@ -11,162 +11,39 @@ permissions:
   contents: write
 
 jobs:
-  fix-test-deploy:
+  fix:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
-
-      - name: Patch canonical WIW client mapping
+      - name: Patch WIW sync ownership rule
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
-
-          scope = Path('backend/core/workforce_scope.py')
-          text = scope.read_text(encoding='utf-8')
-          old = '    "Hotel Spenerhaus": ("hotel spenerhaus", "spenerhaus"),'
-          new = '    "Hotel Spenerhaus": ("hotel spenerhaus", "spenerhaus", "vch hotel phillipp jakob spenerhaus", "phillipp jakob spenerhaus", "philipp jakob spenerhaus"),'
-          if text.count(old) != 1:
-              raise SystemExit(f'workforce_scope alias anchor mismatch: {text.count(old)}')
-          scope.write_text(text.replace(old, new, 1), encoding='utf-8')
-
-          sync = Path('backend/core/wiw_sync.py')
-          text = sync.read_text(encoding='utf-8')
-          import_anchor = 'from .wiw import WhenIWorkClient, WhenIWorkError\n'
-          import_new = 'from .wiw import WhenIWorkClient, WhenIWorkError\nfrom .workforce_scope import canonical_client_name\n'
-          if text.count(import_anchor) != 1:
-              raise SystemExit('wiw_sync import anchor mismatch')
-          text = text.replace(import_anchor, import_new, 1)
-
-          old_method = '''    def _client_for_location(self, item, wiw_id):
-        company = first(item, 'company', 'client', 'account')
-        if isinstance(company, dict):
-            name = str(first(company, 'name', default=f'WIW Kunde {wiw_id}'))
-            external = as_id(first(company, 'id', default=wiw_id))
-        else:
-            name = str(first(item, 'client_name', 'company_name', default=first(item, 'name', default=f'WIW Kunde {wiw_id}')))
-            external = as_id(first(item, 'client_id', 'company_id', default=wiw_id))
-        number = f'WIW-{external}'[:50]
-        client, _ = ClientCompany.objects.get_or_create(customer_number=number, defaults={'name': name, 'address': address_from(item)})
-        if not client.name or client.name.startswith('WIW Kunde'):
-            client.name = name
-        if address_from(item):
-            client.address = address_from(item)
-        client.save()
-        return client
-'''
-          new_method = '''    def _client_for_location(self, item, wiw_id):
-        company = first(item, 'company', 'client', 'account')
-        if isinstance(company, dict):
-            name = str(first(company, 'name', default=f'WIW Kunde {wiw_id}')).strip()
-            external = as_id(first(company, 'id', default=wiw_id))
-        else:
-            name = str(first(item, 'client_name', 'company_name', default=first(item, 'name', default=f'WIW Kunde {wiw_id}'))).strip()
-            external = as_id(first(item, 'client_id', 'company_id', default=wiw_id))
-
-        # WIW still exposes a few historical/legacy customer labels (for example
-        # VCH- Hotel Phillipp-Jakob-Spenerhaus). Prefer the active canonical A+
-        # customer so imported locations remain selectable in the native shift form.
-        canonical_name = canonical_client_name(name)
-        client = None
-        if canonical_name:
-            client = (
-                ClientCompany.objects.filter(name__iexact=canonical_name, active=True).first()
-                or ClientCompany.objects.filter(name__iexact=canonical_name).first()
-            )
-
-        number = f'WIW-{external}'[:50]
-        if not client:
-            client, _ = ClientCompany.objects.get_or_create(
-                customer_number=number,
-                defaults={'name': canonical_name or name, 'address': address_from(item)},
-            )
-        if canonical_name and (not client.name or client.name.startswith('WIW Kunde')):
-            client.name = canonical_name
-        elif not client.name or client.name.startswith('WIW Kunde'):
-            client.name = name
-        if address_from(item):
-            client.address = address_from(item)
-        client.save()
-        return client
-'''
-          if text.count(old_method) != 1:
-              raise SystemExit(f'wiw_sync method anchor mismatch: {text.count(old_method)}')
-          sync.write_text(text.replace(old_method, new_method, 1), encoding='utf-8')
+          path = Path('backend/core/wiw_sync.py')
+          text = path.read_text(encoding='utf-8')
+          old = "                obj.client = client\n                obj.name = name"
+          count = text.count(old)
+          if count != 2:
+              raise SystemExit(f'Expected 2 client overwrite sites, found {count}')
+          new = "                # Existing A+ location/customer links are locally managed.\n                # WIW may seed the client only when the Location is first created;\n                # subsequent syncs must never overwrite a manual assignment.\n                obj.name = name"
+          path.write_text(text.replace(old, new), encoding='utf-8')
           PY
+          git diff --check
+          git diff -- backend/core/wiw_sync.py
 
-      - name: Add regression coverage
-        run: |
-          cat > backend/tests/test_wiw_canonical_location_client.py <<'PYTEST'
-          import pytest
-
-          from core.models import ClientCompany
-          from core.wiw_sync import WhenIWorkSynchronizer
-          from core.workforce_scope import canonical_client_name
-
-
-          @pytest.mark.django_db
-          def test_legacy_spenerhaus_label_resolves_to_active_canonical_client():
-              active = ClientCompany.objects.create(
-                  name='Hotel Spenerhaus',
-                  customer_number='KD-SPENER-REGRESSION',
-                  active=True,
-              )
-              legacy = ClientCompany.objects.create(
-                  name='VCH- Hotel Phillipp-Jakob-Spenerhaus',
-                  customer_number='WIW-5474910',
-                  active=False,
-              )
-
-              assert canonical_client_name('VCH- Hotel Phillipp-Jakob-Spenerhaus') == 'Hotel Spenerhaus'
-
-              sync = WhenIWorkSynchronizer(client=object())
-              resolved = sync._client_for_location(
-                  {
-                      'id': 5474910,
-                      'name': 'VCH- Hotel Phillipp-Jakob-Spenerhaus',
-                      'address': 'Dominikanergasse 5, 60311 Frankfurt am Main, Deutschland',
-                  },
-                  '5474910',
-              )
-
-              assert resolved.pk == active.pk
-              legacy.refresh_from_db()
-              assert legacy.active is False
-          PYTEST
-
-      - name: Install backend dependencies
-        run: pip install -r backend/requirements.txt
-
-      - name: Run targeted regression tests
-        env:
-          DEBUG: '1'
-          DJANGO_SECRET_KEY: ci-secret
-          ALLOWED_HOSTS: localhost,127.0.0.1,testserver
-        run: |
-          set -euo pipefail
-          cd backend
-          python manage.py check
-          pytest -q tests/test_wiw_canonical_location_client.py tests/test_operational_push_wiring.py
-
-      - name: Commit tested backend fix to main
+      - name: Commit fix to main
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add backend/core/workforce_scope.py backend/core/wiw_sync.py backend/tests/test_wiw_canonical_location_client.py
-          git diff --cached --check
-          git commit -m 'Fix mobile location mapping for canonical clients'
+          git add backend/core/wiw_sync.py
+          git commit -m 'Preserve manual location client assignments during WIW sync'
           git push origin HEAD:main
 
       - name: Prepare SSH authentication
@@ -181,7 +58,7 @@ jobs:
           ASKPASS
           chmod 700 /tmp/aplus-askpass.sh
 
-      - name: Hot deploy backend mapping and repair Spenerhaus data
+      - name: Apply production hotfix and repair Spenerhaus mapping
         env:
           DEPLOY_PASSWORD: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
@@ -191,27 +68,14 @@ jobs:
         run: |
           set -euo pipefail
           export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
-          tar -czf /tmp/mobile-location-fix.tgz \
-            backend/core/workforce_scope.py \
-            backend/core/wiw_sync.py
-          setsid -w scp -q \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=15 \
-            /tmp/mobile-location-fix.tgz root@"$HOST":/tmp/mobile-location-fix.tgz
-          setsid -w ssh -qT \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=15 \
-            -o ServerAliveInterval=10 \
-            -o ServerAliveCountMax=6 \
-            root@"$HOST" 'bash -s' <<'REMOTE'
+          tar -czf /tmp/wiw-location-link-fix.tgz backend/core/wiw_sync.py
+          setsid -w scp -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 /tmp/wiw-location-link-fix.tgz root@"$HOST":/tmp/wiw-location-link-fix.tgz
+          setsid -w ssh -qT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 root@"$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
-          tar -xzf /tmp/mobile-location-fix.tgz -C /opt/aplussolution
-          rm -f /tmp/mobile-location-fix.tgz
+          tar -xzf /tmp/wiw-location-link-fix.tgz -C /opt/aplussolution
+          rm -f /tmp/wiw-location-link-fix.tgz
           docker compose up -d --build backend celery celery-beat
-
           ready=0
           for i in $(seq 1 45); do
             if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
@@ -221,64 +85,41 @@ jobs:
             sleep 2
           done
           test "$ready" -eq 1
+          docker compose exec -T backend python manage.py check
 
           docker compose exec -T backend python manage.py shell <<'PY'
           from django.db import transaction
-          from django.utils import timezone
-          from rest_framework.test import APIRequestFactory, force_authenticate
-
-          from core.models import ClientCompany, Location, Position, Shift, User
-          from core.serializers import LocationSerializer
-          from core.shift_views import StaffingShiftViewSet
-          from core.workforce_scope import canonical_client_name
+          from core.models import ClientCompany, Location
+          from core.wiw_sync import WhenIWorkSynchronizer
 
           target = ClientCompany.objects.filter(name__iexact='Hotel Spenerhaus', active=True).first()
-          assert target, 'Active Hotel Spenerhaus client missing'
+          legacy = ClientCompany.objects.filter(name__icontains='Spenerhaus').exclude(pk=getattr(target, 'pk', None)).first()
+          assert target, 'active Hotel Spenerhaus client missing'
+          locations = list(Location.objects.filter(active=True, client=legacy)) if legacy else []
+          repaired = []
+          for loc in locations:
+              if 'spener' in loc.name.lower():
+                  loc.client = target
+                  loc.save(update_fields=['client', 'updated_at'])
+                  repaired.append(str(loc.id))
+          linked = Location.objects.filter(active=True, client=target).order_by('name').first()
+          assert linked, 'Hotel Spenerhaus has no active linked location after repair'
+          print('REPAIRED_SPENER_LOCATION_IDS', repaired)
+          print('SPENER_ACTIVE_LINK', linked.id, linked.name, linked.client_id)
 
-          candidates = Location.objects.select_related('client').filter(active=True)
-          moved = []
-          for location in candidates:
-              source_name = location.client.name if location.client_id else location.name
-              if canonical_client_name(source_name) == 'Hotel Spenerhaus' or canonical_client_name(location.name) == 'Hotel Spenerhaus':
-                  if location.client_id != target.id:
-                      moved.append((str(location.id), location.name, str(location.client_id or '')))
-                      location.client = target
-                      location.save(update_fields=['client', 'updated_at'])
-
-          linked = list(Location.objects.filter(client=target, active=True).order_by('name'))
-          assert linked, 'Hotel Spenerhaus still has no active location after repair'
-          print('SPENER_REPAIRED_MOVED', moved)
-          print('SPENER_ACTIVE_LOCATIONS', LocationSerializer(linked, many=True).data)
-
-          # Rollback-only exact create probe for the client/location combination that
-          # was blocked in the native app screenshot.
-          admin = User.objects.filter(role=User.Role.ADMIN, is_active=True).order_by('date_joined').first()
-          position = Position.objects.filter(name__iexact='Housekeeping', active=True).first() or Position.objects.filter(active=True).first()
-          assert admin and position
-          start = timezone.now() + timezone.timedelta(days=3650)
-          start = start.replace(hour=8, minute=0, second=0, microsecond=0)
-          factory = APIRequestFactory()
-          view = StaffingShiftViewSet.as_view({'post': 'create'})
-          with transaction.atomic():
-              request = factory.post('/api/shifts/', {
-                  'client': str(target.id),
-                  'location': str(linked[0].id),
-                  'position': str(position.id),
-                  'starts_at': start.isoformat(),
-                  'ends_at': (start + timezone.timedelta(hours=5)).isoformat(),
-                  'required_count': 1,
-                  'status': 'draft',
-                  'schedule_groups': ['housekeeping'],
-                  'confirmation_required': False,
-              }, format='json')
-              force_authenticate(request, user=admin)
-              response = view(request)
-              response.render()
-              print('SPENER_MOBILE_CREATE_PROBE', response.status_code, response.data)
-              assert response.status_code == 201, response.data
-              transaction.set_rollback(True)
+          payload = dict(linked.wiw_payload or {})
+          if linked.wiw_site_id and payload:
+              original_client = linked.client_id
+              with transaction.atomic():
+                  WhenIWorkSynchronizer(client=object()).sync_sites([payload])
+                  linked.refresh_from_db()
+                  print('POST_SYNC_CLIENT', linked.client_id)
+                  assert linked.client_id == original_client, 'WIW sync overwrote manual client link'
+                  transaction.set_rollback(True)
+              linked.refresh_from_db()
+              assert linked.client_id == original_client
+              print('MANUAL_LINK_PRESERVED_AFTER_SYNC=True')
           PY
 
-          docker compose exec -T backend python manage.py check
           curl -fsS --max-time 20 https://solution.smarbiz.sbs/health/ >/dev/null
           REMOTE
