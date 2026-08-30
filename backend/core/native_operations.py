@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from . import advanced_views as base
 from . import slot_compat_views_v2 as slots
 from .models import Notification, Shift
+from .operational_notifications import notify_open_shift_available
 from .services import audit
 from .shift_service import (
     ensure_shift_publish_allowed,
@@ -188,6 +189,7 @@ def bulk_publish(request):
             )
             published = 0
             for shift in shifts:
+                was_published = shift.status == Shift.Status.PUBLISHED
                 if shift.status in {Shift.Status.CANCELLED, Shift.Status.COMPLETED}:
                     raise ValidationError('Stornierte oder abgeschlossene Schichten können nicht veröffentlicht werden.')
                 ensure_slots(shift)
@@ -196,6 +198,8 @@ def bulk_publish(request):
                 shift.published_at = shift.published_at or timezone.now()
                 shift.save(update_fields=['status', 'published_at', 'updated_at'])
                 refresh_shift_state(shift)
+                if not was_published:
+                    notify_open_shift_available(shift, 'bulk-publish')
 
                 for worker in _assigned_workers(shift):
                     Notification.objects.get_or_create(

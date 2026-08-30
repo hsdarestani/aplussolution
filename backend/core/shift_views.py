@@ -68,8 +68,11 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                 obj.save(update_fields=['published_at', 'updated_at'])
                 refresh_shift_state(obj)
             audit(self.request, 'staffing_demand.created', obj, {'required_count': obj.required_count})
+        if obj.status == Shift.Status.PUBLISHED:
+            notify_open_shift_available(obj, 'created')
 
     def perform_update(self, serializer):
+        previous_status = serializer.instance.status
         previous_confirmation_required = bool(serializer.instance.confirmation_required)
         with transaction.atomic():
             obj = serializer.save(worker=None)
@@ -104,6 +107,8 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                 'confirmation_required': obj.confirmation_required,
             })
             notify_claimed_workers_shift_changed(obj)
+        if previous_status != Shift.Status.PUBLISHED and obj.status == Shift.Status.PUBLISHED:
+            notify_open_shift_available(obj, 'updated-published')
 
     def perform_destroy(self, instance):
         notify_claimed_workers_shift_changed(instance, title='Schicht entfernt', reason='deleted')
@@ -138,6 +143,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
     def publish(self, request, pk=None):
         shift = self.get_object()
+        was_published = shift.status == Shift.Status.PUBLISHED
         with transaction.atomic():
             ensure_slots(shift)
             ensure_shift_publish_allowed(shift)
@@ -146,6 +152,8 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
             shift.save(update_fields=['status', 'published_at', 'updated_at'])
             refresh_shift_state(shift)
         audit(request, 'staffing_demand.published', shift)
+        if not was_published:
+            notify_open_shift_available(shift, 'publish')
         return Response(self.get_serializer(self.base_queryset().get(pk=shift.pk)).data)
 
     @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
