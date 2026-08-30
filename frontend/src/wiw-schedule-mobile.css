@@ -161,3 +161,37 @@
 @media (prefers-reduced-motion:reduce){
   .wiw-week-turn-next,.wiw-week-turn-prev{animation:none!important}
 }
+
+
+/* A+ admin notification verification + readability pass 2026-08-30 */
+@media (max-width:900px){
+  .wiw-tabs button{font-size:14px}
+  .wiw-search-row input{font-size:14px}
+  .wiw-day-section>header strong{font-size:16px}
+  .wiw-day-section>header span{font-size:15px}
+  .wiw-shift-card{min-height:60px;padding-top:9px;padding-bottom:9px}
+  .wiw-card-line.primary b,.wiw-card-line.primary span{font-size:15px}
+  .wiw-card-line.secondary>span{font-size:12px}
+  .wiw-card-line.secondary small{font-size:12px}
+  .wiw-shift-card.is-filled{
+    background:linear-gradient(90deg,color-mix(in srgb,var(--wiw-card-accent,#0b4d6b) 18%,#fff) 0%,color-mix(in srgb,var(--wiw-card-accent,#0b4d6b) 10%,#fff) 100%);
+    color:#173448;
+  }
+  .wiw-shift-card.is-filled .wiw-card-line.primary b,
+  .wiw-shift-card.is-filled .wiw-card-line.primary span{color:#173448!important;font-weight:800}
+  .wiw-shift-card.is-filled .wiw-card-line.secondary>span,
+  .wiw-shift-card.is-filled .wiw-card-line.secondary small{color:#45606f!important;font-weight:650}
+  .wiw-open-alert{margin-left:11px}
+  .wiw-form-topbar strong{font-size:17px;font-weight:650}
+  .wiw-form-topbar button{font-size:15px}
+  .wiw-form-row{min-height:51px}
+  .wiw-form-row-copy span{font-size:16px}
+  .wiw-form-row-copy b{font-size:12px}
+  .wiw-form-row.employee-emphasis .wiw-form-row-copy b{font-size:15px;font-weight:850;color:#173448;white-space:normal;line-height:1.25;text-align:right}
+  .wiw-form-row.employee-emphasis{min-height:56px}
+  .wiw-choice-sheet>header b,.wiw-date-sheet>header b{font-size:16px}
+  .wiw-choice-sheet>div>button{min-height:50px;font-size:15px}
+  .wiw-bulk-edit-row b{font-size:14px}
+  .wiw-bulk-edit-row span{font-size:11px}
+  .wiw-toast{font-size:13px}
+}

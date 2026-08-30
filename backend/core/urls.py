@@ -62,6 +62,7 @@ urlpatterns = [
     path('attendance/exceptions/', attendance_views.attendance_exceptions),
     path('shifts/<uuid:shift_id>/cards/<uuid:slot_id>/', shift_slot_actions.edit_shift_slot),
     path('shifts/<uuid:shift_id>/cards/<uuid:slot_id>/delete/', shift_card_admin.delete_shift_card),
+    path('shifts/<uuid:shift_id>/cards/<uuid:slot_id>/remind/', shift_card_admin.remind_shift_card),
     path('workers/portal-status/', portal_views.portal_statuses),
     path('workers/<uuid:pk>/invite/', portal_views.invite_worker),
     path('workers/<uuid:pk>/akte/', akten_views.worker_akte),
