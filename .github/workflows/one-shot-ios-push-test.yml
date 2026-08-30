@@ -1,4 +1,4 @@
-name: Hot deploy operational push wiring
+name: Diagnose mobile shift location selection
 
 on:
   push:
@@ -11,14 +11,10 @@ permissions:
   contents: read
 
 jobs:
-  deploy-backend:
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-
       - name: Prepare SSH authentication
         env:
           DEPLOY_PASSWORD: ${{ secrets.PASS }}
@@ -31,26 +27,7 @@ jobs:
           ASKPASS
           chmod 700 /tmp/aplus-askpass.sh
 
-      - name: Upload tested backend files
-        env:
-          DEPLOY_PASSWORD: ${{ secrets.PASS }}
-          HOST: ${{ secrets.HOST }}
-          SSH_ASKPASS: /tmp/aplus-askpass.sh
-          SSH_ASKPASS_REQUIRE: force
-          DISPLAY: :0
-        run: |
-          set -euo pipefail
-          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
-          tar -czf /tmp/push-wiring.tgz \
-            backend/core/shift_views.py \
-            backend/core/native_operations.py
-          setsid -w scp -q \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=15 \
-            /tmp/push-wiring.tgz root@"$HOST":/tmp/push-wiring.tgz
-
-      - name: Apply and verify production backend
+      - name: Inspect production client/location data and mobile CRUD
         env:
           DEPLOY_PASSWORD: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
@@ -64,33 +41,21 @@ jobs:
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=15 \
-            -o ServerAliveInterval=10 \
-            -o ServerAliveCountMax=6 \
             root@"$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
-          test -f .env
-          tar -xzf /tmp/push-wiring.tgz -C /opt/aplussolution
-          rm -f /tmp/push-wiring.tgz
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from core.models import ClientCompany, Location
+          from core.serializers import LocationSerializer
 
-          grep -q "notify_open_shift_available(obj, 'created')" backend/core/shift_views.py
-          grep -q "notify_open_shift_available(shift, 'publish')" backend/core/shift_views.py
-          grep -q "notify_open_shift_available(shift, 'bulk-publish')" backend/core/native_operations.py
-
-          docker compose up -d --build backend
-          ready=0
-          for i in $(seq 1 45); do
-            if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
-              ready=1
-              break
-            fi
-            sleep 2
-          done
-          test "$ready" -eq 1
-
-          docker compose exec -T backend python manage.py check
-          docker compose exec -T backend python manage.py shell -c "import inspect; from core.shift_views import ShiftViewSet; from core.native_operations import bulk_publish; a=inspect.getsource(ShiftViewSet); b=inspect.getsource(bulk_publish); assert \"notify_open_shift_available(obj, 'created')\" in a; assert \"notify_open_shift_available(shift, 'publish')\" in a; assert \"notify_open_shift_available(shift, 'bulk-publish')\" in b; print('Operational push wiring loaded')"
-          docker compose exec -T backend python manage.py shell -c "from core.push_notifications import push_provider_status; s=push_provider_status(); assert s['android'] and s['ios']; print('Native push providers ready', s)"
-          docker compose exec -T backend python manage.py shell -c "import os; assert os.getenv('APNS_KEY_ID','').strip() == '7ZH6Y6V744'; print('Verified APNs key ID loaded')"
-          curl -fsS --max-time 20 https://solution.smarbiz.sbs/health/ >/dev/null
+          clients = list(ClientCompany.objects.filter(name__icontains='Spener').values('id','name','active'))
+          print('SPENER_CLIENTS', clients)
+          if clients:
+              cid = clients[0]['id']
+              linked = Location.objects.filter(client_id=cid).order_by('name')
+              print('SPENER_LOCATION_DB', list(linked.values('id','name','client_id','active','address')))
+              print('SPENER_LOCATION_API', LocationSerializer(linked, many=True).data)
+          print('ACTIVE_LOCATION_CLIENT_SAMPLE', list(Location.objects.filter(active=True).values('id','name','client_id')[:20]))
+          PY
+          docker compose exec -T backend python manage.py diagnose_mobile_shift_crud
           REMOTE
