@@ -16,11 +16,11 @@ AUTH_USER_MODEL='core.User'
 LANGUAGE_CODE='de-de'; TIME_ZONE='Europe/Berlin'; USE_I18N=True; USE_TZ=True
 STATIC_URL='/static/'; STATIC_ROOT=BASE_DIR/'staticfiles'; MEDIA_URL='/media/'; MEDIA_ROOT=BASE_DIR/'media'; DEFAULT_AUTO_FIELD='django.db.models.BigAutoField'
 CORS_ALLOWED_ORIGINS=[x.strip() for x in os.getenv('CORS_ALLOWED_ORIGINS','http://localhost:8080').split(',') if x.strip()]
-# Capacitor uses https://localhost as the WebView origin on both Android and iOS
-# because frontend/capacitor.config.ts explicitly sets both native schemes to https.
-# Keep this independent from the persisted production .env so installed store builds
-# remain able to reach the API even when that .env predates native mobile support.
-NATIVE_APP_CORS_ORIGINS=[x.strip() for x in os.getenv('NATIVE_APP_CORS_ORIGINS','https://localhost').split(',') if x.strip()]
+# Current native builds use https://localhost. Older released Capacitor builds can
+# still identify as capacitor://localhost (iOS) or http://localhost (Android).
+# Keep these exact native origins independent from a persisted production .env so
+# installed store builds remain compatible while arbitrary origins stay blocked.
+NATIVE_APP_CORS_ORIGINS=[x.strip() for x in os.getenv('NATIVE_APP_CORS_ORIGINS','https://localhost,capacitor://localhost,http://localhost').split(',') if x.strip()]
 for origin in NATIVE_APP_CORS_ORIGINS:
     if origin not in CORS_ALLOWED_ORIGINS:
         CORS_ALLOWED_ORIGINS.append(origin)
