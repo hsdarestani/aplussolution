@@ -295,7 +295,9 @@ class WhenIWorkSynchronizer:
                 created = not bool(obj)
                 if not obj:
                     obj = Location(client=client, name=name, address=address_from(item) or name)
-                obj.client = client
+                # Existing A+ location/customer links are locally managed.
+                # WIW may seed the client only when the Location is first created;
+                # subsequent syncs must never overwrite a manual assignment.
                 obj.name = name
                 obj.address = address_from(item) or obj.address or name
                 obj.latitude = as_decimal(first(item, 'latitude', 'lat'))
@@ -328,7 +330,9 @@ class WhenIWorkSynchronizer:
                 created = not bool(obj)
                 if not obj:
                     obj = Location(client=client, name=name, address=address_from(item) or (parent.address if parent else name))
-                obj.client = client
+                # Existing A+ location/customer links are locally managed.
+                # WIW may seed the client only when the Location is first created;
+                # subsequent syncs must never overwrite a manual assignment.
                 obj.name = name
                 obj.address = address_from(item) or obj.address or (parent.address if parent else name)
                 obj.latitude = as_decimal(first(item, 'latitude', 'lat')) or (parent.latitude if parent else None)
