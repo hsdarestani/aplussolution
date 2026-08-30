@@ -73,10 +73,24 @@ def create_portal_invitation(worker: WorkerProfile, created_by=None, lifetime_ho
     delivered = False
     if settings.EMAIL_HOST and settings.EMAIL_HOST_USER:
         try:
+            employee_name = user.get_full_name() or user.first_name or 'Mitarbeiter/in'
             send_mail(
-                'A+ Solution – Mitarbeiterportal aktivieren',
-                'Hallo,\n\nbitte aktiviere dein A+ Solution Mitarbeiterportal über diesen Link:\n'
-                f'{activation_url}\n\nDer Link ist einmalig und 72 Stunden gültig.',
+                'A+ Solution App – Zugang aktivieren',
+                f'Hallo {employee_name},\n\n'
+                'dein Zugang zur A+ Solution Workforce-App ist vorbereitet. Über die App kannst du unter anderem deine Schichten und OpenShifts sehen, Arbeitszeiten erfassen, Verfügbarkeiten verwalten sowie Dokumente und Mitteilungen abrufen.\n\n'
+                '1. App installieren\n'
+                'iPhone / iPad (App Store):\n'
+                'https://apps.apple.com/de/app/a-solution/id6799468007\n\n'
+                'Android (Google Play):\n'
+                'https://play.google.com/store/apps/details?id=de.aplussolution.workforce\n\n'
+                '2. Zugang einmalig aktivieren\n'
+                'Öffne diesen persönlichen Aktivierungslink und lege dein Passwort fest:\n'
+                f'{activation_url}\n\n'
+                '3. Danach in der App anmelden\n'
+                f'E-Mail: {user.email}\n'
+                'Melde dich mit dieser E-Mail-Adresse und dem gerade festgelegten Passwort an. Bitte erlaube Benachrichtigungen, damit du neue Schichten, Änderungen und Erinnerungen direkt erhältst.\n\n'
+                'Der Aktivierungslink ist einmalig und 72 Stunden gültig. Wenn der Link abgelaufen ist oder du Hilfe brauchst, melde dich bitte bei A+ Solution.\n\n'
+                'Viele Grüße\nA+ Solution GmbH',
                 settings.DEFAULT_FROM_EMAIL,
                 [user.email],
                 fail_silently=False,

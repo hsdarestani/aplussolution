@@ -13,6 +13,7 @@ import {
   filterOutline,
   layersOutline,
   locationOutline,
+  notificationsOutline,
   peopleOutline,
   personOutline,
   timeOutline,
@@ -240,10 +241,10 @@ function Switch({ checked, onChange }: { checked: boolean; onChange: (value: boo
   return <button type="button" className={`wiw-switch ${checked ? 'on' : ''}`} aria-pressed={checked} onClick={() => onChange(!checked)}><span /></button>;
 }
 
-function Row({ icon, label, value, muted, green, onClick, trailing, colorManaged }: { icon: string; label: string; value?: string; muted?: boolean; green?: boolean; onClick?: () => void; trailing?: React.ReactNode; colorManaged?: boolean }) {
+function Row({ icon, label, value, muted, green, onClick, trailing, colorManaged, emphasizeValue }: { icon: string; label: string; value?: string; muted?: boolean; green?: boolean; onClick?: () => void; trailing?: React.ReactNode; colorManaged?: boolean; emphasizeValue?: boolean }) {
   const Component: any = onClick ? 'button' : 'div';
   return (
-    <Component type={onClick ? 'button' : undefined} data-color-managed={colorManaged ? 'true' : undefined} className={`wiw-form-row ${muted ? 'muted' : ''} ${green ? 'green' : ''}`} onClick={onClick}>
+    <Component type={onClick ? 'button' : undefined} data-color-managed={colorManaged ? 'true' : undefined} className={`wiw-form-row ${muted ? 'muted' : ''} ${green ? 'green' : ''} ${emphasizeValue ? 'employee-emphasis' : ''}`} onClick={onClick}>
       <IonIcon icon={icon} />
       <div className="wiw-form-row-copy"><span>{label}</span>{value ? <b>{value}</b> : null}</div>
       {trailing ?? (onClick ? <IonIcon className="wiw-row-chevron" icon={chevronForwardOutline} /> : null)}
@@ -489,6 +490,7 @@ export default function WiwScheduleMobile() {
   const clientChoices = useMemo<Choice[]>(() => clients.map((item: any) => ({ value: String(item.id), label: item.name })), [clients]);
   const locationChoices = useMemo<Choice[]>(() => locations.filter((item: any) => !form.client || String(item.client) === form.client).map((item: any) => ({ value: String(item.id), label: item.name })), [locations, form.client]);
   const workerChoices = useMemo<Choice[]>(() => workers.map((item: any) => ({ value: String(item.id), label: item.user_detail?.name || item.user_detail?.email || item.employee_number || 'Mitarbeiter' })), [workers]);
+  const selectedWorkerNames = form.workers.map((workerId) => workerChoices.find((choice) => choice.value === workerId)?.label).filter(Boolean).join(', ');
 
   function openCreate(date = anchor) {
     setEditing(undefined);
@@ -534,16 +536,32 @@ export default function WiwScheduleMobile() {
     setForm((current) => ({ ...current, startMinute: start, endAbsolute: start + 360 }));
   }
 
+  async function sendManualReminder() {
+    if (!editing || !editing.workerName || busy) return;
+    setBusy(true);
+    try {
+      const result: any = await api(`shifts/${editing.shiftId}/cards/${editing.slotId}/remind/`, { method: 'POST', body: '{}' });
+      setToast(`Erinnerung an ${result?.worker || editing.workerName} gesendet.`);
+    } catch (error: any) {
+      setToast(error.message || 'Erinnerung konnte nicht gesendet werden.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function deleteEditingShift() {
     if (!editing || busy) return;
     const label = editing.workerName ? `Schicht von ${editing.workerName}` : 'OpenShift';
     if (!window.confirm(`${label} wirklich löschen?`)) return;
+    const notifyWorker = editing.workerName
+      ? window.confirm(`Soll ${editing.workerName} eine Push-Benachrichtigung über die Löschung erhalten?\n\nOK = Push senden\nAbbrechen = ohne Push löschen`)
+      : false;
     setBusy(true);
     try {
-      await api(`shifts/${editing.shiftId}/cards/${editing.slotId}/delete/`, { method: 'DELETE' });
+      await api(`shifts/${editing.shiftId}/cards/${editing.slotId}/delete/?notify_worker=${notifyWorker ? '1' : '0'}`, { method: 'DELETE' });
       setFormOpen(false);
       setEditing(undefined);
-      setToast('Schicht gelöscht.');
+      setToast(notifyWorker ? 'Schicht gelöscht · Mitarbeiter wurde informiert.' : 'Schicht gelöscht · ohne Mitarbeiter-Push.');
       window.dispatchEvent(new Event('aplus:dashboard-invalidated'));
       await load();
     } catch (error: any) {
@@ -700,9 +718,9 @@ export default function WiwScheduleMobile() {
 
           <div className="wiw-form-separator" />
           <Row icon={personOutline} label="OpenShift" trailing={<Switch checked={form.publish_now} onChange={(value) => setForm((current) => ({ ...current, publish_now: value }))} />} />
-          {!editing ? <Row icon={layersOutline} label={`${form.required_count} Schicht${form.required_count === 1 ? '' : 'en'}`} trailing={<div className="wiw-count-stepper"><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: Math.max(current.workers.length || 1, current.required_count - 1) }))}>−</button><b>{form.required_count}</b><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: current.required_count + 1 }))}>+</button></div>} /> : <Row icon={layersOutline} label="1 Schichtkarte" value={editing.workerName || 'OpenShift'} />}
+          {!editing ? <Row icon={layersOutline} label={`${form.required_count} Schicht${form.required_count === 1 ? '' : 'en'}`} trailing={<div className="wiw-count-stepper"><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: Math.max(current.workers.length || 1, current.required_count - 1) }))}>−</button><b>{form.required_count}</b><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: current.required_count + 1 }))}>+</button></div>} /> : <Row icon={layersOutline} label="1 Schichtkarte" value={editing.workerName || 'OpenShift'} emphasizeValue={Boolean(editing.workerName)} />}
           <Row icon={checkmarkOutline} label="Erfordere Übernahme-Bestätigung" trailing={<Switch checked={form.confirmation_required} onChange={(value) => setForm((current) => ({ ...current, confirmation_required: value }))} />} />
-          {(!editing || editing.isOpen) ? <Row icon={peopleOutline} label={editing ? (form.workers.length ? 'Mitarbeiter ändern' : 'Mitarbeiter zuweisen') : (form.workers.length ? `${form.workers.length} Benutzer direkt zugewiesen` : 'Geeignete Benutzer anzeigen')} value={editing && form.workers.length ? workerChoices.find((choice) => choice.value === form.workers[0])?.label : undefined} muted={!form.workers.length} onClick={() => setSheet('workers')} /> : null}
+          {(!editing || editing.isOpen) ? <Row icon={peopleOutline} label={editing ? (form.workers.length ? 'Mitarbeiter ändern' : 'Mitarbeiter zuweisen') : (form.workers.length ? `${form.workers.length} Benutzer direkt zugewiesen` : 'Geeignete Benutzer anzeigen')} value={selectedWorkerNames || undefined} emphasizeValue={Boolean(selectedWorkerNames)} muted={!form.workers.length} onClick={() => setSheet('workers')} /> : null}
 
           {editing && editing.parentCount > 1 && !editing.isOpen ? <div className="wiw-bulk-edit-row"><div><b>Alle Karten dieser Schicht mitändern</b><span>Wenn aus, wird nur diese Person / OpenShift-Karte geändert.</span></div><Switch checked={form.apply_all} onChange={(value) => setForm((current) => ({ ...current, apply_all: value }))} /></div> : null}
 
@@ -719,6 +737,7 @@ export default function WiwScheduleMobile() {
 
           {editing ? <>
             <div className="wiw-form-separator" />
+            {editing.workerName ? <Row icon={notificationsOutline} label="Erinnerung senden" value={editing.workerName} emphasizeValue onClick={() => void sendManualReminder()} /> : null}
             <Row icon={copyOutline} label="Schicht als OpenShift kopieren" value="Danach bearbeiten & sichern" onClick={prepareCopyAsOpenShift} />
             <Row icon={trashOutline} label="Schicht löschen" onClick={() => void deleteEditingShift()} />
           </> : null}

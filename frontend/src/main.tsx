@@ -35,6 +35,7 @@ import CheckoutReviewEnhancer from './CheckoutReviewEnhancer';
 import DesktopAttendanceHistoryEnhancer from './DesktopAttendanceHistoryEnhancer';
 import MobileAttendanceClarityEnhancer from './MobileAttendanceClarityEnhancer';
 import NativePushRegistration from './NativePushRegistration';
+import AppLaunchSplash from './AppLaunchSplash';
 import { installBerlinLocaleDefaults } from './berlinLocale';
 import { installOperationalFetchResilience } from './operationalFetchResilience';
 import { installSignaturePad } from './signaturePad';
@@ -61,6 +62,7 @@ function renderApp() {
         <StoreLegalPage page={legalPage} />
       ) : (
         <>
+          <AppLaunchSplash />
           <App />
           <HeaderQuickAccess />
           <ScheduleMobileEnhancer />
