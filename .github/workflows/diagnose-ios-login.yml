@@ -1,0 +1,42 @@
+name: Diagnose iOS login connectivity
+
+on:
+  push:
+    branches:
+      - ops/android-push-test-20260830
+    paths:
+      - '.github/workflows/diagnose-ios-login.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe production API and native origins
+        run: |
+          set -euo pipefail
+          URL='https://solution.smarbiz.sbs/api/auth/login/'
+          echo '=== direct connectivity ==='
+          curl -sS -o /tmp/body -D /tmp/headers --connect-timeout 10 --max-time 20 \
+            -H 'Content-Type: application/json' \
+            --data '{"email":"probe@example.invalid","password":"invalid"}' \
+            "$URL" || true
+          head -n 1 /tmp/headers || true
+          grep -iE '^(server|content-type|access-control-allow-origin|vary):' /tmp/headers || true
+
+          for ORIGIN in 'https://localhost' 'capacitor://localhost' 'http://localhost'; do
+            echo "=== origin: $ORIGIN ==="
+            curl -sS -o /dev/null -D - --connect-timeout 10 --max-time 20 -X OPTIONS \
+              -H "Origin: $ORIGIN" \
+              -H 'Access-Control-Request-Method: POST' \
+              -H 'Access-Control-Request-Headers: content-type,authorization' \
+              "$URL" | grep -iE '^(HTTP/|access-control-allow-origin|access-control-allow-methods|access-control-allow-headers|vary):' || true
+          done
+
+          echo '=== ipv4 ==='
+          curl -4 -sS -o /dev/null -w 'ipv4_http=%{http_code} tls=%{ssl_verify_result}\n' --connect-timeout 10 --max-time 20 https://solution.smarbiz.sbs/health/ || true
+          echo '=== ipv6 ==='
+          curl -6 -sS -o /dev/null -w 'ipv6_http=%{http_code} tls=%{ssl_verify_result}\n' --connect-timeout 10 --max-time 20 https://solution.smarbiz.sbs/health/ || true
