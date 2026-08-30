@@ -46,7 +46,7 @@ jobs:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_CREDENTIALS_JSON_BASE64: ${{ secrets.FIREBASE_CREDENTIALS_JSON_BASE64 }}
           APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
-          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          APNS_KEY_ID: '7ZH6Y6V744'
           APNS_PRIVATE_KEY_BASE64: ${{ secrets.APNS_PRIVATE_KEY_BASE64 }}
         run: |
           set -euo pipefail
@@ -95,7 +95,7 @@ jobs:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_CREDENTIALS_JSON_BASE64: ${{ secrets.FIREBASE_CREDENTIALS_JSON_BASE64 }}
           APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
-          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          APNS_KEY_ID: '7ZH6Y6V744'
           APNS_PRIVATE_KEY_BASE64: ${{ secrets.APNS_PRIVATE_KEY_BASE64 }}
         run: |
           set -euo pipefail
