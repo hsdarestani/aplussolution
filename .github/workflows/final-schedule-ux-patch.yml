@@ -6,6 +6,7 @@ on:
       - feature/final-notification-copy-splash
     paths:
       - scripts/final_schedule_ux_patch.py
+      - scripts/final_schedule_ux_patch_bootstrap.py
       - .github/workflows/final-schedule-ux-patch.yml
 
 permissions:
@@ -22,6 +23,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Bootstrap patch for current typed source
+        run: python scripts/final_schedule_ux_patch_bootstrap.py
       - name: Apply final patch
         run: python scripts/final_schedule_ux_patch.py
       - name: Verify no accidental workflow changes
