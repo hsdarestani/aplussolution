@@ -57,7 +57,13 @@ const blackPalette: SchedulePalette = {
   legendText: '#ffffff',
 };
 
-const defaultPalette = vividPalette(198);
+const fallbackHues = [8, 42, 88, 138, 184, 224, 270, 318];
+function fallbackPalette(key: string): SchedulePalette {
+  if (!key) return vividPalette(198);
+  let hash = 0;
+  for (let index = 0; index < key.length; index += 1) hash = ((hash * 31) + key.charCodeAt(index)) >>> 0;
+  return vividPalette(fallbackHues[hash % fallbackHues.length]);
+}
 
 function customHuePalette(hue: number): SchedulePalette {
   const normalized = ((Math.round(hue) % 360) + 360) % 360;
@@ -80,5 +86,5 @@ export function schedulePalette(clientName?: string, _positionName?: string, cus
   if (client.includes('ommia') || client.includes('omnia')) return vividPalette(282);
   if (client.includes('citybeach')) return vividPalette(184);
   if (client.includes('hofgut')) return vividPalette(320);
-  return defaultPalette;
+  return fallbackPalette(client);
 }

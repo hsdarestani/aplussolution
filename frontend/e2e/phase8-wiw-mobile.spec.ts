@@ -69,3 +69,22 @@ test('Phase 8 mobile visual override is mobile-only and keeps A+ identity', asyn
   expect(css).toContain('.sv2-wiw-week-strip');
   expect(css).toContain('.sv2-mini-actions');
 });
+
+
+test('final Dienstplan UX keeps requested client order, hotel presets, copy label and edit reassignment', async () => {
+  const adminSchedule = read('src/WiwScheduleMobile.tsx');
+  const palette = read('src/scheduleClientPalette.ts');
+  const css = read('src/wiw-schedule-mobile.css');
+  expect(adminSchedule).toContain("'marthasfinest','stadthausammarkt','hotelspenerhaus','hofelcatering','restauranthirschgarten','messe','ommia','citybeach','hofgut'");
+  expect(adminSchedule).toContain("label: 'Frühdienst', start: 6 * 60 + 30, end: 15 * 60");
+  expect(adminSchedule).toContain("label: 'Spätdienst', start: 14 * 60 + 45, end: 22 * 60 + 45");
+  expect(adminSchedule).toContain("label: 'Nachtdienst', start: 22 * 60 + 30, end: 24 * 60 + 6 * 60 + 30");
+  expect(adminSchedule).toContain('Schicht kopieren');
+  expect(adminSchedule).toContain("const serviceOnly = groups.length === 1 && groups[0] === 'service'");
+  expect(adminSchedule).toContain("const uniqueLocation = matchingLocations.length === 1 ? String(matchingLocations[0].id) : ''");
+  expect(adminSchedule).toContain("workerId: card.worker?.id ? String(card.worker.id) : ''");
+  expect(adminSchedule).toContain('const workerChanged =');
+  expect(css).toContain('.wiw-open-alert{margin-left:16px!important}');
+  expect(css).toContain('.wiw-client-divider{height:3px;background:#111');
+  expect(palette).toContain('fallbackHues');
+});

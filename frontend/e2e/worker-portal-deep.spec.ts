@@ -275,7 +275,9 @@ test.describe('Worker portal deep regression QA', () => {
     await workerSchedule.locator('ion-segment-button[value="mine"]').click();
     await page.getByTestId('schedule-day-view').getByRole('button', { name: /Servicekraft/ }).click();
     await page.getByRole('button', { name: 'Freigeben' }).click();
-    await page.locator('ion-alert').getByRole('button', { name: 'Freigeben' }).click();
+    const releaseSheet = page.getByRole('dialog', { name: 'Schicht freigeben' });
+    await expect(releaseSheet).toBeVisible();
+    await releaseSheet.getByRole('button', { name: 'Freigabe anfragen' }).click();
     await expect.poll(() => state.releaseRequested).toBe(true);
     await expect.poll(() => state.claimed).toBe(true);
     await expect(page.getByText(/wartet auf Administration/i)).toBeVisible();

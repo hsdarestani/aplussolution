@@ -26,7 +26,7 @@ import './wiw-schedule-mobile.css';
 type TabKey = 'all' | 'open' | 'filled' | 'draft';
 type Choice = { value: string; label: string };
 type ColorChoice = { value: string; label: string; hue: number | null };
-type EditingCard = { shiftId: string; slotId: string; parentCount: number; workerName?: string; isOpen: boolean };
+type EditingCard = { shiftId: string; slotId: string; parentCount: number; workerName?: string; workerId?: string; isOpen: boolean };
 type FormState = {
   client: string;
   date: string;
@@ -514,7 +514,7 @@ export default function WiwScheduleMobile() {
     const startMinute = timeMinuteFromIso(card.shift.starts_at);
     const endMinute = timeMinuteFromIso(card.shift.ends_at);
     const dayOffset = Math.round((keyDate(endDate).getTime() - keyDate(startDate).getTime()) / 86400000);
-    setEditing({ shiftId: String(card.shift.id), slotId: String(card.slot.id), parentCount: Number(card.shift.required_count || 1), workerName: card.worker?.name, isOpen: card.isOpen });
+    setEditing({ shiftId: String(card.shift.id), slotId: String(card.slot.id), parentCount: Number(card.shift.required_count || 1), workerName: card.worker?.name, workerId: card.worker?.id ? String(card.worker.id) : '', isOpen: card.isOpen });
     setForm({
       client: String(card.shift.client || ''),
       date: startDate,
@@ -615,11 +615,17 @@ export default function WiwScheduleMobile() {
         payload.apply_all = form.apply_all;
         const edited: any = await api(`shifts/${editing.shiftId}/cards/${editing.slotId}/`, { method: 'PATCH', body: JSON.stringify(payload) });
         const targetShiftId = String(edited?.shift?.id || editing.shiftId);
-        await api(`shifts/${targetShiftId}/assign/`, {
-          method: 'POST',
-          body: JSON.stringify({ workers: form.workers.slice(0, 1), publish_remaining: form.publish_now }),
-        });
-        setToast(form.workers.length ? 'Schicht gespeichert · Mitarbeiterzuweisung aktualisiert.' : 'Schicht gespeichert · als OpenShift freigegeben.');
+        const nextWorkerId = String(form.workers[0] || '');
+        const workerChanged = String(editing.workerId || '') !== nextWorkerId;
+        if (workerChanged) {
+          await api(`shifts/${targetShiftId}/assign/`, {
+            method: 'POST',
+            body: JSON.stringify({ workers: nextWorkerId ? [nextWorkerId] : [], publish_remaining: form.publish_now }),
+          });
+        }
+        setToast(workerChanged
+          ? (nextWorkerId ? 'Schicht gespeichert · Mitarbeiter geändert.' : 'Schicht gespeichert · als OpenShift freigegeben.')
+          : (form.apply_all ? 'Änderungen auf alle Karten angewendet.' : 'Schicht gespeichert.'));
       } else {
         payload.required_count = Math.max(1, Number(form.required_count || 1));
         payload.status = form.publish_now ? 'published' : 'draft';

@@ -198,10 +198,10 @@ test.describe('Phase 6 mobile QA', () => {
     await dayView.getByRole('button', { name: /Servicekraft/ }).first().click();
     await expect(page.getByRole('button', { name: 'Freigeben' })).toBeVisible();
     await page.getByRole('button', { name: 'Freigeben' }).click();
-    const releaseAlert = page.locator('ion-alert').filter({ hasText: 'Schicht freigeben?' }).last();
-    await expect(releaseAlert).toBeVisible();
-    await releaseAlert.getByRole('button', { name: 'Abbrechen' }).click();
-    await expect(releaseAlert).toBeHidden();
+    const releaseSheet = page.getByRole('dialog', { name: 'Schicht freigeben' });
+    await expect(releaseSheet).toBeVisible();
+    await releaseSheet.getByRole('button', { name: 'Abbrechen' }).click();
+    await expect(releaseSheet).toBeHidden();
 
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeiterfassung' }).click();
     await expect(page.getByTestId('phase8-pay-periods')).toBeVisible();
