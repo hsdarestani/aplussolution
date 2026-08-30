@@ -74,10 +74,6 @@ function decorateStandardColorRow() {
   copy.appendChild(hint);
 }
 
-function openLocationAfterClientChoice() {
-  window.setTimeout(() => locationRow()?.click(), 90);
-}
-
 function setNativeTextareaValue(value: string) {
   const ensureTextarea = () => {
     const textarea = findForm()?.querySelector<HTMLTextAreaElement>('.wiw-extra-options textarea');
@@ -164,20 +160,6 @@ export default function WiwShiftFormUxEnhancer() {
       setClients(unpack(data).filter((item: Client) => item.active !== false));
     }).catch(() => undefined);
   }, [open, clients.length]);
-
-  useEffect(() => {
-    const onClick = (event: MouseEvent) => {
-      const target = event.target as HTMLElement | null;
-      const choiceButton = target?.closest<HTMLButtonElement>('.wiw-choice-sheet > div > button');
-      if (!choiceButton) return;
-      const sheet = choiceButton.closest('.wiw-choice-sheet');
-      const title = text(sheet?.querySelector('header b') || null);
-      if (title === 'Kunde') openLocationAfterClientChoice();
-    };
-
-    document.addEventListener('click', onClick, true);
-    return () => document.removeEventListener('click', onClick, true);
-  }, []);
 
   useEffect(() => {
     if (!open) return;

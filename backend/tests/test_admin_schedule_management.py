@@ -447,6 +447,40 @@ def test_admin_can_create_and_assign_new_shift_to_worker(auth_admin, company, lo
     shift = Shift.objects.get(pk=created.data['id'])
     slot = ShiftSlot.objects.get(shift=shift, status=ShiftSlot.Status.CLAIMED)
     assert slot.worker_id == second_worker.id
-    assert slot.confirmation_status == ShiftSlot.ConfirmationStatus.PENDING
+    assert slot.confirmation_status == ShiftSlot.ConfirmationStatus.CONFIRMED
     assert assigned.data['filled_count'] == 1
     assert assigned.data['open_count'] == 0
+
+@pytest.mark.django_db
+def test_admin_can_replace_worker_after_shift_creation_without_confirmation(
+    auth_admin, company, location, position, worker_user, second_worker
+):
+    starts = timezone.now() + timedelta(days=14)
+    created = auth_admin.post('/api/shifts/', {
+        'client': str(company.id),
+        'location': str(location.id),
+        'position': str(position.id),
+        'starts_at': starts.isoformat(),
+        'ends_at': (starts + timedelta(hours=5)).isoformat(),
+        'required_count': 1,
+        'status': 'published',
+        'confirmation_required': True,
+    }, format='json')
+    assert created.status_code == 201, created.data
+    first = auth_admin.post(f"/api/shifts/{created.data['id']}/assign/", {
+        'workers': [str(worker_user.worker_profile.id)],
+        'publish_remaining': True,
+    }, format='json')
+    assert first.status_code == 200, first.data
+
+    replaced = auth_admin.post(f"/api/shifts/{created.data['id']}/assign/", {
+        'workers': [str(second_worker.id)],
+        'publish_remaining': True,
+    }, format='json')
+    assert replaced.status_code == 200, replaced.data
+
+    shift = Shift.objects.get(pk=created.data['id'])
+    claimed = ShiftSlot.objects.get(shift=shift, status=ShiftSlot.Status.CLAIMED)
+    assert claimed.worker_id == second_worker.id
+    assert claimed.confirmation_status == ShiftSlot.ConfirmationStatus.CONFIRMED
+    assert not ShiftSlot.objects.filter(shift=shift, worker=worker_user.worker_profile, status=ShiftSlot.Status.CLAIMED).exists()

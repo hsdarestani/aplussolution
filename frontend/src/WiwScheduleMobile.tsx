@@ -26,7 +26,7 @@ import './wiw-schedule-mobile.css';
 type TabKey = 'all' | 'open' | 'filled' | 'draft';
 type Choice = { value: string; label: string };
 type ColorChoice = { value: string; label: string; hue: number | null };
-type EditingCard = { shiftId: string; slotId: string; parentCount: number; workerName?: string; isOpen: boolean };
+type EditingCard = { shiftId: string; slotId: string; parentCount: number; workerName?: string; workerId?: string; isOpen: boolean };
 type FormState = {
   client: string;
   date: string;
@@ -67,6 +67,14 @@ const SCHEDULE_GROUPS: Choice[] = [
   { value: 'front_office', label: 'Front Office' },
   { value: 'housekeeping', label: 'Housekeeping' },
 ];
+const CLIENT_ORDER = ['marthasfinest','stadthausammarkt','hotelspenerhaus','hofelcatering','restauranthirschgarten','messe','ommia','citybeach','hofgut'];
+const HOTEL_TIME_PRESETS = [
+  { key: 'early', label: 'Frühdienst', start: 6 * 60 + 30, end: 15 * 60 },
+  { key: 'late', label: 'Spätdienst', start: 14 * 60 + 45, end: 22 * 60 + 45 },
+  { key: 'night', label: 'Nachtdienst', start: 22 * 60 + 30, end: 24 * 60 + 6 * 60 + 30 },
+];
+const clientRank = (name?: string) => { const key = normalize(String(name || '')); const index = CLIENT_ORDER.findIndex((item) => key.includes(item) || item.includes(key)); return index < 0 ? CLIENT_ORDER.length : index; };
+const sortClients = (items: any[]) => [...items].sort((a, b) => clientRank(a?.name) - clientRank(b?.name) || String(a?.name || '').localeCompare(String(b?.name || ''), 'de'));
 const COLOR_CHOICES: ColorChoice[] = [
   { value: 'auto', label: 'Kundenfarbe · automatisch', hue: null },
   { value: 'navy', label: 'Navy', hue: 205 },
@@ -169,34 +177,59 @@ function activeSlots(shift: any) {
 
 function WheelColumn({ items, value, onChange }: { items: Array<{ value: number; label: string }>; value: number; onChange: (value: number) => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  const timer = useRef<number | undefined>(undefined);
+  const settleTimer = useRef<number | undefined>(undefined);
+  const frame = useRef<number | undefined>(undefined);
   const userScrolling = useRef(false);
   const programmatic = useRef(false);
   const latestValue = useRef(value);
+  const lastTickIndex = useRef(-1);
 
   useEffect(() => { latestValue.current = value; }, [value]);
   useEffect(() => {
     if (!ref.current || userScrolling.current) return;
     const index = Math.max(0, items.findIndex((item) => item.value === value));
+    lastTickIndex.current = index;
     const target = index * WHEEL_ROW;
     if (Math.abs(ref.current.scrollTop - target) > 1) ref.current.scrollTop = target;
   }, [items, value]);
+  useEffect(() => () => {
+    window.clearTimeout(settleTimer.current);
+    if (frame.current) window.cancelAnimationFrame(frame.current);
+  }, []);
+
+  const indexAtScroll = () => {
+    if (!ref.current || !items.length) return 0;
+    return Math.max(0, Math.min(items.length - 1, Math.round(ref.current.scrollTop / WHEEL_ROW)));
+  };
+
+  const emitTick = () => {
+    frame.current = undefined;
+    const index = indexAtScroll();
+    if (index === lastTickIndex.current) return;
+    lastTickIndex.current = index;
+    const next = items[index]?.value;
+    if (next == null || next === latestValue.current) return;
+    latestValue.current = next;
+    onChange(next);
+    try { navigator.vibrate?.(4); } catch { /* haptic is best-effort */ }
+  };
 
   const settle = () => {
     if (!ref.current || !items.length) return;
-    const index = Math.max(0, Math.min(items.length - 1, Math.round(ref.current.scrollTop / WHEEL_ROW)));
+    const index = indexAtScroll();
     const target = index * WHEEL_ROW;
     const next = items[index].value;
-    programmatic.current = true;
-    ref.current.scrollTo({ top: target, behavior: 'smooth' });
+    lastTickIndex.current = index;
     if (next !== latestValue.current) {
       latestValue.current = next;
       onChange(next);
     }
+    programmatic.current = true;
+    ref.current.scrollTo({ top: target, behavior: 'smooth' });
     window.setTimeout(() => {
       programmatic.current = false;
       userScrolling.current = false;
-    }, 190);
+    }, 115);
   };
 
   return (
@@ -206,15 +239,21 @@ function WheelColumn({ items, value, onChange }: { items: Array<{ value: number;
       onScroll={() => {
         if (programmatic.current) return;
         userScrolling.current = true;
-        window.clearTimeout(timer.current);
-        timer.current = window.setTimeout(settle, 150);
+        if (!frame.current) frame.current = window.requestAnimationFrame(emitTick);
+        window.clearTimeout(settleTimer.current);
+        settleTimer.current = window.setTimeout(settle, 72);
       }}
     >
       {items.map((item) => (
         <button type="button" key={item.value} className={item.value === value ? 'active' : ''} onClick={() => {
+          const index = items.findIndex((candidate) => candidate.value === item.value);
           latestValue.current = item.value;
+          lastTickIndex.current = index;
           onChange(item.value);
-          ref.current?.scrollTo({ top: items.findIndex((candidate) => candidate.value === item.value) * WHEEL_ROW, behavior: 'smooth' });
+          try { navigator.vibrate?.(4); } catch { /* best-effort */ }
+          programmatic.current = true;
+          ref.current?.scrollTo({ top: index * WHEEL_ROW, behavior: 'smooth' });
+          window.setTimeout(() => { programmatic.current = false; userScrolling.current = false; }, 115);
         }}>{item.label}</button>
       ))}
     </div>
@@ -381,7 +420,7 @@ export default function WiwScheduleMobile() {
       const localRows = unpack(shiftData);
       const liveOpenRows = Array.isArray(dashboardData?.open_shift_rows) ? dashboardData.open_shift_rows : [];
       setRows([...localRows, ...liveOpenRows]);
-      setClients(unpack(clientData).filter((item: any) => item.active !== false));
+      setClients(sortClients(unpack(clientData).filter((item: any) => item.active !== false)));
       setLocations(unpack(locationData).filter((item: any) => item.active !== false));
       setPositions(unpack(positionData).filter((item: any) => item.active !== false));
       setWorkers(unpack(workerData).filter((item: any) => item.active !== false && !String(item?.user_detail?.email || '').endsWith('@sync.invalid')));
@@ -414,6 +453,7 @@ export default function WiwScheduleMobile() {
   const shiftCardStyle = (shift: any) => {
     const palette = schedulePalette(shift?.client_name, shift?.position_name, shift?.color_hue);
     return {
+      '--wiw-client-hue': String(palette.hue),
       '--wiw-card-accent': palette.accent,
       '--wiw-card-open-bg': palette.openBackground,
       '--wiw-card-filled-bg': palette.filledBackground,
@@ -456,18 +496,11 @@ export default function WiwScheduleMobile() {
     visibleDays.forEach((day) => { map[day] = []; });
     visibleCards.forEach((card) => { (map[dateKeyFromIso(card.shift.starts_at)] ||= []).push(card); });
     Object.values(map).forEach((dayCards) => {
-      const firstStartByClient = new Map<string, number>();
-      dayCards.forEach((card) => {
-        const key = clientKey(card.shift);
-        const start = new Date(card.shift.starts_at).getTime();
-        firstStartByClient.set(key, Math.min(firstStartByClient.get(key) ?? Number.POSITIVE_INFINITY, start));
-      });
       dayCards.sort((left, right) => {
-        const leftKey = clientKey(left.shift);
-        const rightKey = clientKey(right.shift);
-        const groupOrder = (firstStartByClient.get(leftKey) ?? 0) - (firstStartByClient.get(rightKey) ?? 0);
+        const groupOrder = clientRank(left.shift.client_name) - clientRank(right.shift.client_name);
         if (groupOrder) return groupOrder;
-        if (leftKey !== rightKey) return String(left.shift.client_name || '').localeCompare(String(right.shift.client_name || ''), 'de');
+        const nameOrder = String(left.shift.client_name || '').localeCompare(String(right.shift.client_name || ''), 'de');
+        if (nameOrder) return nameOrder;
         return new Date(left.shift.starts_at).getTime() - new Date(right.shift.starts_at).getTime();
       });
     });
@@ -479,14 +512,18 @@ export default function WiwScheduleMobile() {
   }, 0), [visibleCards]);
 
   const positionChoices = useMemo<Choice[]>(() => {
-    const hotelOnly = isHotelClientName(clients.find((item: any) => String(item.id) === form.client)?.name);
+    const groups = form.schedule_groups || [];
+    const serviceOnly = groups.length === 1 && groups[0] === 'service';
     return POSITION_ORDER.flatMap((definition) => {
       const match = positions.find((item: any) => definition.aliases.includes(normalize(item.name)));
       if (!match) return [];
-      if (hotelOnly && !isHotelPositionName(match.name)) return [];
+      if (serviceOnly && isHotelPositionName(match.name)) return [];
+      if (!serviceOnly && (groups.includes('front_office') || groups.includes('housekeeping')) && !isHotelPositionName(match.name)) return [];
+      if (groups.length === 1 && groups[0] === 'front_office' && normalize(match.name) !== 'frontoffice') return [];
+      if (groups.length === 1 && groups[0] === 'housekeeping' && !['housekeeping','houskeeping'].includes(normalize(match.name))) return [];
       return [{ value: String(match.id), label: definition.label }];
     });
-  }, [positions, clients, form.client]);
+  }, [positions, form.schedule_groups]);
   const clientChoices = useMemo<Choice[]>(() => clients.map((item: any) => ({ value: String(item.id), label: item.name })), [clients]);
   const locationChoices = useMemo<Choice[]>(() => locations.filter((item: any) => !form.client || String(item.client) === form.client).map((item: any) => ({ value: String(item.id), label: item.name })), [locations, form.client]);
   const workerChoices = useMemo<Choice[]>(() => workers.map((item: any) => ({ value: String(item.id), label: item.user_detail?.name || item.user_detail?.email || item.employee_number || 'Mitarbeiter' })), [workers]);
@@ -508,7 +545,7 @@ export default function WiwScheduleMobile() {
     const startMinute = timeMinuteFromIso(card.shift.starts_at);
     const endMinute = timeMinuteFromIso(card.shift.ends_at);
     const dayOffset = Math.round((keyDate(endDate).getTime() - keyDate(startDate).getTime()) / 86400000);
-    setEditing({ shiftId: String(card.shift.id), slotId: String(card.slot.id), parentCount: Number(card.shift.required_count || 1), workerName: card.worker?.name, isOpen: card.isOpen });
+    setEditing({ shiftId: String(card.shift.id), slotId: String(card.slot.id), parentCount: Number(card.shift.required_count || 1), workerName: card.worker?.name, workerId: card.worker?.id ? String(card.worker.id) : '', isOpen: card.isOpen });
     setForm({
       client: String(card.shift.client || ''),
       date: startDate,
@@ -608,16 +645,18 @@ export default function WiwScheduleMobile() {
         payload.status = form.publish_now ? 'published' : 'draft';
         payload.apply_all = form.apply_all;
         const edited: any = await api(`shifts/${editing.shiftId}/cards/${editing.slotId}/`, { method: 'PATCH', body: JSON.stringify(payload) });
-        if (editing.isOpen && form.workers.length) {
-          const targetShiftId = String(edited?.shift?.id || editing.shiftId);
+        const targetShiftId = String(edited?.shift?.id || editing.shiftId);
+        const nextWorkerId = String(form.workers[0] || '');
+        const workerChanged = String(editing.workerId || '') !== nextWorkerId;
+        if (workerChanged) {
           await api(`shifts/${targetShiftId}/assign/`, {
             method: 'POST',
-            body: JSON.stringify({ workers: [form.workers[0]], publish_remaining: form.publish_now }),
+            body: JSON.stringify({ workers: nextWorkerId ? [nextWorkerId] : [], publish_remaining: form.publish_now }),
           });
-          setToast('Mitarbeiter wurde der OpenShift zugewiesen.');
-        } else {
-          setToast(form.apply_all ? 'Änderungen auf alle Karten angewendet.' : 'Nur diese Schichtkarte wurde geändert.');
         }
+        setToast(workerChanged
+          ? (nextWorkerId ? 'Schicht gespeichert · Mitarbeiter geändert.' : 'Schicht gespeichert · als OpenShift freigegeben.')
+          : (form.apply_all ? 'Änderungen auf alle Karten angewendet.' : 'Schicht gespeichert.'));
       } else {
         payload.required_count = Math.max(1, Number(form.required_count || 1));
         payload.status = form.publish_now ? 'published' : 'draft';
@@ -670,14 +709,38 @@ export default function WiwScheduleMobile() {
       <div
         key={weekStart}
         className={`wiw-week-scroll ${weekDirection ? `wiw-week-turn-${weekDirection}` : ''}`}
-        onTouchStart={(event) => { const touch = event.touches[0]; swipe.current = { x: touch.clientX, y: touch.clientY }; }}
+        onTouchStart={(event) => {
+          const touch = event.touches[0];
+          swipe.current = { x: touch.clientX, y: touch.clientY };
+          event.currentTarget.classList.add('is-swipe-dragging');
+        }}
+        onTouchMove={(event) => {
+          if (!swipe.current || !event.touches.length || tab === 'open') return;
+          const touch = event.touches[0];
+          const dx = touch.clientX - swipe.current.x;
+          const dy = touch.clientY - swipe.current.y;
+          if (Math.abs(dx) < Math.abs(dy) * 1.05) return;
+          const travel = Math.max(-118, Math.min(118, dx * .56));
+          const rotate = Math.max(-9, Math.min(9, dx / 18));
+          event.currentTarget.style.transform = `translate3d(${travel}px,0,0) rotateY(${rotate}deg) scale(.985)`;
+          event.currentTarget.style.opacity = String(Math.max(.58, 1 - Math.abs(dx) / 520));
+        }}
         onTouchEnd={(event) => {
+          event.currentTarget.classList.remove('is-swipe-dragging');
+          event.currentTarget.style.transform = '';
+          event.currentTarget.style.opacity = '';
           if (!swipe.current || !event.changedTouches.length) return;
           const touch = event.changedTouches[0];
           const dx = touch.clientX - swipe.current.x;
           const dy = touch.clientY - swipe.current.y;
           swipe.current = undefined;
-          if (tab !== 'open' && Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.2) changeWeek(dx < 0 ? 7 : -7);
+          if (tab !== 'open' && Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.15) changeWeek(dx < 0 ? 7 : -7);
+        }}
+        onTouchCancel={(event) => {
+          swipe.current = undefined;
+          event.currentTarget.classList.remove('is-swipe-dragging');
+          event.currentTarget.style.transform = '';
+          event.currentTarget.style.opacity = '';
         }}
       >
         {visibleDays.map((day) => {
@@ -685,10 +748,10 @@ export default function WiwScheduleMobile() {
           const dayCards = byDay[day] || [];
           return <section className="wiw-day-section" id={`wiw-day-${day}`} key={day}>
             <header><strong>{header.weekday}</strong><span>{header.date}</span><em>{dayCards.length}</em></header>
-            {dayCards.map((card) => <button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'}`} style={shiftCardStyle(card.shift)} key={card.key} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
+            {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'}`} style={shiftCardStyle(card.shift)} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
               <div className="wiw-card-line primary"><b>{card.worker?.name || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}{card.isOpen && card.shift.status !== 'draft' ? <span className="wiw-open-alert">!</span> : null}</b><span>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</span></div>
               <div className="wiw-card-line secondary"><span className={card.isOpen ? 'open' : ''}>{card.shift.position_name || 'Schicht'}</span><small>{card.shift.location_name || ''}</small></div>
-            </button>)}
+            </button></React.Fragment>)}
             {tab !== 'open' && !dayCards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
           </section>;
         })}
@@ -696,12 +759,13 @@ export default function WiwScheduleMobile() {
       </div>
 
       {tab !== 'open' ? <div className="wiw-week-total"><span>Gesamtstunden</span><strong>{weekHours.toFixed(1)}</strong></div> : null}
-      <button type="button" className="wiw-create-fab" aria-label="Schicht erstellen" onClick={() => openCreate(anchor)}>+</button>
+      <button type="button" className="wiw-create-fab" aria-label="Schicht anlegen" onClick={() => openCreate(anchor)}>+</button>
 
       {formOpen ? <div className="wiw-shift-form-screen" data-testid="wiw-shift-form">
         <header className="wiw-form-topbar"><button type="button" onClick={() => setFormOpen(false)}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null} onClick={() => void save()}>Sichern</button></header>
         <div className="wiw-form-scroll">
           <Row icon={calendarOutline} label={formatDateRow(form.date)} onClick={() => setDateOpen(true)} />
+          {isHotelClientName(selectedClientName) ? <div className="wiw-hotel-presets">{HOTEL_TIME_PRESETS.map((preset) => <button type="button" key={preset.key} onClick={() => setForm((current) => ({ ...current, startMinute: preset.start, endAbsolute: preset.end }))}><b>{preset.label}</b><small>{formatMinute(preset.start)}–{formatMinute(preset.end)}</small></button>)}</div> : null}
           <div className="wiw-time-row-wrap">
             <Row icon={timeOutline} label={form.startMinute == null || form.endAbsolute == null ? 'Wähle Zeitrahmen' : `${formatMinute(form.startMinute)} ${form.endAbsolute >= 1440 ? '~ ' : '– '}${formatMinute(form.endAbsolute)}`} muted={form.startMinute == null} onClick={() => { ensureTime(); setTimeOpen((value) => !value); }} />
             {timeOpen && form.startMinute != null && form.endAbsolute != null ? <TimeFrameWheel start={form.startMinute} end={form.endAbsolute} onChange={(start, end) => setForm((current) => ({ ...current, startMinute: start, endAbsolute: end }))} /> : null}
@@ -720,7 +784,7 @@ export default function WiwScheduleMobile() {
           <Row icon={personOutline} label="OpenShift" trailing={<Switch checked={form.publish_now} onChange={(value) => setForm((current) => ({ ...current, publish_now: value }))} />} />
           {!editing ? <Row icon={layersOutline} label={`${form.required_count} Schicht${form.required_count === 1 ? '' : 'en'}`} trailing={<div className="wiw-count-stepper"><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: Math.max(current.workers.length || 1, current.required_count - 1) }))}>−</button><b>{form.required_count}</b><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: current.required_count + 1 }))}>+</button></div>} /> : <Row icon={layersOutline} label="1 Schichtkarte" value={editing.workerName || 'OpenShift'} emphasizeValue={Boolean(editing.workerName)} />}
           <Row icon={checkmarkOutline} label="Erfordere Übernahme-Bestätigung" trailing={<Switch checked={form.confirmation_required} onChange={(value) => setForm((current) => ({ ...current, confirmation_required: value }))} />} />
-          {(!editing || editing.isOpen) ? <Row icon={peopleOutline} label={editing ? (form.workers.length ? 'Mitarbeiter ändern' : 'Mitarbeiter zuweisen') : (form.workers.length ? `${form.workers.length} Benutzer direkt zugewiesen` : 'Geeignete Benutzer anzeigen')} value={selectedWorkerNames || undefined} emphasizeValue={Boolean(selectedWorkerNames)} muted={!form.workers.length} onClick={() => setSheet('workers')} /> : null}
+          <Row icon={peopleOutline} label={editing ? (form.workers.length ? 'Mitarbeiter ändern' : 'Mitarbeiter zuweisen') : (form.workers.length ? `${form.workers.length} Benutzer direkt zugewiesen` : 'Geeignete Benutzer anzeigen')} value={selectedWorkerNames || undefined} emphasizeValue={Boolean(selectedWorkerNames)} muted={!form.workers.length} onClick={() => setSheet('workers')} />
 
           {editing && editing.parentCount > 1 && !editing.isOpen ? <div className="wiw-bulk-edit-row"><div><b>Alle Karten dieser Schicht mitändern</b><span>Wenn aus, wird nur diese Person / OpenShift-Karte geändert.</span></div><Switch checked={form.apply_all} onChange={(value) => setForm((current) => ({ ...current, apply_all: value }))} /></div> : null}
 
@@ -738,18 +802,18 @@ export default function WiwScheduleMobile() {
           {editing ? <>
             <div className="wiw-form-separator" />
             {editing.workerName ? <Row icon={notificationsOutline} label="Erinnerung senden" value={editing.workerName} emphasizeValue onClick={() => void sendManualReminder()} /> : null}
-            <Row icon={copyOutline} label="Schicht als OpenShift kopieren" value="Danach bearbeiten & sichern" onClick={prepareCopyAsOpenShift} />
+            <Row icon={copyOutline} label="Schicht kopieren" onClick={prepareCopyAsOpenShift} />
             <Row icon={trashOutline} label="Schicht löschen" onClick={() => void deleteEditingShift()} />
           </> : null}
         </div>
 
         {dateOpen ? <div className="wiw-sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setDateOpen(false); }}><section className="wiw-date-sheet"><header><b>Datum</b><button type="button" onClick={() => setDateOpen(false)}>Fertig</button></header><input type="date" value={form.date} onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))} /><div><button type="button" onClick={() => setForm((current) => ({ ...current, date: berlinToday() }))}>Heute</button><button type="button" onClick={() => setForm((current) => ({ ...current, date: addDays(berlinToday(), 1) }))}>Morgen</button></div></section></div> : null}
-        {sheet === 'client' ? <ChoiceSheet title="Kunde" choices={clientChoices} selected={form.client} onClose={() => setSheet('')} onSelect={(choice) => { const nextName = clients.find((item: any) => String(item.id) === choice.value)?.name; setForm((current) => { const currentPosition = positions.find((item: any) => String(item.id) === current.position); return { ...current, client: choice.value, location: '', position: isHotelClientName(nextName) && !isHotelPositionName(currentPosition?.name) ? '' : current.position }; }); setSheet(''); }} /> : null}
+        {sheet === 'client' ? <ChoiceSheet title="Kunde" choices={clientChoices} selected={form.client} onClose={() => setSheet('')} onSelect={(choice) => { const nextName = clients.find((item: any) => String(item.id) === choice.value)?.name; const matchingLocations = locations.filter((item: any) => String(item.client) === choice.value); const uniqueLocation = matchingLocations.length === 1 ? String(matchingLocations[0].id) : ''; const nextGroups = isHotelClientName(nextName) ? ['front_office', 'housekeeping'] : ['service']; setForm((current) => { const currentPosition = positions.find((item: any) => String(item.id) === current.position); const incompatible = (nextGroups.length === 1 && nextGroups[0] === 'service' && isHotelPositionName(currentPosition?.name)) || (isHotelClientName(nextName) && !isHotelPositionName(currentPosition?.name)); return { ...current, client: choice.value, location: uniqueLocation, position: incompatible ? '' : current.position, schedule_groups: nextGroups }; }); setSheet(matchingLocations.length > 1 ? 'location' : ''); }} /> : null}
         {sheet === 'position' ? <ChoiceSheet title="Position" choices={positionChoices} selected={form.position} onClose={() => setSheet('')} onSelect={(choice) => { setForm((current) => ({ ...current, position: choice.value })); setSheet(''); }} /> : null}
         {sheet === 'location' ? <ChoiceSheet title="Jobstandort" choices={locationChoices} selected={form.location} onClose={() => setSheet('')} onSelect={(choice) => { setForm((current) => ({ ...current, location: choice.value })); setSheet(''); }} /> : null}
-        {sheet === 'groups' ? <MultiChoiceSheet title="Zeitplan" choices={SCHEDULE_GROUPS} selected={form.schedule_groups} onClose={() => setSheet('')} onChange={(values) => setForm((current) => ({ ...current, schedule_groups: values }))} /> : null}
+        {sheet === 'groups' ? <MultiChoiceSheet title="Zeitplan" choices={SCHEDULE_GROUPS} selected={form.schedule_groups} onClose={() => setSheet('')} onChange={(values) => setForm((current) => { const groups = values.includes('service') ? ['service'] : values; const currentPosition = positions.find((item: any) => String(item.id) === current.position); return { ...current, schedule_groups: groups, position: groups.length === 1 && groups[0] === 'service' && isHotelPositionName(currentPosition?.name) ? '' : current.position }; })} /> : null}
         {sheet === 'color' ? <ColorSheet selected={form.color_hue} autoHue={formAutoHue} onClose={() => setSheet('')} onSelect={(hue) => setForm((current) => ({ ...current, color_hue: hue }))} /> : null}
-        {sheet === 'workers' ? <MultiChoiceSheet title={editing?.isOpen ? 'Mitarbeiter zuweisen' : 'Geeignete Benutzer'} choices={workerChoices} selected={form.workers} limit={editing ? 1 : form.required_count} onClose={() => setSheet('')} onChange={(values) => setForm((current) => ({ ...current, workers: values }))} /> : null}
+        {sheet === 'workers' ? <MultiChoiceSheet title={editing ? 'Mitarbeiter auswählen / ändern' : 'Geeignete Benutzer'} choices={workerChoices} selected={form.workers} limit={editing ? 1 : form.required_count} onClose={() => setSheet('')} onChange={(values) => setForm((current) => ({ ...current, workers: values, apply_all: editing ? false : current.apply_all }))} /> : null}
       </div> : null}
 
       {toast ? <button type="button" className="wiw-toast" onClick={() => setToast('')}>{toast}</button> : null}
@@ -770,7 +834,7 @@ function emptyForm(date: string): FormState {
     publish_now: true,
     confirmation_required: false,
     workers: [],
-    schedule_groups: [],
+    schedule_groups: ['service'],
     color_hue: null,
     notes: '',
     apply_all: false,

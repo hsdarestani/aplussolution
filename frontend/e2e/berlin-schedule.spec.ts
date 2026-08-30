@@ -78,13 +78,13 @@ test('schedule keeps Berlin time and offers five planning views with customer co
 
 test('mobile planning defaults to the vertically scrollable full week and keeps the week strip inside the viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 }); await page.clock.setFixedTime(fixedNow); await mockAdmin(page); await page.goto('/?view=schedule');
-  await expect(page.getByTestId('phase8-week-strip')).toBeVisible();
-  const week = page.getByTestId('schedule-week-view');
-  await expect(week).toBeVisible();
-  await expect(week.locator('.sv2-week-day')).toHaveCount(7);
-  await expect(page.getByTestId('schedule-day-view')).toHaveCount(0);
+  const native = page.getByTestId('wiw-native-schedule');
+  await expect(native).toBeVisible();
+  await expect(native.locator('.wiw-week-strip')).toBeVisible();
+  await expect(native.locator('.wiw-day-section')).toHaveCount(7);
+  await expect(native.locator('.wiw-week-total')).toBeVisible();
+  await expect(native.getByRole('tab', { name: 'Alle' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('schedule-view-toolbar')).toBeHidden();
-  await expect(page.locator('.sv2 > ion-segment ion-segment-button[value="all"]')).toHaveClass(/segment-button-checked/);
   const noPageOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
   expect(noPageOverflow).toBeTruthy();
 });

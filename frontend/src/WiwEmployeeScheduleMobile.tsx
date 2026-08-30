@@ -326,9 +326,9 @@ export default function WiwEmployeeScheduleMobile() {
     </div>
   );
 
-  return createPortal(<>
-    {screen}
-    {releaseTarget && <div className="wiw-release-backdrop" role="presentation" onClick={closeReleaseChooser}>
+  return <>
+    {createPortal(screen, host)}
+    {releaseTarget ? createPortal(<div className="wiw-release-backdrop" role="presentation" onClick={closeReleaseChooser}>
       <section className="wiw-release-sheet" role="dialog" aria-modal="true" aria-labelledby="wiw-release-title" onClick={(event) => event.stopPropagation()}>
         <div className="wiw-release-handle" />
         <header>
@@ -365,6 +365,6 @@ export default function WiwEmployeeScheduleMobile() {
           <button type="button" className="primary" disabled={busy || releaseLoading} onClick={() => void requestRelease(releaseTarget)}>{busy ? 'Wird gesendet …' : 'Freigabe anfragen'}</button>
         </div>
       </section>
-    </div>}
-  </>, host);
+    </div>, document.body) : null}
+  </>;
 }

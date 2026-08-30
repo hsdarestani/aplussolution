@@ -40,7 +40,9 @@ def test_message_creates_notification(api_client, admin_user, worker_user):
     response = api_client.post(f'/api/conversations/{conversation.id}/post_message/', {'body': 'Hallo Anna'}, format='json')
     assert response.status_code == 201
     assert Message.objects.count() == 1
-    assert Notification.objects.filter(user=worker_user, title='Einsatz').exists()
+    notification = Notification.objects.get(user=worker_user, kind__startswith='message-')
+    assert notification.title == 'Neue Nachricht von Admin'
+    assert notification.body == 'Hallo Anna'
 
 
 @pytest.mark.django_db

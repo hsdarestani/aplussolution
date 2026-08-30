@@ -8,8 +8,8 @@ from core.models import Announcement, AnnouncementRecipient, Notification
 
 
 @pytest.mark.django_db
-def test_confirmation_required_assignment_is_pending_and_worker_can_confirm(
-    auth_admin, auth_worker, admin_user, worker_user, company, location, position
+def test_direct_admin_assignment_is_confirmed_without_worker_confirmation(
+    auth_admin, auth_worker, worker_user, company, location, position
 ):
     starts_at = timezone.now() + timedelta(days=2)
     created = auth_admin.post('/api/shifts/', {
@@ -24,27 +24,27 @@ def test_confirmation_required_assignment_is_pending_and_worker_can_confirm(
     }, format='json')
     assert assigned.status_code == 200, assigned.data
     worker = assigned.data['assigned_workers'][0]
-    assert worker['confirmation_status'] == 'pending'
-    assert worker['confirmation_label'] == 'Ausstehend'
+    assert worker['confirmation_status'] == 'confirmed'
+    assert worker['confirmation_label'] == 'Bestätigt'
     assert worker['slot_id']
-    assert Notification.objects.filter(user=worker_user, title='Schicht bestätigen').exists()
+    assignment_notice = Notification.objects.get(user=worker_user, kind__startswith='shift-admin-assigned-')
+    assert assignment_notice.title == 'Anna Becker übernimmt folgende Schicht:'
+    assert not Notification.objects.filter(user=worker_user, title='Bitte Schicht bestätigen').exists()
 
-    confirmed = auth_worker.post(f"/api/shifts/{created.data['id']}/confirmation/", {'status': 'confirmed'}, format='json')
-    assert confirmed.status_code == 200, confirmed.data
-    mine = next(item for item in confirmed.data['assigned_workers'] if item['is_me'])
-    assert mine['confirmation_status'] == 'confirmed'
-    assert Notification.objects.filter(user=admin_user, kind__startswith='shift-confirmation-response-').exists()
-
-    reset = auth_admin.post(f"/api/shifts/{created.data['id']}/confirmation/", {
-        'slot_id': worker['slot_id'], 'status': 'pending',
-    }, format='json')
-    assert reset.status_code == 200, reset.data
-    assert reset.data['assigned_workers'][0]['confirmation_status'] == 'pending'
+    # Even when the shift template has confirmation_required enabled, selecting a
+    # worker directly in the admin form is the acceptance decision for this slot.
+    confirmation = auth_worker.post(
+        f"/api/shifts/{created.data['id']}/confirmation/",
+        {'status': 'confirmed'},
+        format='json',
+    )
+    assert confirmation.status_code == 200, confirmation.data
+    assert confirmation.data['assigned_workers'][0]['confirmation_status'] == 'confirmed'
 
 
 @pytest.mark.django_db
 def test_admin_sends_one_way_announcement_with_attachment_and_push_notification(
-    auth_admin, auth_worker, worker_user
+    auth_admin, auth_worker, admin_user, worker_user
 ):
     attachment = SimpleUploadedFile('einsatz.pdf', b'%PDF-1.4 phase6', content_type='application/pdf')
     sent = auth_admin.post('/api/announcements/', {
@@ -60,7 +60,9 @@ def test_admin_sends_one_way_announcement_with_attachment_and_push_notification(
     announcement = Announcement.objects.get(pk=sent.data['id'])
     link = AnnouncementRecipient.objects.get(announcement=announcement, user=worker_user)
     assert link.notification_id
-    assert Notification.objects.filter(pk=link.notification_id, kind=f'announcement-{announcement.id}').exists()
+    notification = Notification.objects.get(pk=link.notification_id, kind=f'announcement-{announcement.id}')
+    assert notification.title == f'Neue Mitteilung von {admin_user.get_full_name() or admin_user.email}'
+    assert notification.body == 'Bitte vor dem Einsatz lesen.'
 
     inbox = auth_worker.get('/api/announcements/')
     assert inbox.status_code == 200

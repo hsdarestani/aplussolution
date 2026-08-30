@@ -6,8 +6,27 @@ from .models import Notification, User
 from .push_notifications import push_provider_configured, send_notification_push
 
 
+_SUPPRESSED_NATIVE_TITLES = {
+    'Schichtübernahme abgelehnt',
+    'Schicht bestätigt',
+    'Schicht abgelehnt',
+    'Schichtbestätigung aktualisiert',
+    'Zeiterfassung wurde beendet',
+}
+
+
+def native_push_suppressed(instance: Notification) -> bool:
+    """Return True for events explicitly approved as in-app-only/no-push."""
+    kind = str(instance.kind or '')
+    if kind.startswith('shift-confirmation-response-') or kind.startswith('shift-confirmation-admin-'):
+        return True
+    if kind.startswith('pickup-') and kind.endswith('-rejected'):
+        return True
+    return str(instance.title or '').strip() in _SUPPRESSED_NATIVE_TITLES
+
+
 def _mirror_worker_notification_to_admins(instance: Notification) -> None:
-    """Give admins a visible confirmation copy for every worker notification.
+    """Give admins a visible confirmation copy for every worker push.
 
     The original notification remains addressed to the worker. The admin copy is
     a separate Notification, so it reaches every registered admin device through
@@ -31,6 +50,11 @@ def _mirror_worker_notification_to_admins(instance: Notification) -> None:
 @receiver(post_save, sender=Notification, dispatch_uid='aplus_native_push_notification')
 def dispatch_native_push(sender, instance: Notification, created: bool, **kwargs):
     if not created:
+        return
+
+    # These events stay in the in-app history but Ashkan explicitly does not want
+    # a native push (or an admin verification push) for them.
+    if native_push_suppressed(instance):
         return
 
     # Create the admin verification copy inside the same DB transaction. Because
