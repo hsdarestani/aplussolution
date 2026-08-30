@@ -53,7 +53,7 @@ export default function AppLaunchSplash() {
         <img src="/5.png" alt="" />
       </div>
       <strong>A+ SOLUTION GMBH</strong>
-      <small>Alles organisiert. Alles im Griff.</small>
+      <small>NO LIMITS, JUST SOLUTIONS.</small>
       <div className="app-launch-progress"><i /></div>
     </div>
   );
