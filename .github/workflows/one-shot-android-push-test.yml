@@ -14,7 +14,7 @@ permissions:
 jobs:
   send-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - name: Prepare SSH authentication
         env:
@@ -28,10 +28,13 @@ jobs:
           ASKPASS
           chmod 700 /tmp/aplus-askpass.sh
 
-      - name: Send and record Android push test
+      - name: Repair FCM config if available, then send one Android admin push
         env:
           DEPLOY_PASSWORD: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
+          FIREBASE_PROJECT_ID_SECRET: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_CREDENTIALS_JSON_BASE64_SECRET: ${{ secrets.FIREBASE_CREDENTIALS_JSON_BASE64 }}
+          GOOGLE_SERVICES_JSON_BASE64_SECRET: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
           SSH_ASKPASS: /tmp/aplus-askpass.sh
           SSH_ASKPASS_REQUIRE: force
           DISPLAY: :0
@@ -41,8 +44,14 @@ jobs:
           test -n "$HOST" && test -n "$DEPLOY_PASSWORD"
           export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
 
-          set +e
-          OUTPUT=$(setsid -w ssh -qT \
+          PROJECT_PRESENT=false
+          CREDS_PRESENT=false
+          GOOGLE_SERVICES_PRESENT=false
+          [ -n "${FIREBASE_PROJECT_ID_SECRET:-}" ] && PROJECT_PRESENT=true
+          [ -n "${FIREBASE_CREDENTIALS_JSON_BASE64_SECRET:-}" ] && CREDS_PRESENT=true
+          [ -n "${GOOGLE_SERVICES_JSON_BASE64_SECRET:-}" ] && GOOGLE_SERVICES_PRESENT=true
+
+          PRE_OUTPUT=$(setsid -w ssh -qT \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=15 \
@@ -50,48 +59,139 @@ jobs:
           set -euo pipefail
           cd /opt/aplussolution
           docker compose exec -T backend python manage.py shell <<'PY'
-          import uuid
-          from types import SimpleNamespace
           from core.push_models import PushDevice
-          from core.push_notifications import push_provider_status, _send_android
+          from core.push_notifications import push_provider_status
 
           providers = push_provider_status()
-          print(f"android_provider_ready={providers.get('android', False)}")
-          print(f"ios_provider_ready={providers.get('ios', False)}")
-          if not providers.get('android', False):
-              raise SystemExit('Android FCM provider is not configured in production.')
-
           devices = PushDevice.objects.filter(
               active=True,
               platform=PushDevice.Platform.ANDROID,
               user__role='admin',
           ).order_by('-last_seen_at')
-          print(f"active_admin_android_devices={devices.count()}")
           device = devices.first()
-          if not device:
-              raise SystemExit('No active Android push device is registered for an admin account.')
-
-          notification = SimpleNamespace(
-              id=uuid.uuid4(),
-              kind='general',
-              action_url='',
-              title='A+ Solution Test',
-              body='Push-Test erfolgreich – Android-Benachrichtigungen funktionieren.',
-          )
-          ok, error, invalid = _send_android(device, notification)
-          print(f"selected_device_last_seen={device.last_seen_at.isoformat()}")
-          print(f"fcm_send_ok={ok}")
-          print(f"invalid_token={invalid}")
-          if not ok:
-              raise SystemExit(1)
+          print(f"pre_android_provider_ready={providers.get('android', False)}")
+          print(f"ios_provider_ready={providers.get('ios', False)}")
+          print(f"active_admin_android_devices={devices.count()}")
+          print(f"selected_device_last_seen={device.last_seen_at.isoformat() if device else 'none'}")
           PY
           REMOTE
           )
-          STATUS=$?
-          set -e
 
-          printf '%s\n' "$OUTPUT"
-          SAFE=$(printf '%s\n' "$OUTPUT" | grep -E '^(android_provider_ready|ios_provider_ready|active_admin_android_devices|selected_device_last_seen|fcm_send_ok|invalid_token)=' || true)
+          STATUS=1
+          POST_OUTPUT=""
+          if [ "$PROJECT_PRESENT" = true ] && [ "$CREDS_PRESENT" = true ]; then
+            printf '%s' "$FIREBASE_PROJECT_ID_SECRET" > /tmp/aplus-firebase-project-id
+            printf '%s' "$FIREBASE_CREDENTIALS_JSON_BASE64_SECRET" > /tmp/aplus-firebase-creds.b64
+            chmod 600 /tmp/aplus-firebase-project-id /tmp/aplus-firebase-creds.b64
+
+            setsid -w scp -q \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=15 \
+              /tmp/aplus-firebase-project-id /tmp/aplus-firebase-creds.b64 \
+              root@"$HOST":/tmp/
+            rm -f /tmp/aplus-firebase-project-id /tmp/aplus-firebase-creds.b64
+
+            setsid -w ssh -qT \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=15 \
+              root@"$HOST" 'bash -s' <<'REMOTE'
+            set -euo pipefail
+            cd /opt/aplussolution
+            export FIREBASE_PROJECT_ID="$(cat /tmp/aplus-firebase-project-id)"
+            export FIREBASE_CREDENTIALS_JSON="$(base64 -d /tmp/aplus-firebase-creds.b64 | tr -d '\r\n')"
+            test -n "$FIREBASE_PROJECT_ID"
+            test -n "$FIREBASE_CREDENTIALS_JSON"
+            python3 - <<'PY'
+            from pathlib import Path
+            import os
+
+            path = Path('/opt/aplussolution/.env')
+            updates = {
+                'FIREBASE_PROJECT_ID': os.environ['FIREBASE_PROJECT_ID'],
+                'FIREBASE_CREDENTIALS_JSON': os.environ['FIREBASE_CREDENTIALS_JSON'],
+            }
+            lines = path.read_text(encoding='utf-8').splitlines() if path.exists() else []
+            output = []
+            seen = set()
+            for line in lines:
+                stripped = line.lstrip()
+                if '=' in line and not stripped.startswith('#'):
+                    key = line.split('=', 1)[0].strip()
+                    if key in updates:
+                        output.append(f'{key}={updates[key]}')
+                        seen.add(key)
+                        continue
+                output.append(line)
+            for key, value in updates.items():
+                if key not in seen:
+                    output.append(f'{key}={value}')
+            path.write_text('\n'.join(output) + '\n', encoding='utf-8')
+            PY
+            rm -f /tmp/aplus-firebase-project-id /tmp/aplus-firebase-creds.b64
+            docker compose up -d --force-recreate >/dev/null
+            backend_ready=0
+            for i in $(seq 1 30); do
+              if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
+                backend_ready=1
+                break
+              fi
+              sleep 2
+            done
+            test "$backend_ready" -eq 1
+            REMOTE
+
+            set +e
+            POST_OUTPUT=$(setsid -w ssh -qT \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=15 \
+              root@"$HOST" 'bash -s' <<'REMOTE'
+            set -euo pipefail
+            cd /opt/aplussolution
+            docker compose exec -T backend python manage.py shell <<'PY'
+            import uuid
+            from types import SimpleNamespace
+            from core.push_models import PushDevice
+            from core.push_notifications import push_provider_status, _send_android
+
+            providers = push_provider_status()
+            devices = PushDevice.objects.filter(
+                active=True,
+                platform=PushDevice.Platform.ANDROID,
+                user__role='admin',
+            ).order_by('-last_seen_at')
+            device = devices.first()
+            print(f"android_provider_ready={providers.get('android', False)}")
+            print(f"active_admin_android_devices={devices.count()}")
+            print(f"selected_device_last_seen={device.last_seen_at.isoformat() if device else 'none'}")
+            if not providers.get('android', False):
+                raise SystemExit(1)
+            if not device:
+                raise SystemExit(2)
+
+            notification = SimpleNamespace(
+                id=uuid.uuid4(),
+                kind='general',
+                action_url='',
+                title='A+ Solution Test',
+                body='Push-Test erfolgreich – Android-Benachrichtigungen funktionieren.',
+            )
+            ok, error, invalid = _send_android(device, notification)
+            print(f"fcm_send_ok={ok}")
+            print(f"invalid_token={invalid}")
+            if not ok:
+                raise SystemExit(3)
+            PY
+            REMOTE
+            )
+            STATUS=$?
+            set -e
+          fi
+
+          SAFE=$(printf '%s\n%s\n' "$PRE_OUTPUT" "$POST_OUTPUT" | grep -E '^(pre_android_provider_ready|android_provider_ready|ios_provider_ready|active_admin_android_devices|selected_device_last_seen|fcm_send_ok|invalid_token)=' | tail -n 8 || true)
+          SECRET_SAFE=$(printf 'github_firebase_project_id_present=%s\ngithub_firebase_credentials_present=%s\ngithub_google_services_present=%s' "$PROJECT_PRESENT" "$CREDS_PRESENT" "$GOOGLE_SERVICES_PRESENT")
           if [ "$STATUS" -eq 0 ]; then
             RESULT=success
             STATE=closed
@@ -99,6 +199,6 @@ jobs:
             RESULT=failed
             STATE=open
           fi
-          BODY=$(printf 'Automated one-shot Android admin push test.\n\n- Result: **%s**\n- Commit: `%s`\n\n```text\n%s\n```\n\nNo device token or credential is included.' "$RESULT" "${{ github.sha }}" "$SAFE")
+          BODY=$(printf 'Automated one-shot Android admin push test.\n\n- Result: **%s**\n- Commit: `%s`\n\n```text\n%s\n%s\n```\n\nNo device token or credential is included.' "$RESULT" "${{ github.sha }}" "$SECRET_SAFE" "$SAFE")
           gh api --method PATCH "repos/${{ github.repository }}/issues/161" -f body="$BODY" -f state="$STATE" >/dev/null
           exit "$STATUS"
