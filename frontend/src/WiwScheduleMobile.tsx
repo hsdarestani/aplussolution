@@ -659,12 +659,18 @@ export default function WiwScheduleMobile() {
           : (form.apply_all ? 'Änderungen auf alle Karten angewendet.' : 'Schicht gespeichert.'));
       } else {
         payload.required_count = Math.max(1, Number(form.required_count || 1));
-        payload.status = form.publish_now ? 'published' : 'draft';
+        const selectedWorkers = form.workers.slice(0, payload.required_count);
+        // With direct assignments, create as draft first so workers do not receive
+        // an OpenShift push before the assignment is applied. The assign endpoint
+        // publishes any remaining capacity once and sends the correct notifications.
+        payload.status = selectedWorkers.length ? 'draft' : (form.publish_now ? 'published' : 'draft');
         const created: any = await api('shifts/', { method: 'POST', body: JSON.stringify(payload) });
-        await api(`shifts/${created.id}/assign/`, {
-          method: 'POST',
-          body: JSON.stringify({ workers: form.workers.slice(0, payload.required_count), publish_remaining: form.publish_now }),
-        });
+        if (selectedWorkers.length) {
+          await api(`shifts/${created.id}/assign/`, {
+            method: 'POST',
+            body: JSON.stringify({ workers: selectedWorkers, publish_remaining: form.publish_now }),
+          });
+        }
         setToast(`${payload.required_count} separate Schichtkarte${payload.required_count === 1 ? '' : 'n'} erstellt.`);
       }
       if (savingCopy) setTab('all');

@@ -168,10 +168,10 @@ export default function ScheduleV2({user}:{user:User}) {
       const start=wallClockMs(form.starts_at), end=wallClockMs(form.ends_at); if(!(end>start)) throw new Error('Das Ende muss nach dem Beginn liegen.');
       const assignedWorkers=Array.isArray(form.workers)?form.workers.filter(Boolean):[]; const requiredCount=Math.max(1,Number(form.required_count||1));
       if(assignedWorkers.length>requiredCount) throw new Error('Mehr Mitarbeiter ausgewählt als benötigte Plätze.');
-      const baseStatus=assignedWorkers.length===requiredCount?'draft':form.publish_now?'published':'draft';
+      const baseStatus=!editing&&assignedWorkers.length?'draft':assignedWorkers.length===requiredCount?'draft':form.publish_now?'published':'draft';
       const p:any={client:form.client,location:form.location,position:form.position,starts_at:form.starts_at,ends_at:form.ends_at,break_minutes:automaticBreakMinutes(form.starts_at,form.ends_at),required_count:requiredCount,confirmation_required:!!form.confirmation_required,schedule_groups:form.schedule_groups||[],notes:form.notes||'',status:baseStatus};
       const saved:any=await api(editing?`shifts/${editing}/`:'shifts/',{method:editing?'PATCH':'POST',body:JSON.stringify(p)}); if(!editing) createdId=String(saved.id);
-      await api(`shifts/${saved.id}/assign/`,{method:'POST',body:JSON.stringify({workers:assignedWorkers,publish_remaining:!!form.publish_now})}); createdId=undefined; setModal(false); setToast(assignedWorkers.length?`${assignedWorkers.length} Mitarbeiter direkt zugewiesen.`:'Personalbedarf gespeichert.'); await load();
+      if(editing||assignedWorkers.length){await api(`shifts/${saved.id}/assign/`,{method:'POST',body:JSON.stringify({workers:assignedWorkers,publish_remaining:!!form.publish_now})});} createdId=undefined; setModal(false); setToast(assignedWorkers.length?`${assignedWorkers.length} Mitarbeiter direkt zugewiesen.`:'Personalbedarf gespeichert.'); await load();
     }catch(e:any){if(createdId){try{await api(`shifts/${createdId}/`,{method:'DELETE'});}catch{} await load();}setToast(e.message);}finally{setBusy(false);}
   }
 

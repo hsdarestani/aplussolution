@@ -4,7 +4,9 @@ from unittest.mock import patch
 import pytest
 from django.utils import timezone
 
-from core.models import Position, Shift
+from core.models import Notification, Position, Shift
+from core.operational_notifications import notify_open_shift_available
+from core.shift_slots import ShiftSlot
 
 
 @pytest.fixture
@@ -68,3 +70,20 @@ def test_bulk_publish_notifies_open_capacity(auth_admin, company, location, push
     notify.assert_called_once()
     assert notify.call_args.args[0].id == shift.id
     assert notify.call_args.args[1] == 'bulk-publish'
+
+
+@pytest.mark.django_db
+def test_open_shift_fanout_creates_one_admin_summary(admin_user, worker_user, second_worker, company, location, push_position, monkeypatch):
+    shift = _future_shift(company, location, push_position, status=Shift.Status.PUBLISHED)
+    ShiftSlot.objects.create(shift=shift)
+    monkeypatch.setattr('core.operational_notifications.shift_visible_to_worker', lambda *_: True)
+
+    created = notify_open_shift_available(shift, 'regression')
+
+    worker_notifications = Notification.objects.filter(user__role='worker', kind__startswith='open-shift-')
+    assert created == worker_notifications.count()
+    assert created >= 2
+    summaries = Notification.objects.filter(user=admin_user, kind__startswith='admin-open-shift-summary-')
+    assert summaries.count() == 1
+    assert f'{created} Mitarbeiter' in summaries.get().body
+    assert not Notification.objects.filter(user=admin_user, kind__startswith='admin-worker-copy-').exists()

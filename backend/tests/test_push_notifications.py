@@ -56,13 +56,14 @@ def test_delivery_uses_registered_device_and_deactivates_invalid_token(monkeypat
 
 
 @pytest.mark.django_db(transaction=True)
-def test_new_notification_enqueues_native_push_after_commit(monkeypatch, worker_user):
+def test_new_notification_enqueues_native_push_after_commit(monkeypatch, worker_user, admin_user):
     calls = []
     monkeypatch.setattr(push_signals, 'push_provider_configured', lambda: True)
     monkeypatch.setattr(push_signals.send_notification_push, 'delay', lambda notification_id: calls.append(notification_id))
 
     Notification.objects.create(user=worker_user, title='Vertrag bereit', action_url='/contracts')
     assert len(calls) == 1
+    assert not Notification.objects.filter(user=admin_user, kind__startswith='admin-worker-copy-').exists()
 
 
 def test_sign_in_with_apple_key_is_not_treated_as_apns_key(monkeypatch):
