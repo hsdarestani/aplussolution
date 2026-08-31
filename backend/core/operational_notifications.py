@@ -27,6 +27,25 @@ def _shift_body(shift: Shift) -> str:
     return f'{local_start:%d.%m.%Y %H:%M} · {position} · {location}'
 
 
+def _notify_admin_open_shift_summary(shift: Shift, event: str, worker_count: int) -> int:
+    """Create one admin notification for an OpenShift fan-out, not one per worker."""
+    if worker_count <= 0:
+        return 0
+    created = 0
+    for admin in User.objects.filter(role=User.Role.ADMIN, is_active=True):
+        _, was_created = Notification.objects.get_or_create(
+            user=admin,
+            kind=f'admin-open-shift-summary-{event}-{shift.id}',
+            defaults={
+                'title': 'OpenShift veröffentlicht',
+                'body': f'Benachrichtigung für {worker_count} Mitarbeiter ausgelöst · {_shift_body(shift)}',
+                'action_url': '/schedule',
+            },
+        )
+        created += int(was_created)
+    return created
+
+
 def notify_open_shift_available(shift: Shift, reason: str = 'available') -> int:
     """Notify every active employee who can actually see/take this OpenShift."""
     try:
@@ -65,6 +84,8 @@ def notify_open_shift_available(shift: Shift, reason: str = 'available') -> int:
             action_url='/schedule',
         )
         created += 1
+
+    _notify_admin_open_shift_summary(shift, event, created)
     return created
 
 
