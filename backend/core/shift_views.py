@@ -176,6 +176,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
 
         with transaction.atomic():
             shift = Shift.objects.select_for_update().select_related('location', 'position').get(pk=pk)
+            was_published = shift.status == Shift.Status.PUBLISHED
             ensure_slots(shift)
             if len(requested_ids) > int(shift.required_count or 1):
                 return Response({'detail': f'Es können höchstens {shift.required_count} Mitarbeiter zugewiesen werden.'}, status=400)
