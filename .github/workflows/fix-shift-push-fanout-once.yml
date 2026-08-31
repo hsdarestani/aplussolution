@@ -15,127 +15,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Patch mobile and desktop shift creation flow
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          mobile = Path('frontend/src/WiwScheduleMobile.tsx')
-          text = mobile.read_text()
-          old = """      } else {
-        payload.required_count = Math.max(1, Number(form.required_count || 1));
-        payload.status = form.publish_now ? 'published' : 'draft';
-        const created: any = await api('shifts/', { method: 'POST', body: JSON.stringify(payload) });
-        await api(`shifts/${created.id}/assign/`, {
-          method: 'POST',
-          body: JSON.stringify({ workers: form.workers.slice(0, payload.required_count), publish_remaining: form.publish_now }),
-        });
-        setToast(`${payload.required_count} separate Schichtkarte${payload.required_count === 1 ? '' : 'n'} erstellt.`);
-      }
-"""
-          new = """      } else {
-        payload.required_count = Math.max(1, Number(form.required_count || 1));
-        const selectedWorkers = form.workers.slice(0, payload.required_count);
-        // With direct assignments, create as draft first so workers do not receive
-        // an OpenShift push before the assignment is applied. The assign endpoint
-        // publishes any remaining capacity once and sends the correct notifications.
-        payload.status = selectedWorkers.length ? 'draft' : (form.publish_now ? 'published' : 'draft');
-        const created: any = await api('shifts/', { method: 'POST', body: JSON.stringify(payload) });
-        if (selectedWorkers.length) {
-          await api(`shifts/${created.id}/assign/`, {
-            method: 'POST',
-            body: JSON.stringify({ workers: selectedWorkers, publish_remaining: form.publish_now }),
-          });
-        }
-        setToast(`${payload.required_count} separate Schichtkarte${payload.required_count === 1 ? '' : 'n'} erstellt.`);
-      }
-"""
-          if old not in text:
-              raise SystemExit('mobile create block not found')
-          mobile.write_text(text.replace(old, new, 1))
-
-          desktop = Path('frontend/src/ScheduleV2.tsx')
-          text = desktop.read_text()
-          old_status = "const baseStatus=assignedWorkers.length===requiredCount?'draft':form.publish_now?'published':'draft';"
-          new_status = "const baseStatus=!editing&&assignedWorkers.length?'draft':assignedWorkers.length===requiredCount?'draft':form.publish_now?'published':'draft';"
-          if old_status not in text:
-              raise SystemExit('desktop baseStatus not found')
-          text = text.replace(old_status, new_status, 1)
-          old_assign = "await api(`shifts/${saved.id}/assign/`,{method:'POST',body:JSON.stringify({workers:assignedWorkers,publish_remaining:!!form.publish_now})}); createdId=undefined;"
-          new_assign = "if(editing||assignedWorkers.length){await api(`shifts/${saved.id}/assign/`,{method:'POST',body:JSON.stringify({workers:assignedWorkers,publish_remaining:!!form.publish_now})});} createdId=undefined;"
-          if old_assign not in text:
-              raise SystemExit('desktop assign call not found')
-          desktop.write_text(text.replace(old_assign, new_assign, 1))
-          PY
-
-      - name: Add regression coverage
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          push_test = Path('backend/tests/test_push_notifications.py')
-          text = push_test.read_text()
-          old = """@pytest.mark.django_db(transaction=True)
-def test_new_notification_enqueues_native_push_after_commit(monkeypatch, worker_user):
-    calls = []
-    monkeypatch.setattr(push_signals, 'push_provider_configured', lambda: True)
-    monkeypatch.setattr(push_signals.send_notification_push, 'delay', lambda notification_id: calls.append(notification_id))
-
-    Notification.objects.create(user=worker_user, title='Vertrag bereit', action_url='/contracts')
-    assert len(calls) == 1
-"""
-          new = """@pytest.mark.django_db(transaction=True)
-def test_new_notification_enqueues_native_push_after_commit(monkeypatch, worker_user, admin_user):
-    calls = []
-    monkeypatch.setattr(push_signals, 'push_provider_configured', lambda: True)
-    monkeypatch.setattr(push_signals.send_notification_push, 'delay', lambda notification_id: calls.append(notification_id))
-
-    Notification.objects.create(user=worker_user, title='Vertrag bereit', action_url='/contracts')
-    assert len(calls) == 1
-    assert not Notification.objects.filter(user=admin_user, kind__startswith='admin-worker-copy-').exists()
-"""
-          if old not in text:
-              raise SystemExit('push enqueue test block not found')
-          push_test.write_text(text.replace(old, new, 1))
-
-          op_test = Path('backend/tests/test_operational_push_wiring.py')
-          text = op_test.read_text()
-          text = text.replace('from core.models import Position, Shift\n', 'from core.models import Notification, Position, Shift\nfrom core.operational_notifications import notify_open_shift_available\nfrom core.shift_slots import ShiftSlot\n', 1)
-          addition = """
-
-@pytest.mark.django_db
-def test_open_shift_fanout_creates_one_admin_summary(admin_user, worker_user, second_worker, company, location, push_position, monkeypatch):
-    shift = _future_shift(company, location, push_position, status=Shift.Status.PUBLISHED)
-    ShiftSlot.objects.create(shift=shift)
-    monkeypatch.setattr('core.operational_notifications.shift_visible_to_worker', lambda *_: True)
-
-    created = notify_open_shift_available(shift, 'regression')
-
-    assert created == 2
-    assert Notification.objects.filter(user__role='worker', kind__startswith='open-shift-').count() == 2
-    summaries = Notification.objects.filter(user=admin_user, kind__startswith='admin-open-shift-summary-')
-    assert summaries.count() == 1
-    assert '2 Mitarbeiter' in summaries.get().body
-    assert not Notification.objects.filter(user=admin_user, kind__startswith='admin-worker-copy-').exists()
-"""
-          if 'test_open_shift_fanout_creates_one_admin_summary' not in text:
-              text += addition
-          op_test.write_text(text)
-          PY
-
+      - name: Apply regression patch
+        run: python -c "import base64;exec(base64.b64decode('CmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aAoKbW9iaWxlID0gUGF0aCgnZnJvbnRlbmQvc3JjL1dpd1NjaGVkdWxlTW9iaWxlLnRzeCcpCnRleHQgPSBtb2JpbGUucmVhZF90ZXh0KCkKb2xkID0gIiIiICAgICAgfSBlbHNlIHsKICAgICAgICBwYXlsb2FkLnJlcXVpcmVkX2NvdW50ID0gTWF0aC5tYXgoMSwgTnVtYmVyKGZvcm0ucmVxdWlyZWRfY291bnQgfHwgMSkpOwogICAgICAgIHBheWxvYWQuc3RhdHVzID0gZm9ybS5wdWJsaXNoX25vdyA/ICdwdWJsaXNoZWQnIDogJ2RyYWZ0JzsKICAgICAgICBjb25zdCBjcmVhdGVkOiBhbnkgPSBhd2FpdCBhcGkoJ3NoaWZ0cy8nLCB7IG1ldGhvZDogJ1BPU1QnLCBib2R5OiBKU09OLnN0cmluZ2lmeShwYXlsb2FkKSB9KTsKICAgICAgICBhd2FpdCBhcGkoYHNoaWZ0cy8ke2NyZWF0ZWQuaWR9L2Fzc2lnbi9gLCB7CiAgICAgICAgICBtZXRob2Q6ICdQT1NUJywKICAgICAgICAgIGJvZHk6IEpTT04uc3RyaW5naWZ5KHsgd29ya2VyczogZm9ybS53b3JrZXJzLnNsaWNlKDAsIHBheWxvYWQucmVxdWlyZWRfY291bnQpLCBwdWJsaXNoX3JlbWFpbmluZzogZm9ybS5wdWJsaXNoX25vdyB9KSwKICAgICAgICB9KTsKICAgICAgICBzZXRUb2FzdChgJHtwYXlsb2FkLnJlcXVpcmVkX2NvdW50fSBzZXBhcmF0ZSBTY2hpY2h0a2FydGUke3BheWxvYWQucmVxdWlyZWRfY291bnQgPT09IDEgPyAnJyA6ICduJ30gZXJzdGVsbHQuYCk7CiAgICAgIH0KIiIiCm5ldyA9ICIiIiAgICAgIH0gZWxzZSB7CiAgICAgICAgcGF5bG9hZC5yZXF1aXJlZF9jb3VudCA9IE1hdGgubWF4KDEsIE51bWJlcihmb3JtLnJlcXVpcmVkX2NvdW50IHx8IDEpKTsKICAgICAgICBjb25zdCBzZWxlY3RlZFdvcmtlcnMgPSBmb3JtLndvcmtlcnMuc2xpY2UoMCwgcGF5bG9hZC5yZXF1aXJlZF9jb3VudCk7CiAgICAgICAgLy8gV2l0aCBkaXJlY3QgYXNzaWdubWVudHMsIGNyZWF0ZSBhcyBkcmFmdCBmaXJzdCBzbyB3b3JrZXJzIGRvIG5vdCByZWNlaXZlCiAgICAgICAgLy8gYW4gT3BlblNoaWZ0IHB1c2ggYmVmb3JlIHRoZSBhc3NpZ25tZW50IGlzIGFwcGxpZWQuIFRoZSBhc3NpZ24gZW5kcG9pbnQKICAgICAgICAvLyBwdWJsaXNoZXMgYW55IHJlbWFpbmluZyBjYXBhY2l0eSBvbmNlIGFuZCBzZW5kcyB0aGUgY29ycmVjdCBub3RpZmljYXRpb25zLgogICAgICAgIHBheWxvYWQuc3RhdHVzID0gc2VsZWN0ZWRXb3JrZXJzLmxlbmd0aCA/ICdkcmFmdCcgOiAoZm9ybS5wdWJsaXNoX25vdyA/ICdwdWJsaXNoZWQnIDogJ2RyYWZ0Jyk7CiAgICAgICAgY29uc3QgY3JlYXRlZDogYW55ID0gYXdhaXQgYXBpKCdzaGlmdHMvJywgeyBtZXRob2Q6ICdQT1NUJywgYm9keTogSlNPTi5zdHJpbmdpZnkocGF5bG9hZCkgfSk7CiAgICAgICAgaWYgKHNlbGVjdGVkV29ya2Vycy5sZW5ndGgpIHsKICAgICAgICAgIGF3YWl0IGFwaShgc2hpZnRzLyR7Y3JlYXRlZC5pZH0vYXNzaWduL2AsIHsKICAgICAgICAgICAgbWV0aG9kOiAnUE9TVCcsCiAgICAgICAgICAgIGJvZHk6IEpTT04uc3RyaW5naWZ5KHsgd29ya2Vyczogc2VsZWN0ZWRXb3JrZXJzLCBwdWJsaXNoX3JlbWFpbmluZzogZm9ybS5wdWJsaXNoX25vdyB9KSwKICAgICAgICAgIH0pOwogICAgICAgIH0KICAgICAgICBzZXRUb2FzdChgJHtwYXlsb2FkLnJlcXVpcmVkX2NvdW50fSBzZXBhcmF0ZSBTY2hpY2h0a2FydGUke3BheWxvYWQucmVxdWlyZWRfY291bnQgPT09IDEgPyAnJyA6ICduJ30gZXJzdGVsbHQuYCk7CiAgICAgIH0KIiIiCmlmIG9sZCBub3QgaW4gdGV4dDoKICAgIHJhaXNlIFN5c3RlbUV4aXQoJ21vYmlsZSBjcmVhdGUgYmxvY2sgbm90IGZvdW5kJykKbW9iaWxlLndyaXRlX3RleHQodGV4dC5yZXBsYWNlKG9sZCwgbmV3LCAxKSkKCmRlc2t0b3AgPSBQYXRoKCdmcm9udGVuZC9zcmMvU2NoZWR1bGVWMi50c3gnKQp0ZXh0ID0gZGVza3RvcC5yZWFkX3RleHQoKQpvbGRfc3RhdHVzID0gImNvbnN0IGJhc2VTdGF0dXM9YXNzaWduZWRXb3JrZXJzLmxlbmd0aD09PXJlcXVpcmVkQ291bnQ/J2RyYWZ0Jzpmb3JtLnB1Ymxpc2hfbm93PydwdWJsaXNoZWQnOidkcmFmdCc7IgpuZXdfc3RhdHVzID0gImNvbnN0IGJhc2VTdGF0dXM9IWVkaXRpbmcmJmFzc2lnbmVkV29ya2Vycy5sZW5ndGg/J2RyYWZ0Jzphc3NpZ25lZFdvcmtlcnMubGVuZ3RoPT09cmVxdWlyZWRDb3VudD8nZHJhZnQnOmZvcm0ucHVibGlzaF9ub3c/J3B1Ymxpc2hlZCc6J2RyYWZ0JzsiCmlmIG9sZF9zdGF0dXMgbm90IGluIHRleHQ6CiAgICByYWlzZSBTeXN0ZW1FeGl0KCdkZXNrdG9wIGJhc2VTdGF0dXMgbm90IGZvdW5kJykKdGV4dCA9IHRleHQucmVwbGFjZShvbGRfc3RhdHVzLCBuZXdfc3RhdHVzLCAxKQpvbGRfYXNzaWduID0gImF3YWl0IGFwaShgc2hpZnRzLyR7c2F2ZWQuaWR9L2Fzc2lnbi9gLHttZXRob2Q6J1BPU1QnLGJvZHk6SlNPTi5zdHJpbmdpZnkoe3dvcmtlcnM6YXNzaWduZWRXb3JrZXJzLHB1Ymxpc2hfcmVtYWluaW5nOiEhZm9ybS5wdWJsaXNoX25vd30pfSk7IGNyZWF0ZWRJZD11bmRlZmluZWQ7IgpuZXdfYXNzaWduID0gImlmKGVkaXRpbmd8fGFzc2lnbmVkV29ya2Vycy5sZW5ndGgpe2F3YWl0IGFwaShgc2hpZnRzLyR7c2F2ZWQuaWR9L2Fzc2lnbi9gLHttZXRob2Q6J1BPU1QnLGJvZHk6SlNPTi5zdHJpbmdpZnkoe3dvcmtlcnM6YXNzaWduZWRXb3JrZXJzLHB1Ymxpc2hfcmVtYWluaW5nOiEhZm9ybS5wdWJsaXNoX25vd30pfSk7fSBjcmVhdGVkSWQ9dW5kZWZpbmVkOyIKaWYgb2xkX2Fzc2lnbiBub3QgaW4gdGV4dDoKICAgIHJhaXNlIFN5c3RlbUV4aXQoJ2Rlc2t0b3AgYXNzaWduIGNhbGwgbm90IGZvdW5kJykKZGVza3RvcC53cml0ZV90ZXh0KHRleHQucmVwbGFjZShvbGRfYXNzaWduLCBuZXdfYXNzaWduLCAxKSkKCnB1c2hfdGVzdCA9IFBhdGgoJ2JhY2tlbmQvdGVzdHMvdGVzdF9wdXNoX25vdGlmaWNhdGlvbnMucHknKQp0ZXh0ID0gcHVzaF90ZXN0LnJlYWRfdGV4dCgpCm9sZCA9ICIiIkBweXRlc3QubWFyay5kamFuZ29fZGIodHJhbnNhY3Rpb249VHJ1ZSkKZGVmIHRlc3RfbmV3X25vdGlmaWNhdGlvbl9lbnF1ZXVlc19uYXRpdmVfcHVzaF9hZnRlcl9jb21taXQobW9ua2V5cGF0Y2gsIHdvcmtlcl91c2VyKToKICAgIGNhbGxzID0gW10KICAgIG1vbmtleXBhdGNoLnNldGF0dHIocHVzaF9zaWduYWxzLCAncHVzaF9wcm92aWRlcl9jb25maWd1cmVkJywgbGFtYmRhOiBUcnVlKQogICAgbW9ua2V5cGF0Y2guc2V0YXR0cihwdXNoX3NpZ25hbHMuc2VuZF9ub3RpZmljYXRpb25fcHVzaCwgJ2RlbGF5JywgbGFtYmRhIG5vdGlmaWNhdGlvbl9pZDogY2FsbHMuYXBwZW5kKG5vdGlmaWNhdGlvbl9pZCkpCgogICAgTm90aWZpY2F0aW9uLm9iamVjdHMuY3JlYXRlKHVzZXI9d29ya2VyX3VzZXIsIHRpdGxlPSdWZXJ0cmFnIGJlcmVpdCcsIGFjdGlvbl91cmw9Jy9jb250cmFjdHMnKQogICAgYXNzZXJ0IGxlbihjYWxscykgPT0gMQoiIiIKbmV3ID0gIiIiQHB5dGVzdC5tYXJrLmRqYW5nb19kYih0cmFuc2FjdGlvbj1UcnVlKQpkZWYgdGVzdF9uZXdfbm90aWZpY2F0aW9uX2VucXVldWVzX25hdGl2ZV9wdXNoX2FmdGVyX2NvbW1pdChtb25rZXlwYXRjaCwgd29ya2VyX3VzZXIsIGFkbWluX3VzZXIpOgogICAgY2FsbHMgPSBbXQogICAgbW9ua2V5cGF0Y2guc2V0YXR0cihwdXNoX3NpZ25hbHMsICdwdXNoX3Byb3ZpZGVyX2NvbmZpZ3VyZWQnLCBsYW1iZGE6IFRydWUpCiAgICBtb25rZXlwYXRjaC5zZXRhdHRyKHB1c2hfc2lnbmFscy5zZW5kX25vdGlmaWNhdGlvbl9wdXNoLCAnZGVsYXknLCBsYW1iZGEgbm90aWZpY2F0aW9uX2lkOiBjYWxscy5hcHBlbmQobm90aWZpY2F0aW9uX2lkKSkKCiAgICBOb3RpZmljYXRpb24ub2JqZWN0cy5jcmVhdGUodXNlcj13b3JrZXJfdXNlciwgdGl0bGU9J1ZlcnRyYWcgYmVyZWl0JywgYWN0aW9uX3VybD0nL2NvbnRyYWN0cycpCiAgICBhc3NlcnQgbGVuKGNhbGxzKSA9PSAxCiAgICBhc3NlcnQgbm90IE5vdGlmaWNhdGlvbi5vYmplY3RzLmZpbHRlcih1c2VyPWFkbWluX3VzZXIsIGtpbmRfX3N0YXJ0c3dpdGg9J2FkbWluLXdvcmtlci1jb3B5LScpLmV4aXN0cygpCiIiIgppZiBvbGQgbm90IGluIHRleHQ6CiAgICByYWlzZSBTeXN0ZW1FeGl0KCdwdXNoIGVucXVldWUgdGVzdCBibG9jayBub3QgZm91bmQnKQpwdXNoX3Rlc3Qud3JpdGVfdGV4dCh0ZXh0LnJlcGxhY2Uob2xkLCBuZXcsIDEpKQoKb3BfdGVzdCA9IFBhdGgoJ2JhY2tlbmQvdGVzdHMvdGVzdF9vcGVyYXRpb25hbF9wdXNoX3dpcmluZy5weScpCnRleHQgPSBvcF90ZXN0LnJlYWRfdGV4dCgpCmltcG9ydF9vbGQgPSAnZnJvbSBjb3JlLm1vZGVscyBpbXBvcnQgUG9zaXRpb24sIFNoaWZ0XG4nCmltcG9ydF9uZXcgPSAnZnJvbSBjb3JlLm1vZGVscyBpbXBvcnQgTm90aWZpY2F0aW9uLCBQb3NpdGlvbiwgU2hpZnRcbmZyb20gY29yZS5vcGVyYXRpb25hbF9ub3RpZmljYXRpb25zIGltcG9ydCBub3RpZnlfb3Blbl9zaGlmdF9hdmFpbGFibGVcbmZyb20gY29yZS5zaGlmdF9zbG90cyBpbXBvcnQgU2hpZnRTbG90XG4nCmlmIGltcG9ydF9vbGQgbm90IGluIHRleHQ6CiAgICByYWlzZSBTeXN0ZW1FeGl0KCdvcGVyYXRpb25hbCB0ZXN0IGltcG9ydCBibG9jayBub3QgZm91bmQnKQp0ZXh0ID0gdGV4dC5yZXBsYWNlKGltcG9ydF9vbGQsIGltcG9ydF9uZXcsIDEpCmFkZGl0aW9uID0gIiIiCgpAcHl0ZXN0Lm1hcmsuZGphbmdvX2RiCmRlZiB0ZXN0X29wZW5fc2hpZnRfZmFub3V0X2NyZWF0ZXNfb25lX2FkbWluX3N1bW1hcnkoYWRtaW5fdXNlciwgd29ya2VyX3VzZXIsIHNlY29uZF93b3JrZXIsIGNvbXBhbnksIGxvY2F0aW9uLCBwdXNoX3Bvc2l0aW9uLCBtb25rZXlwYXRjaCk6CiAgICBzaGlmdCA9IF9mdXR1cmVfc2hpZnQoY29tcGFueSwgbG9jYXRpb24sIHB1c2hfcG9zaXRpb24sIHN0YXR1cz1TaGlmdC5TdGF0dXMuUFVCTElTSEVEKQogICAgU2hpZnRTbG90Lm9iamVjdHMuY3JlYXRlKHNoaWZ0PXNoaWZ0KQogICAgbW9ua2V5cGF0Y2guc2V0YXR0cignY29yZS5vcGVyYXRpb25hbF9ub3RpZmljYXRpb25zLnNoaWZ0X3Zpc2libGVfdG9fd29ya2VyJywgbGFtYmRhICpfOiBUcnVlKQoKICAgIGNyZWF0ZWQgPSBub3RpZnlfb3Blbl9zaGlmdF9hdmFpbGFibGUoc2hpZnQsICdyZWdyZXNzaW9uJykKCiAgICBhc3NlcnQgY3JlYXRlZCA9PSAyCiAgICBhc3NlcnQgTm90aWZpY2F0aW9uLm9iamVjdHMuZmlsdGVyKHVzZXJfX3JvbGU9J3dvcmtlcicsIGtpbmRfX3N0YXJ0c3dpdGg9J29wZW4tc2hpZnQtJykuY291bnQoKSA9PSAyCiAgICBzdW1tYXJpZXMgPSBOb3RpZmljYXRpb24ub2JqZWN0cy5maWx0ZXIodXNlcj1hZG1pbl91c2VyLCBraW5kX19zdGFydHN3aXRoPSdhZG1pbi1vcGVuLXNoaWZ0LXN1bW1hcnktJykKICAgIGFzc2VydCBzdW1tYXJpZXMuY291bnQoKSA9PSAxCiAgICBhc3NlcnQgJzIgTWl0YXJiZWl0ZXInIGluIHN1bW1hcmllcy5nZXQoKS5ib2R5CiAgICBhc3NlcnQgbm90IE5vdGlmaWNhdGlvbi5vYmplY3RzLmZpbHRlcih1c2VyPWFkbWluX3VzZXIsIGtpbmRfX3N0YXJ0c3dpdGg9J2FkbWluLXdvcmtlci1jb3B5LScpLmV4aXN0cygpCiIiIgppZiAndGVzdF9vcGVuX3NoaWZ0X2Zhbm91dF9jcmVhdGVzX29uZV9hZG1pbl9zdW1tYXJ5JyBub3QgaW4gdGV4dDoKICAgIHRleHQgKz0gYWRkaXRpb24Kb3BfdGVzdC53cml0ZV90ZXh0KHRleHQpCg=='))"
       - name: Backend regression tests
         working-directory: backend
         run: |
           python -m pip install -q -r requirements.txt
           pytest -q tests/test_push_notifications.py tests/test_operational_push_wiring.py
-
       - name: Frontend build
         working-directory: frontend
         run: |
           npm ci
           npm run build
-
       - name: Commit patch and remove one-shot workflow
         run: |
           git config user.name 'github-actions[bot]'
