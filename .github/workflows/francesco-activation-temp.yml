@@ -1,4 +1,4 @@
-name: Prepare Francesco activation envelope
+name: Activate Francesco securely
 
 on:
   push:
@@ -8,26 +8,96 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  prepare:
+  activate:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
       ENVELOPE_KEY: ${{ secrets.PASS }}
+      HOST: ${{ secrets.HOST }}
+      PASS: ${{ secrets.PASS }}
+      GITHUB_TOKEN: ${{ github.token }}
+      PASSWORD_CIPHERTEXT_B64: ZtVtXK2n4+MvUnJLzjxbSWZgvORRsWdXP+pZgYIOaNKBPghsP0koAlk8CWGo3NRbkpIJ86pN45eOpwOcYA4ECdv8bUMYKV0/4heMa0RRuplVBJUO/MwyTZTiwqqMRGYdUx0W7Z5F7c2gyILfooCfGWK4YamOdeA1+/uTDSUrO/s33bSwzzpiWqTouXETGcwlgfI2YWxiRai7f7fDvyUBBqS5Y1N0pdmys6IOTneGFbjYu5+SykOeFizt7VsSQMRroO6j1N6ess2wdCx0AXMLfg8DVz7yXb7SxTSQqdCS9GhAYAZ5gjATKFvQYBAMisJ+eIAWB6G5k6tFwadr1HdlUw==
     steps:
-      - name: Generate one-time encrypted envelope
+      - name: Decrypt one-time password and activate production worker
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$ENVELOPE_KEY"
+          test -n "$ENVELOPE_KEY" && test -n "$HOST" && test -n "$PASS"
           umask 077
-          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out private.pem >/dev/null 2>&1
-          openssl pkey -in private.pem -pubout -out public.pem >/dev/null 2>&1
-          openssl enc -aes-256-cbc -pbkdf2 -salt -in private.pem -out private.enc -pass env:ENVELOPE_KEY
-          printf 'public_key_b64='
-          base64 -w0 public.pem
-          printf '\nencrypted_private_key_b64='
-          base64 -w0 private.enc
-          printf '\n'
-          rm -f private.pem public.pem private.enc
+
+          curl -fsSL \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/jobs/99400046230/logs" \
+            -o previous.log
+
+          encrypted_private_key_b64="$(grep -o 'encrypted_private_key_b64=.*' previous.log | tail -1 | sed 's/^encrypted_private_key_b64=//')"
+          test -n "$encrypted_private_key_b64"
+          printf '%s' "$encrypted_private_key_b64" | base64 -d > private.enc
+          openssl enc -d -aes-256-cbc -pbkdf2 -in private.enc -out private.pem -pass env:ENVELOPE_KEY
+          printf '%s' "$PASSWORD_CIPHERTEXT_B64" | base64 -d > password.enc
+          openssl pkeyutl -decrypt -inkey private.pem -in password.enc -out password.txt \
+            -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256
+          francesco_password="$(cat password.txt)"
+          test -n "$francesco_password"
+
+          if ! command -v sshpass >/dev/null 2>&1; then
+            sudo -n apt-get update -qq
+            sudo -n apt-get install -y -qq sshpass
+          fi
+
+          PYCODE=$(cat <<'PY'
+          import sys
+          from django.conf import settings
+          from django.db import transaction
+          from core.models import User, WorkerProfile
+
+          password = sys.stdin.read()
+          if not password:
+              raise SystemExit('password_input_missing')
+          if getattr(settings, 'WORKER_EMAILS_ENABLED', True):
+              raise SystemExit('worker_email_gate_not_disabled')
+
+          matches = User.objects.filter(
+              role=User.Role.WORKER,
+              first_name__iexact='francesco',
+              last_name__iexact='trulli',
+          )
+          if matches.count() != 1:
+              raise SystemExit(f'matching_workers={matches.count()}; aborting')
+
+          with transaction.atomic():
+              user = matches.select_for_update().get()
+              worker = WorkerProfile.objects.select_for_update().get(user=user)
+              user.set_password(password)
+              user.is_active = True
+              user.save(update_fields=['password', 'is_active'])
+              worker.active = True
+              worker.save(update_fields=['active'])
+
+          user.refresh_from_db()
+          worker.refresh_from_db()
+          print('francesco_updated=1')
+          print(f'user_active={int(user.is_active)}')
+          print(f'worker_active={int(worker.active)}')
+          print(f'password_verified={int(user.check_password(password))}')
+          print(f'worker_emails_enabled={int(getattr(settings, "WORKER_EMAILS_ENABLED", True))}')
+          PY
+          )
+          PYCODE_B64="$(printf '%s' "$PYCODE" | base64 -w0)"
+
+          export SSHPASS="$PASS"
+          printf '%s' "$francesco_password" | timeout 180s sshpass -e ssh \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=2 \
+            root@"$HOST" \
+            "cd /opt/aplussolution && docker compose exec -T backend python manage.py shell -c \"import base64; exec(base64.b64decode('$PYCODE_B64'))\""
+
+          unset francesco_password SSHPASS
+          rm -f previous.log private.enc private.pem password.enc password.txt
