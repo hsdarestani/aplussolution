@@ -279,7 +279,9 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                 'workers': requested_ids,
                 'publish_remaining': publish_remaining,
             })
-            if free_count > 0 and shift.status == Shift.Status.PUBLISHED:
+            # Already-published OpenShifts have already notified eligible workers.
+            # Legacy clients may still POST an empty assignment after create; do not fan out again.
+            if not was_published and free_count > 0 and shift.status == Shift.Status.PUBLISHED:
                 notify_open_shift_available(shift, 'assignment')
 
         return Response(self.get_serializer(self.base_queryset().get(pk=shift.pk)).data)
