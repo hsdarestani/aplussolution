@@ -1,0 +1,146 @@
+name: One-shot shift push fanout fix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-shift-push-fanout-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch mobile and desktop shift creation flow
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          mobile = Path('frontend/src/WiwScheduleMobile.tsx')
+          text = mobile.read_text()
+          old = """      } else {
+        payload.required_count = Math.max(1, Number(form.required_count || 1));
+        payload.status = form.publish_now ? 'published' : 'draft';
+        const created: any = await api('shifts/', { method: 'POST', body: JSON.stringify(payload) });
+        await api(`shifts/${created.id}/assign/`, {
+          method: 'POST',
+          body: JSON.stringify({ workers: form.workers.slice(0, payload.required_count), publish_remaining: form.publish_now }),
+        });
+        setToast(`${payload.required_count} separate Schichtkarte${payload.required_count === 1 ? '' : 'n'} erstellt.`);
+      }
+"""
+          new = """      } else {
+        payload.required_count = Math.max(1, Number(form.required_count || 1));
+        const selectedWorkers = form.workers.slice(0, payload.required_count);
+        // With direct assignments, create as draft first so workers do not receive
+        // an OpenShift push before the assignment is applied. The assign endpoint
+        // publishes any remaining capacity once and sends the correct notifications.
+        payload.status = selectedWorkers.length ? 'draft' : (form.publish_now ? 'published' : 'draft');
+        const created: any = await api('shifts/', { method: 'POST', body: JSON.stringify(payload) });
+        if (selectedWorkers.length) {
+          await api(`shifts/${created.id}/assign/`, {
+            method: 'POST',
+            body: JSON.stringify({ workers: selectedWorkers, publish_remaining: form.publish_now }),
+          });
+        }
+        setToast(`${payload.required_count} separate Schichtkarte${payload.required_count === 1 ? '' : 'n'} erstellt.`);
+      }
+"""
+          if old not in text:
+              raise SystemExit('mobile create block not found')
+          mobile.write_text(text.replace(old, new, 1))
+
+          desktop = Path('frontend/src/ScheduleV2.tsx')
+          text = desktop.read_text()
+          old_status = "const baseStatus=assignedWorkers.length===requiredCount?'draft':form.publish_now?'published':'draft';"
+          new_status = "const baseStatus=!editing&&assignedWorkers.length?'draft':assignedWorkers.length===requiredCount?'draft':form.publish_now?'published':'draft';"
+          if old_status not in text:
+              raise SystemExit('desktop baseStatus not found')
+          text = text.replace(old_status, new_status, 1)
+          old_assign = "await api(`shifts/${saved.id}/assign/`,{method:'POST',body:JSON.stringify({workers:assignedWorkers,publish_remaining:!!form.publish_now})}); createdId=undefined;"
+          new_assign = "if(editing||assignedWorkers.length){await api(`shifts/${saved.id}/assign/`,{method:'POST',body:JSON.stringify({workers:assignedWorkers,publish_remaining:!!form.publish_now})});} createdId=undefined;"
+          if old_assign not in text:
+              raise SystemExit('desktop assign call not found')
+          desktop.write_text(text.replace(old_assign, new_assign, 1))
+          PY
+
+      - name: Add regression coverage
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          push_test = Path('backend/tests/test_push_notifications.py')
+          text = push_test.read_text()
+          old = """@pytest.mark.django_db(transaction=True)
+def test_new_notification_enqueues_native_push_after_commit(monkeypatch, worker_user):
+    calls = []
+    monkeypatch.setattr(push_signals, 'push_provider_configured', lambda: True)
+    monkeypatch.setattr(push_signals.send_notification_push, 'delay', lambda notification_id: calls.append(notification_id))
+
+    Notification.objects.create(user=worker_user, title='Vertrag bereit', action_url='/contracts')
+    assert len(calls) == 1
+"""
+          new = """@pytest.mark.django_db(transaction=True)
+def test_new_notification_enqueues_native_push_after_commit(monkeypatch, worker_user, admin_user):
+    calls = []
+    monkeypatch.setattr(push_signals, 'push_provider_configured', lambda: True)
+    monkeypatch.setattr(push_signals.send_notification_push, 'delay', lambda notification_id: calls.append(notification_id))
+
+    Notification.objects.create(user=worker_user, title='Vertrag bereit', action_url='/contracts')
+    assert len(calls) == 1
+    assert not Notification.objects.filter(user=admin_user, kind__startswith='admin-worker-copy-').exists()
+"""
+          if old not in text:
+              raise SystemExit('push enqueue test block not found')
+          push_test.write_text(text.replace(old, new, 1))
+
+          op_test = Path('backend/tests/test_operational_push_wiring.py')
+          text = op_test.read_text()
+          text = text.replace('from core.models import Position, Shift\n', 'from core.models import Notification, Position, Shift\nfrom core.operational_notifications import notify_open_shift_available\nfrom core.shift_slots import ShiftSlot\n', 1)
+          addition = """
+
+@pytest.mark.django_db
+def test_open_shift_fanout_creates_one_admin_summary(admin_user, worker_user, second_worker, company, location, push_position, monkeypatch):
+    shift = _future_shift(company, location, push_position, status=Shift.Status.PUBLISHED)
+    ShiftSlot.objects.create(shift=shift)
+    monkeypatch.setattr('core.operational_notifications.shift_visible_to_worker', lambda *_: True)
+
+    created = notify_open_shift_available(shift, 'regression')
+
+    assert created == 2
+    assert Notification.objects.filter(user__role='worker', kind__startswith='open-shift-').count() == 2
+    summaries = Notification.objects.filter(user=admin_user, kind__startswith='admin-open-shift-summary-')
+    assert summaries.count() == 1
+    assert '2 Mitarbeiter' in summaries.get().body
+    assert not Notification.objects.filter(user=admin_user, kind__startswith='admin-worker-copy-').exists()
+"""
+          if 'test_open_shift_fanout_creates_one_admin_summary' not in text:
+              text += addition
+          op_test.write_text(text)
+          PY
+
+      - name: Backend regression tests
+        working-directory: backend
+        run: |
+          python -m pip install -q -r requirements.txt
+          pytest -q tests/test_push_notifications.py tests/test_operational_push_wiring.py
+
+      - name: Frontend build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Commit patch and remove one-shot workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/fix-shift-push-fanout-once.yml
+          git add frontend/src/WiwScheduleMobile.tsx frontend/src/ScheduleV2.tsx backend/tests/test_push_notifications.py backend/tests/test_operational_push_wiring.py
+          git commit -m 'Fix shift copy push fanout regression'
+          git push origin HEAD:main
