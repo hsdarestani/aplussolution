@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.conf import settings
 from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
@@ -8,9 +9,11 @@ from rest_framework.response import Response
 
 from .models import Contract, Notification, Shift, TimeEntry, User, WorkerProfile
 from .portal_service import activate_portal, create_portal_invitation, invitation_status, resolve_invitation
+from .premium_approval_models import ShiftPickupRequest
 from .serializers import NotificationSerializer, UserSerializer
 from .shift_api import ShiftApiSerializer
 from .shift_slots import ShiftSlot
+from .wiw_dashboard import _live_wiw_snapshot, _local_open_shift_count
 
 
 SYNTHETIC_MIGRATION_EMAIL_SUFFIX = '@sync.invalid'
@@ -30,6 +33,26 @@ def shift_queryset():
         filled_count=Count('slots', filter=Q(slots__status='claimed', slots__worker__isnull=False), distinct=True),
         open_count=Count('slots', filter=Q(slots__status='open', slots__worker__isnull=True), distinct=True),
     ).order_by('starts_at')
+
+
+def employee_open_shift_count(now):
+    """Return the same combined OpenShift availability shown on the admin dashboard.
+
+    During the WIW migration window, imported WIW shifts also exist locally. Use
+    the live WIW count plus native-only A+ slots so the employee app and the
+    administration dashboard cannot drift or double-count the imported rows.
+    """
+    local_count = _local_open_shift_count(now)
+    if not (settings.WIW_SYNC_ENABLED and settings.WIW_DEV_KEY and settings.WIW_EMAIL and settings.WIW_PASSWORD):
+        return local_count
+    try:
+        live = dict(_live_wiw_snapshot(now))
+        if 'open_shifts_available' in live:
+            return int(live.get('open_shifts_available') or 0) + _local_open_shift_count(now, native_only=True)
+    except Exception:
+        # A temporary WIW outage must not break the employee dashboard.
+        pass
+    return local_count
 
 
 @api_view(['POST'])
@@ -125,6 +148,8 @@ def employee_home(request):
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     mine = shift_queryset().filter(slots__worker=worker, slots__status=ShiftSlot.Status.CLAIMED, ends_at__gte=now).distinct()
     available = shift_queryset().filter(status=Shift.Status.PUBLISHED, starts_at__gte=now, slots__status=ShiftSlot.Status.OPEN, slots__worker__isnull=True).exclude(slots__worker=worker, slots__status=ShiftSlot.Status.CLAIMED).distinct()
+    available_count = employee_open_shift_count(now)
+    open_shift_requests = ShiftPickupRequest.objects.filter(worker=worker, status=ShiftPickupRequest.Status.PENDING).count()
     # The live employee dashboard reflects completed native A+ entries only.
     # Imported WIW time rows remain available for archive/reporting but must not
     # inflate the current monthly total or turn an old open row into worked time.
@@ -144,7 +169,8 @@ def employee_home(request):
         'next_shift': ShiftApiSerializer(mine.first(), context={'request': request}).data if mine.exists() else None,
         'upcoming_shifts': ShiftApiSerializer(mine[:5], many=True, context={'request': request}).data,
         'available_shifts': ShiftApiSerializer(available[:5], many=True, context={'request': request}).data,
-        'available_count': available.count(),
+        'available_count': available_count,
+        'open_shift_requests': open_shift_requests,
         'month_worked_minutes': worked_minutes,
         'contract_actions': contracts.filter(status__in=[Contract.Status.READY, Contract.Status.SENT]).count(),
         'contracts_expiring_30': contracts.filter(ends_on__gte=timezone.localdate(), ends_on__lte=timezone.localdate() + timedelta(days=30)).count(),
