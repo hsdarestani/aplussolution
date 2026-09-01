@@ -91,7 +91,7 @@ export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:a
     <div className="wiw-mobile-dashboard wiw-worker-home" data-testid="phase8-mobile-dashboard">
       <div className="wiw-section-label">Anfragen</div>
       <MobileRow icon={calendarOutline} label="Schichtanfragen" count={0} onClick={()=>navigate('operations')}/>
-      <MobileRow icon={calendarOutline} label="OpenShift-Anfragen" count={data.available_count||0} onClick={()=>{sessionStorage.setItem('aplus:schedule-entry-filter','open');navigate('schedule');}}/>
+      <MobileRow icon={calendarOutline} label="OpenShift-Anfragen" count={data.open_shift_requests||0} onClick={()=>{sessionStorage.setItem('aplus:schedule-entry-filter','open');navigate('schedule');}}/>
 
       <div className="wiw-section-label">Mein Zeitplan</div>
       <button type="button" className="wiw-next-shift wiw-worker-next" onClick={()=>navigate('schedule')}>
