@@ -173,7 +173,7 @@ export default function OrderDocumentImportEnhancer() {
   return (
     <>
       {button}
-      <IonModal isOpen={open} onDidDismiss={close} cssClass="order-document-import-modal">
+      <IonModal isOpen={open} onDidDismiss={close} className="order-document-import-modal">
         <div className="order-import-shell">
           <header className="order-import-header">
             <div className="order-import-kicker"><IonIcon icon={sparklesOutline} /> A+ AI PLANUNG</div>
