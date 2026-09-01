@@ -1,0 +1,11 @@
+/* Softer client-group separation for the mobile Dienstplan. */
+@media (max-width: 900px) {
+  .wiw-client-divider {
+    height: 10px;
+    margin: 0;
+    background: linear-gradient(90deg, rgba(11, 77, 107, 0.11), rgba(11, 77, 107, 0.04) 55%, rgba(11, 77, 107, 0));
+    border-top: 1px solid rgba(11, 77, 107, 0.13);
+    border-bottom: 1px solid rgba(11, 77, 107, 0.05);
+    box-shadow: none;
+  }
+}
