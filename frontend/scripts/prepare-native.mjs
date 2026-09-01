@@ -125,10 +125,16 @@ function patchIos() {
   }
   let plist = fs.readFileSync(plistPath, 'utf8');
   plist = ensurePlistKey(plist, 'NSLocationWhenInUseUsageDescription', 'Der Standort wird nur beim Ein- und Ausstempeln erfasst, um den vorgesehenen Einsatzort zu prüfen. Es findet keine Hintergrundortung statt.');
+  // Apple validates binaries against sensitive APIs referenced by bundled SDKs as
+  // well as APIs called directly by the app. Capacitor's location stack can make
+  // the Always/When-In-Use purpose key mandatory even though A+ Solution only
+  // requests foreground location. Keep the text explicit so App Review and users
+  // understand that no background tracking is performed.
+  plist = ensurePlistKey(plist, 'NSLocationAlwaysAndWhenInUseUsageDescription', 'Diese Standortberechtigung wird technisch für die Standortfunktion benötigt. A+ Solution verwendet den Standort ausschließlich beim Ein- und Ausstempeln im Vordergrund, um den vorgesehenen Einsatzort zu prüfen. Eine Hintergrundortung findet nicht statt.');
   plist = ensurePlistBooleanKey(plist, 'ITSAppUsesNonExemptEncryption', false);
   fs.writeFileSync(plistPath, plist);
   patchIosPush();
-  console.log('Prepared iOS foreground-location, export compliance and native push.');
+  console.log('Prepared iOS foreground-location purpose strings, export compliance and native push.');
 }
 
 if (target === 'android' || target === 'all') patchAndroid();
