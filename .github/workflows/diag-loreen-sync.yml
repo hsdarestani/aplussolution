@@ -1,0 +1,138 @@
+name: Diagnose Loreen WIW sync
+
+on:
+  push:
+    branches: [diag/loreen-sync-20260901]
+    paths:
+      - '.github/workflows/diag-loreen-sync.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Install SSH tooling
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass >/dev/null
+
+      - name: Inspect Loreen production records and WIW sync
+        env:
+          HOST: ${{ secrets.HOST }}
+          PASS: ${{ secrets.PASS }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PORT="${SSH_PORT:-22}"
+          sshpass -p "$PASS" ssh -p "$PORT" -o StrictHostKeyChecking=no root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell <<'PY'
+          import json
+          from django.apps import apps
+          from django.db.models import Q
+          from django.utils import timezone
+
+          NEEDLE='loreen'
+          SKIP_BITS=('password','token','secret','key','credential','hash')
+
+          def safe_value(v):
+              if v is None: return None
+              if hasattr(v, 'isoformat'):
+                  try: return v.isoformat()
+                  except Exception: pass
+              if isinstance(v, (str,int,float,bool)): return v
+              return str(v)
+
+          print('=== LOREEN MODEL MATCHES ===')
+          for model in apps.get_models():
+              text_fields=[]
+              for f in model._meta.fields:
+                  it=f.get_internal_type()
+                  if it in ('CharField','TextField','EmailField'):
+                      text_fields.append(f)
+              if not text_fields:
+                  continue
+              q=Q()
+              for f in text_fields:
+                  q |= Q(**{f.name+'__icontains': NEEDLE})
+              try:
+                  qs=model.objects.filter(q)[:20]
+              except Exception:
+                  continue
+              for obj in qs:
+                  data={}
+                  for f in model._meta.fields:
+                      name=f.name
+                      if any(bit in name.lower() for bit in SKIP_BITS):
+                          continue
+                      try:
+                          val=getattr(obj, name)
+                      except Exception:
+                          continue
+                      if name.endswith('_id') or f.is_relation:
+                          try: val=getattr(obj, f.attname)
+                          except Exception: pass
+                      sv=safe_value(val)
+                      if sv not in (None,'',False,0,[]):
+                          data[name]=sv
+                  print('MATCH='+json.dumps({'model':model._meta.label,'data':data}, ensure_ascii=False, default=str))
+
+          print('=== AUTH USER DETAILS ===')
+          try:
+              from django.contrib.auth import get_user_model
+              User=get_user_model()
+              uq=Q()
+              for fname in ('first_name','last_name','email','username'):
+                  if any(f.name==fname for f in User._meta.fields):
+                      uq |= Q(**{fname+'__icontains': NEEDLE})
+              for u in User.objects.filter(uq)[:20]:
+                  d={'pk':str(u.pk)}
+                  for fname in ('username','email','first_name','last_name','is_active','is_staff','date_joined','last_login'):
+                      if hasattr(u,fname): d[fname]=safe_value(getattr(u,fname))
+                  if hasattr(u,'has_usable_password'):
+                      d['has_usable_password']=u.has_usable_password()
+                  print('AUTH='+json.dumps(d, ensure_ascii=False, default=str))
+          except Exception as e:
+              print('AUTH_ERROR='+repr(e))
+
+          print('=== LATEST WIW SYNC ===')
+          try:
+              M=apps.get_model('core','IntegrationSyncRun')
+              rows=M.objects.filter(provider='wiw').order_by('-finished_at','-created_at')[:5]
+              for r in rows:
+                  d={}
+                  for f in r._meta.fields:
+                      if any(bit in f.name.lower() for bit in SKIP_BITS): continue
+                      try: d[f.name]=safe_value(getattr(r,f.name))
+                      except Exception: pass
+                  print('WIW_SYNC='+json.dumps(d, ensure_ascii=False, default=str))
+          except Exception as e:
+              print('WIW_SYNC_ERROR='+repr(e))
+
+          print('=== RECENT NOTIFICATIONS MENTIONING LOREEN ===')
+          for model in apps.get_models():
+              label=model._meta.label.lower()
+              if 'notif' not in label and 'push' not in label and 'event' not in label and 'audit' not in label:
+                  continue
+              text_fields=[f for f in model._meta.fields if f.get_internal_type() in ('CharField','TextField','EmailField')]
+              if not text_fields: continue
+              q=Q()
+              for f in text_fields: q |= Q(**{f.name+'__icontains':NEEDLE})
+              try: qs=model.objects.filter(q).order_by('-pk')[:20]
+              except Exception: continue
+              for obj in qs:
+                  d={}
+                  for f in model._meta.fields:
+                      if any(bit in f.name.lower() for bit in SKIP_BITS): continue
+                      try: d[f.name]=safe_value(getattr(obj,f.name))
+                      except Exception: pass
+                  print('NOTICE='+json.dumps({'model':model._meta.label,'data':d}, ensure_ascii=False, default=str))
+          PY
+          REMOTE
