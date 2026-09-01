@@ -1,0 +1,83 @@
+name: Diagnose Marthas Finest WIW sync
+
+on:
+  push:
+    branches: [diag/marthas-sync-20260901]
+    paths:
+      - '.github/workflows/diag-marthas-sync.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install SSH tooling
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass >/dev/null
+
+      - name: Force WIW refresh and inspect Marthas Finest
+        env:
+          HOST: ${{ secrets.HOST }}
+          PASS: ${{ secrets.PASS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$PASS"
+          sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          echo '=== WIW FULL SYNC ==='
+          docker compose exec -T backend python manage.py sync_wiw --full
+          echo '=== MARTHAS LOCAL MATCHES ==='
+          docker compose exec -T backend python manage.py shell <<'PY'
+          import json
+          from django.utils import timezone
+          from core.models import ClientCompany, IntegrationSyncRun, Location, Shift
+
+          latest = IntegrationSyncRun.objects.filter(provider='wiw').order_by('-finished_at', '-created_at').first()
+          print('latest_sync_status=' + (latest.status if latest else 'none'))
+          print('latest_sync_finished=' + (latest.finished_at.isoformat() if latest and latest.finished_at else ''))
+          print('latest_sync_counts=' + json.dumps(latest.counts if latest else {}, sort_keys=True, default=str))
+          if latest and latest.errors:
+              print('latest_sync_errors=' + json.dumps(latest.errors, ensure_ascii=False, default=str))
+
+          clients = list(ClientCompany.objects.filter(name__icontains='martha').values('id','name','customer_number'))
+          print('martha_clients=' + json.dumps([{**c, 'id': str(c['id'])} for c in clients], ensure_ascii=False))
+          client_ids = {c['id'] for c in clients}
+
+          locations = list(Location.objects.filter(client_id__in=client_ids).values('id','name','wiw_location_id','wiw_site_id')) if client_ids else []
+          print('martha_locations=' + json.dumps([{**l, 'id': str(l['id'])} for l in locations], ensure_ascii=False))
+
+          now = timezone.now()
+          rows = []
+          qs = Shift.objects.filter(starts_at__gte=now).select_related('client','location','position').order_by('starts_at')
+          for s in qs.iterator():
+              blob = ' '.join([
+                  s.client.name if s.client_id else '',
+                  s.location.name if s.location_id else '',
+                  json.dumps(s.wiw_payload or {}, ensure_ascii=False, default=str),
+                  s.notes or '',
+              ]).lower()
+              if 'martha' not in blob:
+                  continue
+              rows.append({
+                  'id': str(s.id),
+                  'wiw_shift_id': s.wiw_shift_id,
+                  'client': s.client.name if s.client_id else '',
+                  'location': s.location.name if s.location_id else '',
+                  'position': s.position.name if s.position_id else '',
+                  'starts_at': s.starts_at.isoformat(),
+                  'ends_at': s.ends_at.isoformat(),
+                  'status': s.status,
+                  'is_open': s.is_open,
+                  'required_count': s.required_count,
+                  'wiw_synced_at': s.wiw_synced_at.isoformat() if s.wiw_synced_at else '',
+              })
+              if len(rows) >= 40:
+                  break
+          print('martha_future_shift_count_sample=' + str(len(rows)))
+          print('martha_future_shifts=' + json.dumps(rows, ensure_ascii=False, default=str))
+          PY
+          REMOTE
