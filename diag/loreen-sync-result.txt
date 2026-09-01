@@ -1,0 +1,12 @@
+Loreen WIW sync diagnostic — 2026-09-01
+
+Production findings:
+- A+ user: Loreen G. / loreen.gawlitza@gmail.com / role worker / active.
+- A+ user has WIW id 48430860 and was synced from WIW at 2026-09-01T15:46:51.599826+00:00.
+- WIW payload says activated=true and updated_at=Tue, 01 Sep 2026 17:40:37 +0200.
+- A+ account has no usable password and last_login is null.
+- An A+ notification to A+ Admin was created at 2026-09-01T15:41:52.128055+00:00 with title "Mitarbeiter registriert" and body "Loreen G. hat die Registrierung abgeschlossen." (kind portal-registration-complete-16).
+- The immediately preceding WIW incremental sync started at 2026-09-01T15:41:51.600181+00:00 and completed successfully at 2026-09-01T15:41:53.300447+00:00, updating 20 users and 20 workers.
+
+Conclusion:
+Loreen did not log into or complete a separate A+ registration. The A+ user record and the "Mitarbeiter registriert" admin notification were produced as a consequence of WIW synchronization/activation. The notification wording is misleading for WIW-synced users because it sounds like an A+ registration was completed, while this account has no usable A+ password and has never logged in.
