@@ -45,6 +45,7 @@ import './brand-navy.css';
 import './mobile-readable-typography.css';
 import './mobile-page-gutters.css';
 import './wiw-shift-save-hotfix.css';
+import './wiw-client-divider-polish.css';
 
 installBerlinLocaleDefaults();
 installOperationalFetchResilience();
