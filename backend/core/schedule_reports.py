@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from io import BytesIO
 from uuid import UUID
 
@@ -84,11 +84,11 @@ def _report_filters(request):
 
 def _report_rows(filters):
     start_dt = timezone.make_aware(
-        timezone.datetime.combine(filters['start'], timezone.datetime.min.time()),
+        datetime.combine(filters['start'], time.min),
         timezone.get_current_timezone(),
     )
     end_dt = timezone.make_aware(
-        timezone.datetime.combine(filters['end'] + timedelta(days=1), timezone.datetime.min.time()),
+        datetime.combine(filters['end'] + timedelta(days=1), time.min),
         timezone.get_current_timezone(),
     )
     qs = (
