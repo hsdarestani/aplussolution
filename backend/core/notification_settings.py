@@ -34,6 +34,7 @@ PUSH_RULE_CATALOG = (
     PushRuleDefinition('release_decision', 'Schichtfreigabe entschieden'),
     PushRuleDefinition('shift_swap', 'Schichttausch'),
     PushRuleDefinition('attendance_status', 'Check-in / Check-out'),
+    PushRuleDefinition('attendance_auto_end', 'Automatisches Ende der Zeiterfassung', enabled=False),
     PushRuleDefinition('attendance_reminder', 'Check-in / Check-out Erinnerung'),
     PushRuleDefinition('offsite_checkout', 'Check-out außerhalb Einsatzort'),
     PushRuleDefinition('portal_registration', 'Portal-Registrierung abgeschlossen'),
@@ -49,6 +50,18 @@ _CATALOG_BY_KEY = {item.key: item for item in PUSH_RULE_CATALOG}
 def notification_rule_key(notification) -> str:
     kind = str(getattr(notification, 'kind', '') or '')
     title = str(getattr(notification, 'title', '') or '').strip()
+
+    # Preserve historically silent system events before the broader kind-family
+    # mapping. Admins can explicitly enable them from Settings if desired.
+    if title == 'Zeiterfassung wurde beendet':
+        return 'attendance_auto_end'
+    if title in {
+        'Schichtübernahme abgelehnt',
+        'Schicht bestätigt',
+        'Schicht abgelehnt',
+        'Schichtbestätigung aktualisiert',
+    }:
+        return 'shift_confirmation_response'
 
     if kind.startswith('admin-open-shift-summary-'):
         return 'admin_open_shift'
@@ -94,18 +107,6 @@ def notification_rule_key(notification) -> str:
         return 'announcement'
     if kind.startswith(('message-', 'conversation-')) or 'nachricht' in kind.lower():
         return 'message'
-
-    # Preserve the old intentionally in-app-only behavior as defaults while
-    # allowing admins to turn these event families back on from Settings.
-    if title in {
-        'Schichtübernahme abgelehnt',
-        'Schicht bestätigt',
-        'Schicht abgelehnt',
-        'Schichtbestätigung aktualisiert',
-    }:
-        return 'shift_confirmation_response'
-    if title == 'Zeiterfassung wurde beendet':
-        return 'attendance_status'
     return 'general'
 
 
