@@ -313,7 +313,7 @@ export default function WiwEmployeeScheduleMobile() {
           {(byDay[day] || []).map((shift) => <button type="button" className="wiw-employee-shift-card" key={shift.id} onClick={() => setSelected(shift)}>
             <div><b>{shift.position_name || 'Einsatz'}</b><span>{time(shift.starts_at)}–{time(shift.ends_at)}</span></div>
             <p>{mode === 'mine' ? (worker.name || worker.email || 'Mitarbeiter') : 'OpenShift'}</p>
-            <small>{shift.client_name || 'A+'} · {shift.location_name || 'Einsatzort'}</small>
+            <small>{shift.location_name || 'Einsatzort'}</small>
             {shift.my_release_request?.status === 'pending' && <i>Freigabe angefragt</i>}
             <IonIcon icon={chevronForwardOutline} />
           </button>)}

@@ -220,3 +220,25 @@ def test_pdf_selected_worker_does_not_include_other_assignees(auth_admin, shift,
     assert shift.worker.user.get_full_name() in text
     assert second_worker.user.get_full_name() not in text
     assert 'Hotel <Spa> & Bar' in text
+
+
+@pytest.mark.django_db
+def test_requested_workers_created_idempotently_without_invitations():
+    call_command('configure_schedule_workers')
+    izabella = WorkerProfile.objects.get(user__email='izabellasomodi21@yahoo.com')
+    musa = WorkerProfile.objects.get(user__first_name='Musa', user__last_name='Jamali')
+    max_worker = WorkerProfile.objects.get(user__first_name='Max', user__last_name='Najmudinov')
+    assert izabella.schedule_groups == ['housekeeping']
+    assert set(musa.schedule_groups) == {'service', 'front_office', 'housekeeping'}
+    assert max_worker.schedule_groups == ['service']
+    for worker in [izabella, musa, max_worker]:
+        assert worker.active and worker.open_shift_client_ids == []
+        assert not worker.user.has_usable_password()
+    assert musa.user.email.endswith('@pending.invalid')
+    musa.user.email = 'musa.real@example.com'
+    musa.user.save(update_fields=['email'])
+    ids = set(WorkerProfile.objects.values_list('id', flat=True))
+    call_command('configure_schedule_workers')
+    musa.user.refresh_from_db()
+    assert musa.user.email == 'musa.real@example.com'
+    assert set(WorkerProfile.objects.values_list('id', flat=True)) == ids

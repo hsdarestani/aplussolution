@@ -22,6 +22,8 @@ import {
   trashOutline,
 } from 'ionicons/icons';
 import { api, apiBlob } from './api';
+import ScheduleDatePicker from './ScheduleDatePicker';
+import { saveSchedulePdf } from './saveSchedulePdf';
 import { isHotelClientName, schedulePalette } from './scheduleClientPalette';
 import './wiw-schedule-mobile.css';
 
@@ -429,7 +431,9 @@ export default function WiwScheduleMobile() {
   const localRowsRef = useRef<any[]>([]);
   const liveRowsRef = useRef<any[]>([]);
   const loadSequence = useRef(0);
-  const dateInputRef = useRef<HTMLInputElement>(null);
+  const [dateOpen, setDateOpen] = useState(false);
+  const [pdfError, setPdfError] = useState('');
+  const [pdfDateField, setPdfDateField] = useState<'dateFrom' | 'dateTo' | ''>('');
   const formScreenRef = useRef<HTMLDivElement>(null);
   const formScrollRef = useRef<HTMLDivElement>(null);
   const noteRef = useRef<HTMLTextAreaElement>(null);
@@ -695,6 +699,7 @@ export default function WiwScheduleMobile() {
     setForm(emptyForm(date));
     setTimeOpen(false);
     setExtrasOpen(false);
+    setDateOpen(false);
     setFormOpen(true);
   }
 
@@ -724,6 +729,7 @@ export default function WiwScheduleMobile() {
     });
     setTimeOpen(false);
     setExtrasOpen(false);
+    setDateOpen(false);
     setFormOpen(true);
   }
 
@@ -733,16 +739,6 @@ export default function WiwScheduleMobile() {
     setForm((current) => ({ ...current, startMinute: start, endAbsolute: start + 360 }));
   }
 
-  function openNativeDatePicker() {
-    const input = dateInputRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
-    if (!input) return;
-    try {
-      if (typeof input.showPicker === 'function') input.showPicker();
-      else input.click();
-    } catch {
-      input.click();
-    }
-  }
 
   function toggleNotes() {
     if (extrasOpen) {
@@ -796,6 +792,17 @@ export default function WiwScheduleMobile() {
     if (!editing || busy) return;
     setEditing(undefined);
     setCopying(true);
+    setTimeOpen(false);
+    setExtrasOpen(false);
+    noteRef.current?.blur();
+    formScrollRef.current?.scrollTo({ top: 0 });
+    const screen = formScreenRef.current;
+    if (screen && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      screen.animate([
+        { transform: 'translateY(100%)', opacity: 0.4 },
+        { transform: 'translateY(0)', opacity: 1 },
+      ], { duration: 520, easing: 'cubic-bezier(.16,.82,.24,1)' });
+    }
     setForm((current) => ({
       ...current,
       required_count: 1,
@@ -889,10 +896,18 @@ export default function WiwScheduleMobile() {
 
   function openPdfExport() {
     setPdf({ dateFrom: weekStart, dateTo: addDays(weekStart, 6), workers: [], clients: [], groups: [] });
+    setPdfError('');
+    setPdfDateField('');
     setPdfOpen(true);
   }
 
   async function downloadPdf() {
+    if (pdfBusy) return;
+    if (!pdf.dateFrom || !pdf.dateTo || pdf.dateFrom > pdf.dateTo) {
+      setPdfError('Bitte einen gültigen Zeitraum auswählen.');
+      return;
+    }
+    setPdfError('');
     setPdfBusy(true);
     try {
       const params = new URLSearchParams({ date_from: pdf.dateFrom, date_to: pdf.dateTo });
@@ -900,24 +915,11 @@ export default function WiwScheduleMobile() {
       if (pdf.clients.length) params.set('clients', pdf.clients.join(','));
       if (pdf.groups.length) params.set('groups', pdf.groups.join(','));
       const result = await apiBlob(`reports/schedule.pdf?${params.toString()}`);
-      const file = new File([result.blob], result.filename, { type: 'application/pdf' });
-      const share = navigator as Navigator & { canShare?: (data: ShareData) => boolean; share?: (data: ShareData) => Promise<void> };
-      if (share.share && share.canShare?.({ files: [file] })) {
-        await share.share({ title: 'Dienstplan', files: [file] });
-      } else {
-        const url = URL.createObjectURL(result.blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = result.filename;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      }
+      await saveSchedulePdf(result.blob, result.filename);
       setPdfOpen(false);
       setToast('Dienstplan-PDF erstellt.');
     } catch (error: any) {
-      setToast(error?.message || 'PDF konnte nicht erstellt werden.');
+      setPdfError(error?.message || 'PDF konnte nicht erstellt werden.');
     } finally {
       setPdfBusy(false);
     }
@@ -1002,7 +1004,7 @@ export default function WiwScheduleMobile() {
             <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}</em></header>
             {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'} ${recentCopyShiftId && String(card.shift.id) === recentCopyShiftId ? 'is-copy-entering' : ''}`} style={shiftCardStyle(card.shift)} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
               <div className="wiw-card-line primary"><b>{card.worker?.name || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}{card.isOpen && card.shift.status !== 'draft' ? <span className="wiw-open-alert">!</span> : null}</b><span>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</span></div>
-              <div className="wiw-card-line secondary"><span className={card.isOpen ? 'open' : ''}>{card.shift.position_name || 'Schicht'}</span><small>{card.shift.client_name || ''}{card.shift.location_name ? ` · ${card.shift.location_name}` : ''}</small></div>
+              <div className="wiw-card-line secondary"><span className={card.isOpen ? 'open' : ''}>{card.shift.position_name || 'Schicht'}</span><small>{card.shift.location_name || 'Einsatzort'}</small></div>
             </button></React.Fragment>)}
             {tab !== 'open' && !dayCards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
           </section>;
@@ -1015,9 +1017,9 @@ export default function WiwScheduleMobile() {
 
       {formOpen ? <div ref={formScreenRef} className="wiw-shift-form-screen" data-testid="wiw-shift-form">
         <header className="wiw-form-topbar"><button type="button" onClick={() => { noteRef.current?.blur(); setFormOpen(false); }}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null} onClick={() => void save()}>Sichern</button></header>
-        <input ref={dateInputRef} className="wiw-native-date-input" type="date" value={form.date} onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))} tabIndex={-1} aria-hidden="true" />
+        {dateOpen ? <ScheduleDatePicker value={form.date} onSelect={(date) => { setForm((current) => ({ ...current, date })); setDateOpen(false); }} onClose={() => setDateOpen(false)} /> : null}
         <div ref={formScrollRef} className="wiw-form-scroll">
-          <Row icon={calendarOutline} label={formatDateRow(form.date)} onClick={openNativeDatePicker} />
+          <Row icon={calendarOutline} label={formatDateRow(form.date)} field="date" onClick={() => setDateOpen(true)} />
           {isHotelClientName(selectedClientName) ? <div className="wiw-hotel-presets">{HOTEL_TIME_PRESETS.map((preset) => <button type="button" key={preset.key} onClick={() => setForm((current) => ({ ...current, startMinute: preset.start, endAbsolute: preset.end }))}><b>{preset.label}</b><small>{formatMinute(preset.start)}–{formatMinute(preset.end)}</small></button>)}</div> : null}
           <div className="wiw-time-row-wrap">
             <Row
@@ -1071,16 +1073,18 @@ export default function WiwScheduleMobile() {
         {sheet === 'workers' ? <MultiChoiceSheet title={editing ? 'Mitarbeiter auswählen / ändern' : 'Geeignete Benutzer'} choices={workerChoices} selected={form.workers} limit={editing ? 1 : form.required_count} onClose={() => setSheet('')} onChange={(values) => setForm((current) => ({ ...current, workers: values, apply_all: editing ? false : current.apply_all }))} /> : null}
       </div> : null}
 
+      {pdfOpen && pdfDateField ? <ScheduleDatePicker title="PDF Zeitraum" value={pdf[pdfDateField]} onSelect={(date) => { setPdf((current) => ({ ...current, [pdfDateField]: date })); setPdfDateField(''); }} onClose={() => setPdfDateField('')} /> : null}
       {pdfOpen ? <div className="wiw-sheet-backdrop wiw-pdf-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !pdfBusy) setPdfOpen(false); }}>
         <section className="wiw-pdf-sheet">
-          <header><div><b>Dienstplan als PDF</b><small>Filter auswählen und exportieren</small></div><button type="button" onClick={() => setPdfOpen(false)}>Fertig</button></header>
+          <header><div><b>Dienstplan als PDF</b><small>Filter auswählen und exportieren</small></div><button type="button" disabled={pdfBusy} onClick={() => void downloadPdf()}>{pdfBusy ? 'Erstellen…' : 'Fertig'}</button></header>
           <div className="wiw-pdf-scroll">
-            <div className="wiw-pdf-dates"><label>Von<input type="date" value={pdf.dateFrom} onChange={(event) => setPdf((current) => ({ ...current, dateFrom: event.target.value }))}/></label><label>Bis<input type="date" value={pdf.dateTo} onChange={(event) => setPdf((current) => ({ ...current, dateTo: event.target.value }))}/></label></div>
-            <div className="wiw-pdf-filter-block"><b>Mitarbeiter</b><div className="wiw-pdf-chip-grid">{workerChoices.map((choice) => <button type="button" key={choice.value} className={pdf.workers.includes(choice.value) ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, workers: current.workers.includes(choice.value) ? current.workers.filter((item) => item !== choice.value) : [...current.workers, choice.value] }))}>{choice.label}</button>)}</div><small>Nichts ausgewählt = alle Mitarbeiter</small></div>
-            <div className="wiw-pdf-filter-block"><b>Kunden</b><div className="wiw-pdf-chip-grid">{clientChoices.map((choice) => <button type="button" key={choice.value} className={pdf.clients.includes(choice.value) ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, clients: current.clients.includes(choice.value) ? current.clients.filter((item) => item !== choice.value) : [...current.clients, choice.value] }))}>{choice.label}</button>)}</div><small>Nichts ausgewählt = alle Kunden</small></div>
+            <div className="wiw-pdf-dates"><label>Von<button type="button" aria-label="PDF Startdatum" onClick={() => setPdfDateField('dateFrom')}>{formatDateRow(pdf.dateFrom)}</button></label><label>Bis<button type="button" aria-label="PDF Enddatum" onClick={() => setPdfDateField('dateTo')}>{formatDateRow(pdf.dateTo)}</button></label></div>
+            <div className="wiw-pdf-filter-block"><b>Mitarbeiter</b><div className="wiw-pdf-chip-grid"><button type="button" aria-pressed={pdf.workers.length === 0} className={pdf.workers.length === 0 ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, workers: [] }))}>Alle Mitarbeiter</button>{workerChoices.map((choice) => <button type="button" key={choice.value} className={pdf.workers.includes(choice.value) ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, workers: current.workers.includes(choice.value) ? current.workers.filter((item) => item !== choice.value) : [...current.workers, choice.value] }))}>{choice.label}</button>)}</div><small>Nichts ausgewählt = alle Mitarbeiter</small></div>
+            <div className="wiw-pdf-filter-block"><b>Kunden</b><div className="wiw-pdf-chip-grid"><button type="button" aria-pressed={pdf.clients.length === 0} className={pdf.clients.length === 0 ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, clients: [] }))}>Alle Kunden</button>{clientChoices.map((choice) => <button type="button" key={choice.value} className={pdf.clients.includes(choice.value) ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, clients: current.clients.includes(choice.value) ? current.clients.filter((item) => item !== choice.value) : [...current.clients, choice.value] }))}>{choice.label}</button>)}</div><small>Nichts ausgewählt = alle Kunden</small></div>
             <div className="wiw-pdf-filter-block"><b>{pdfHasHotel ? 'Hotel-Bereich / Zeitplan' : 'Zeitplan'}</b><div className="wiw-pdf-chip-grid compact">{SCHEDULE_GROUPS.map((choice) => <button type="button" key={choice.value} className={pdf.groups.includes(choice.value) ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, groups: current.groups.includes(choice.value) ? current.groups.filter((item) => item !== choice.value) : [...current.groups, choice.value] }))}>{choice.label}</button>)}</div><small>Nichts ausgewählt = alle Bereiche</small></div>
           </div>
-          <footer><button type="button" onClick={() => setPdfOpen(false)}>Abbrechen</button><button type="button" className="primary" disabled={pdfBusy || !pdf.dateFrom || !pdf.dateTo} onClick={() => void downloadPdf()}>{pdfBusy ? 'PDF wird erstellt…' : 'PDF erstellen'}</button></footer>
+          {pdfError ? <p className="wiw-pdf-error" role="alert">{pdfError}</p> : null}
+          <footer><button type="button" disabled={pdfBusy} onClick={() => setPdfOpen(false)}>Abbrechen</button><button type="button" className="primary" disabled={pdfBusy || !pdf.dateFrom || !pdf.dateTo} onClick={() => void downloadPdf()}>{pdfBusy ? 'PDF wird erstellt…' : 'PDF erstellen'}</button></footer>
         </section>
       </div> : null}
 

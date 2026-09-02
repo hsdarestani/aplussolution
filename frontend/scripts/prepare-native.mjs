@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const target = process.argv[2] || 'all';
 const cwd = process.cwd();
@@ -117,6 +118,36 @@ function patchIosPush() {
   console.log('Prepared iOS Push Notifications entitlement and APNs callbacks.');
 }
 
+function patchIosFilePrivacy() {
+  const appDir = path.join(cwd, 'ios', 'App', 'App');
+  const privacyPath = path.join(appDir, 'PrivacyInfo.xcprivacy');
+  execFileSync('python3', ['-c', `
+import os, plistlib, sys
+p = sys.argv[1]
+data = plistlib.load(open(p, 'rb')) if os.path.exists(p) else {}
+entries = data.setdefault('NSPrivacyAccessedAPITypes', [])
+category = 'NSPrivacyAccessedAPICategoryFileTimestamp'
+entry = next((item for item in entries if item.get('NSPrivacyAccessedAPIType') == category), None)
+if entry is None:
+    entry = {'NSPrivacyAccessedAPIType': category, 'NSPrivacyAccessedAPITypeReasons': []}
+    entries.append(entry)
+reasons = entry.setdefault('NSPrivacyAccessedAPITypeReasons', [])
+if 'C617.1' not in reasons:
+    reasons.append('C617.1')
+with open(p, 'wb') as output:
+    plistlib.dump(data, output)
+`, privacyPath]);
+  const pbxPath = path.join(cwd, 'ios', 'App', 'App.xcodeproj', 'project.pbxproj');
+  let pbx = fs.readFileSync(pbxPath, 'utf8');
+  if (!pbx.includes('PrivacyInfo.xcprivacy in Resources')) {
+    pbx = pbx.replace('/* Begin PBXBuildFile section */', '/* Begin PBXBuildFile section */\n\t\tA90100000000000000000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A90100000000000000000002; };');
+    pbx = pbx.replace('/* Begin PBXFileReference section */', '/* Begin PBXFileReference section */\n\t\tA90100000000000000000002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = App/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };');
+    pbx = pbx.replace(/(isa = PBXResourcesBuildPhase;[\s\S]*?files = \()/, '$1\n\t\t\t\tA90100000000000000000001 /* PrivacyInfo.xcprivacy in Resources */,');
+    if ((pbx.match(/A90100000000000000000001/g) || []).length !== 2) throw new Error('Could not attach PDF filesystem privacy manifest.');
+    fs.writeFileSync(pbxPath, pbx);
+  }
+}
+
 function patchIos() {
   const plistPath = path.join(cwd, 'ios', 'App', 'App', 'Info.plist');
   if (!fs.existsSync(plistPath)) {
@@ -134,6 +165,7 @@ function patchIos() {
   plist = ensurePlistBooleanKey(plist, 'ITSAppUsesNonExemptEncryption', false);
   fs.writeFileSync(plistPath, plist);
   patchIosPush();
+  patchIosFilePrivacy();
   console.log('Prepared iOS foreground-location purpose strings, export compliance and native push.');
 }
 

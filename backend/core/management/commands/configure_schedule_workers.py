@@ -6,7 +6,7 @@ import unicodedata
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from core.models import User, WorkerProfile
+from core.models import User, WorkerProfile, EmployeeMasterData
 from core.shift_rules import normalized_groups
 
 
@@ -29,6 +29,15 @@ WORKER_CONFIG = {
     'Musa Jamali': ['service', 'housekeeping', 'front_office'],
     'Max Najmudinov': ['service'],
 }
+
+# Explicitly requested on 2026-09-02. Pending addresses are reserved, non-routable
+# identifiers required by the unique email login schema; no invitations are sent.
+APPROVED_NEW_WORKERS = {
+    'Izabella Somodo': ('izabellasomodi21@yahoo.com', 'LOCAL-IZABELLA-SOMODO'),
+    'Musa Jamali': ('musa.jamali@pending.invalid', 'LOCAL-MUSA-JAMALI'),
+    'Max Najmudinov': ('max.najmudinov@pending.invalid', 'LOCAL-MAX-NAJMUDINOV'),
+}
+
 
 DELETE_FROM_WORKFORCE = {'Lara Mohieddine', 'Julia Stahl'}
 
@@ -75,6 +84,32 @@ class Command(BaseCommand):
         deleted = []
 
         with transaction.atomic():
+            for name, (email, employee_number) in APPROVED_NEW_WORKERS.items():
+                if _find_worker(workers, name):
+                    continue
+                first_name, last_name = name.split(' ', 1)
+                candidates = User.objects.filter(first_name__iexact=first_name, last_name__iexact=last_name)
+                user = User.objects.filter(email__iexact=email).first()
+                if not user and candidates.count() == 1:
+                    user = candidates.first()
+                if user:
+                    if normalize_name(user.get_full_name()) != normalize_name(name) or user.role != User.Role.WORKER:
+                        raise ValueError(f'Existing account does not match requested worker: {name}')
+                elif candidates.exists():
+                    raise ValueError(f'Ambiguous requested worker: {name}')
+                else:
+                    user = User.objects.create_user(email, first_name=first_name, last_name=last_name, role=User.Role.WORKER)
+                worker, created = WorkerProfile.objects.get_or_create(
+                    user=user, defaults={'employee_number': employee_number, 'active': True}
+                )
+                if created:
+                    EmployeeMasterData.objects.get_or_create(
+                        worker=worker,
+                        defaults={'data': {}, 'missing_fields': ['email'] if email.endswith('@pending.invalid') else []},
+                    )
+                    self.stdout.write(f'created requested worker: {name}')
+                workers.append(worker)
+
             for target, groups in WORKER_CONFIG.items():
                 worker = _find_worker(workers, target)
                 if not worker:

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from django.db import OperationalError, ProgrammingError
 
 from .push_models import NotificationPushRule
+from .models import Notification
 
 
 @dataclass(frozen=True)
@@ -131,20 +132,151 @@ def push_rule_payload(key: str) -> dict:
     }
 
 
+# Readable fallbacks for event families with no sent notification yet.
+# These examples never replace the dynamic templates during a settings save.
+COPY_EXAMPLES = {
+    "open_shift": [
+        "Neue Schicht verfügbar",
+        "[Datum] · [Beginn]–[Ende] Uhr\n[Location] - [Position]"
+    ],
+    "admin_open_shift": [
+        "OpenShift veröffentlicht",
+        "Benachrichtigung für [Anzahl] Mitarbeiter ausgelöst"
+    ],
+    "shift_assignment": [
+        "[Mitarbeiter] übernimmt folgende Schicht:",
+        "[Datum] · [Beginn]–[Ende] Uhr\n[Location] - [Position]"
+    ],
+    "shift_updated": [
+        "Deine Schicht wurde aktualisiert",
+        "[Datum] · neu [Beginn]–[Ende] Uhr\n[Location] - [Position]"
+    ],
+    "shift_deleted": [
+        "Schicht gelöscht am",
+        "[Datum] · [Beginn]–[Ende] Uhr\n[Location] - [Position]"
+    ],
+    "shift_manual_reminder": [
+        "Erinnerung an deine Schicht",
+        "[Datum] von [Beginn]–[Ende] Uhr\n[Location] - [Position]"
+    ],
+    "shift_24h_reminder": [
+        "Erinnerung:",
+        "Dein Einsatz beginnt morgen um [Beginn] Uhr"
+    ],
+    "shift_claimed": [
+        "Schicht übernommen am",
+        "[Datum] · [Beginn]–[Ende] Uhr"
+    ],
+    "shift_confirmation": [
+        "Bitte Schicht bestätigen",
+        "[Mitarbeiter] · [Datum] · [Beginn]–[Ende] Uhr"
+    ],
+    "shift_confirmation_response": [
+        "Schicht bestätigt",
+        "[Mitarbeiter] · [Schicht]"
+    ],
+    "pickup_request": [
+        "Schichtanfrage",
+        "[Mitarbeiter] möchte folgende Schicht übernehmen · [Schicht]"
+    ],
+    "pickup_approved": [
+        "Schichtübernahme für den [Datum] genehmigt",
+        ""
+    ],
+    "pickup_rejected": [
+        "Schichtübernahme abgelehnt",
+        "[Schicht]"
+    ],
+    "release_request": [
+        "Schichtfreigabe prüfen",
+        "[Mitarbeiter] möchte aus der Schicht freigegeben werden · [Schicht]"
+    ],
+    "release_decision": [
+        "Schichtfreigabe genehmigt",
+        "Du wurdest aus dieser Schicht freigegeben · [Schicht]"
+    ],
+    "shift_swap": [
+        "Neue Schichttauschanfrage",
+        "[Mitarbeiter] möchte ihre Schicht mit [Mitarbeiter] tauschen\n[Schicht]"
+    ],
+    "attendance_status": [
+        "Check-in / Check-out",
+        "[Mitarbeiter] · [Location]"
+    ],
+    "attendance_auto_end": [
+        "Zeiterfassung wurde beendet",
+        "[Schicht]"
+    ],
+    "attendance_reminder": [
+        "Check-in nicht vergessen",
+        "Deine Schicht hat vor 15 Minuten begonnen"
+    ],
+    "offsite_checkout": [
+        "Check-out außerhalb Einsatzort",
+        "[Mitarbeiter] · [Location]"
+    ],
+    "portal_registration": [
+        "Mitarbeiterregistrierung abgeschlossen",
+        "[Mitarbeiter] hat die Registrierung erfolgreich abgeschlossen"
+    ],
+    "contract": [
+        "Dokument zur Prüfung bereit",
+        "[Dokument]\nVersand: [Datum], [Uhrzeit] Uhr · Status: Unterschrift ausstehend."
+    ],
+    "announcement": [
+        "Neue Mitteilung von [Absender]",
+        "[Mitteilung]"
+    ],
+    "message": [
+        "Neue Nachricht von [Absender]",
+        "[Nachricht]"
+    ],
+    "general": [
+        "Benachrichtigung",
+        "[Ereignistext]"
+    ]
+}
+
+
+def _copy_previews() -> dict:
+    previews = {}
+    for notification in Notification.objects.only('kind', 'title', 'body').order_by('-created_at')[:5000].iterator(chunk_size=500):
+        key = notification_rule_key(notification)
+        if key not in previews:
+            previews[key] = (notification.title, notification.body)
+        if len(previews) == len(PUSH_RULE_CATALOG):
+            break
+    return previews
+
+
+def _preview_text(template: str, title: str, body: str) -> str:
+    try:
+        return template.format(title=title, body=body)
+    except (KeyError, ValueError, IndexError):
+        return template
+
+
 def all_push_rule_payloads() -> list[dict]:
     try:
         stored = {item.key: item for item in NotificationPushRule.objects.all()}
     except (OperationalError, ProgrammingError):
         stored = {}
+    previews = _copy_previews()
     result = []
     for definition in PUSH_RULE_CATALOG:
         override = stored.get(definition.key)
+        title, body = previews.get(definition.key, COPY_EXAMPLES[definition.key])
+        title_template = override.title_template if override else definition.title_template
+        body_template = override.body_template if override else definition.body_template
         result.append({
             'key': definition.key,
             'label': definition.label,
             'enabled': override.enabled if override else definition.enabled,
             'title_template': override.title_template if override else definition.title_template,
-            'body_template': override.body_template if override else definition.body_template,
+            'body_template': body_template,
+            'display_title': _preview_text(title_template, title, body),
+            'display_body': _preview_text(body_template, title, body),
+            'preview_source': 'latest' if definition.key in previews else 'example',
         })
     return result
 
