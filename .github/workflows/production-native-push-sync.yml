@@ -1,4 +1,4 @@
-name: Diagnose native push production
+name: Repair native push production
 
 on:
   push:
@@ -10,13 +10,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: aplus-native-push-diagnostics-${{ github.ref }}
+  group: aplus-native-push-repair-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  diagnose:
+  repair:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 7
     steps:
       - name: Ensure SSH tooling
         run: |
@@ -28,109 +28,65 @@ jobs:
             }
           fi
 
-      - name: Prepare diagnostic script
-        run: |
-          cat > /tmp/pushdiag.py <<'PY'
-          import base64
-          import json
-          import os
-          import sys
-          from datetime import timedelta
-
-          sys.path.insert(0, '/app')
-          os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
-          import django
-          django.setup()
-
-          from django.utils import timezone
-          from core.models import Notification, User
-          from core.push_models import PushDevice
-          from core.push_notifications import push_provider_status, _firebase_credentials, firebase_project_id
-
-          raw = os.getenv('FIREBASE_CREDENTIALS_JSON', '')
-          parsed = _firebase_credentials()
-          manual_b64_ok = False
-          manual_json_ok = False
-          if raw and not raw.lstrip().startswith('{'):
-              try:
-                  decoded = base64.b64decode(raw).decode('utf-8')
-                  manual_b64_ok = True
-                  json.loads(decoded)
-                  manual_json_ok = True
-              except Exception:
-                  pass
-
-          recent = timezone.now() - timedelta(hours=2)
-          admin_devices = PushDevice.objects.filter(user__role='admin').order_by('-last_seen_at')
-          result = {
-              'push_providers': push_provider_status(),
-              'firebase_env_project_present': bool(os.getenv('FIREBASE_PROJECT_ID', '').strip()),
-              'firebase_resolved_project_present': bool(firebase_project_id()),
-              'firebase_credentials_env_present': bool(raw.strip()),
-              'firebase_credentials_length': len(raw),
-              'firebase_credentials_starts_json': raw.lstrip().startswith('{'),
-              'firebase_credentials_manual_b64_ok': manual_b64_ok,
-              'firebase_credentials_manual_json_ok': manual_json_ok,
-              'firebase_parsed_nonempty': bool(parsed),
-              'firebase_parsed_has_project_id': bool(parsed.get('project_id')) if parsed else False,
-              'firebase_parsed_has_client_email': bool(parsed.get('client_email')) if parsed else False,
-              'firebase_parsed_has_private_key': bool(parsed.get('private_key')) if parsed else False,
-              'active_admin_users': User.objects.filter(role='admin', is_active=True).count(),
-              'active_devices_total': PushDevice.objects.filter(active=True).count(),
-              'admin_android_active': admin_devices.filter(active=True, platform='android').count(),
-              'admin_ios_active': admin_devices.filter(active=True, platform='ios').count(),
-              'admin_android_inactive': admin_devices.filter(active=False, platform='android').count(),
-              'admin_ios_inactive': admin_devices.filter(active=False, platform='ios').count(),
-              'recent_admin_open_shift_notifications': Notification.objects.filter(
-                  user__role='admin', kind__startswith='admin-open-shift-summary-', created_at__gte=recent
-              ).count(),
-              'admin_devices': [
-                  {
-                      'platform': device.platform,
-                      'active': device.active,
-                      'last_seen_at': device.last_seen_at.isoformat() if device.last_seen_at else None,
-                      'last_error': (device.last_error or '')[:1000],
-                  }
-                  for device in admin_devices[:10]
-              ],
-          }
-          print(json.dumps(result, indent=2, sort_keys=True))
-          PY
-
-      - name: Collect production push state
-        continue-on-error: true
+      - name: Repair Firebase configuration and test Android delivery
         env:
           SSHPASS: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_CREDENTIALS_JSON_BASE64: ${{ secrets.FIREBASE_CREDENTIALS_JSON_BASE64 }}
         run: |
-          set +e
-          : > /tmp/pushdiag.out
-          test -n "$HOST" && test -n "$SSHPASS" || { echo 'missing ssh secret' >> /tmp/pushdiag.out; exit 0; }
-          SSH_OPTS='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15'
-          sshpass -e scp $SSH_OPTS /tmp/pushdiag.py root@"$HOST":/tmp/pushdiag.py >> /tmp/pushdiag.out 2>&1
-          echo "script_scp_exit=$?" >> /tmp/pushdiag.out
-          sshpass -e ssh $SSH_OPTS root@"$HOST" 'bash -s' >> /tmp/pushdiag.out 2>&1 <<'REMOTE'
-          set +e
-          cd /opt/aplussolution || { echo 'cd_failed'; exit 0; }
-          echo 'REMOTE_DIAGNOSTIC_BEGIN'
-          CID="$(docker compose ps -q backend)"
-          echo "backend_cid_present=$([ -n "$CID" ] && echo yes || echo no)"
-          if [ -n "$CID" ]; then
-            docker cp /tmp/pushdiag.py "$CID":/tmp/pushdiag.py
-            docker compose exec -T backend python /tmp/pushdiag.py
-            echo "python_diag_exit=$?"
-          fi
-          echo '--- celery push task log tail ---'
-          docker compose logs --since=2h --no-color celery 2>&1 | grep -E 'send_notification_push|FCM|APNs|Task core\.push_notifications' | tail -n 120 || true
-          echo 'REMOTE_DIAGNOSTIC_END'
-          exit 0
-          REMOTE
-          echo "ssh_diag_exit=$?" >> /tmp/pushdiag.out
+          set -euo pipefail
+          test -n "$HOST" && test -n "$SSHPASS"
+          test -n "$FIREBASE_PROJECT_ID" && test -n "$FIREBASE_CREDENTIALS_JSON_BASE64"
+          PROJECT_B64="$(printf '%s' "$FIREBASE_PROJECT_ID" | base64 -w0)"
+          CREDS_B64="$FIREBASE_CREDENTIALS_JSON_BASE64"
+          SSH_OPTS='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -o ServerAliveInterval=10 -o ServerAliveCountMax=3'
 
-      - name: Upload diagnostic artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-push-production-diagnostic
-          path: /tmp/pushdiag.out
-          retention-days: 1
+          sshpass -e ssh $SSH_OPTS root@"$HOST" \
+            "PROJECT_B64='$PROJECT_B64' CREDS_B64='$CREDS_B64' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          export FIREBASE_PROJECT_VALUE="$(printf '%s' "$PROJECT_B64" | base64 -d)"
+          export FIREBASE_CREDS_VALUE="$CREDS_B64"
+
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path('.env')
+          lines = path.read_text(encoding='utf-8').splitlines()
+          updates = {
+              'FIREBASE_PROJECT_ID': os.environ['FIREBASE_PROJECT_VALUE'].strip(),
+              'FIREBASE_CREDENTIALS_JSON': os.environ['FIREBASE_CREDS_VALUE'].strip(),
+          }
+          output = []
+          seen = set()
+          for line in lines:
+              if '=' in line and not line.lstrip().startswith('#'):
+                  key = line.split('=', 1)[0].strip()
+                  if key in updates:
+                      output.append(f'{key}={updates[key]}')
+                      seen.add(key)
+                      continue
+              output.append(line)
+          for key, value in updates.items():
+              if key not in seen:
+                  output.append(f'{key}={value}')
+          path.write_text('\n'.join(output) + '\n', encoding='utf-8')
+          PY
+          chmod 600 .env
+
+          docker compose up -d --force-recreate backend celery celery-beat
+          ready=0
+          for i in $(seq 1 30); do
+            if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+
+          docker compose exec -T backend python manage.py shell -c "from core.push_notifications import push_provider_status; s=push_provider_status(); assert s.get('android'), s; print('Android provider ready')"
+          docker compose exec -T backend python manage.py shell -c "from core.models import Notification; from core.push_models import PushDevice; from core.push_notifications import _send_android; d=PushDevice.objects.filter(active=True,user__role='admin',platform='android').order_by('-last_seen_at').first(); n=Notification.objects.filter(user=d.user,kind__startswith='admin-open-shift-summary-').order_by('-created_at').first() if d else None; assert d is not None, 'No active admin Android device'; assert n is not None, 'No admin OpenShift notification'; ok,error,invalid=_send_android(d,n); print('Android direct push sent=',ok,'invalid=',invalid,'error=',error[:250]); assert ok, error"
+          REMOTE
