@@ -1,4 +1,4 @@
-name: Audit missing mobile workforce profiles
+name: Verify requested workforce profiles after mobile release
 on:
   push:
     branches: [ops/mobile-workforce-20260902]
@@ -23,23 +23,24 @@ jobs:
           export SSH_ASKPASS=/tmp/askpass SSH_ASKPASS_REQUIRE=force DISPLAY=:0
           setsid -w ssh -T -o StrictHostKeyChecking=no -o ConnectTimeout=20 root@"$DEPLOY_HOST" 'cd /opt/aplussolution && docker compose exec -T backend python manage.py shell' <<'PY'
           import json
-          from core.models import User, WorkerProfile
-          from core.management.commands.configure_schedule_workers import normalize_name
-          needles = ['izab', 'isab', 'somod', 'najm', 'nadjm', 'jamal', 'musa', 'mous', 'max']
-          candidates = []
-          for user in User.objects.all():
-              name = user.get_full_name()
-              if any(part in normalize_name(name) for part in needles):
-                  worker = WorkerProfile.objects.filter(user=user).first()
-                  candidates.append({'id': str(user.pk), 'name': name, 'role': user.role, 'active': user.is_active, 'worker_id': str(worker.pk) if worker else None, 'groups': worker.schedule_groups if worker else None})
-          print('WORKFORCE_CANDIDATES=' + json.dumps(candidates))
-          from core.wiw import WhenIWorkClient
-          matches = []
-          for item in WhenIWorkClient().collection('users', optional=False).items:
-              first = str(item.get('first_name') or item.get('firstname') or '')
-              last = str(item.get('last_name') or item.get('lastname') or '')
-              name = (first + ' ' + last).strip() or str(item.get('name') or '')
-              if any(part in normalize_name(name) for part in needles):
-                  matches.append({'wiw_id': item.get('id'), 'name': name, 'has_email': bool(item.get('email'))})
-          print('WIW_CANDIDATES=' + json.dumps(matches))
+          from core.models import WorkerProfile
+          from core.notification_settings import all_push_rule_payloads
+          expected = {
+              'Izabella Somodo': ['housekeeping'],
+              'Musa Jamali': ['service', 'housekeeping', 'front_office'],
+              'Max Najmudinov': ['service'],
+          }
+          rows = []
+          for name, groups in expected.items():
+              first, last = name.split(' ', 1)
+              worker = WorkerProfile.objects.select_related('user').get(user__first_name=first, user__last_name=last)
+              assert set(worker.schedule_groups) == set(groups), name
+              assert worker.active and worker.open_shift_client_ids == [], name
+              if first == 'Izabella':
+                  assert worker.user.email == 'izabellasomodi21@yahoo.com'
+              rows.append({'name': name, 'groups': worker.schedule_groups, 'all_clients': not worker.open_shift_client_ids, 'email_pending': worker.user.email.endswith('@pending.invalid')})
+          rules = all_push_rule_payloads()
+          assert all(rule['display_title'] != '{title}' and rule['display_body'] != '{body}' for rule in rules)
+          print('VERIFIED_WORKFORCE=' + json.dumps(rows))
+          print('VERIFIED_NOTIFICATION_PREVIEWS=' + str(len(rules)))
           PY
