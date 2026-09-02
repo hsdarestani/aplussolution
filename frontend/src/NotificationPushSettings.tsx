@@ -8,6 +8,9 @@ type PushRule = {
   enabled: boolean;
   title_template: string;
   body_template: string;
+  display_title: string;
+  display_body: string;
+  preview_source: 'latest' | 'example';
 };
 
 export default function NotificationPushSettings({ role }: { role?: string }) {
@@ -58,7 +61,7 @@ export default function NotificationPushSettings({ role }: { role?: string }) {
     <div className="section-head">
       <div>
         <h3>Push-Benachrichtigungen</h3>
-        <p>Jeden Ereignistyp aktivieren, deaktivieren oder den angezeigten Text anpassen. <code>{'{title}'}</code> und <code>{'{body}'}</code> übernehmen den dynamischen Standardtext.</p>
+        <p>Aktuelle Texte ansehen, bearbeiten und speichern. Unveränderte Texte bleiben dynamisch. Ein bearbeiteter Text wird als eigener Text für diesen Ereignistyp gespeichert.</p>
       </div>
       <IonButton size="small" disabled={saving || loading || !dirty} onClick={() => void save()}>
         {saving ? <IonSpinner name="crescent" /> : 'Speichern'}
@@ -71,13 +74,14 @@ export default function NotificationPushSettings({ role }: { role?: string }) {
           <div><b>{rule.label}</b><small>{rule.key}</small></div>
           <IonToggle checked={rule.enabled} onIonChange={event => update(rule.key, { enabled: event.detail.checked })} aria-label={`${rule.label} aktivieren`} />
         </div>
+        <small>{rule.preview_source === 'latest' ? 'Aktueller Text · letzte Benachrichtigung' : 'Textbeispiel · noch keine Benachrichtigung'}</small>
         <label>
           <span>Titel</span>
-          <input value={rule.title_template} onChange={event => update(rule.key, { title_template: event.target.value })} maxLength={240} />
+          <input value={rule.display_title ?? rule.title_template} onChange={event => update(rule.key, { title_template: event.target.value, display_title: event.target.value })} maxLength={240} />
         </label>
         <label>
           <span>Text</span>
-          <textarea value={rule.body_template} onChange={event => update(rule.key, { body_template: event.target.value })} rows={2} maxLength={4000} />
+          <textarea value={rule.display_body ?? rule.body_template} onChange={event => update(rule.key, { body_template: event.target.value, display_body: event.target.value })} rows={2} maxLength={4000} />
         </label>
       </article>)}
     </div>}

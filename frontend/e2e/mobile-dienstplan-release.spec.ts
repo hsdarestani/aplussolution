@@ -93,3 +93,67 @@ test('dense time wheel emits feedback and notes can reopen without locking the f
   await pdf.getByRole('button', { name: 'Housekeeping', exact: true }).click();
   await expect(pdf.locator('.compact button.active')).toHaveCount(3);
 });
+
+
+test('shift date opens immediately in create and edit, and copied form slides into view', async ({ page }) => {
+  await mobileAdmin(page);
+  const cards = page.getByTestId('wiw-native-schedule').locator('.wiw-shift-card');
+  await expect(cards.first()).not.toContainText('Hotel Spenerhaus');
+  await expect(cards.first()).toContainText('Frankfurt');
+  await cards.first().click();
+  const form = page.getByTestId('wiw-shift-form');
+  await form.locator('[data-field="date"]').click();
+  const calendar = page.getByRole('dialog', { name: 'Schichtdatum' });
+  await expect(calendar).toBeVisible();
+  await calendar.getByRole('button', { name: '2026-09-04', exact: true }).click();
+  await expect(calendar).toHaveCount(0);
+  await expect(form.locator('[data-field="date"]')).toContainText('04.');
+  await form.getByRole('button', { name: 'Schicht kopieren', exact: true }).click();
+  await expect(form).toContainText('Kopie bearbeiten');
+  const frames = await form.evaluate(element => element.getAnimations().flatMap(animation =>
+    (animation.effect as KeyframeEffect).getKeyframes().map(frame => String(frame.transform))));
+  expect(frames).toContain('translateY(100%)');
+  await form.getByRole('button', { name: 'Abbrechen', exact: true }).click();
+  await page.getByRole('button', { name: 'Schicht anlegen', exact: true }).click();
+  await page.getByRole('button', { name: /Manuell.*WIW-Formular öffnen/ }).click();
+  await form.locator('[data-field="date"]').click();
+  await expect(calendar).toBeVisible();
+  await calendar.getByRole('button', { name: 'Nächster Monat', exact: true }).click();
+  await calendar.getByRole('button', { name: '2026-10-05', exact: true }).click();
+  await expect(form.locator('[data-field="date"]')).toContainText('05.');
+  await expect(form.locator('[data-field="date"]')).toContainText('Okt');
+});
+
+test('PDF Fertig downloads the file and explicit All choices clear restrictive filters', async ({ page }) => {
+  await mobileAdmin(page);
+  await page.route('**/api/reports/schedule.pdf?*', route => route.fulfill({
+    status: 200, contentType: 'application/pdf',
+    headers: { 'content-disposition': 'attachment; filename="dienstplan.pdf"' },
+    body: '%PDF-1.4\\n%%EOF',
+  }));
+  await page.locator('.wiw-pdf-button').click();
+  const pdf = page.locator('.wiw-pdf-sheet');
+  await pdf.getByRole('button', { name: 'Tooba Amjad', exact: true }).click();
+  await pdf.getByRole('button', { name: 'Hotel Spenerhaus', exact: true }).click();
+  await pdf.getByRole('button', { name: 'Alle Mitarbeiter', exact: true }).click();
+  await pdf.getByRole('button', { name: 'Alle Kunden', exact: true }).click();
+  await expect(pdf.getByRole('button', { name: 'Alle Mitarbeiter', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const request = page.waitForRequest(r => r.url().includes('/reports/schedule.pdf?'));
+  const download = page.waitForEvent('download');
+  await pdf.getByRole('button', { name: 'Fertig', exact: true }).click();
+  expect((await download).suggestedFilename()).toBe('dienstplan.pdf');
+  const url = new URL((await request).url());
+  expect(url.searchParams.has('workers')).toBe(false);
+  expect(url.searchParams.has('clients')).toBe(false);
+  await expect(pdf).toHaveCount(0);
+});
+
+test('PDF errors remain visible in the export dialog', async ({ page }) => {
+  await mobileAdmin(page);
+  await page.route('**/api/reports/schedule.pdf?*', route => route.fulfill({ status: 500, json: { detail: 'Export vorübergehend fehlgeschlagen' } }));
+  await page.locator('.wiw-pdf-button').click();
+  const pdf = page.locator('.wiw-pdf-sheet');
+  await pdf.getByRole('button', { name: 'Fertig', exact: true }).click();
+  await expect(pdf.getByRole('alert')).toHaveText('Export vorübergehend fehlgeschlagen');
+  await expect(pdf.getByRole('button', { name: 'Fertig', exact: true })).toBeEnabled();
+});

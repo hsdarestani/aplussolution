@@ -114,3 +114,17 @@
 @media (prefers-reduced-motion:reduce){
   .wiw-shift-card.is-copy-entering,.wiw-week-turn-next,.wiw-week-turn-prev{animation:none!important}
 }
+
+@media(max-width:900px){
+  .wiw-calendar-backdrop{z-index:22000!important}
+  .wiw-calendar-sheet{width:100%;background:#fff;border-radius:18px 18px 0 0;padding:16px 16px calc(20px + env(safe-area-inset-bottom));color:#1d2939;box-shadow:0 -12px 36px #10182833}
+  .wiw-calendar-sheet header,.wiw-calendar-sheet nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+  .wiw-calendar-sheet button{border:0;background:#fff;color:#254a65;min-height:44px;font:inherit;border-radius:10px}
+  .wiw-calendar-sheet nav button{width:44px;background:#f2f5f7;font-size:28px}
+  .wiw-calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;text-align:center}
+  .wiw-calendar-grid small{padding:8px 0;color:#667085}
+  .wiw-calendar-grid button.selected{background:#477f34;color:#fff;font-weight:700}
+  .wiw-calendar-grid button.outside{color:#98a2b3}
+  .wiw-pdf-error{margin:0;padding:12px;background:#fff1f0;color:#a32020;font-size:13px}
+  .wiw-pdf-sheet>footer{flex-shrink:0}
+}
