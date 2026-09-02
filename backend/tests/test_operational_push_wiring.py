@@ -87,3 +87,20 @@ def test_open_shift_fanout_creates_one_admin_summary(admin_user, worker_user, se
     assert summaries.count() == 1
     assert f'{created} Mitarbeiter' in summaries.get().body
     assert not Notification.objects.filter(user=admin_user, kind__startswith='admin-worker-copy-').exists()
+
+
+@pytest.mark.django_db
+def test_open_shift_zero_worker_fanout_still_confirms_to_admin(admin_user, worker_user, company, location, push_position, monkeypatch):
+    shift = _future_shift(company, location, push_position, status=Shift.Status.PUBLISHED)
+    ShiftSlot.objects.create(shift=shift)
+    monkeypatch.setattr('core.operational_notifications.shift_visible_to_worker', lambda *_: False)
+
+    created = notify_open_shift_available(shift, 'copied-regression')
+
+    assert created == 0
+    summary = Notification.objects.get(
+        user=admin_user,
+        kind__startswith='admin-open-shift-summary-copied-regression-',
+    )
+    assert summary.title == 'OpenShift veröffentlicht'
+    assert 'Keine passenden Mitarbeiter benachrichtigt' in summary.body
