@@ -33,8 +33,10 @@ jobs:
           cat > /tmp/pushdiag.py <<'PY'
           import json
           import os
+          import sys
           from datetime import timedelta
 
+          sys.path.insert(0, '/app')
           os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
           import django
           django.setup()
@@ -94,7 +96,7 @@ jobs:
           if [ -n "$CID" ]; then
             docker cp /tmp/pushdiag.py "$CID":/tmp/pushdiag.py
             echo "docker_cp_exit=$?"
-            docker compose exec -T backend sh -lc 'cd /app && python /tmp/pushdiag.py'
+            docker compose exec -T backend python /tmp/pushdiag.py
             echo "python_diag_exit=$?"
           fi
           echo '--- celery push task log tail ---'
