@@ -46,6 +46,7 @@ urlpatterns = [
     path('push/devices/register/', push_views.register_push_device),
     path('push/devices/unregister/', push_views.unregister_push_device),
     path('push/status/', push_views.push_status),
+    path('push/settings/', push_views.push_settings),
     path('admin/exceptions/', live_admin_center.admin_exception_center),
     path('admin/mobile-dashboard/', wiw_dashboard.mobile_dashboard),
     path('search/global/', global_search_views.global_search),
@@ -106,6 +107,7 @@ urlpatterns = [
     path('working-time/backup/', automation_views.worktime_backup),
     path('reports/timesheets.csv', advanced_views.export_timesheets),
     path('reports/schedule.csv', native_operations.export_schedule),
+    path('reports/schedule.pdf', native_operations.export_schedule_pdf),
     path('reports/payroll-estimate.csv', advanced_views.export_payroll_estimate),
     # Keep the DRF router last so fixed custom endpoints such as
     # workers/portal-status/ and workers/bulk-invite/ are not interpreted
