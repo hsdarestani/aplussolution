@@ -187,3 +187,34 @@ def test_configure_schedule_workers_changes_only_approved_workforce(db):
     assert not User.objects.filter(pk=lara_user.pk).exists()
     assert User.objects.filter(pk=julia_user.pk).exists()
     assert not WorkerProfile.objects.filter(user_id=julia_user.pk).exists()
+
+
+@pytest.mark.django_db
+def test_julia_workforce_removal_preserves_account_even_with_stale_worker_role():
+    user = User.objects.create_user(
+        'julia.stale@example.com', 'Pass123456!', first_name='Julia', last_name='Stahl', role=User.Role.WORKER
+    )
+    WorkerProfile.objects.create(user=user, employee_number='CFG-JULIA-STALE')
+    call_command('configure_schedule_workers')
+    assert User.objects.filter(pk=user.pk).exists()
+    assert not WorkerProfile.objects.filter(user_id=user.pk).exists()
+
+
+@pytest.mark.django_db
+def test_pdf_selected_worker_does_not_include_other_assignees(auth_admin, shift, second_worker):
+    from io import BytesIO
+    from pypdf import PdfReader
+    from core.shift_slots import ShiftSlot
+
+    ShiftSlot.objects.create(shift=shift, worker=second_worker, status=ShiftSlot.Status.CLAIMED)
+    shift.client.name = 'Hotel <Spa> & Bar'
+    shift.client.save(update_fields=['name'])
+    day = timezone.localdate(shift.starts_at).isoformat()
+    response = auth_admin.get('/api/reports/schedule.pdf', {
+        'date_from': day, 'date_to': day, 'workers': str(shift.worker_id),
+    })
+    assert response.status_code == 200
+    text = '\n'.join(page.extract_text() for page in PdfReader(BytesIO(response.content)).pages)
+    assert shift.worker.user.get_full_name() in text
+    assert second_worker.user.get_full_name() not in text
+    assert 'Hotel <Spa> & Bar' in text

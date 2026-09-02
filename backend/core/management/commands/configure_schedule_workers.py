@@ -97,7 +97,7 @@ class Command(BaseCommand):
                 # Julia is a client in the business data. If an inconsistent
                 # client-role account has a WorkerProfile, remove only that
                 # employee profile and preserve the client login/contact.
-                if user.role == User.Role.CLIENT:
+                if target == 'Julia Stahl' or user.role == User.Role.CLIENT or user.client_companies.exists():
                     worker.delete()
                 else:
                     user.delete()

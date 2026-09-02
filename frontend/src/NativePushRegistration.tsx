@@ -140,10 +140,16 @@ export default function NativePushRegistration() {
         openActionUrl(notificationActionUrl(event.notification));
       }));
 
-      handles.push(await LocalNotifications.addListener('localNotificationActionPerformed', (event) => {
-        const actionUrl = String(event.notification.extra?.action_url || event.notification.extra?.actionUrl || '');
-        openActionUrl(actionUrl);
-      }));
+      try {
+        handles.push(await LocalNotifications.addListener('localNotificationActionPerformed', (event) => {
+          const actionUrl = String(event.notification.extra?.action_url || event.notification.extra?.actionUrl || '');
+          openActionUrl(actionUrl);
+        }));
+      } catch (error) {
+        // Older installed binaries can still register remote push and display
+        // the in-app banner without the optional local-notification plugin.
+        console.warn('Local notification actions unavailable', error);
+      }
     };
 
     const registerWhenAuthenticated = async () => {
@@ -191,7 +197,9 @@ export default function NativePushRegistration() {
       }
     };
 
-    void addListeners().then(registerWhenAuthenticated);
+    void addListeners().then(registerWhenAuthenticated).catch((error) => {
+      console.warn('Native push listeners failed', error);
+    });
 
     return () => {
       disposed = true;

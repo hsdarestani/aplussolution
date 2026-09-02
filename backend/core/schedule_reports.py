@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, time, timedelta
 from io import BytesIO
 from uuid import UUID
+from xml.sax.saxutils import escape
 
 from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
@@ -122,6 +123,8 @@ def _report_rows(filters):
             seen.add(str(shift.worker_id))
         if selected_workers and not selected_workers.intersection(seen):
             continue
+        if selected_workers:
+            workers = [worker for worker in workers if str(worker.pk) in selected_workers]
         start = timezone.localtime(shift.starts_at)
         end = timezone.localtime(shift.ends_at)
         result.append({
@@ -181,7 +184,7 @@ def export_schedule_pdf(request):
 
     story = [Paragraph('Dienstplan', title_style), Paragraph(meta, meta_style)]
     if details:
-        story.append(Paragraph(' · '.join(details), meta_style))
+        story.append(Paragraph(escape(' · '.join(details)), meta_style))
     story.append(Spacer(1, 5 * mm))
 
     table_data = [[
@@ -197,10 +200,10 @@ def export_schedule_pdf(request):
         table_data.append([
             Paragraph(row['date'], cell_style),
             Paragraph(row['time'], cell_style),
-            Paragraph(row['client'], cell_style),
-            Paragraph(row['location'], cell_style),
+            Paragraph(escape(row['client']), cell_style),
+            Paragraph(escape(row['location']), cell_style),
             Paragraph(row['groups'], cell_style),
-            Paragraph(row['workers'], cell_style),
+            Paragraph(escape(row['workers']), cell_style),
             Paragraph(row['pause'], cell_style),
         ])
     if not rows:

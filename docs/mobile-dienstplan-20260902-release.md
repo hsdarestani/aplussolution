@@ -36,3 +36,13 @@ This release packages the requested mobile scheduling improvements before produc
 
 ## Release validation
 CI must pass backend syntax/configuration, migration drift, backend test coverage, frontend tests, TypeScript/Vite build and Playwright smoke tests before merge. Production deploy reruns migrations, health checks, WIW one-way validation and the production workforce configuration path.
+
+## Final QA corrections
+- A one-person assignment now replaces the current worker immediately; schedule groups remain multi-select.
+- Quarter-hour ticks use a standalone light native impact, with browser vibration fallback.
+- Missing LocalNotifications support no longer aborts remote push registration.
+- PDF group selection is available for all customers; employee-filtered exports include only the selected assignees and escape literal customer/location names.
+- Removing Julia's worker profile always preserves her account, including inconsistent legacy worker-role records.
+- Browser regressions now exercise group filters, reassignment requests, dense time selection, feedback, note reopening and PDF filters; native push compatibility has a mocked plugin regression test.
+
+Physical Android/iPhone gesture, keyboard and foreground/background delivery QA remains a device acceptance step. Web/backend deployment alone does not update the bundled assets inside already-installed native store builds.

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Haptics } from '@capacitor/haptics';
+import { Capacitor } from '@capacitor/core';
+import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { IonIcon } from '@ionic/react';
 import {
   addCircleOutline,
@@ -201,9 +202,14 @@ function shiftGroups(shift: any) {
   return groups.length ? groups : [positionGroup(shift?.position_name)];
 }
 function hapticTick() {
-  void Haptics.selectionChanged().catch(() => {
+  const fallback = () => {
     try { navigator.vibrate?.(5); } catch { /* best effort */ }
-  });
+  };
+  if (Capacitor.isNativePlatform()) {
+    void Haptics.impact({ style: ImpactStyle.Light }).catch(fallback);
+  } else {
+    fallback();
+  }
 }
 function safeSessionGet(key: string) {
   try { return sessionStorage.getItem(key); } catch { return null; }
@@ -381,6 +387,7 @@ function MultiChoiceSheet({ title, choices, selected, limit, onChange, onClose }
           const checked = selected.includes(choice.value);
           return <button type="button" key={choice.value} className={checked ? 'selected' : ''} onClick={() => {
             if (checked) onChange(selected.filter((value) => value !== choice.value));
+            else if (limit === 1) onChange([choice.value]);
             else if (!limit || selected.length < limit) onChange([...selected, choice.value]);
           }}><span>{choice.label}</span>{checked ? <IonIcon icon={checkmarkOutline} /> : null}</button>;
         })}</div>
@@ -1071,7 +1078,7 @@ export default function WiwScheduleMobile() {
             <div className="wiw-pdf-dates"><label>Von<input type="date" value={pdf.dateFrom} onChange={(event) => setPdf((current) => ({ ...current, dateFrom: event.target.value }))}/></label><label>Bis<input type="date" value={pdf.dateTo} onChange={(event) => setPdf((current) => ({ ...current, dateTo: event.target.value }))}/></label></div>
             <div className="wiw-pdf-filter-block"><b>Mitarbeiter</b><div className="wiw-pdf-chip-grid">{workerChoices.map((choice) => <button type="button" key={choice.value} className={pdf.workers.includes(choice.value) ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, workers: current.workers.includes(choice.value) ? current.workers.filter((item) => item !== choice.value) : [...current.workers, choice.value] }))}>{choice.label}</button>)}</div><small>Nichts ausgewählt = alle Mitarbeiter</small></div>
             <div className="wiw-pdf-filter-block"><b>Kunden</b><div className="wiw-pdf-chip-grid">{clientChoices.map((choice) => <button type="button" key={choice.value} className={pdf.clients.includes(choice.value) ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, clients: current.clients.includes(choice.value) ? current.clients.filter((item) => item !== choice.value) : [...current.clients, choice.value] }))}>{choice.label}</button>)}</div><small>Nichts ausgewählt = alle Kunden</small></div>
-            {pdfHasHotel ? <div className="wiw-pdf-filter-block"><b>Hotel-Bereich</b><div className="wiw-pdf-chip-grid compact">{SCHEDULE_GROUPS.filter((choice) => choice.value !== 'service').map((choice) => <button type="button" key={choice.value} className={pdf.groups.includes(choice.value) ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, groups: current.groups.includes(choice.value) ? current.groups.filter((item) => item !== choice.value) : [...current.groups, choice.value] }))}>{choice.label}</button>)}</div><small>Nichts ausgewählt = Front Office + Housekeeping</small></div> : null}
+            <div className="wiw-pdf-filter-block"><b>{pdfHasHotel ? 'Hotel-Bereich / Zeitplan' : 'Zeitplan'}</b><div className="wiw-pdf-chip-grid compact">{SCHEDULE_GROUPS.map((choice) => <button type="button" key={choice.value} className={pdf.groups.includes(choice.value) ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, groups: current.groups.includes(choice.value) ? current.groups.filter((item) => item !== choice.value) : [...current.groups, choice.value] }))}>{choice.label}</button>)}</div><small>Nichts ausgewählt = alle Bereiche</small></div>
           </div>
           <footer><button type="button" onClick={() => setPdfOpen(false)}>Abbrechen</button><button type="button" className="primary" disabled={pdfBusy || !pdf.dateFrom || !pdf.dateTo} onClick={() => void downloadPdf()}>{pdfBusy ? 'PDF wird erstellt…' : 'PDF erstellen'}</button></footer>
         </section>

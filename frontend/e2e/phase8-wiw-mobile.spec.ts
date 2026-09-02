@@ -80,7 +80,6 @@ test('final Dienstplan UX keeps requested client order, hotel presets, copy labe
   expect(adminSchedule).toContain("label: 'Spätdienst', start: 14 * 60 + 45, end: 22 * 60 + 45");
   expect(adminSchedule).toContain("label: 'Nachtdienst', start: 22 * 60 + 30, end: 24 * 60 + 6 * 60 + 30");
   expect(adminSchedule).toContain('Schicht kopieren');
-  expect(adminSchedule).toContain("const serviceOnly = groups.length === 1 && groups[0] === 'service'");
   expect(adminSchedule).toContain("const uniqueLocation = matchingLocations.length === 1 ? String(matchingLocations[0].id) : ''");
   expect(adminSchedule).toContain("workerId: card.worker?.id ? String(card.worker.id) : ''");
   expect(adminSchedule).toContain('const workerChanged =');
@@ -95,7 +94,6 @@ test('WIW motion uses live quarter-hour ticks and strong swipe feedback', async(
   const css=read('src/wiw-schedule-mobile.css');
   const employee=read('src/WiwEmployeeScheduleMobile.tsx');
   expect(schedule).toContain('window.requestAnimationFrame(emitTick)');
-  expect(schedule).toContain('navigator.vibrate?.(4)');
   expect(schedule).toContain("classList.add('is-swipe-dragging')");
   expect(css).toContain('scroll-snap-type:y mandatory');
   expect(css).toContain('scroll-snap-stop:always');
