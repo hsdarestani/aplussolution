@@ -1,0 +1,36 @@
+name: Audit missing mobile workforce profiles
+on:
+  push:
+    branches: [ops/mobile-workforce-20260902]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read matching production identities
+        env:
+          DEPLOY_PASSWORD: ${{ secrets.PASS }}
+          DEPLOY_HOST: ${{ secrets.HOST }}
+        run: |
+          set -euo pipefail
+          cat > /tmp/askpass <<'SH'
+          #!/bin/sh
+          printf '%s\n' "$DEPLOY_PASSWORD"
+          SH
+          chmod 700 /tmp/askpass
+          export SSH_ASKPASS=/tmp/askpass SSH_ASKPASS_REQUIRE=force DISPLAY=:0
+          setsid -w ssh -T -o StrictHostKeyChecking=no -o ConnectTimeout=20 root@"$DEPLOY_HOST" 'cd /opt/aplussolution && docker compose exec -T backend python manage.py shell' <<'PY'
+          import json
+          from core.models import User, WorkerProfile
+          from core.management.commands.configure_schedule_workers import normalize_name
+          needles = ['izab', 'isab', 'somod', 'najm', 'nadjm', 'jamal', 'musa', 'mous', 'max']
+          candidates = []
+          for user in User.objects.all():
+              name = user.get_full_name()
+              if any(part in normalize_name(name) for part in needles):
+                  worker = WorkerProfile.objects.filter(user=user).first()
+                  candidates.append({'id': str(user.pk), 'name': name, 'role': user.role, 'active': user.is_active, 'worker_id': str(worker.pk) if worker else None, 'groups': worker.schedule_groups if worker else None})
+          print('WORKFORCE_CANDIDATES=' + json.dumps(candidates))
+          PY
