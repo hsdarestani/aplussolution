@@ -31,6 +31,7 @@ jobs:
       - name: Prepare diagnostic script
         run: |
           cat > /tmp/pushdiag.py <<'PY'
+          import base64
           import json
           import os
           import sys
@@ -44,12 +45,36 @@ jobs:
           from django.utils import timezone
           from core.models import Notification, User
           from core.push_models import PushDevice
-          from core.push_notifications import push_provider_status
+          from core.push_notifications import push_provider_status, _firebase_credentials, firebase_project_id
+
+          raw = os.getenv('FIREBASE_CREDENTIALS_JSON', '')
+          parsed = _firebase_credentials()
+          manual_b64_ok = False
+          manual_json_ok = False
+          if raw and not raw.lstrip().startswith('{'):
+              try:
+                  decoded = base64.b64decode(raw).decode('utf-8')
+                  manual_b64_ok = True
+                  json.loads(decoded)
+                  manual_json_ok = True
+              except Exception:
+                  pass
 
           recent = timezone.now() - timedelta(hours=2)
           admin_devices = PushDevice.objects.filter(user__role='admin').order_by('-last_seen_at')
           result = {
               'push_providers': push_provider_status(),
+              'firebase_env_project_present': bool(os.getenv('FIREBASE_PROJECT_ID', '').strip()),
+              'firebase_resolved_project_present': bool(firebase_project_id()),
+              'firebase_credentials_env_present': bool(raw.strip()),
+              'firebase_credentials_length': len(raw),
+              'firebase_credentials_starts_json': raw.lstrip().startswith('{'),
+              'firebase_credentials_manual_b64_ok': manual_b64_ok,
+              'firebase_credentials_manual_json_ok': manual_json_ok,
+              'firebase_parsed_nonempty': bool(parsed),
+              'firebase_parsed_has_project_id': bool(parsed.get('project_id')) if parsed else False,
+              'firebase_parsed_has_client_email': bool(parsed.get('client_email')) if parsed else False,
+              'firebase_parsed_has_private_key': bool(parsed.get('private_key')) if parsed else False,
               'active_admin_users': User.objects.filter(role='admin', is_active=True).count(),
               'active_devices_total': PushDevice.objects.filter(active=True).count(),
               'admin_android_active': admin_devices.filter(active=True, platform='android').count(),
@@ -82,20 +107,16 @@ jobs:
           : > /tmp/pushdiag.out
           test -n "$HOST" && test -n "$SSHPASS" || { echo 'missing ssh secret' >> /tmp/pushdiag.out; exit 0; }
           SSH_OPTS='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15'
-
           sshpass -e scp $SSH_OPTS /tmp/pushdiag.py root@"$HOST":/tmp/pushdiag.py >> /tmp/pushdiag.out 2>&1
           echo "script_scp_exit=$?" >> /tmp/pushdiag.out
-
           sshpass -e ssh $SSH_OPTS root@"$HOST" 'bash -s' >> /tmp/pushdiag.out 2>&1 <<'REMOTE'
           set +e
           cd /opt/aplussolution || { echo 'cd_failed'; exit 0; }
           echo 'REMOTE_DIAGNOSTIC_BEGIN'
-          docker compose ps
           CID="$(docker compose ps -q backend)"
           echo "backend_cid_present=$([ -n "$CID" ] && echo yes || echo no)"
           if [ -n "$CID" ]; then
             docker cp /tmp/pushdiag.py "$CID":/tmp/pushdiag.py
-            echo "docker_cp_exit=$?"
             docker compose exec -T backend python /tmp/pushdiag.py
             echo "python_diag_exit=$?"
           fi
