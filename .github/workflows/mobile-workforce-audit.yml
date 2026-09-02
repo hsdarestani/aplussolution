@@ -33,4 +33,13 @@ jobs:
                   worker = WorkerProfile.objects.filter(user=user).first()
                   candidates.append({'id': str(user.pk), 'name': name, 'role': user.role, 'active': user.is_active, 'worker_id': str(worker.pk) if worker else None, 'groups': worker.schedule_groups if worker else None})
           print('WORKFORCE_CANDIDATES=' + json.dumps(candidates))
+          from core.wiw import WhenIWorkClient
+          matches = []
+          for item in WhenIWorkClient().collection('users', optional=False).items:
+              first = str(item.get('first_name') or item.get('firstname') or '')
+              last = str(item.get('last_name') or item.get('lastname') or '')
+              name = (first + ' ' + last).strip() or str(item.get('name') or '')
+              if any(part in normalize_name(name) for part in needles):
+                  matches.append({'wiw_id': item.get('id'), 'name': name, 'has_email': bool(item.get('email'))})
+          print('WIW_CANDIDATES=' + json.dumps(matches))
           PY
