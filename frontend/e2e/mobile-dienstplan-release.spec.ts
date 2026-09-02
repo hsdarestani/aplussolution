@@ -49,6 +49,10 @@ test('mobile filters stay multi-select and worker reassignment replaces the curr
   await sheet.getByRole('button', { name: 'Front Office', exact: true }).click();
   await expect(sheet.locator('button.selected')).toHaveCount(3);
   await sheet.getByRole('button', { name: 'Fertig' }).click();
+  await expect(form.getByRole('button', { name: /Einsatzort anlegen/ })).toBeEnabled();
+  await form.getByRole('button', { name: /Einsatzort anlegen/ }).click();
+  await expect(page.locator('.wiw-location-create-sheet .wiw-client-context')).toContainText('Hotel Spenerhaus');
+  await page.locator('.wiw-location-create-sheet header').getByRole('button', { name: 'Abbrechen' }).click();
   await form.getByRole('button', { name: /Mitarbeiter ändern/ }).click();
   sheet = form.locator('.wiw-choice-sheet');
   await expect(sheet.getByRole('button', { name: 'Other Worker' })).toHaveCount(0);
@@ -64,6 +68,7 @@ test('mobile filters stay multi-select and worker reassignment replaces the curr
 test('dense time wheel emits feedback and notes can reopen without locking the form', async ({ page }) => {
   await mobileAdmin(page);
   await page.getByRole('button', { name: 'Schicht anlegen', exact: true }).click();
+  await page.getByRole('button', { name: /Manuell.*WIW-Formular öffnen/ }).click();
   const form = page.getByTestId('wiw-shift-form');
   await form.getByRole('button', { name: /Wähle Zeitrahmen/ }).click();
   const wheel = page.getByTestId('wiw-time-wheel');

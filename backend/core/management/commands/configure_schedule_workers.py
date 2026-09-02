@@ -88,7 +88,8 @@ class Command(BaseCommand):
                 updated.append(worker_name(worker))
 
             for target in DELETE_FROM_WORKFORCE:
-                worker = _find_worker(workers, target)
+                matches = [worker for worker in workers if normalize_name(worker_name(worker)) == normalize_name(target)]
+                worker = matches[0] if len(matches) == 1 else None
                 if not worker:
                     # Already removed is a valid idempotent state.
                     continue
@@ -99,6 +100,9 @@ class Command(BaseCommand):
                 # employee profile and preserve the client login/contact.
                 if target == 'Julia Stahl' or user.role == User.Role.CLIENT or user.client_companies.exists():
                     worker.delete()
+                    if target == 'Julia Stahl' and user.role == User.Role.WORKER:
+                        user.role = User.Role.CLIENT
+                        user.save(update_fields=['role'])
                 else:
                     user.delete()
                 deleted.append(label)

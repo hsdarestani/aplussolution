@@ -197,7 +197,7 @@ function positionGroup(name?: string) {
   if (key.includes('housekeeping') || key.includes('houskeeping') || key.includes('zimmer')) return 'housekeeping';
   return 'service';
 }
-function shiftGroups(shift: any) {
+function shiftGroups(shift: any): string[] {
   const groups = Array.isArray(shift?.schedule_groups) ? shift.schedule_groups.filter((value: string) => SCHEDULE_GROUPS.some((item) => item.value === value)) : [];
   return groups.length ? groups : [positionGroup(shift?.position_name)];
 }
@@ -338,10 +338,10 @@ function Switch({ checked, onChange }: { checked: boolean; onChange: (value: boo
   return <button type="button" className={`wiw-switch ${checked ? 'on' : ''}`} aria-pressed={checked} onClick={() => onChange(!checked)}><span /></button>;
 }
 
-function Row({ icon, label, value, muted, green, onClick, trailing, colorManaged, emphasizeValue }: { icon: string; label: string; value?: string; muted?: boolean; green?: boolean; onClick?: () => void; trailing?: React.ReactNode; colorManaged?: boolean; emphasizeValue?: boolean }) {
+function Row({ field, icon, label, value, muted, green, onClick, trailing, colorManaged, emphasizeValue }: { field?: string; icon: string; label: string; value?: string; muted?: boolean; green?: boolean; onClick?: () => void; trailing?: React.ReactNode; colorManaged?: boolean; emphasizeValue?: boolean }) {
   const Component: any = onClick ? 'button' : 'div';
   return (
-    <Component type={onClick ? 'button' : undefined} data-color-managed={colorManaged ? 'true' : undefined} className={`wiw-form-row ${muted ? 'muted' : ''} ${green ? 'green' : ''} ${emphasizeValue ? 'employee-emphasis' : ''}`} onClick={onClick}>
+    <Component data-field={field} type={onClick ? 'button' : undefined} data-color-managed={colorManaged ? 'true' : undefined} className={`wiw-form-row ${muted ? 'muted' : ''} ${green ? 'green' : ''} ${emphasizeValue ? 'employee-emphasis' : ''}`} onClick={onClick}>
       <IonIcon icon={icon} />
       <div className="wiw-form-row-copy"><span>{label}</span>{value ? <b>{value}</b> : null}</div>
       {trailing ?? (onClick ? <IonIcon className="wiw-row-chevron" icon={chevronForwardOutline} /> : null)}
@@ -1033,8 +1033,8 @@ export default function WiwScheduleMobile() {
 
           <div className="wiw-form-separator" />
           <Row icon={briefcaseOutline} label={positionChoices.find((item) => item.value === form.position)?.label || 'Füge Position hinzu'} muted={!form.position} onClick={() => setSheet('position')} />
-          <Row icon={peopleOutline} label={clientChoices.find((item) => item.value === form.client)?.label || 'Kunde auswählen'} muted={!form.client} onClick={() => setSheet('client')} />
-          <Row icon={locationOutline} label={locationChoices.find((item) => item.value === form.location)?.label || 'Jobstandort'} muted={!form.location} onClick={() => form.client ? setSheet('location') : setSheet('client')} />
+          <Row field="client" icon={peopleOutline} label={clientChoices.find((item) => item.value === form.client)?.label || 'Kunde auswählen'} muted={!form.client} onClick={() => setSheet('client')} />
+          <Row field="location" icon={locationOutline} label={locationChoices.find((item) => item.value === form.location)?.label || 'Jobstandort'} muted={!form.location} onClick={() => form.client ? setSheet('location') : setSheet('client')} />
 
           <div className="wiw-form-separator" />
           <Row icon={personOutline} label="OpenShift" value={form.publish_now ? 'Für passende Mitarbeiter sichtbar' : 'Aus · ohne Zuweisung nur als Entwurf'} trailing={<Switch checked={form.publish_now} onChange={(value) => setForm((current) => ({ ...current, publish_now: value }))} />} />

@@ -198,6 +198,8 @@ def test_julia_workforce_removal_preserves_account_even_with_stale_worker_role()
     call_command('configure_schedule_workers')
     assert User.objects.filter(pk=user.pk).exists()
     assert not WorkerProfile.objects.filter(user_id=user.pk).exists()
+    user.refresh_from_db()
+    assert user.role == User.Role.CLIENT
 
 
 @pytest.mark.django_db
