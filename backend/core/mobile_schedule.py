@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
 from django.db.models import Count, Q
 from django.utils import timezone
@@ -27,8 +27,8 @@ def mobile_schedule(request):
         end = start + timedelta(days=31)
 
     tz = timezone.get_current_timezone()
-    start_dt = timezone.make_aware(timezone.datetime.combine(start, timezone.datetime.min.time()), tz)
-    end_dt = timezone.make_aware(timezone.datetime.combine(end + timedelta(days=1), timezone.datetime.min.time()), tz)
+    start_dt = timezone.make_aware(datetime.combine(start, time.min), tz)
+    end_dt = timezone.make_aware(datetime.combine(end + timedelta(days=1), time.min), tz)
 
     # Week/day rows are tightly bounded. Future published open shifts are included
     # as a small union so the OpenShifts tab stays complete without downloading
