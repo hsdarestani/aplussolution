@@ -1,0 +1,148 @@
+/* Desktop-only Dienstplan repair.
+   Keep the WIW/native mobile schedule untouched: every rule in this file starts at 901px. */
+@media (min-width: 901px) {
+  .sv2 {
+    max-width: 1360px;
+  }
+
+  /* Filled customer palettes are intentionally vivid on mobile, but the same
+     dark gradients make the desktop planning surface heavy and can leave
+     inherited metadata colors unreadable. Desktop keeps the customer identity
+     as an accent instead of painting the whole card. */
+  .sv2 .sv2-card,
+  .sv2 .sv2-card.mine {
+    grid-template-columns: 62px minmax(0, 1fr) 122px;
+    gap: 16px;
+    padding: 16px 18px;
+    color: #172033 !important;
+    background: linear-gradient(
+      90deg,
+      hsl(var(--sv2-client-hue, 215) 78% 97%) 0%,
+      #ffffff 30%,
+      #ffffff 100%
+    ) !important;
+    border: 1px solid #e2e8f0 !important;
+    border-left: 5px solid hsl(var(--sv2-client-hue, 215) 68% 44%) !important;
+    border-radius: 18px;
+    box-shadow: 0 2px 8px rgba(16, 24, 40, 0.045);
+    transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+  }
+
+  .sv2 .sv2-card:hover {
+    border-color: #d4dce8 !important;
+    border-left-color: hsl(var(--sv2-client-hue, 215) 68% 40%) !important;
+    box-shadow: 0 6px 18px rgba(16, 24, 40, 0.075);
+    transform: translateY(-1px);
+  }
+
+  .sv2 .sv2-date {
+    width: 62px;
+    height: 62px;
+    background: hsl(var(--sv2-client-hue, 215) 72% 94%) !important;
+    color: hsl(var(--sv2-client-hue, 215) 58% 30%) !important;
+    border: 1px solid hsl(var(--sv2-client-hue, 215) 52% 88%);
+  }
+
+  .sv2 .sv2-list-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .sv2 .sv2-list-head h3,
+  .sv2 .sv2-event-head strong {
+    color: #101828 !important;
+  }
+
+  .sv2 .sv2-list-head > span,
+  .sv2 .sv2-body em,
+  .sv2 .sv2-event-head > span,
+  .sv2 .sv2-no-profile {
+    color: #667085 !important;
+  }
+
+  /* List view has enough room to scan shift metadata in two columns. */
+  .sv2 .sv2-card .sv2-event-details {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 24px;
+    row-gap: 5px;
+    margin-top: 4px;
+  }
+
+  .sv2 .sv2-card .sv2-confirmation-panel {
+    grid-column: 1 / -1;
+  }
+
+  .sv2 .sv2-event-details .sv2-event-line {
+    min-width: 0;
+    color: #344054 !important;
+  }
+
+  .sv2 .sv2-event-details .sv2-event-line > ion-icon {
+    color: hsl(var(--sv2-client-hue, 215) 55% 40%) !important;
+  }
+
+  .sv2 .sv2-event-details .sv2-field-copy,
+  .sv2 .sv2-event-details .sv2-field-copy > span,
+  .sv2 .sv2-event-details .sv2-worker-names,
+  .sv2 .sv2-event-details .sv2-name-separator {
+    color: #344054 !important;
+  }
+
+  .sv2 .sv2-event-details .sv2-entity-link {
+    color: #175cd3 !important;
+    text-decoration-color: rgba(23, 92, 211, 0.28);
+  }
+
+  .sv2 .sv2-meter {
+    background: #eef2f6 !important;
+  }
+
+  .sv2 .sv2-meter > span {
+    background: hsl(var(--sv2-client-hue, 215) 68% 44%) !important;
+  }
+
+  .sv2 .sv2-side {
+    min-width: 112px;
+    padding-left: 14px;
+    border-left: 1px solid #eef2f6;
+  }
+
+  /* Week/month/location cards use the same readable light surface. Status
+     remains visible in its existing badge/text and customer color stays on the
+     left edge, date tile and icons. */
+  .sv2 .sv2-event,
+  .sv2 .sv2-event:hover {
+    color: #172033 !important;
+    background: linear-gradient(
+      90deg,
+      hsl(var(--sv2-client-hue, 215) 78% 97%) 0%,
+      #ffffff 42%,
+      #ffffff 100%
+    ) !important;
+    border-color: hsl(var(--sv2-client-hue, 215) 48% 86%) !important;
+    border-left: 4px solid hsl(var(--sv2-client-hue, 215) 68% 44%) !important;
+    box-shadow: 0 1px 3px rgba(16, 24, 40, 0.035);
+  }
+
+  .sv2 .sv2-event:hover {
+    border-color: hsl(var(--sv2-client-hue, 215) 50% 76%) !important;
+    background: hsl(var(--sv2-client-hue, 215) 74% 98%) !important;
+  }
+
+  .sv2 .sv2-week-wrap,
+  .sv2 .sv2-month-wrap,
+  .sv2 .sv2-timeline-wrap,
+  .sv2 .sv2-single-day {
+    border-color: #e1e7ef;
+    box-shadow: 0 1px 3px rgba(16, 24, 40, 0.025);
+  }
+
+  .sv2 .sv2-view-switch,
+  .sv2 .sv2-service-filter button,
+  .sv2 .sv2-date-nav > button {
+    box-shadow: none;
+  }
+}
