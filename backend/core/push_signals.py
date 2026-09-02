@@ -3,26 +3,14 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 from .models import Notification
+from .notification_settings import render_push_notification
 from .push_notifications import push_provider_configured, send_notification_push
 
 
-_SUPPRESSED_NATIVE_TITLES = {
-    'Schichtübernahme abgelehnt',
-    'Schicht bestätigt',
-    'Schicht abgelehnt',
-    'Schichtbestätigung aktualisiert',
-    'Zeiterfassung wurde beendet',
-}
-
-
 def native_push_suppressed(instance: Notification) -> bool:
-    """Return True for events explicitly approved as in-app-only/no-push."""
-    kind = str(instance.kind or '')
-    if kind.startswith('shift-confirmation-response-') or kind.startswith('shift-confirmation-admin-'):
-        return True
-    if kind.startswith('pickup-') and kind.endswith('-rejected'):
-        return True
-    return str(instance.title or '').strip() in _SUPPRESSED_NATIVE_TITLES
+    """Compatibility helper: settings now decide which native events are muted."""
+    enabled, _title, _body, _key = render_push_notification(instance)
+    return not enabled
 
 
 @receiver(post_save, sender=Notification, dispatch_uid='aplus_native_push_notification')
@@ -30,8 +18,8 @@ def dispatch_native_push(sender, instance: Notification, created: bool, **kwargs
     if not created:
         return
 
-    # These events stay in the in-app history but Ashkan explicitly does not want
-    # a native push for them.
+    # Every family is now configurable in Settings. Disabled types still remain
+    # in the in-app history, they simply do not produce an Android/iOS alert.
     if native_push_suppressed(instance):
         return
 
