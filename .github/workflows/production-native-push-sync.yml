@@ -55,9 +55,7 @@ jobs:
               'admin_android_inactive': admin_devices.filter(active=False, platform='android').count(),
               'admin_ios_inactive': admin_devices.filter(active=False, platform='ios').count(),
               'recent_admin_open_shift_notifications': Notification.objects.filter(
-                  user__role='admin',
-                  kind__startswith='admin-open-shift-summary-',
-                  created_at__gte=recent,
+                  user__role='admin', kind__startswith='admin-open-shift-summary-', created_at__gte=recent
               ).count(),
               'admin_devices': [
                   {
@@ -73,32 +71,41 @@ jobs:
           PY
 
       - name: Collect production push state
+        continue-on-error: true
         env:
           SSHPASS: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
         run: |
-          set -euo pipefail
-          test -n "$HOST" && test -n "$SSHPASS"
+          set +e
+          : > /tmp/pushdiag.out
+          test -n "$HOST" && test -n "$SSHPASS" || { echo 'missing ssh secret' >> /tmp/pushdiag.out; exit 0; }
           SSH_OPTS='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15'
-          sshpass -e scp $SSH_OPTS /tmp/pushdiag.py root@"$HOST":/tmp/pushdiag.py
-          sshpass -e ssh $SSH_OPTS root@"$HOST" 'bash -s' <<'REMOTE'
-          set -euo pipefail
-          cd /opt/aplussolution
+
+          sshpass -e scp $SSH_OPTS /tmp/pushdiag.py root@"$HOST":/tmp/pushdiag.py >> /tmp/pushdiag.out 2>&1
+          echo "script_scp_exit=$?" >> /tmp/pushdiag.out
+
+          sshpass -e ssh $SSH_OPTS root@"$HOST" 'bash -s' >> /tmp/pushdiag.out 2>&1 <<'REMOTE'
+          set +e
+          cd /opt/aplussolution || { echo 'cd_failed'; exit 0; }
+          echo 'REMOTE_DIAGNOSTIC_BEGIN'
+          docker compose ps
           CID="$(docker compose ps -q backend)"
-          test -n "$CID"
-          docker cp /tmp/pushdiag.py "$CID":/tmp/pushdiag.py
-          docker compose exec -T backend python /tmp/pushdiag.py > /tmp/pushdiag.out 2>&1
-          {
-            echo
-            echo '--- celery push task log tail ---'
-            docker compose logs --since=2h --no-color celery 2>&1 | grep -E 'send_notification_push|FCM|APNs|Task core\.push_notifications' | tail -n 120 || true
-          } >> /tmp/pushdiag.out
-          chmod 600 /tmp/pushdiag.out
+          echo "backend_cid_present=$([ -n "$CID" ] && echo yes || echo no)"
+          if [ -n "$CID" ]; then
+            docker cp /tmp/pushdiag.py "$CID":/tmp/pushdiag.py
+            echo "docker_cp_exit=$?"
+            docker compose exec -T backend sh -lc 'cd /app && python /tmp/pushdiag.py'
+            echo "python_diag_exit=$?"
+          fi
+          echo '--- celery push task log tail ---'
+          docker compose logs --since=2h --no-color celery 2>&1 | grep -E 'send_notification_push|FCM|APNs|Task core\.push_notifications' | tail -n 120 || true
+          echo 'REMOTE_DIAGNOSTIC_END'
+          exit 0
           REMOTE
-          sshpass -e scp $SSH_OPTS root@"$HOST":/tmp/pushdiag.out /tmp/pushdiag.out
-          test -s /tmp/pushdiag.out
+          echo "ssh_diag_exit=$?" >> /tmp/pushdiag.out
 
       - name: Upload diagnostic artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: native-push-production-diagnostic
