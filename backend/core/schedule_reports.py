@@ -16,7 +16,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from rest_framework.decorators import api_view
 
 from .models import ClientCompany, Shift, User, WorkerProfile
-from .shift_rules import normalize_schedule_groups
+from .shift_rules import normalized_groups
 from .shift_slots import ShiftSlot
 
 
@@ -46,11 +46,11 @@ def _uuid_list(raw: str) -> list[UUID]:
 
 
 def _group_list(raw: str) -> list[str]:
-    return [value for value in normalize_schedule_groups(str(raw or '').split(',')) if value in ALLOWED_GROUPS]
+    return [value for value in normalized_groups(str(raw or '').split(',')) if value in ALLOWED_GROUPS]
 
 
 def _shift_groups(shift: Shift) -> list[str]:
-    groups = normalize_schedule_groups(shift.schedule_groups or [])
+    groups = normalized_groups(shift.schedule_groups or [])
     if groups:
         return groups
     label = str(getattr(shift.position, 'name', '') or '').lower().replace('-', ' ').replace('_', ' ')
