@@ -126,7 +126,6 @@ jobs:
           export APPLE_SIGNIN_KEY_ID_VALUE="$(printf '%s' "$APPLE_KEY_ID_B64" | base64 -d)"
           export APPLE_PRIVATE_KEY_SECRET="$(printf '%s' "${APPLE_PRIVATE_KEY_B64:-}" | base64 -d 2>/dev/null || true)"
           export FIREBASE_PROJECT_ID_VALUE="$(printf '%s' "$FIREBASE_PROJECT_ID_B64" | base64 -d)"
-          export FIREBASE_CREDENTIALS_VALUE="$(printf '%s' "${FIREBASE_CREDS_B64:-}" | base64 -d 2>/dev/null || true)"
           export APNS_TEAM_ID_VALUE="$(printf '%s' "$APNS_TEAM_ID_B64" | base64 -d)"
           export APNS_KEY_ID_VALUE="$(printf '%s' "$APNS_KEY_ID_B64" | base64 -d)"
           export APNS_PRIVATE_KEY_VALUE="$(printf '%s' "${APNS_PRIVATE_KEY_B64:-}" | base64 -d 2>/dev/null || true)"
@@ -170,10 +169,13 @@ jobs:
               updates['APPLE_PRIVATE_KEY_PATH'] = ''
 
           firebase_project = os.environ.get('FIREBASE_PROJECT_ID_VALUE', '').strip()
-          firebase_credentials = os.environ.get('FIREBASE_CREDENTIALS_VALUE', '').strip()
-          if firebase_project and firebase_credentials:
+          firebase_credentials_b64 = os.environ.get('FIREBASE_CREDS_B64', '').strip()
+          if firebase_project and firebase_credentials_b64:
+              # Keep the service-account JSON base64-encoded in .env. The backend
+              # deliberately supports this form and decodes it at runtime. This
+              # avoids corrupting pretty-printed JSON by escaping structural newlines.
               updates['FIREBASE_PROJECT_ID'] = firebase_project
-              updates['FIREBASE_CREDENTIALS_JSON'] = firebase_credentials.replace('\r\n', '\n').replace('\n', '\\n')
+              updates['FIREBASE_CREDENTIALS_JSON'] = firebase_credentials_b64
 
           apns_team = os.environ.get('APNS_TEAM_ID_VALUE', '').strip()
           apns_key = os.environ.get('APNS_KEY_ID_VALUE', '').strip()
@@ -214,7 +216,7 @@ jobs:
 
           docker compose exec -T backend python manage.py shell -c "from django.conf import settings; assert settings.OPENAI_API_KEY; assert settings.EMAIL_HOST == 'smtp.strato.de'; assert settings.EMAIL_HOST_USER == 'app@aplus-solution.de'; assert settings.COMPANY_ADDRESS; assert settings.GOOGLE_OAUTH_REDIRECT_URI.endswith('/google/callback/'); assert settings.APPLE_TEAM_ID == '884MVA2MD5'; assert settings.APPLE_SERVICE_ID == 'de.aplussolution.workforce.web'; assert settings.APPLE_OAUTH_REDIRECT_URI.endswith('/apple/callback/'); print('Production integration settings loaded')"
           docker compose exec -T backend python manage.py shell -c "from django.conf import settings; from core.oauth import apple_client_secret; assert settings.APPLE_KEY_ID; assert settings.APPLE_PRIVATE_KEY; token=apple_client_secret(); assert isinstance(token, str) and token.count('.') == 2; print('Apple Sign in client secret generation OK')"
-          docker compose exec -T backend python manage.py shell -c "from core.push_notifications import push_provider_status; print('Native push providers', push_provider_status())"
+          docker compose exec -T backend python manage.py shell -c "from core.push_notifications import push_provider_status; status=push_provider_status(); assert status.get('android') and status.get('ios'), status; print('Native push providers', status)"
           docker compose exec -T backend python manage.py shell -c "from django.core.mail import get_connection; c=get_connection(); opened=c.open(); assert opened is not False; c.close(); print('STRATO SMTP authentication OK')"
           curl -fsS --max-time 20 https://solution.smarbiz.sbs/health/ >/dev/null
           REMOTE
