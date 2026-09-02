@@ -1,0 +1,1 @@
+CI: backend checks/tests/coverage; frontend tests/TypeScript build; Playwright smoke tests; production workflow after merge.
