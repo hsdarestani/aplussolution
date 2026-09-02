@@ -18,30 +18,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Prepare SSH authentication
-        env:
-          DEPLOY_PASSWORD: ${{ secrets.PASS }}
+      - name: Ensure SSH tooling
         run: |
           set -euo pipefail
-          test -n "$DEPLOY_PASSWORD"
-          cat > /tmp/aplus-askpass.sh <<'ASKPASS'
-          #!/bin/sh
-          printf '%s\n' "$DEPLOY_PASSWORD"
-          ASKPASS
-          chmod 700 /tmp/aplus-askpass.sh
+          if ! command -v sshpass >/dev/null 2>&1; then
+            sudo -n timeout 60s apt-get install -y -qq sshpass || {
+              sudo -n timeout 90s apt-get update -qq
+              sudo -n timeout 60s apt-get install -y -qq sshpass
+            }
+          fi
 
       - name: Inspect production push path
         env:
-          DEPLOY_PASSWORD: ${{ secrets.PASS }}
+          SSHPASS: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
-          SSH_ASKPASS: /tmp/aplus-askpass.sh
-          SSH_ASKPASS_REQUIRE: force
-          DISPLAY: :0
         run: |
           set -euo pipefail
-          test -n "$HOST" && test -n "$DEPLOY_PASSWORD"
-          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
-          setsid -w ssh -qT \
+          test -n "$HOST" && test -n "$SSHPASS"
+          sshpass -e ssh \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=15 \
