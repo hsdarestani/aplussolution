@@ -41,18 +41,14 @@ jobs:
             -o ConnectTimeout=15 \
             -o ServerAliveInterval=10 \
             -o ServerAliveCountMax=3 \
-            root@"$HOST" 'bash -s' <<'REMOTE'
+            root@"$HOST" 'bash -s' > /tmp/push-diagnostic.txt 2>&1 <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
-
           docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null
-          echo 'PUSH_DIAGNOSTIC_BEGIN' >&2
-
-          docker compose exec -T backend python manage.py shell -c "import sys; from datetime import timedelta; from django.utils import timezone; from core.models import Notification,User; from core.push_models import PushDevice; from core.push_notifications import push_provider_status; recent=timezone.now()-timedelta(hours=2); active=PushDevice.objects.filter(active=True); admin=PushDevice.objects.filter(user__role='admin'); print('push_providers=',push_provider_status(),file=sys.stderr,flush=True); print('active_admin_users=',User.objects.filter(role='admin',is_active=True).count(),file=sys.stderr,flush=True); print('active_devices_total=',active.count(),file=sys.stderr,flush=True); print('admin_android_active=',admin.filter(active=True,platform='android').count(),file=sys.stderr,flush=True); print('admin_ios_active=',admin.filter(active=True,platform='ios').count(),file=sys.stderr,flush=True); print('admin_android_inactive=',admin.filter(active=False,platform='android').count(),file=sys.stderr,flush=True); print('admin_ios_inactive=',admin.filter(active=False,platform='ios').count(),file=sys.stderr,flush=True); print('recent_admin_open_shift_notifications=',Notification.objects.filter(user__role='admin',kind__startswith='admin-open-shift-summary-',created_at__gte=recent).count(),file=sys.stderr,flush=True); print('admin_device_state=',list(admin.order_by('-last_seen_at').values('platform','active','last_seen_at','last_error')[:10]),file=sys.stderr,flush=True)"
-
-          echo '--- celery push task log tail ---' >&2
-          docker compose logs --since=2h --no-color celery 2>&1 \
-            | grep -E 'send_notification_push|FCM|APNs|Task core\.push_notifications' \
-            | tail -n 120 >&2 || true
-          echo 'PUSH_DIAGNOSTIC_END' >&2
+          echo 'PUSH_DIAGNOSTIC_BEGIN'
+          docker compose exec -T backend python manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from core.models import Notification,User; from core.push_models import PushDevice; from core.push_notifications import push_provider_status; recent=timezone.now()-timedelta(hours=2); active=PushDevice.objects.filter(active=True); admin=PushDevice.objects.filter(user__role='admin'); print('push_providers=',push_provider_status(),flush=True); print('active_admin_users=',User.objects.filter(role='admin',is_active=True).count(),flush=True); print('active_devices_total=',active.count(),flush=True); print('admin_android_active=',admin.filter(active=True,platform='android').count(),flush=True); print('admin_ios_active=',admin.filter(active=True,platform='ios').count(),flush=True); print('admin_android_inactive=',admin.filter(active=False,platform='android').count(),flush=True); print('admin_ios_inactive=',admin.filter(active=False,platform='ios').count(),flush=True); print('recent_admin_open_shift_notifications=',Notification.objects.filter(user__role='admin',kind__startswith='admin-open-shift-summary-',created_at__gte=recent).count(),flush=True); print('admin_device_state=',list(admin.order_by('-last_seen_at').values('platform','active','last_seen_at','last_error')[:10]),flush=True)"
+          echo '--- celery push task log tail ---'
+          docker compose logs --since=2h --no-color celery 2>&1 | grep -E 'send_notification_push|FCM|APNs|Task core\.push_notifications' | tail -n 120 || true
+          echo 'PUSH_DIAGNOSTIC_END'
           REMOTE
+          cat /tmp/push-diagnostic.txt
