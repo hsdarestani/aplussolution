@@ -32,7 +32,8 @@ const client = {
   phone: '',
 };
 
-const hoursFromNow = (hours: number) => new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+const TEST_NOW = new Date('2026-09-02T08:00:00Z');
+const hoursFromNow = (hours: number) => new Date(TEST_NOW.getTime() + hours * 60 * 60 * 1000).toISOString();
 
 const availableShift = {
   id: 'shift-1',
@@ -64,6 +65,7 @@ async function fulfill(route: Route, body: unknown, status = 200) {
 }
 
 async function mockApi(page: Page, user: typeof worker | typeof admin | typeof client, seenPaths?: string[]) {
+  await page.clock.setFixedTime(TEST_NOW);
   await page.addInitScript(() => {
     localStorage.setItem('access', 'phase6-e2e-access');
     localStorage.setItem('refresh', 'phase6-e2e-refresh');
@@ -191,7 +193,8 @@ test.describe('Phase 6 mobile QA', () => {
     await expect(workerSchedule.getByTestId('phase8-week-strip')).toBeVisible();
     const dayView = workerSchedule.getByTestId('schedule-day-view');
     await expect(dayView.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
-    await expect(dayView.getByText(/Main Suites Frankfurt.*Frankfurt Innenstadt/).first()).toBeVisible();
+    await expect(dayView.getByText('Frankfurt Innenstadt', { exact: true }).first()).toBeVisible();
+    await expect(dayView).not.toContainText('Main Suites Frankfurt');
     await expectNoHorizontalPageOverflow(page);
 
     await workerSchedule.locator('ion-segment-button[value="mine"]').click();
