@@ -7,7 +7,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from core.models import User, WorkerProfile
-from core.shift_rules import normalize_schedule_groups
+from core.shift_rules import normalized_groups
 
 
 WORKER_CONFIG = {
@@ -80,7 +80,7 @@ class Command(BaseCommand):
                 if not worker:
                     missing.append(target)
                     continue
-                worker.schedule_groups = normalize_schedule_groups(groups)
+                worker.schedule_groups = normalized_groups(groups)
                 # Empty means unrestricted/all clients in shift_visible_to_worker().
                 worker.open_shift_client_ids = []
                 worker.active = True
