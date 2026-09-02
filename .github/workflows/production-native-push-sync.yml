@@ -1,23 +1,22 @@
-name: Sync native push production
+name: Diagnose native push production
 
 on:
-  workflow_run:
-    workflows: ["Validate and deploy production"]
-    types: [completed]
+  push:
+    paths:
+      - '.github/workflows/production-native-push-sync.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: aplus-native-push-production
+  group: aplus-native-push-diagnostics
   cancel-in-progress: true
 
 jobs:
-  sync:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - name: Prepare SSH authentication
         env:
@@ -31,55 +30,7 @@ jobs:
           ASKPASS
           chmod 700 /tmp/aplus-askpass.sh
 
-      - name: Prepare production push configuration
-        env:
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_CREDENTIALS_JSON_BASE64: ${{ secrets.FIREBASE_CREDENTIALS_JSON_BASE64 }}
-          APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
-          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
-          APNS_PRIVATE_KEY_BASE64: ${{ secrets.APNS_PRIVATE_KEY_BASE64 }}
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import base64
-          import os
-          from pathlib import Path
-
-          required = [
-              'FIREBASE_PROJECT_ID',
-              'FIREBASE_CREDENTIALS_JSON_BASE64',
-              'APNS_TEAM_ID',
-              'APNS_KEY_ID',
-              'APNS_PRIVATE_KEY_BASE64',
-          ]
-          missing = [name for name in required if not os.environ.get(name, '').strip()]
-          if missing:
-              raise SystemExit('Missing native push secrets: ' + ', '.join(missing))
-
-          try:
-              apns_key = base64.b64decode(os.environ['APNS_PRIVATE_KEY_BASE64']).decode('utf-8').strip()
-          except Exception as exc:
-              raise SystemExit(f'APNS_PRIVATE_KEY_BASE64 is invalid: {exc}')
-          if 'BEGIN PRIVATE KEY' not in apns_key:
-              raise SystemExit('Decoded APNs key is not a .p8 private key')
-
-          escaped_apns = apns_key.replace('\\', '\\\\').replace('\n', '\\n')
-          lines = [
-              f"FIREBASE_PROJECT_ID={os.environ['FIREBASE_PROJECT_ID'].strip()}",
-              f"FIREBASE_CREDENTIALS_JSON={os.environ['FIREBASE_CREDENTIALS_JSON_BASE64'].strip()}",
-              f"APNS_TEAM_ID={os.environ['APNS_TEAM_ID'].strip()}",
-              f"APNS_KEY_ID={os.environ['APNS_KEY_ID'].strip()}",
-              f"APNS_PRIVATE_KEY={escaped_apns}",
-              'APNS_BUNDLE_ID=de.aplussolution.workforce',
-              'APNS_USE_SANDBOX=0',
-          ]
-          path = Path('/tmp/aplus-push.env')
-          path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
-          path.chmod(0o600)
-          print('Native push secret bundle prepared without exposing values.')
-          PY
-
-      - name: Sync push configuration and verify production
+      - name: Inspect production push path
         env:
           DEPLOY_PASSWORD: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
@@ -90,12 +41,6 @@ jobs:
           set -euo pipefail
           test -n "$HOST" && test -n "$DEPLOY_PASSWORD"
           export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
-          setsid -w scp -q \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=15 \
-            /tmp/aplus-push.env root@"$HOST":/tmp/aplus-push.env
-
           setsid -w ssh -qT \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
@@ -105,44 +50,9 @@ jobs:
             root@"$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
-          test -f .env
-          test -f /tmp/aplus-push.env
-
-          python3 - <<'PY'
-          from pathlib import Path
-
-          env_path = Path('.env')
-          patch_path = Path('/tmp/aplus-push.env')
-          updates = {}
-          for line in patch_path.read_text(encoding='utf-8').splitlines():
-              if not line or '=' not in line:
-                  continue
-              key, value = line.split('=', 1)
-              updates[key] = value
-
-          existing = env_path.read_text(encoding='utf-8').splitlines()
-          output = []
-          seen = set()
-          for line in existing:
-              if '=' in line and not line.lstrip().startswith('#'):
-                  key = line.split('=', 1)[0]
-                  if key in updates:
-                      output.append(f'{key}={updates[key]}')
-                      seen.add(key)
-                      continue
-              output.append(line)
-          for key, value in updates.items():
-              if key not in seen:
-                  output.append(f'{key}={value}')
-          env_path.write_text('\n'.join(output) + '\n', encoding='utf-8')
-          PY
-          chmod 600 .env
-          rm -f /tmp/aplus-push.env
-
-          docker compose up -d --force-recreate backend celery celery-beat
 
           ready=0
-          for i in $(seq 1 30); do
+          for i in $(seq 1 20); do
             if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
               ready=1
               break
@@ -151,5 +61,38 @@ jobs:
           done
           test "$ready" -eq 1
 
-          docker compose exec -T backend python manage.py shell -c "from core.push_notifications import push_provider_status; from core.push_models import PushDevice; s=push_provider_status(); print('push_providers=', s); print('active_devices=', PushDevice.objects.filter(active=True).count()); print('admin_android_devices=', PushDevice.objects.filter(active=True, user__role='admin', platform='android').count()); print('admin_ios_devices=', PushDevice.objects.filter(active=True, user__role='admin', platform='ios').count()); print('devices_with_last_error=', PushDevice.objects.filter(active=True).exclude(last_error='').count()); assert s.get('android') and s.get('ios')"
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from datetime import timedelta
+          from django.utils import timezone
+          from core.models import Notification, User
+          from core.push_models import PushDevice
+          from core.push_notifications import push_provider_status
+
+          now = timezone.now()
+          recent = now - timedelta(hours=2)
+          providers = push_provider_status()
+          admins = User.objects.filter(role='admin', is_active=True)
+          active = PushDevice.objects.filter(active=True)
+          admin_active = active.filter(user__role='admin')
+
+          print('push_providers=', providers)
+          print('active_admin_users=', admins.count())
+          print('active_devices_total=', active.count())
+          print('admin_android_active=', admin_active.filter(platform='android').count())
+          print('admin_ios_active=', admin_active.filter(platform='ios').count())
+          print('admin_android_inactive=', PushDevice.objects.filter(active=False, user__role='admin', platform='android').count())
+          print('admin_ios_inactive=', PushDevice.objects.filter(active=False, user__role='admin', platform='ios').count())
+          print('recent_admin_open_shift_notifications=', Notification.objects.filter(user__role='admin', kind__startswith='admin-open-shift-summary-', created_at__gte=recent).count())
+
+          for platform in ('android', 'ios'):
+              rows = PushDevice.objects.filter(user__role='admin', platform=platform).order_by('-last_seen_at')[:5]
+              for index, device in enumerate(rows, 1):
+                  error = (device.last_error or '').replace('\n', ' ')[:500]
+                  print(f'admin_{platform}_{index}: active={device.active} last_seen={device.last_seen_at} last_error={error!r}')
+          PY
+
+          echo '--- celery push task log tail ---'
+          docker compose logs --since=2h --no-color celery 2>&1 \
+            | grep -E 'send_notification_push|FCM|APNs|Task core\.push_notifications' \
+            | tail -n 120 || true
           REMOTE
