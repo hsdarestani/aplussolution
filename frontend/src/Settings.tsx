@@ -3,6 +3,7 @@ import { IonButton, IonIcon, IonInput, IonModal, IonSelect, IonSelectOption, Ion
 import { addOutline, locationOutline, trashOutline } from 'ionicons/icons';
 import { api, User } from './api';
 import PortalAccessPanel from './PortalAccessPanel';
+import NotificationPushSettings from './NotificationPushSettings';
 import { enrichLocationPayload } from './locationPicker';
 
 const unpack=(data:any):any[]=>data?.results||data||[];
@@ -37,6 +38,7 @@ export default function Settings({user}:{user:User}){
   return <>
     <div className="title"><div><h1>Einstellungen</h1><p>Stammdaten, Portalzugänge und administrative Imports.</p></div><IonButton fill="outline" onClick={()=>setModal('csv')}>CSV-Import</IonButton></div>
     <PortalAccessPanel />
+    <NotificationPushSettings role={user.role} />
     <div className="columns master-data">
       <div className="panel"><div className="section-head"><div><h3>Einsatzorte</h3><p>Adressen und GPS-Geofences.</p></div><IonButton fill="outline" size="small" onClick={()=>setModal('location')}><IonIcon slot="start" icon={addOutline}/>Standort</IonButton></div>
         {locations.map(location=><div className="row" key={location.id}><IonIcon icon={locationOutline}/><div className="grow"><b>{location.name}</b><p>{location.client_name||'Ohne Kunde'} · {location.address}</p></div><span>{location.geofence_radius_m} m</span><IonButton fill="clear" color="danger" onClick={()=>remove('locations',location.id)}><IonIcon icon={trashOutline}/></IonButton></div>)}
