@@ -27,3 +27,23 @@ class PushDevice(TimestampedModel):
 
     def __str__(self):
         return f'{self.user} · {self.platform} · {"aktiv" if self.active else "inaktiv"}'
+
+
+class NotificationPushRule(TimestampedModel):
+    """Admin-editable native-push behavior for one notification family.
+
+    The operational Notification row remains the source of truth for in-app
+    history.  These rules only decide whether a native push is sent and how its
+    title/body are rendered for Android/iOS.
+    """
+
+    key = models.CharField(max_length=80, unique=True)
+    enabled = models.BooleanField(default=True)
+    title_template = models.CharField(max_length=240, default='{title}', blank=True)
+    body_template = models.TextField(default='{body}', blank=True)
+
+    class Meta:
+        ordering = ['key']
+
+    def __str__(self):
+        return self.key
