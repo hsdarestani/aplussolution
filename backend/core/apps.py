@@ -19,6 +19,7 @@ class CoreConfig(AppConfig):
             push_models,
             push_signals,
             shift_slots,
+            wiw_name_protection,
         )
         from .smart_docx_integration import install_smart_docx_renderer
         from .smartdocs_contract_integration import install_smartdocs_contract_renderer
