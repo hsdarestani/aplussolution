@@ -51,45 +51,9 @@ jobs:
           set -euo pipefail
           cd /opt/aplussolution
 
-          ready=0
-          for i in $(seq 1 20); do
-            if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
-              ready=1
-              break
-            fi
-            sleep 3
-          done
-          test "$ready" -eq 1
+          docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null
 
-          docker compose exec -T backend python manage.py shell <<'PY'
-          from datetime import timedelta
-          from django.utils import timezone
-          from core.models import Notification, User
-          from core.push_models import PushDevice
-          from core.push_notifications import push_provider_status
-
-          now = timezone.now()
-          recent = now - timedelta(hours=2)
-          providers = push_provider_status()
-          admins = User.objects.filter(role='admin', is_active=True)
-          active = PushDevice.objects.filter(active=True)
-          admin_active = active.filter(user__role='admin')
-
-          print('push_providers=', providers)
-          print('active_admin_users=', admins.count())
-          print('active_devices_total=', active.count())
-          print('admin_android_active=', admin_active.filter(platform='android').count())
-          print('admin_ios_active=', admin_active.filter(platform='ios').count())
-          print('admin_android_inactive=', PushDevice.objects.filter(active=False, user__role='admin', platform='android').count())
-          print('admin_ios_inactive=', PushDevice.objects.filter(active=False, user__role='admin', platform='ios').count())
-          print('recent_admin_open_shift_notifications=', Notification.objects.filter(user__role='admin', kind__startswith='admin-open-shift-summary-', created_at__gte=recent).count())
-
-          for platform in ('android', 'ios'):
-              rows = PushDevice.objects.filter(user__role='admin', platform=platform).order_by('-last_seen_at')[:5]
-              for index, device in enumerate(rows, 1):
-                  error = (device.last_error or '').replace('\n', ' ')[:500]
-                  print(f'admin_{platform}_{index}: active={device.active} last_seen={device.last_seen_at} last_error={error!r}')
-          PY
+          docker compose exec -T backend python manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from core.models import Notification,User; from core.push_models import PushDevice; from core.push_notifications import push_provider_status; recent=timezone.now()-timedelta(hours=2); active=PushDevice.objects.filter(active=True); admin=PushDevice.objects.filter(user__role='admin'); print('push_providers=',push_provider_status(),flush=True); print('active_admin_users=',User.objects.filter(role='admin',is_active=True).count(),flush=True); print('active_devices_total=',active.count(),flush=True); print('admin_android_active=',admin.filter(active=True,platform='android').count(),flush=True); print('admin_ios_active=',admin.filter(active=True,platform='ios').count(),flush=True); print('admin_android_inactive=',admin.filter(active=False,platform='android').count(),flush=True); print('admin_ios_inactive=',admin.filter(active=False,platform='ios').count(),flush=True); print('recent_admin_open_shift_notifications=',Notification.objects.filter(user__role='admin',kind__startswith='admin-open-shift-summary-',created_at__gte=recent).count(),flush=True); print('admin_device_state=',list(admin.order_by('-last_seen_at').values('platform','active','last_seen_at','last_error')[:10]),flush=True)"
 
           echo '--- celery push task log tail ---'
           docker compose logs --since=2h --no-color celery 2>&1 \
