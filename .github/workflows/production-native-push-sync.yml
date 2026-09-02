@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: aplus-native-push-diagnostics
+  group: aplus-native-push-diagnostics-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -28,27 +28,79 @@ jobs:
             }
           fi
 
-      - name: Inspect production push path
+      - name: Prepare diagnostic script
+        run: |
+          cat > /tmp/pushdiag.py <<'PY'
+          import json
+          import os
+          from datetime import timedelta
+
+          os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+          import django
+          django.setup()
+
+          from django.utils import timezone
+          from core.models import Notification, User
+          from core.push_models import PushDevice
+          from core.push_notifications import push_provider_status
+
+          recent = timezone.now() - timedelta(hours=2)
+          admin_devices = PushDevice.objects.filter(user__role='admin').order_by('-last_seen_at')
+          result = {
+              'push_providers': push_provider_status(),
+              'active_admin_users': User.objects.filter(role='admin', is_active=True).count(),
+              'active_devices_total': PushDevice.objects.filter(active=True).count(),
+              'admin_android_active': admin_devices.filter(active=True, platform='android').count(),
+              'admin_ios_active': admin_devices.filter(active=True, platform='ios').count(),
+              'admin_android_inactive': admin_devices.filter(active=False, platform='android').count(),
+              'admin_ios_inactive': admin_devices.filter(active=False, platform='ios').count(),
+              'recent_admin_open_shift_notifications': Notification.objects.filter(
+                  user__role='admin',
+                  kind__startswith='admin-open-shift-summary-',
+                  created_at__gte=recent,
+              ).count(),
+              'admin_devices': [
+                  {
+                      'platform': device.platform,
+                      'active': device.active,
+                      'last_seen_at': device.last_seen_at.isoformat() if device.last_seen_at else None,
+                      'last_error': (device.last_error or '')[:1000],
+                  }
+                  for device in admin_devices[:10]
+              ],
+          }
+          print(json.dumps(result, indent=2, sort_keys=True))
+          PY
+
+      - name: Collect production push state
         env:
           SSHPASS: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
         run: |
           set -euo pipefail
           test -n "$HOST" && test -n "$SSHPASS"
-          sshpass -e ssh \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=15 \
-            -o ServerAliveInterval=10 \
-            -o ServerAliveCountMax=3 \
-            root@"$HOST" 'bash -s' > /tmp/push-diagnostic.txt 2>&1 <<'REMOTE'
+          SSH_OPTS='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15'
+          sshpass -e scp $SSH_OPTS /tmp/pushdiag.py root@"$HOST":/tmp/pushdiag.py
+          sshpass -e ssh $SSH_OPTS root@"$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
-          docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null
-          echo 'PUSH_DIAGNOSTIC_BEGIN'
-          docker compose exec -T backend python manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from core.models import Notification,User; from core.push_models import PushDevice; from core.push_notifications import push_provider_status; recent=timezone.now()-timedelta(hours=2); active=PushDevice.objects.filter(active=True); admin=PushDevice.objects.filter(user__role='admin'); print('push_providers=',push_provider_status(),flush=True); print('active_admin_users=',User.objects.filter(role='admin',is_active=True).count(),flush=True); print('active_devices_total=',active.count(),flush=True); print('admin_android_active=',admin.filter(active=True,platform='android').count(),flush=True); print('admin_ios_active=',admin.filter(active=True,platform='ios').count(),flush=True); print('admin_android_inactive=',admin.filter(active=False,platform='android').count(),flush=True); print('admin_ios_inactive=',admin.filter(active=False,platform='ios').count(),flush=True); print('recent_admin_open_shift_notifications=',Notification.objects.filter(user__role='admin',kind__startswith='admin-open-shift-summary-',created_at__gte=recent).count(),flush=True); print('admin_device_state=',list(admin.order_by('-last_seen_at').values('platform','active','last_seen_at','last_error')[:10]),flush=True)"
-          echo '--- celery push task log tail ---'
-          docker compose logs --since=2h --no-color celery 2>&1 | grep -E 'send_notification_push|FCM|APNs|Task core\.push_notifications' | tail -n 120 || true
-          echo 'PUSH_DIAGNOSTIC_END'
+          CID="$(docker compose ps -q backend)"
+          test -n "$CID"
+          docker cp /tmp/pushdiag.py "$CID":/tmp/pushdiag.py
+          docker compose exec -T backend python /tmp/pushdiag.py > /tmp/pushdiag.out 2>&1
+          {
+            echo
+            echo '--- celery push task log tail ---'
+            docker compose logs --since=2h --no-color celery 2>&1 | grep -E 'send_notification_push|FCM|APNs|Task core\.push_notifications' | tail -n 120 || true
+          } >> /tmp/pushdiag.out
+          chmod 600 /tmp/pushdiag.out
           REMOTE
-          cat /tmp/push-diagnostic.txt
+          sshpass -e scp $SSH_OPTS root@"$HOST":/tmp/pushdiag.out /tmp/pushdiag.out
+          test -s /tmp/pushdiag.out
+
+      - name: Upload diagnostic artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-push-production-diagnostic
+          path: /tmp/pushdiag.out
+          retention-days: 1
