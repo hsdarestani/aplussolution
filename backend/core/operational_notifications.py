@@ -28,17 +28,24 @@ def _shift_body(shift: Shift) -> str:
 
 
 def _notify_admin_open_shift_summary(shift: Shift, event: str, worker_count: int) -> int:
-    """Create one admin notification for an OpenShift fan-out, not one per worker."""
-    if worker_count <= 0:
-        return 0
+    """Create exactly one admin confirmation for an OpenShift publication.
+
+    Admin confirmation must not depend on whether any worker matched the current
+    Zeitplan/customer visibility filters. This is especially important for copied
+    shifts: the admin needs a positive publication signal even when fan-out is zero.
+    """
     created = 0
+    if worker_count > 0:
+        body = f'Benachrichtigung für {worker_count} Mitarbeiter ausgelöst · {_shift_body(shift)}'
+    else:
+        body = f'Keine passenden Mitarbeiter benachrichtigt · {_shift_body(shift)}'
     for admin in User.objects.filter(role=User.Role.ADMIN, is_active=True):
         _, was_created = Notification.objects.get_or_create(
             user=admin,
             kind=f'admin-open-shift-summary-{event}-{shift.id}',
             defaults={
                 'title': 'OpenShift veröffentlicht',
-                'body': f'Benachrichtigung für {worker_count} Mitarbeiter ausgelöst · {_shift_body(shift)}',
+                'body': body,
                 'action_url': '/schedule',
             },
         )
