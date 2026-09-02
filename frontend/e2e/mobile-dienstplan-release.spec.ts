@@ -138,6 +138,8 @@ test('PDF Fertig downloads the file and explicit All choices clear restrictive f
   await pdf.getByRole('button', { name: 'Alle Mitarbeiter', exact: true }).click();
   await pdf.getByRole('button', { name: 'Alle Kunden', exact: true }).click();
   await expect(pdf.getByRole('button', { name: 'Alle Mitarbeiter', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await pdf.getByRole('button', { name: 'PDF Enddatum', exact: true }).click();
+  await page.getByRole('dialog', { name: 'PDF Zeitraum' }).getByRole('button', { name: '2026-09-09', exact: true }).click();
   const request = page.waitForRequest(r => r.url().includes('/reports/schedule.pdf?'));
   const download = page.waitForEvent('download');
   await pdf.getByRole('button', { name: 'Fertig', exact: true }).click();
@@ -145,6 +147,7 @@ test('PDF Fertig downloads the file and explicit All choices clear restrictive f
   const url = new URL((await request).url());
   expect(url.searchParams.has('workers')).toBe(false);
   expect(url.searchParams.has('clients')).toBe(false);
+  expect(url.searchParams.get('date_to')).toBe('2026-09-09');
   await expect(pdf).toHaveCount(0);
 });
 

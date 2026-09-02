@@ -433,6 +433,7 @@ export default function WiwScheduleMobile() {
   const loadSequence = useRef(0);
   const [dateOpen, setDateOpen] = useState(false);
   const [pdfError, setPdfError] = useState('');
+  const [pdfDateField, setPdfDateField] = useState<'dateFrom' | 'dateTo' | ''>('');
   const formScreenRef = useRef<HTMLDivElement>(null);
   const formScrollRef = useRef<HTMLDivElement>(null);
   const noteRef = useRef<HTMLTextAreaElement>(null);
@@ -896,6 +897,7 @@ export default function WiwScheduleMobile() {
   function openPdfExport() {
     setPdf({ dateFrom: weekStart, dateTo: addDays(weekStart, 6), workers: [], clients: [], groups: [] });
     setPdfError('');
+    setPdfDateField('');
     setPdfOpen(true);
   }
 
@@ -1071,11 +1073,12 @@ export default function WiwScheduleMobile() {
         {sheet === 'workers' ? <MultiChoiceSheet title={editing ? 'Mitarbeiter auswählen / ändern' : 'Geeignete Benutzer'} choices={workerChoices} selected={form.workers} limit={editing ? 1 : form.required_count} onClose={() => setSheet('')} onChange={(values) => setForm((current) => ({ ...current, workers: values, apply_all: editing ? false : current.apply_all }))} /> : null}
       </div> : null}
 
+      {pdfOpen && pdfDateField ? <ScheduleDatePicker title="PDF Zeitraum" value={pdf[pdfDateField]} onSelect={(date) => { setPdf((current) => ({ ...current, [pdfDateField]: date })); setPdfDateField(''); }} onClose={() => setPdfDateField('')} /> : null}
       {pdfOpen ? <div className="wiw-sheet-backdrop wiw-pdf-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !pdfBusy) setPdfOpen(false); }}>
         <section className="wiw-pdf-sheet">
           <header><div><b>Dienstplan als PDF</b><small>Filter auswählen und exportieren</small></div><button type="button" disabled={pdfBusy} onClick={() => void downloadPdf()}>{pdfBusy ? 'Erstellen…' : 'Fertig'}</button></header>
           <div className="wiw-pdf-scroll">
-            <div className="wiw-pdf-dates"><label>Von<input type="date" value={pdf.dateFrom} onChange={(event) => setPdf((current) => ({ ...current, dateFrom: event.target.value }))}/></label><label>Bis<input type="date" value={pdf.dateTo} onChange={(event) => setPdf((current) => ({ ...current, dateTo: event.target.value }))}/></label></div>
+            <div className="wiw-pdf-dates"><label>Von<button type="button" aria-label="PDF Startdatum" onClick={() => setPdfDateField('dateFrom')}>{formatDateRow(pdf.dateFrom)}</button></label><label>Bis<button type="button" aria-label="PDF Enddatum" onClick={() => setPdfDateField('dateTo')}>{formatDateRow(pdf.dateTo)}</button></label></div>
             <div className="wiw-pdf-filter-block"><b>Mitarbeiter</b><div className="wiw-pdf-chip-grid"><button type="button" aria-pressed={pdf.workers.length === 0} className={pdf.workers.length === 0 ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, workers: [] }))}>Alle Mitarbeiter</button>{workerChoices.map((choice) => <button type="button" key={choice.value} className={pdf.workers.includes(choice.value) ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, workers: current.workers.includes(choice.value) ? current.workers.filter((item) => item !== choice.value) : [...current.workers, choice.value] }))}>{choice.label}</button>)}</div><small>Nichts ausgewählt = alle Mitarbeiter</small></div>
             <div className="wiw-pdf-filter-block"><b>Kunden</b><div className="wiw-pdf-chip-grid"><button type="button" aria-pressed={pdf.clients.length === 0} className={pdf.clients.length === 0 ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, clients: [] }))}>Alle Kunden</button>{clientChoices.map((choice) => <button type="button" key={choice.value} className={pdf.clients.includes(choice.value) ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, clients: current.clients.includes(choice.value) ? current.clients.filter((item) => item !== choice.value) : [...current.clients, choice.value] }))}>{choice.label}</button>)}</div><small>Nichts ausgewählt = alle Kunden</small></div>
             <div className="wiw-pdf-filter-block"><b>{pdfHasHotel ? 'Hotel-Bereich / Zeitplan' : 'Zeitplan'}</b><div className="wiw-pdf-chip-grid compact">{SCHEDULE_GROUPS.map((choice) => <button type="button" key={choice.value} className={pdf.groups.includes(choice.value) ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, groups: current.groups.includes(choice.value) ? current.groups.filter((item) => item !== choice.value) : [...current.groups, choice.value] }))}>{choice.label}</button>)}</div><small>Nichts ausgewählt = alle Bereiche</small></div>
