@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pytest
 from django.utils import timezone
 
@@ -18,7 +20,7 @@ def test_wiw_refresh_cannot_overwrite_locally_renamed_location():
 
     location.name = 'Name aus WIW'
     location.address = 'Neue Adresse'
-    location.wiw_synced_at = old_sync + timezone.timedelta(minutes=5)
+    location.wiw_synced_at = old_sync + timedelta(minutes=5)
     location.save()
     location.refresh_from_db()
 
