@@ -2,6 +2,7 @@ from django.utils import timezone
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from .notification_settings import all_push_rule_payloads, save_push_rules
 from .push_models import PushDevice
 from .push_notifications import push_provider_status
 
@@ -59,4 +60,21 @@ def push_status(request):
         'active_devices': devices.count(),
         'android_devices': devices.filter(platform=PushDevice.Platform.ANDROID).count(),
         'ios_devices': devices.filter(platform=PushDevice.Platform.IOS).count(),
+    })
+
+
+@api_view(['GET', 'PUT'])
+def push_settings(request):
+    if getattr(request.user, 'role', '') not in {'admin', 'manager'}:
+        return Response({'detail': 'Keine Berechtigung.'}, status=403)
+
+    if request.method == 'PUT':
+        rules = request.data.get('rules')
+        if not isinstance(rules, list):
+            return Response({'detail': 'rules muss eine Liste sein.'}, status=400)
+        return Response({'rules': save_push_rules(rules)})
+
+    return Response({
+        'rules': all_push_rule_payloads(),
+        'providers': push_provider_status(),
     })

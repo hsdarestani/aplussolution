@@ -11,6 +11,7 @@ from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import service_account
 
 from .models import Notification
+from .notification_settings import render_push_notification
 from .push_models import PushDevice
 
 FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging'
@@ -116,7 +117,12 @@ def _data_payload(notification: Notification) -> dict[str, str]:
     }
 
 
-def _send_android(device: PushDevice, notification: Notification) -> tuple[bool, str, bool]:
+def _send_android(
+    device: PushDevice,
+    notification: Notification,
+    title: str,
+    body: str,
+) -> tuple[bool, str, bool]:
     project_id = firebase_project_id()
     if not project_id:
         return False, 'Firebase project is not configured.', False
@@ -124,8 +130,8 @@ def _send_android(device: PushDevice, notification: Notification) -> tuple[bool,
         'message': {
             'token': device.token,
             'notification': {
-                'title': notification.title,
-                'body': notification.body or '',
+                'title': title,
+                'body': body,
             },
             'data': _data_payload(notification),
             'android': {
@@ -155,12 +161,17 @@ def _send_android(device: PushDevice, notification: Notification) -> tuple[bool,
     return False, f'FCM {response.status_code}: {text}', invalid
 
 
-def _send_ios(device: PushDevice, notification: Notification) -> tuple[bool, str, bool]:
+def _send_ios(
+    device: PushDevice,
+    notification: Notification,
+    title: str,
+    body: str,
+) -> tuple[bool, str, bool]:
     _, _, _, bundle_id, sandbox = _apns_values()
     host = 'https://api.sandbox.push.apple.com' if sandbox else 'https://api.push.apple.com'
     payload = {
         'aps': {
-            'alert': {'title': notification.title, 'body': notification.body or ''},
+            'alert': {'title': title, 'body': body},
             'sound': 'default',
             'badge': 1,
         },
@@ -189,16 +200,21 @@ def _send_ios(device: PushDevice, notification: Notification) -> tuple[bool, str
 
 def deliver_notification(notification: Notification) -> dict[str, int]:
     result = {'sent': 0, 'failed': 0, 'deactivated': 0, 'skipped': 0}
-    providers = push_provider_status()
+    enabled, title, body, _rule_key = render_push_notification(notification)
     devices = PushDevice.objects.filter(user=notification.user, active=True).order_by('-last_seen_at')
+    if not enabled:
+        result['skipped'] = devices.count()
+        return result
+
+    providers = push_provider_status()
     for device in devices:
         if not providers.get(device.platform, False):
             result['skipped'] += 1
             continue
         if device.platform == PushDevice.Platform.ANDROID:
-            ok, error, invalid = _send_android(device, notification)
+            ok, error, invalid = _send_android(device, notification, title, body)
         elif device.platform == PushDevice.Platform.IOS:
-            ok, error, invalid = _send_ios(device, notification)
+            ok, error, invalid = _send_ios(device, notification, title, body)
         else:
             result['skipped'] += 1
             continue

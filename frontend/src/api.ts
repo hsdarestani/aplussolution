@@ -174,6 +174,28 @@ export async function api<T = any>(path: string, options: RequestInit = {}, retr
   return response.status === 204 ? ({} as T) : response.json();
 }
 
+export async function apiBlob(path: string, options: RequestInit = {}, retry = true): Promise<{ blob: Blob; filename: string }> {
+  const normalizedPath = path.replace(/^\//, '');
+  const response = await request(`${API}/${normalizedPath}`, { ...options, headers: headers(options) });
+  if (response.status === 401 && retry) {
+    const token = await refreshAccessToken();
+    if (token) {
+      const retried = await request(`${API}/${normalizedPath}`, { ...options, headers: headers(options, token) });
+      if (!retried.ok) throw new Error(await parseError(retried));
+      const disposition = retried.headers.get('content-disposition') || '';
+      const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] || 'download.pdf';
+      return { blob: await retried.blob(), filename };
+    }
+    localStorage.removeItem('access');
+    localStorage.removeItem('refresh');
+    window.dispatchEvent(new Event('auth-lost'));
+  }
+  if (!response.ok) throw new Error(await parseError(response));
+  const disposition = response.headers.get('content-disposition') || '';
+  const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] || 'download.pdf';
+  return { blob: await response.blob(), filename };
+}
+
 export async function login(email: string, password: string) {
   const data: any = await api('auth/login/', {
     method: 'POST',

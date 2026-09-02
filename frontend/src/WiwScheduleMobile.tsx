@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Capacitor } from '@capacitor/core';
+import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { IonIcon } from '@ionic/react';
 import {
   addCircleOutline,
@@ -19,8 +21,8 @@ import {
   timeOutline,
   trashOutline,
 } from 'ionicons/icons';
-import { api } from './api';
-import { isHotelClientName, isHotelPositionName, schedulePalette } from './scheduleClientPalette';
+import { api, apiBlob } from './api';
+import { isHotelClientName, schedulePalette } from './scheduleClientPalette';
 import './wiw-schedule-mobile.css';
 
 type TabKey = 'all' | 'open' | 'filled' | 'draft';
@@ -43,6 +45,13 @@ type FormState = {
   notes: string;
   apply_all: boolean;
 };
+type PdfState = {
+  dateFrom: string;
+  dateTo: string;
+  workers: string[];
+  clients: string[];
+  groups: string[];
+};
 
 type CardRow = {
   key: string;
@@ -54,7 +63,9 @@ type CardRow = {
 
 const BERLIN = 'Europe/Berlin';
 const QUARTER = 15;
-const WHEEL_ROW = 44;
+const WHEEL_ROW = 32;
+const META_CACHE_KEY = 'aplus:wiw-mobile-meta:v4';
+const WEEK_CACHE_PREFIX = 'aplus:wiw-mobile-week:v4:';
 const POSITION_ORDER = [
   { label: 'Servicekraft', aliases: ['servicekraft', 'servicekrat'] },
   { label: 'Serviceleitung', aliases: ['serviceleitung'] },
@@ -66,6 +77,25 @@ const SCHEDULE_GROUPS: Choice[] = [
   { value: 'service', label: 'Service' },
   { value: 'front_office', label: 'Front Office' },
   { value: 'housekeeping', label: 'Housekeeping' },
+];
+const WORKER_PICKER_NAMES = [
+  'Tooba Amjad',
+  'Shahrzad Bagheri',
+  'Michelle Brettschneider',
+  'Michele Corrado',
+  'Loreen G.',
+  'Katerina Gentsou',
+  'Yohannes Kiffle',
+  'Ksenia Marszalek',
+  'Arina Martynko',
+  'Claire Odinius',
+  'Ilhan Omerovic',
+  'Ilayda Tarhan',
+  'Francesco Trulli',
+  'Akeel Zafar',
+  'Izabella Somodo',
+  'Musa Jamali',
+  'Max Najmudinov',
 ];
 const CLIENT_ORDER = ['marthasfinest','stadthausammarkt','hotelspenerhaus','hofelcatering','restauranthirschgarten','messe','ommia','citybeach','hofgut'];
 const HOTEL_TIME_PRESETS = [
@@ -91,6 +121,7 @@ const unpack = (value: any): any[] => value?.results || value || [];
 const pad = (value: number) => String(value).padStart(2, '0');
 const normalize = (value: string) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const clientKey = (item: any) => String(item?.client || item?.client_name || 'ohne-kunde');
+const allowedWorkerNames = new Set(WORKER_PICKER_NAMES.map(normalize));
 
 function keyDate(key: string) {
   const [year, month, day] = key.split('-').map(Number);
@@ -160,6 +191,32 @@ function initialTime() {
   const minute = Number(parts.find((part) => part.type === 'minute')?.value || 0);
   return Math.min(1425, Math.ceil((hour * 60 + minute) / QUARTER) * QUARTER);
 }
+function positionGroup(name?: string) {
+  const key = normalize(String(name || ''));
+  if (key.includes('frontoffice') || key.includes('rezeption') || key.includes('reception')) return 'front_office';
+  if (key.includes('housekeeping') || key.includes('houskeeping') || key.includes('zimmer')) return 'housekeeping';
+  return 'service';
+}
+function shiftGroups(shift: any): string[] {
+  const groups = Array.isArray(shift?.schedule_groups) ? shift.schedule_groups.filter((value: string) => SCHEDULE_GROUPS.some((item) => item.value === value)) : [];
+  return groups.length ? groups : [positionGroup(shift?.position_name)];
+}
+function hapticTick() {
+  const fallback = () => {
+    try { navigator.vibrate?.(5); } catch { /* best effort */ }
+  };
+  if (Capacitor.isNativePlatform()) {
+    void Haptics.impact({ style: ImpactStyle.Light }).catch(fallback);
+  } else {
+    fallback();
+  }
+}
+function safeSessionGet(key: string) {
+  try { return sessionStorage.getItem(key); } catch { return null; }
+}
+function safeSessionSet(key: string, value: string) {
+  try { sessionStorage.setItem(key, value); } catch { /* cache is optional */ }
+}
 
 function activeSlots(shift: any) {
   if (Array.isArray(shift.slot_cards) && shift.slot_cards.length) return shift.slot_cards;
@@ -207,11 +264,11 @@ function WheelColumn({ items, value, onChange }: { items: Array<{ value: number;
     const index = indexAtScroll();
     if (index === lastTickIndex.current) return;
     lastTickIndex.current = index;
+    hapticTick();
     const next = items[index]?.value;
     if (next == null || next === latestValue.current) return;
     latestValue.current = next;
     onChange(next);
-    try { navigator.vibrate?.(4); } catch { /* haptic is best-effort */ }
   };
 
   const settle = () => {
@@ -223,13 +280,14 @@ function WheelColumn({ items, value, onChange }: { items: Array<{ value: number;
     if (next !== latestValue.current) {
       latestValue.current = next;
       onChange(next);
+      hapticTick();
     }
     programmatic.current = true;
     ref.current.scrollTo({ top: target, behavior: 'smooth' });
     window.setTimeout(() => {
       programmatic.current = false;
       userScrolling.current = false;
-    }, 115);
+    }, 90);
   };
 
   return (
@@ -241,7 +299,7 @@ function WheelColumn({ items, value, onChange }: { items: Array<{ value: number;
         userScrolling.current = true;
         if (!frame.current) frame.current = window.requestAnimationFrame(emitTick);
         window.clearTimeout(settleTimer.current);
-        settleTimer.current = window.setTimeout(settle, 72);
+        settleTimer.current = window.setTimeout(settle, 55);
       }}
     >
       {items.map((item) => (
@@ -250,10 +308,10 @@ function WheelColumn({ items, value, onChange }: { items: Array<{ value: number;
           latestValue.current = item.value;
           lastTickIndex.current = index;
           onChange(item.value);
-          try { navigator.vibrate?.(4); } catch { /* best-effort */ }
+          hapticTick();
           programmatic.current = true;
           ref.current?.scrollTo({ top: index * WHEEL_ROW, behavior: 'smooth' });
-          window.setTimeout(() => { programmatic.current = false; userScrolling.current = false; }, 115);
+          window.setTimeout(() => { programmatic.current = false; userScrolling.current = false; }, 90);
         }}>{item.label}</button>
       ))}
     </div>
@@ -280,10 +338,10 @@ function Switch({ checked, onChange }: { checked: boolean; onChange: (value: boo
   return <button type="button" className={`wiw-switch ${checked ? 'on' : ''}`} aria-pressed={checked} onClick={() => onChange(!checked)}><span /></button>;
 }
 
-function Row({ icon, label, value, muted, green, onClick, trailing, colorManaged, emphasizeValue }: { icon: string; label: string; value?: string; muted?: boolean; green?: boolean; onClick?: () => void; trailing?: React.ReactNode; colorManaged?: boolean; emphasizeValue?: boolean }) {
+function Row({ field, icon, label, value, muted, green, onClick, trailing, colorManaged, emphasizeValue }: { field?: string; icon: string; label: string; value?: string; muted?: boolean; green?: boolean; onClick?: () => void; trailing?: React.ReactNode; colorManaged?: boolean; emphasizeValue?: boolean }) {
   const Component: any = onClick ? 'button' : 'div';
   return (
-    <Component type={onClick ? 'button' : undefined} data-color-managed={colorManaged ? 'true' : undefined} className={`wiw-form-row ${muted ? 'muted' : ''} ${green ? 'green' : ''} ${emphasizeValue ? 'employee-emphasis' : ''}`} onClick={onClick}>
+    <Component data-field={field} type={onClick ? 'button' : undefined} data-color-managed={colorManaged ? 'true' : undefined} className={`wiw-form-row ${muted ? 'muted' : ''} ${green ? 'green' : ''} ${emphasizeValue ? 'employee-emphasis' : ''}`} onClick={onClick}>
       <IonIcon icon={icon} />
       <div className="wiw-form-row-copy"><span>{label}</span>{value ? <b>{value}</b> : null}</div>
       {trailing ?? (onClick ? <IonIcon className="wiw-row-chevron" icon={chevronForwardOutline} /> : null)}
@@ -329,6 +387,7 @@ function MultiChoiceSheet({ title, choices, selected, limit, onChange, onClose }
           const checked = selected.includes(choice.value);
           return <button type="button" key={choice.value} className={checked ? 'selected' : ''} onClick={() => {
             if (checked) onChange(selected.filter((value) => value !== choice.value));
+            else if (limit === 1) onChange([choice.value]);
             else if (!limit || selected.length < limit) onChange([...selected, choice.value]);
           }}><span>{choice.label}</span>{checked ? <IonIcon icon={checkmarkOutline} /> : null}</button>;
         })}</div>
@@ -350,23 +409,124 @@ export default function WiwScheduleMobile() {
   const [tab, setTab] = useState<TabKey>('all');
   const [weekDirection, setWeekDirection] = useState<'next' | 'prev' | ''>('');
   const [query, setQuery] = useState('');
+  const [groupFilter, setGroupFilter] = useState<string[]>(SCHEDULE_GROUPS.map((item) => item.value));
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<EditingCard>();
   const [copying, setCopying] = useState(false);
+  const [recentCopyShiftId, setRecentCopyShiftId] = useState('');
   const [form, setForm] = useState<FormState>(() => emptyForm(berlinToday()));
   const [timeOpen, setTimeOpen] = useState(false);
-  const [dateOpen, setDateOpen] = useState(false);
   const [sheet, setSheet] = useState<'client' | 'position' | 'location' | 'workers' | 'groups' | 'color' | ''>('');
   const [extrasOpen, setExtrasOpen] = useState(false);
+  const [pdfOpen, setPdfOpen] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdf, setPdf] = useState<PdfState>(() => ({ dateFrom: monday(berlinToday()), dateTo: addDays(monday(berlinToday()), 6), workers: [], clients: [], groups: [] }));
   const swipe = useRef<{ x: number; y: number } | undefined>(undefined);
+  const swipeFrame = useRef<number | undefined>(undefined);
+  const swipeTravel = useRef(0);
+  const localRowsRef = useRef<any[]>([]);
+  const liveRowsRef = useRef<any[]>([]);
+  const loadSequence = useRef(0);
+  const dateInputRef = useRef<HTMLInputElement>(null);
+  const formScreenRef = useRef<HTMLDivElement>(null);
+  const formScrollRef = useRef<HTMLDivElement>(null);
+  const noteRef = useRef<HTMLTextAreaElement>(null);
+
+  const weekStart = monday(anchor);
+  const days = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
+
+  const publishRows = () => setRows([...localRowsRef.current, ...liveRowsRef.current]);
+
+  const restoreMetadataCache = () => {
+    const raw = safeSessionGet(META_CACHE_KEY);
+    if (!raw) return;
+    try {
+      const cached = JSON.parse(raw);
+      if (Array.isArray(cached.clients)) setClients(cached.clients);
+      if (Array.isArray(cached.locations)) setLocations(cached.locations);
+      if (Array.isArray(cached.positions)) setPositions(cached.positions);
+      if (Array.isArray(cached.workers)) setWorkers(cached.workers);
+    } catch { /* optional cache */ }
+  };
+
+  const loadMetadata = async () => {
+    try {
+      const [clientData, locationData, positionData, workerData] = await Promise.all([
+        api('clients/?ordering=name'),
+        api('locations/'),
+        api('positions/'),
+        api('workers/?ordering=user__last_name'),
+      ]);
+      const next = {
+        clients: sortClients(unpack(clientData).filter((item: any) => item.active !== false)),
+        locations: unpack(locationData).filter((item: any) => item.active !== false),
+        positions: unpack(positionData).filter((item: any) => item.active !== false),
+        workers: unpack(workerData).filter((item: any) => item.active !== false && !String(item?.user_detail?.email || '').endsWith('@sync.invalid')),
+      };
+      setClients(next.clients);
+      setLocations(next.locations);
+      setPositions(next.positions);
+      setWorkers(next.workers);
+      safeSessionSet(META_CACHE_KEY, JSON.stringify(next));
+    } catch (error) {
+      console.warn('Dienstplan Stammdaten refresh failed', error);
+    }
+  };
+
+  const loadScheduleWeek = async (targetWeek: string, showBusy = true) => {
+    if (!manager) return;
+    const sequence = ++loadSequence.current;
+    const cacheKey = `${WEEK_CACHE_PREFIX}${targetWeek}`;
+    const cached = safeSessionGet(cacheKey);
+    if (cached) {
+      try {
+        const cachedRows = JSON.parse(cached);
+        if (Array.isArray(cachedRows)) {
+          localRowsRef.current = cachedRows;
+          publishRows();
+        }
+      } catch { /* optional cache */ }
+    }
+    if (showBusy && !cached) setBusy(true);
+    try {
+      const scheduleData: any = await api(`admin/mobile-schedule/?date_from=${encodeURIComponent(targetWeek)}&date_to=${encodeURIComponent(addDays(targetWeek, 6))}`);
+      if (sequence !== loadSequence.current) return;
+      const nextLocal = Array.isArray(scheduleData?.shifts) ? scheduleData.shifts : [];
+      localRowsRef.current = nextLocal;
+      safeSessionSet(cacheKey, JSON.stringify(nextLocal));
+      publishRows();
+      setBusy(false);
+
+      void api('admin/mobile-dashboard/').then((dashboardData: any) => {
+        if (sequence !== loadSequence.current) return;
+        liveRowsRef.current = Array.isArray(dashboardData?.open_shift_rows) ? dashboardData.open_shift_rows : [];
+        publishRows();
+      }).catch((error) => console.warn('OpenShift live rows refresh failed', error));
+    } catch (error: any) {
+      if (sequence === loadSequence.current) setToast(error.message || 'Dienstplan konnte nicht geladen werden.');
+    } finally {
+      if (sequence === loadSequence.current) setBusy(false);
+    }
+  };
+
+  const load = async (targetWeek = weekStart) => {
+    await loadScheduleWeek(targetWeek, true);
+    void loadMetadata();
+  };
 
   useEffect(() => {
     if (!toast) return;
-    const timer = window.setTimeout(() => setToast(''), 1000);
+    const timer = window.setTimeout(() => setToast(''), 1300);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    if (!recentCopyShiftId) return;
+    const timer = window.setTimeout(() => setRecentCopyShiftId(''), 1150);
+    return () => window.clearTimeout(timer);
+  }, [recentCopyShiftId]);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -405,44 +565,40 @@ export default function WiwScheduleMobile() {
     return () => { cancelled = true; };
   }, [active, mobile]);
 
-  const load = async () => {
-    if (!manager) return;
-    setBusy(true);
-    try {
-      const [shiftData, clientData, locationData, positionData, workerData, dashboardData] = await Promise.all([
-        api('shifts/?ordering=starts_at'),
-        api('clients/'),
-        api('locations/'),
-        api('positions/'),
-        api('workers/?ordering=user__last_name'),
-        api('admin/mobile-dashboard/'),
-      ]);
-      const localRows = unpack(shiftData);
-      const liveOpenRows = Array.isArray(dashboardData?.open_shift_rows) ? dashboardData.open_shift_rows : [];
-      setRows([...localRows, ...liveOpenRows]);
-      setClients(sortClients(unpack(clientData).filter((item: any) => item.active !== false)));
-      setLocations(unpack(locationData).filter((item: any) => item.active !== false));
-      setPositions(unpack(positionData).filter((item: any) => item.active !== false));
-      setWorkers(unpack(workerData).filter((item: any) => item.active !== false && !String(item?.user_detail?.email || '').endsWith('@sync.invalid')));
-    } catch (error: any) {
-      setToast(error.message || 'Dienstplan konnte nicht geladen werden.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   useEffect(() => {
     if (!active || !mobile || !manager) return;
     document.body.classList.add('wiw-native-schedule-active');
     const requested = sessionStorage.getItem('aplus:schedule-entry-filter');
     sessionStorage.removeItem('aplus:schedule-entry-filter');
     setTab(requested === 'open' ? 'open' : 'all');
-    void load();
+    restoreMetadataCache();
+    void loadMetadata();
     return () => document.body.classList.remove('wiw-native-schedule-active');
   }, [active, mobile, manager]);
 
-  const weekStart = monday(anchor);
-  const days = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
+  useEffect(() => {
+    if (!active || !mobile || !manager) return;
+    void loadScheduleWeek(weekStart, true);
+  }, [active, mobile, manager, weekStart]);
+
+  useEffect(() => {
+    if (!formOpen) return;
+    const viewport = window.visualViewport;
+    const syncInset = () => {
+      const height = viewport?.height ?? window.innerHeight;
+      const offsetTop = viewport?.offsetTop ?? 0;
+      const inset = Math.max(0, window.innerHeight - height - offsetTop);
+      formScreenRef.current?.style.setProperty('--wiw-keyboard-inset', `${Math.round(inset)}px`);
+    };
+    syncInset();
+    viewport?.addEventListener('resize', syncInset);
+    viewport?.addEventListener('scroll', syncInset);
+    return () => {
+      viewport?.removeEventListener('resize', syncInset);
+      viewport?.removeEventListener('scroll', syncInset);
+    };
+  }, [formOpen]);
+
   const cards = useMemo<CardRow[]>(() => rows.flatMap((shift: any) => activeSlots(shift).map((slot: any) => ({
     key: `${shift.id}:${slot.id}`,
     shift,
@@ -481,12 +637,15 @@ export default function WiwScheduleMobile() {
     }
     if (tab === 'filled' && (!card.worker || card.shift.status === 'draft')) return false;
     if (tab === 'draft' && card.shift.status !== 'draft') return false;
+    const cardGroups = shiftGroups(card.shift);
+    if (groupFilter.length && !cardGroups.some((group) => groupFilter.includes(group))) return false;
+    if (!groupFilter.length) return false;
     if (query.trim()) {
       const haystack = `${card.shift.position_name || ''} ${card.shift.client_name || ''} ${card.shift.location_name || ''} ${card.worker?.name || ''}`.toLowerCase();
       if (!haystack.includes(query.trim().toLowerCase())) return false;
     }
     return true;
-  }), [cards, days, liveLocalShiftIds, query, tab]);
+  }), [cards, days, groupFilter, liveLocalShiftIds, query, tab]);
   const visibleDays = useMemo(() => {
     if (tab !== 'open') return days;
     return Array.from(new Set(visibleCards.map((card) => dateKeyFromIso(card.shift.starts_at)))).sort();
@@ -512,22 +671,23 @@ export default function WiwScheduleMobile() {
   }, 0), [visibleCards]);
 
   const positionChoices = useMemo<Choice[]>(() => {
-    const groups = form.schedule_groups || [];
-    const serviceOnly = groups.length === 1 && groups[0] === 'service';
+    const selectedGroups = form.schedule_groups || [];
     return POSITION_ORDER.flatMap((definition) => {
       const match = positions.find((item: any) => definition.aliases.includes(normalize(item.name)));
       if (!match) return [];
-      if (serviceOnly && isHotelPositionName(match.name)) return [];
-      if (!serviceOnly && (groups.includes('front_office') || groups.includes('housekeeping')) && !isHotelPositionName(match.name)) return [];
-      if (groups.length === 1 && groups[0] === 'front_office' && normalize(match.name) !== 'frontoffice') return [];
-      if (groups.length === 1 && groups[0] === 'housekeeping' && !['housekeeping','houskeeping'].includes(normalize(match.name))) return [];
+      const group = positionGroup(match.name);
+      if (selectedGroups.length && !selectedGroups.includes(group)) return [];
       return [{ value: String(match.id), label: definition.label }];
     });
   }, [positions, form.schedule_groups]);
   const clientChoices = useMemo<Choice[]>(() => clients.map((item: any) => ({ value: String(item.id), label: item.name })), [clients]);
   const locationChoices = useMemo<Choice[]>(() => locations.filter((item: any) => !form.client || String(item.client) === form.client).map((item: any) => ({ value: String(item.id), label: item.name })), [locations, form.client]);
-  const workerChoices = useMemo<Choice[]>(() => workers.map((item: any) => ({ value: String(item.id), label: item.user_detail?.name || item.user_detail?.email || item.employee_number || 'Mitarbeiter' })), [workers]);
+  const workerChoices = useMemo<Choice[]>(() => workers
+    .map((item: any) => ({ value: String(item.id), label: item.user_detail?.name || item.user_detail?.email || item.employee_number || 'Mitarbeiter' }))
+    .filter((item: Choice) => allowedWorkerNames.has(normalize(item.label)))
+    .sort((a: Choice, b: Choice) => a.label.localeCompare(b.label, 'de', { sensitivity: 'base' })), [workers]);
   const selectedWorkerNames = form.workers.map((workerId) => workerChoices.find((choice) => choice.value === workerId)?.label).filter(Boolean).join(', ');
+  const pdfHasHotel = useMemo(() => pdf.clients.some((clientId) => isHotelClientName(clients.find((item: any) => String(item.id) === clientId)?.name)), [clients, pdf.clients]);
 
   function openCreate(date = anchor) {
     setEditing(undefined);
@@ -557,7 +717,7 @@ export default function WiwScheduleMobile() {
       publish_now: card.shift.status !== 'draft',
       confirmation_required: Boolean(card.shift.confirmation_required),
       workers: card.worker?.id ? [String(card.worker.id)] : [],
-      schedule_groups: Array.isArray(card.shift.schedule_groups) ? card.shift.schedule_groups : [],
+      schedule_groups: Array.isArray(card.shift.schedule_groups) && card.shift.schedule_groups.length ? card.shift.schedule_groups : [positionGroup(card.shift.position_name)],
       color_hue: card.shift.color_hue == null ? null : Number(card.shift.color_hue),
       notes: card.shift.notes || '',
       apply_all: false,
@@ -571,6 +731,30 @@ export default function WiwScheduleMobile() {
     if (form.startMinute != null && form.endAbsolute != null) return;
     const start = initialTime();
     setForm((current) => ({ ...current, startMinute: start, endAbsolute: start + 360 }));
+  }
+
+  function openNativeDatePicker() {
+    const input = dateInputRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
+    if (!input) return;
+    try {
+      if (typeof input.showPicker === 'function') input.showPicker();
+      else input.click();
+    } catch {
+      input.click();
+    }
+  }
+
+  function toggleNotes() {
+    if (extrasOpen) {
+      noteRef.current?.blur();
+      setExtrasOpen(false);
+      return;
+    }
+    setExtrasOpen(true);
+    window.setTimeout(() => {
+      noteRef.current?.focus({ preventScroll: true });
+      noteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
   }
 
   async function sendManualReminder() {
@@ -629,6 +813,7 @@ export default function WiwScheduleMobile() {
       return;
     }
     setBusy(true);
+    let createdShiftId = '';
     try {
       const payload: any = {
         client: form.client,
@@ -661,10 +846,11 @@ export default function WiwScheduleMobile() {
         payload.required_count = Math.max(1, Number(form.required_count || 1));
         const selectedWorkers = form.workers.slice(0, payload.required_count);
         // With direct assignments, create as draft first so workers do not receive
-        // an OpenShift push before the assignment is applied. The assign endpoint
-        // publishes any remaining capacity once and sends the correct notifications.
+        // an OpenShift push before the assignment is applied. If OpenShift is off
+        // and nobody is assigned, the shift stays draft and is invisible to workers.
         payload.status = selectedWorkers.length ? 'draft' : (form.publish_now ? 'published' : 'draft');
         const created: any = await api('shifts/', { method: 'POST', body: JSON.stringify(payload) });
+        createdShiftId = String(created?.id || '');
         if (selectedWorkers.length) {
           await api(`shifts/${created.id}/assign/`, {
             method: 'POST',
@@ -673,11 +859,17 @@ export default function WiwScheduleMobile() {
         }
         setToast(`${payload.required_count} separate Schichtkarte${payload.required_count === 1 ? '' : 'n'} erstellt.`);
       }
-      if (savingCopy) setTab('all');
+      if (savingCopy) {
+        setTab('all');
+        if (createdShiftId) setRecentCopyShiftId(createdShiftId);
+      }
+      const targetWeek = monday(form.date);
+      setAnchor(form.date);
       setCopying(false);
       setFormOpen(false);
+      setExtrasOpen(false);
       window.dispatchEvent(new Event('aplus:dashboard-invalidated'));
-      await load();
+      await loadScheduleWeek(targetWeek, false);
     } catch (error: any) {
       setToast(error.message || 'Schicht konnte nicht gespeichert werden.');
     } finally {
@@ -688,6 +880,47 @@ export default function WiwScheduleMobile() {
   function changeWeek(delta: number) {
     setWeekDirection(delta > 0 ? 'next' : 'prev');
     setAnchor((current) => addDays(current, delta));
+    window.setTimeout(() => setWeekDirection(''), 190);
+  }
+
+  function toggleGroupFilter(value: string) {
+    setGroupFilter((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
+  }
+
+  function openPdfExport() {
+    setPdf({ dateFrom: weekStart, dateTo: addDays(weekStart, 6), workers: [], clients: [], groups: [] });
+    setPdfOpen(true);
+  }
+
+  async function downloadPdf() {
+    setPdfBusy(true);
+    try {
+      const params = new URLSearchParams({ date_from: pdf.dateFrom, date_to: pdf.dateTo });
+      if (pdf.workers.length) params.set('workers', pdf.workers.join(','));
+      if (pdf.clients.length) params.set('clients', pdf.clients.join(','));
+      if (pdf.groups.length) params.set('groups', pdf.groups.join(','));
+      const result = await apiBlob(`reports/schedule.pdf?${params.toString()}`);
+      const file = new File([result.blob], result.filename, { type: 'application/pdf' });
+      const share = navigator as Navigator & { canShare?: (data: ShareData) => boolean; share?: (data: ShareData) => Promise<void> };
+      if (share.share && share.canShare?.({ files: [file] })) {
+        await share.share({ title: 'Dienstplan', files: [file] });
+      } else {
+        const url = URL.createObjectURL(result.blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = result.filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      setPdfOpen(false);
+      setToast('Dienstplan-PDF erstellt.');
+    } catch (error: any) {
+      setToast(error?.message || 'PDF konnte nicht erstellt werden.');
+    } finally {
+      setPdfBusy(false);
+    }
   }
 
   if (!active || !mobile || !manager) return null;
@@ -698,6 +931,10 @@ export default function WiwScheduleMobile() {
       <div className="wiw-schedule-tools">
         <div className="wiw-tabs" role="tablist">
           {([['all', 'Alle'], ['open', 'OpenShifts']] as Array<[TabKey, string]>).map(([key, label]) => <button type="button" role="tab" aria-selected={tab === key} key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}</button>)}
+          <button type="button" className="wiw-pdf-button" onClick={openPdfExport}><IonIcon icon={documentTextOutline} />PDF</button>
+        </div>
+        <div className="wiw-group-filters" aria-label="Bereiche filtern">
+          {SCHEDULE_GROUPS.map((choice) => <button type="button" key={choice.value} className={groupFilter.includes(choice.value) ? 'active' : ''} aria-pressed={groupFilter.includes(choice.value)} onClick={() => toggleGroupFilter(choice.value)}>{choice.label}</button>)}
         </div>
         <div className="wiw-search-row"><IonIcon icon={filterOutline} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filtern …" /><button type="button" onClick={() => void load()}>{busy ? '…' : '↻'}</button></div>
       </div>
@@ -718,6 +955,7 @@ export default function WiwScheduleMobile() {
         onTouchStart={(event) => {
           const touch = event.touches[0];
           swipe.current = { x: touch.clientX, y: touch.clientY };
+          swipeTravel.current = 0;
           event.currentTarget.classList.add('is-swipe-dragging');
         }}
         onTouchMove={(event) => {
@@ -725,13 +963,19 @@ export default function WiwScheduleMobile() {
           const touch = event.touches[0];
           const dx = touch.clientX - swipe.current.x;
           const dy = touch.clientY - swipe.current.y;
-          if (Math.abs(dx) < Math.abs(dy) * 1.05) return;
-          const travel = Math.max(-118, Math.min(118, dx * .56));
-          const rotate = Math.max(-9, Math.min(9, dx / 18));
-          event.currentTarget.style.transform = `translate3d(${travel}px,0,0) rotateY(${rotate}deg) scale(.985)`;
-          event.currentTarget.style.opacity = String(Math.max(.58, 1 - Math.abs(dx) / 520));
+          if (Math.abs(dx) < Math.abs(dy) * 1.08) return;
+          swipeTravel.current = Math.max(-105, Math.min(105, dx * .5));
+          if (swipeFrame.current) return;
+          const target = event.currentTarget;
+          swipeFrame.current = window.requestAnimationFrame(() => {
+            swipeFrame.current = undefined;
+            target.style.transform = `translate3d(${swipeTravel.current}px,0,0)`;
+            target.style.opacity = String(Math.max(.72, 1 - Math.abs(swipeTravel.current) / 430));
+          });
         }}
         onTouchEnd={(event) => {
+          if (swipeFrame.current) window.cancelAnimationFrame(swipeFrame.current);
+          swipeFrame.current = undefined;
           event.currentTarget.classList.remove('is-swipe-dragging');
           event.currentTarget.style.transform = '';
           event.currentTarget.style.opacity = '';
@@ -740,9 +984,11 @@ export default function WiwScheduleMobile() {
           const dx = touch.clientX - swipe.current.x;
           const dy = touch.clientY - swipe.current.y;
           swipe.current = undefined;
-          if (tab !== 'open' && Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.15) changeWeek(dx < 0 ? 7 : -7);
+          if (tab !== 'open' && Math.abs(dx) > 44 && Math.abs(dx) > Math.abs(dy) * 1.12) changeWeek(dx < 0 ? 7 : -7);
         }}
         onTouchCancel={(event) => {
+          if (swipeFrame.current) window.cancelAnimationFrame(swipeFrame.current);
+          swipeFrame.current = undefined;
           swipe.current = undefined;
           event.currentTarget.classList.remove('is-swipe-dragging');
           event.currentTarget.style.transform = '';
@@ -753,10 +999,10 @@ export default function WiwScheduleMobile() {
           const header = formatDayHeader(day);
           const dayCards = byDay[day] || [];
           return <section className="wiw-day-section" id={`wiw-day-${day}`} key={day}>
-            <header><strong>{header.weekday}</strong><span>{header.date}</span><em>{dayCards.length}</em></header>
-            {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'}`} style={shiftCardStyle(card.shift)} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
+            <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}</em></header>
+            {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'} ${recentCopyShiftId && String(card.shift.id) === recentCopyShiftId ? 'is-copy-entering' : ''}`} style={shiftCardStyle(card.shift)} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
               <div className="wiw-card-line primary"><b>{card.worker?.name || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}{card.isOpen && card.shift.status !== 'draft' ? <span className="wiw-open-alert">!</span> : null}</b><span>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</span></div>
-              <div className="wiw-card-line secondary"><span className={card.isOpen ? 'open' : ''}>{card.shift.position_name || 'Schicht'}</span><small>{card.shift.location_name || ''}</small></div>
+              <div className="wiw-card-line secondary"><span className={card.isOpen ? 'open' : ''}>{card.shift.position_name || 'Schicht'}</span><small>{card.shift.client_name || ''}{card.shift.location_name ? ` · ${card.shift.location_name}` : ''}</small></div>
             </button></React.Fragment>)}
             {tab !== 'open' && !dayCards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
           </section>;
@@ -767,27 +1013,31 @@ export default function WiwScheduleMobile() {
       {tab !== 'open' ? <div className="wiw-week-total"><span>Gesamtstunden</span><strong>{weekHours.toFixed(1)}</strong></div> : null}
       <button type="button" className="wiw-create-fab" aria-label="Schicht anlegen" onClick={() => openCreate(anchor)}>+</button>
 
-      {formOpen ? <div className="wiw-shift-form-screen" data-testid="wiw-shift-form">
-        <header className="wiw-form-topbar"><button type="button" onClick={() => setFormOpen(false)}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null} onClick={() => void save()}>Sichern</button></header>
-        <div className="wiw-form-scroll">
-          <Row icon={calendarOutline} label={formatDateRow(form.date)} onClick={() => setDateOpen(true)} />
+      {formOpen ? <div ref={formScreenRef} className="wiw-shift-form-screen" data-testid="wiw-shift-form">
+        <header className="wiw-form-topbar"><button type="button" onClick={() => { noteRef.current?.blur(); setFormOpen(false); }}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null} onClick={() => void save()}>Sichern</button></header>
+        <input ref={dateInputRef} className="wiw-native-date-input" type="date" value={form.date} onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))} tabIndex={-1} aria-hidden="true" />
+        <div ref={formScrollRef} className="wiw-form-scroll">
+          <Row icon={calendarOutline} label={formatDateRow(form.date)} onClick={openNativeDatePicker} />
           {isHotelClientName(selectedClientName) ? <div className="wiw-hotel-presets">{HOTEL_TIME_PRESETS.map((preset) => <button type="button" key={preset.key} onClick={() => setForm((current) => ({ ...current, startMinute: preset.start, endAbsolute: preset.end }))}><b>{preset.label}</b><small>{formatMinute(preset.start)}–{formatMinute(preset.end)}</small></button>)}</div> : null}
           <div className="wiw-time-row-wrap">
-            <Row icon={timeOutline} label={form.startMinute == null || form.endAbsolute == null ? 'Wähle Zeitrahmen' : `${formatMinute(form.startMinute)} ${form.endAbsolute >= 1440 ? '~ ' : '– '}${formatMinute(form.endAbsolute)}`} muted={form.startMinute == null} onClick={() => { ensureTime(); setTimeOpen((value) => !value); }} />
+            <Row
+              icon={timeOutline}
+              label={form.startMinute == null || form.endAbsolute == null ? 'Wähle Zeitrahmen' : `${formatMinute(form.startMinute)} ${form.endAbsolute >= 1440 ? '~ ' : '– '}${formatMinute(form.endAbsolute)}`}
+              muted={form.startMinute == null}
+              onClick={() => { ensureTime(); setTimeOpen((value) => !value); }}
+              trailing={<span className="wiw-time-pause-tail"><small>Pause: {automaticBreak(form.startMinute, form.endAbsolute)} Min</small><IonIcon className="wiw-row-chevron" icon={chevronForwardOutline} /></span>}
+            />
             {timeOpen && form.startMinute != null && form.endAbsolute != null ? <TimeFrameWheel start={form.startMinute} end={form.endAbsolute} onChange={(start, end) => setForm((current) => ({ ...current, startMinute: start, endAbsolute: end }))} /> : null}
           </div>
           <Row icon={calendarOutline} label={form.schedule_groups.length ? form.schedule_groups.map((value) => SCHEDULE_GROUPS.find((item) => item.value === value)?.label || value).join(', ') : 'Wähle Zeitplan'} muted={!form.schedule_groups.length} onClick={() => setSheet('groups')} />
 
           <div className="wiw-form-separator" />
           <Row icon={briefcaseOutline} label={positionChoices.find((item) => item.value === form.position)?.label || 'Füge Position hinzu'} muted={!form.position} onClick={() => setSheet('position')} />
-          <Row icon={locationOutline} label={locationChoices.find((item) => item.value === form.location)?.label || 'Jobstandort'} muted={!form.location} onClick={() => form.client ? setSheet('location') : setSheet('client')} />
-          <Row icon={peopleOutline} label={clientChoices.find((item) => item.value === form.client)?.label || 'Kunde auswählen'} muted={!form.client} onClick={() => setSheet('client')} />
+          <Row field="client" icon={peopleOutline} label={clientChoices.find((item) => item.value === form.client)?.label || 'Kunde auswählen'} muted={!form.client} onClick={() => setSheet('client')} />
+          <Row field="location" icon={locationOutline} label={locationChoices.find((item) => item.value === form.location)?.label || 'Jobstandort'} muted={!form.location} onClick={() => form.client ? setSheet('location') : setSheet('client')} />
 
           <div className="wiw-form-separator" />
-          <Row icon={addCircleOutline} label={`Pause automatisch · ${automaticBreak(form.startMinute, form.endAbsolute)} Min.`} green />
-
-          <div className="wiw-form-separator" />
-          <Row icon={personOutline} label="OpenShift" trailing={<Switch checked={form.publish_now} onChange={(value) => setForm((current) => ({ ...current, publish_now: value }))} />} />
+          <Row icon={personOutline} label="OpenShift" value={form.publish_now ? 'Für passende Mitarbeiter sichtbar' : 'Aus · ohne Zuweisung nur als Entwurf'} trailing={<Switch checked={form.publish_now} onChange={(value) => setForm((current) => ({ ...current, publish_now: value }))} />} />
           {!editing ? <Row icon={layersOutline} label={`${form.required_count} Schicht${form.required_count === 1 ? '' : 'en'}`} trailing={<div className="wiw-count-stepper"><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: Math.max(current.workers.length || 1, current.required_count - 1) }))}>−</button><b>{form.required_count}</b><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: current.required_count + 1 }))}>+</button></div>} /> : <Row icon={layersOutline} label="1 Schichtkarte" value={editing.workerName || 'OpenShift'} emphasizeValue={Boolean(editing.workerName)} />}
           <Row icon={checkmarkOutline} label="Erfordere Übernahme-Bestätigung" trailing={<Switch checked={form.confirmation_required} onChange={(value) => setForm((current) => ({ ...current, confirmation_required: value }))} />} />
           <Row icon={peopleOutline} label={editing ? (form.workers.length ? 'Mitarbeiter ändern' : 'Mitarbeiter zuweisen') : (form.workers.length ? `${form.workers.length} Benutzer direkt zugewiesen` : 'Geeignete Benutzer anzeigen')} value={selectedWorkerNames || undefined} emphasizeValue={Boolean(selectedWorkerNames)} muted={!form.workers.length} onClick={() => setSheet('workers')} />
@@ -802,8 +1052,8 @@ export default function WiwScheduleMobile() {
             onClick={() => setSheet('color')}
             trailing={<span className="wiw-color-row-tail"><i style={form.color_hue == null ? ({ background: formPalette.accent } as React.CSSProperties) : ({ '--wiw-color-hue': String(form.color_hue ?? formAutoHue) } as React.CSSProperties)} /><b>{form.color_hue == null ? 'Kundenfarbe · automatisch' : (COLOR_CHOICES.find((choice) => choice.hue === form.color_hue)?.label || 'Individuell')}</b><IonIcon className="wiw-row-chevron" icon={chevronForwardOutline} /></span>}
           />
-          <Row icon={documentTextOutline} label={form.notes ? 'Notiz bearbeiten' : 'Füge Notiz hinzu'} onClick={() => setExtrasOpen((value) => !value)} />
-          {extrasOpen ? <div className="wiw-extra-options"><label>Notiz<textarea value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Hinweis für Mitarbeiter …" /></label></div> : null}
+          <Row icon={documentTextOutline} label={form.notes ? 'Notiz bearbeiten' : 'Füge Notiz hinzu'} onClick={toggleNotes} />
+          {extrasOpen ? <div className="wiw-extra-options"><label>Notiz<textarea ref={noteRef} value={form.notes} onFocus={() => window.setTimeout(() => noteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 120)} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Hinweis für Mitarbeiter …" /></label></div> : null}
 
           {editing ? <>
             <div className="wiw-form-separator" />
@@ -813,13 +1063,25 @@ export default function WiwScheduleMobile() {
           </> : null}
         </div>
 
-        {dateOpen ? <div className="wiw-sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setDateOpen(false); }}><section className="wiw-date-sheet"><header><b>Datum</b><button type="button" onClick={() => setDateOpen(false)}>Fertig</button></header><input type="date" value={form.date} onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))} /><div><button type="button" onClick={() => setForm((current) => ({ ...current, date: berlinToday() }))}>Heute</button><button type="button" onClick={() => setForm((current) => ({ ...current, date: addDays(berlinToday(), 1) }))}>Morgen</button></div></section></div> : null}
-        {sheet === 'client' ? <ChoiceSheet title="Kunde" choices={clientChoices} selected={form.client} onClose={() => setSheet('')} onSelect={(choice) => { const nextName = clients.find((item: any) => String(item.id) === choice.value)?.name; const matchingLocations = locations.filter((item: any) => String(item.client) === choice.value); const uniqueLocation = matchingLocations.length === 1 ? String(matchingLocations[0].id) : ''; const nextGroups = isHotelClientName(nextName) ? ['front_office', 'housekeeping'] : ['service']; setForm((current) => { const currentPosition = positions.find((item: any) => String(item.id) === current.position); const incompatible = (nextGroups.length === 1 && nextGroups[0] === 'service' && isHotelPositionName(currentPosition?.name)) || (isHotelClientName(nextName) && !isHotelPositionName(currentPosition?.name)); return { ...current, client: choice.value, location: uniqueLocation, position: incompatible ? '' : current.position, schedule_groups: nextGroups }; }); setSheet(matchingLocations.length > 1 ? 'location' : ''); }} /> : null}
+        {sheet === 'client' ? <ChoiceSheet title="Kunde" choices={clientChoices} selected={form.client} onClose={() => setSheet('')} onSelect={(choice) => { const nextName = clients.find((item: any) => String(item.id) === choice.value)?.name; const matchingLocations = locations.filter((item: any) => String(item.client) === choice.value); const uniqueLocation = matchingLocations.length === 1 ? String(matchingLocations[0].id) : ''; setForm((current) => ({ ...current, client: choice.value, location: uniqueLocation, schedule_groups: current.schedule_groups.length ? current.schedule_groups : (isHotelClientName(nextName) ? ['front_office', 'housekeeping'] : ['service']) })); setSheet(matchingLocations.length > 1 ? 'location' : ''); }} /> : null}
         {sheet === 'position' ? <ChoiceSheet title="Position" choices={positionChoices} selected={form.position} onClose={() => setSheet('')} onSelect={(choice) => { setForm((current) => ({ ...current, position: choice.value })); setSheet(''); }} /> : null}
         {sheet === 'location' ? <ChoiceSheet title="Jobstandort" choices={locationChoices} selected={form.location} onClose={() => setSheet('')} onSelect={(choice) => { setForm((current) => ({ ...current, location: choice.value })); setSheet(''); }} /> : null}
-        {sheet === 'groups' ? <MultiChoiceSheet title="Zeitplan" choices={SCHEDULE_GROUPS} selected={form.schedule_groups} onClose={() => setSheet('')} onChange={(values) => setForm((current) => { const groups = values.includes('service') ? ['service'] : values; const currentPosition = positions.find((item: any) => String(item.id) === current.position); return { ...current, schedule_groups: groups, position: groups.length === 1 && groups[0] === 'service' && isHotelPositionName(currentPosition?.name) ? '' : current.position }; })} /> : null}
+        {sheet === 'groups' ? <MultiChoiceSheet title="Zeitplan" choices={SCHEDULE_GROUPS} selected={form.schedule_groups} onClose={() => setSheet('')} onChange={(values) => setForm((current) => { const currentPosition = positions.find((item: any) => String(item.id) === current.position); const keepPosition = !current.position || !values.length || values.includes(positionGroup(currentPosition?.name)); return { ...current, schedule_groups: values, position: keepPosition ? current.position : '' }; })} /> : null}
         {sheet === 'color' ? <ColorSheet selected={form.color_hue} autoHue={formAutoHue} onClose={() => setSheet('')} onSelect={(hue) => setForm((current) => ({ ...current, color_hue: hue }))} /> : null}
         {sheet === 'workers' ? <MultiChoiceSheet title={editing ? 'Mitarbeiter auswählen / ändern' : 'Geeignete Benutzer'} choices={workerChoices} selected={form.workers} limit={editing ? 1 : form.required_count} onClose={() => setSheet('')} onChange={(values) => setForm((current) => ({ ...current, workers: values, apply_all: editing ? false : current.apply_all }))} /> : null}
+      </div> : null}
+
+      {pdfOpen ? <div className="wiw-sheet-backdrop wiw-pdf-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !pdfBusy) setPdfOpen(false); }}>
+        <section className="wiw-pdf-sheet">
+          <header><div><b>Dienstplan als PDF</b><small>Filter auswählen und exportieren</small></div><button type="button" onClick={() => setPdfOpen(false)}>Fertig</button></header>
+          <div className="wiw-pdf-scroll">
+            <div className="wiw-pdf-dates"><label>Von<input type="date" value={pdf.dateFrom} onChange={(event) => setPdf((current) => ({ ...current, dateFrom: event.target.value }))}/></label><label>Bis<input type="date" value={pdf.dateTo} onChange={(event) => setPdf((current) => ({ ...current, dateTo: event.target.value }))}/></label></div>
+            <div className="wiw-pdf-filter-block"><b>Mitarbeiter</b><div className="wiw-pdf-chip-grid">{workerChoices.map((choice) => <button type="button" key={choice.value} className={pdf.workers.includes(choice.value) ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, workers: current.workers.includes(choice.value) ? current.workers.filter((item) => item !== choice.value) : [...current.workers, choice.value] }))}>{choice.label}</button>)}</div><small>Nichts ausgewählt = alle Mitarbeiter</small></div>
+            <div className="wiw-pdf-filter-block"><b>Kunden</b><div className="wiw-pdf-chip-grid">{clientChoices.map((choice) => <button type="button" key={choice.value} className={pdf.clients.includes(choice.value) ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, clients: current.clients.includes(choice.value) ? current.clients.filter((item) => item !== choice.value) : [...current.clients, choice.value] }))}>{choice.label}</button>)}</div><small>Nichts ausgewählt = alle Kunden</small></div>
+            <div className="wiw-pdf-filter-block"><b>{pdfHasHotel ? 'Hotel-Bereich / Zeitplan' : 'Zeitplan'}</b><div className="wiw-pdf-chip-grid compact">{SCHEDULE_GROUPS.map((choice) => <button type="button" key={choice.value} className={pdf.groups.includes(choice.value) ? 'active' : ''} onClick={() => setPdf((current) => ({ ...current, groups: current.groups.includes(choice.value) ? current.groups.filter((item) => item !== choice.value) : [...current.groups, choice.value] }))}>{choice.label}</button>)}</div><small>Nichts ausgewählt = alle Bereiche</small></div>
+          </div>
+          <footer><button type="button" onClick={() => setPdfOpen(false)}>Abbrechen</button><button type="button" className="primary" disabled={pdfBusy || !pdf.dateFrom || !pdf.dateTo} onClick={() => void downloadPdf()}>{pdfBusy ? 'PDF wird erstellt…' : 'PDF erstellen'}</button></footer>
+        </section>
       </div> : null}
 
       {toast ? <button type="button" className="wiw-toast" onClick={() => setToast('')}>{toast}</button> : null}

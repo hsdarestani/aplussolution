@@ -3,12 +3,19 @@ from datetime import timedelta
 from celery import shared_task
 from django.conf import settings
 from django.core.mail import send_mail
+from django.core.management import call_command
 from django.utils import timezone
 
 from .document_center import dispatch_contract_reminders
 from .models import Notification, Shift, ShiftImportPackage
 from .operational_notifications import dispatch_attendance_reminders
 from .shift_slots import ShiftSlot
+
+
+def _reapply_schedule_worker_config(run):
+    """Keep business-owned Dienstplan worker rules authoritative over WIW imports."""
+    if getattr(run, 'status', '') == 'success':
+        call_command('configure_schedule_workers')
 
 
 @shared_task
@@ -69,6 +76,7 @@ def sync_when_i_work(self, mode='incremental', triggered_by_id=None):
     from .wiw_sync import WhenIWorkSynchronizer
     user = User.objects.filter(pk=triggered_by_id).first() if triggered_by_id else None
     run = WhenIWorkSynchronizer(triggered_by=user).sync(mode=mode)
+    _reapply_schedule_worker_config(run)
     return {'id': str(run.id), 'status': run.status, 'counts': run.counts, 'errors': run.errors}
 
 
@@ -84,6 +92,7 @@ def process_wiw_webhook(self, event_id):
     from .wiw_sync import WhenIWorkSynchronizer
     try:
         run = WhenIWorkSynchronizer().sync(mode='incremental')
+        _reapply_schedule_worker_config(run)
         event.processed_at = timezone.now()
         event.processing_error = ''
         event.save(update_fields=['processed_at', 'processing_error', 'updated_at'])

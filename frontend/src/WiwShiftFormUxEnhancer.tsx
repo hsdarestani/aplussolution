@@ -41,13 +41,11 @@ function directActionRows() {
 }
 
 function locationRow() {
-  const rows = directActionRows();
-  return rows[3] || rows.find((row) => text(row).includes('Jobstandort')) || null;
+  return findForm()?.querySelector<HTMLButtonElement>('[data-field="location"]') || null;
 }
 
 function clientRow() {
-  const rows = directActionRows();
-  return rows[4] || null;
+  return findForm()?.querySelector<HTMLButtonElement>('[data-field="client"]') || null;
 }
 
 function noteRow() {

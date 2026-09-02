@@ -15,6 +15,11 @@ REPORT_FILE="$BACKUP_DIR/wiw-final-report-$STAMP.log"
 COUNTS_BEFORE="$BACKUP_DIR/pre-wiw-counts-$STAMP.log"
 COUNTS_AFTER="$BACKUP_DIR/post-wiw-counts-$STAMP.log"
 
+apply_schedule_worker_config() {
+  echo "Applying approved Dienstplan worker groups and visibility..."
+  docker compose exec -T backend python manage.py configure_schedule_workers
+}
+
 run_mobile_shift_probe() {
   echo "Running rollback-only production mobile shift CRUD probe..."
   docker compose exec -T backend python manage.py diagnose_mobile_shift_crud
@@ -23,6 +28,10 @@ run_mobile_shift_probe() {
 if [[ -f "$DONE_MARKER" ]]; then
   echo "WIW bounded full reset already completed; marker: $DONE_MARKER"
   cat "$DONE_MARKER"
+  # Reapply the business-owned worker configuration on every deployment. This
+  # keeps WIW refreshes from reintroducing removed workforce rows or resetting
+  # Dienstplan group/client visibility.
+  apply_schedule_worker_config
   # Even after the destructive one-time migration is retired, every release
   # should prove the exact mobile create/edit/assign paths against current
   # production-shaped WIW data. The command wraps every write in a rollback.
@@ -107,6 +116,7 @@ perform_clean_import() {
 
   docker compose exec -T backend python manage.py shell -c "from django.conf import settings; from core.models import User,WorkerProfile,ClientCompany,Location,Position,Shift,TimeEntry,Availability,TimeOffRequest; assert settings.WIW_SYNC_ENABLED is False; print({'users':User.objects.count(),'workers':WorkerProfile.objects.count(),'clients':ClientCompany.objects.count(),'locations':Location.objects.count(),'positions':Position.objects.count(),'shifts':Shift.objects.count(),'times':TimeEntry.objects.count(),'availabilities':Availability.objects.count(),'requests':TimeOffRequest.objects.count(),'wiw_sync_enabled':settings.WIW_SYNC_ENABLED})" | tee "$COUNTS_AFTER" || return 1
 
+  apply_schedule_worker_config || return 1
   docker compose up -d celery celery-beat >/dev/null || return 1
   curl -fsS --retry 12 --retry-delay 5 https://solution.smarbiz.sbs/health/ >/dev/null || return 1
   run_mobile_shift_probe || return 1

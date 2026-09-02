@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, akten_views, announcement_api, attendance_actions, attendance_views, automation_views, availability_admin, client_order_planning, client_portal_views, contract_views, document_catalog_views, document_center_views, global_search_views, integration_views, live_admin_center, live_operations, native_operations, oauth_views, payroll_views, portal_views, push_views, searchable_views, shift_card_admin, shift_slot_actions, shift_views, store_review_views, time_views, views, wiw_dashboard, worker_portal_views
+from . import admin_center_views, advanced_views, akten_views, announcement_api, attendance_actions, attendance_views, automation_views, availability_admin, client_order_planning, client_portal_views, contract_views, document_catalog_views, document_center_views, global_search_views, integration_views, live_admin_center, live_operations, mobile_schedule, native_operations, oauth_views, payroll_views, portal_views, push_views, schedule_reports, searchable_views, shift_card_admin, shift_slot_actions, shift_views, store_review_views, time_views, views, wiw_dashboard, worker_portal_views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -46,8 +46,10 @@ urlpatterns = [
     path('push/devices/register/', push_views.register_push_device),
     path('push/devices/unregister/', push_views.unregister_push_device),
     path('push/status/', push_views.push_status),
+    path('push/settings/', push_views.push_settings),
     path('admin/exceptions/', live_admin_center.admin_exception_center),
     path('admin/mobile-dashboard/', wiw_dashboard.mobile_dashboard),
+    path('admin/mobile-schedule/', mobile_schedule.mobile_schedule),
     path('search/global/', global_search_views.global_search),
     path('document-center/', document_center_views.document_center),
     path('document-center/templates/<slug:slug>/source/', document_center_views.upload_template_source),
@@ -106,6 +108,7 @@ urlpatterns = [
     path('working-time/backup/', automation_views.worktime_backup),
     path('reports/timesheets.csv', advanced_views.export_timesheets),
     path('reports/schedule.csv', native_operations.export_schedule),
+    path('reports/schedule.pdf', schedule_reports.export_schedule_pdf),
     path('reports/payroll-estimate.csv', advanced_views.export_payroll_estimate),
     # Keep the DRF router last so fixed custom endpoints such as
     # workers/portal-status/ and workers/bulk-invite/ are not interpreted
