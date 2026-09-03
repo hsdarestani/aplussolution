@@ -51,6 +51,7 @@ import './wiw-client-divider-polish.css';
 import './schedule-desktop-polish.css';
 import './wiw-mobile-20260902.css';
 import './mobile-schedule-filter-removal.css';
+import './wiw-ios-date-note-polish.css';
 
 installBerlinLocaleDefaults();
 installOperationalFetchResilience();
