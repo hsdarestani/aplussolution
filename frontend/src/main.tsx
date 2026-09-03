@@ -30,6 +30,7 @@ import SchedulePdfLocationFilter from './SchedulePdfLocationFilter';
 import WiwScheduleMobile from './WiwScheduleMobile';
 import WiwEmployeeScheduleMobile from './WiwEmployeeScheduleMobile';
 import WiwShiftFormUxEnhancer from './WiwShiftFormUxEnhancer';
+import WiwWorkerPickerEligibilityEnhancer from './WiwWorkerPickerEligibilityEnhancer';
 import ShiftReleaseApprovalPanel from './ShiftReleaseApprovalPanel';
 import AdminScheduleTools from './AdminScheduleTools';
 import AdminAvailabilityManager from './AdminAvailabilityManager';
@@ -81,6 +82,7 @@ function renderApp() {
           <WiwScheduleMobile />
           <WiwEmployeeScheduleMobile />
           <WiwShiftFormUxEnhancer />
+          <WiwWorkerPickerEligibilityEnhancer />
           <ShiftReleaseApprovalPanel />
           <AdminScheduleTools />
           <AdminAvailabilityManager />
