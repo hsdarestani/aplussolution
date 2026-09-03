@@ -174,8 +174,26 @@ export async function api<T = any>(path: string, options: RequestInit = {}, retr
   return response.status === 204 ? ({} as T) : response.json();
 }
 
+function fallbackBlobFilename(path: string) {
+  const [pathname, query = ''] = path.split('?', 2);
+  if (pathname.replace(/^\//, '') === 'reports/schedule.pdf') {
+    const params = new URLSearchParams(query);
+    const formatDate = (value: string | null) => {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+      return match ? `${match[3]}.${match[2]}.${match[1]}` : '';
+    };
+    const from = formatDate(params.get('date_from'));
+    const to = formatDate(params.get('date_to'));
+    if (from && to) return `Dienstplan_${from}_bis_${to}.pdf`;
+    if (from) return `Dienstplan_ab_${from}.pdf`;
+    return 'Dienstplan.pdf';
+  }
+  return 'Download.pdf';
+}
+
 export async function apiBlob(path: string, options: RequestInit = {}, retry = true): Promise<{ blob: Blob; filename: string }> {
   const normalizedPath = path.replace(/^\//, '');
+  const fallbackFilename = fallbackBlobFilename(normalizedPath);
   const response = await request(`${API}/${normalizedPath}`, { ...options, headers: headers(options) });
   if (response.status === 401 && retry) {
     const token = await refreshAccessToken();
@@ -183,7 +201,7 @@ export async function apiBlob(path: string, options: RequestInit = {}, retry = t
       const retried = await request(`${API}/${normalizedPath}`, { ...options, headers: headers(options, token) });
       if (!retried.ok) throw new Error(await parseError(retried));
       const disposition = retried.headers.get('content-disposition') || '';
-      const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] || 'download.pdf';
+      const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] || fallbackFilename;
       return { blob: await retried.blob(), filename };
     }
     localStorage.removeItem('access');
@@ -192,7 +210,7 @@ export async function apiBlob(path: string, options: RequestInit = {}, retry = t
   }
   if (!response.ok) throw new Error(await parseError(response));
   const disposition = response.headers.get('content-disposition') || '';
-  const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] || 'download.pdf';
+  const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] || fallbackFilename;
   return { blob: await response.blob(), filename };
 }
 
