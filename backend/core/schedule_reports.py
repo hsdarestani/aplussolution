@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta
+from collections import defaultdict
+from datetime import date, datetime, time, timedelta
 from io import BytesIO
 from uuid import UUID
 from xml.sax.saxutils import escape
@@ -13,7 +14,7 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from rest_framework.decorators import api_view
 
 from .models import ClientCompany, Shift, User, WorkerProfile
@@ -27,6 +28,7 @@ GROUP_LABELS = {
     'front_office': 'Front Office',
     'housekeeping': 'Housekeeping',
 }
+WEEKDAY_LABELS = ['MO', 'DI', 'MI', 'DO', 'FR', 'SA', 'SO']
 
 
 def _manager_required(request):
@@ -109,6 +111,7 @@ def _report_rows(filters):
         groups = _shift_groups(shift)
         if selected_groups and not selected_groups.intersection(groups):
             continue
+
         workers = []
         seen = set()
         for slot in shift.slots.all():
@@ -121,22 +124,51 @@ def _report_rows(filters):
         if shift.worker_id and str(shift.worker_id) not in seen:
             workers.append(shift.worker)
             seen.add(str(shift.worker_id))
+
         if selected_workers and not selected_workers.intersection(seen):
             continue
         if selected_workers:
             workers = [worker for worker in workers if str(worker.pk) in selected_workers]
+
         start = timezone.localtime(shift.starts_at)
         end = timezone.localtime(shift.ends_at)
         result.append({
-            'date': start.strftime('%d.%m.%Y'),
+            'date': start.date(),
             'time': f'{start:%H:%M}–{end:%H:%M}',
             'client': shift.client.name,
             'location': shift.location.name,
             'groups': ', '.join(GROUP_LABELS.get(group, group) for group in groups),
-            'workers': ', '.join(_worker_label(worker) for worker in workers) or 'OpenShift',
-            'pause': f'{int(shift.break_minutes or 0)} Min',
+            'worker_labels': [_worker_label(worker) for worker in workers],
+            'pause_minutes': int(shift.break_minutes or 0),
         })
     return result
+
+
+def _week_chunks(start: date, end: date):
+    current = start
+    while current <= end:
+        chunk_end = min(end, current + timedelta(days=6))
+        yield [current + timedelta(days=offset) for offset in range((chunk_end - current).days + 1)]
+        current = chunk_end + timedelta(days=1)
+
+
+def _cell_html(entries, *, show_client: bool, show_group: bool) -> str:
+    if not entries:
+        return ''
+
+    blocks = []
+    for entry in entries:
+        lines = [f'<b>{escape(entry["time"])}</b>']
+        if show_client:
+            lines.append(escape(entry['client']))
+        if entry['location']:
+            lines.append(escape(entry['location']))
+        if show_group and entry['groups']:
+            lines.append(f'<font color="#667085">{escape(entry["groups"])}</font>')
+        if entry['pause_minutes']:
+            lines.append(f'<font color="#98A2B3">Pause {entry["pause_minutes"]} Min</font>')
+        blocks.append('<br/>'.join(lines))
+    return '<br/><br/>'.join(blocks)
 
 
 @api_view(['GET'])
@@ -150,82 +182,169 @@ def export_schedule_pdf(request):
     document = SimpleDocTemplate(
         output,
         pagesize=landscape(A4),
-        leftMargin=10 * mm,
-        rightMargin=10 * mm,
-        topMargin=10 * mm,
-        bottomMargin=10 * mm,
+        leftMargin=9 * mm,
+        rightMargin=9 * mm,
+        topMargin=8 * mm,
+        bottomMargin=8 * mm,
         title='Dienstplan',
         author='A+ Solution GmbH',
     )
+
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
-        'ReportTitle', parent=styles['Heading1'], alignment=TA_CENTER, fontName='Helvetica-Bold', fontSize=15, leading=18
+        'ReportTitle',
+        parent=styles['Heading1'],
+        alignment=TA_CENTER,
+        fontName='Helvetica-Bold',
+        fontSize=14,
+        leading=17,
+        textColor=colors.HexColor('#1F2937'),
+        spaceAfter=2,
     )
     meta_style = ParagraphStyle(
-        'ReportMeta', parent=styles['Normal'], alignment=TA_CENTER, fontName='Helvetica', fontSize=8, textColor=colors.HexColor('#475467')
+        'ReportMeta',
+        parent=styles['Normal'],
+        alignment=TA_CENTER,
+        fontName='Helvetica',
+        fontSize=7.5,
+        leading=10,
+        textColor=colors.HexColor('#667085'),
     )
-    cell_style = ParagraphStyle('ReportCell', parent=styles['Normal'], fontName='Helvetica', fontSize=7, leading=9)
-    head_style = ParagraphStyle('ReportHead', parent=cell_style, fontName='Helvetica-Bold', textColor=colors.white)
+    head_style = ParagraphStyle(
+        'ReportHead',
+        parent=styles['Normal'],
+        alignment=TA_CENTER,
+        fontName='Helvetica-Bold',
+        fontSize=7.2,
+        leading=9,
+        textColor=colors.white,
+    )
+    name_style = ParagraphStyle(
+        'ReportName',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=7.2,
+        leading=9,
+        textColor=colors.HexColor('#263238'),
+    )
+    cell_style = ParagraphStyle(
+        'ReportCell',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=6.2,
+        leading=7.5,
+        textColor=colors.HexColor('#344054'),
+    )
+    empty_style = ParagraphStyle(
+        'ReportEmpty',
+        parent=styles['Normal'],
+        alignment=TA_CENTER,
+        fontName='Helvetica',
+        fontSize=8,
+        textColor=colors.HexColor('#98A2B3'),
+    )
 
-    client_names = list(ClientCompany.objects.filter(pk__in=filters['clients']).order_by('name').values_list('name', flat=True))
-    worker_names = [
-        _worker_label(worker)
-        for worker in WorkerProfile.objects.filter(pk__in=filters['workers']).select_related('user').order_by('user__last_name', 'user__first_name')
-    ]
+    client_names = list(
+        ClientCompany.objects.filter(pk__in=filters['clients']).order_by('name').values_list('name', flat=True)
+    )
+    selected_workers = list(
+        WorkerProfile.objects.filter(pk__in=filters['workers'])
+        .select_related('user')
+        .order_by('user__last_name', 'user__first_name')
+    )
+    selected_worker_names = [_worker_label(worker) for worker in selected_workers]
     group_names = [GROUP_LABELS.get(value, value) for value in filters['groups']]
-    meta = f"{filters['start']:%d.%m.%Y} – {filters['end']:%d.%m.%Y}"
-    details = []
-    if client_names:
-        details.append('Kunden: ' + ', '.join(client_names))
-    if worker_names:
-        details.append('Mitarbeiter: ' + ', '.join(worker_names))
-    if group_names:
-        details.append('Bereiche: ' + ', '.join(group_names))
 
-    story = [Paragraph('Dienstplan', title_style), Paragraph(meta, meta_style)]
-    if details:
-        story.append(Paragraph(escape(' · '.join(details)), meta_style))
-    story.append(Spacer(1, 5 * mm))
+    # A filtered customer or area belongs in the compact report heading instead
+    # of being repeated in every shift cell. Worker names always live in the
+    # fixed left column, matching the familiar weekly planning grid.
+    show_client_in_cells = len(client_names) != 1
+    show_group_in_cells = len(group_names) != 1
 
-    table_data = [[
-        Paragraph('Datum', head_style),
-        Paragraph('Zeit', head_style),
-        Paragraph('Kunde', head_style),
-        Paragraph('Einsatzort', head_style),
-        Paragraph('Bereich', head_style),
-        Paragraph('Mitarbeiter', head_style),
-        Paragraph('Pause', head_style),
-    ]]
+    all_worker_names = []
+    seen_names = set()
+    for name in selected_worker_names:
+        if name not in seen_names:
+            seen_names.add(name)
+            all_worker_names.append(name)
     for row in rows:
-        table_data.append([
-            Paragraph(row['date'], cell_style),
-            Paragraph(row['time'], cell_style),
-            Paragraph(escape(row['client']), cell_style),
-            Paragraph(escape(row['location']), cell_style),
-            Paragraph(row['groups'], cell_style),
-            Paragraph(escape(row['workers']), cell_style),
-            Paragraph(row['pause'], cell_style),
-        ])
-    if not rows:
-        table_data.append(['', '', '', Paragraph('Keine Schichten für diese Filter.', cell_style), '', '', ''])
+        labels = row['worker_labels'] or ['OpenShift']
+        for name in labels:
+            if name not in seen_names:
+                seen_names.add(name)
+                all_worker_names.append(name)
+    all_worker_names.sort(key=lambda value: (value == 'OpenShift', value.lower()))
 
-    table = Table(
-        table_data,
-        repeatRows=1,
-        colWidths=[22 * mm, 27 * mm, 42 * mm, 48 * mm, 35 * mm, 74 * mm, 20 * mm],
-        hAlign='CENTER',
-    )
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#162A46')),
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('GRID', (0, 0), (-1, -1), 0.35, colors.HexColor('#D0D5DD')),
-        ('LEFTPADDING', (0, 0), (-1, -1), 4),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8FAFC')]),
-    ]))
-    story.append(table)
+    entries_by_name_and_day = defaultdict(list)
+    for row in rows:
+        labels = row['worker_labels'] or ['OpenShift']
+        for name in labels:
+            entries_by_name_and_day[(name, row['date'])].append(row)
+
+    story = []
+    chunks = list(_week_chunks(filters['start'], filters['end']))
+    if not chunks:
+        chunks = [[filters['start']]]
+
+    for chunk_index, days in enumerate(chunks):
+        range_label = f'{days[0]:%d.%m.%Y} – {days[-1]:%d.%m.%Y}' if len(days) > 1 else f'{days[0]:%d.%m.%Y}'
+        story.append(Paragraph('Dienstplan', title_style))
+        story.append(Paragraph(range_label, meta_style))
+
+        heading_bits = []
+        if client_names:
+            heading_bits.append('Kunde: ' + ', '.join(client_names))
+        if group_names:
+            heading_bits.append('Bereich: ' + ', '.join(group_names))
+        if heading_bits:
+            story.append(Paragraph(escape(' · '.join(heading_bits)), meta_style))
+        story.append(Spacer(1, 3.5 * mm))
+
+        if not all_worker_names:
+            story.append(Paragraph('Keine Schichten für diese Filter.', empty_style))
+        else:
+            header = [Paragraph('Name', head_style)]
+            for day in days:
+                weekday = WEEKDAY_LABELS[day.weekday()]
+                header.append(Paragraph(f'{weekday}<br/>{day:%d.%m.}', head_style))
+
+            table_data = [header]
+            for name in all_worker_names:
+                row_cells = [Paragraph(escape(name), name_style)]
+                for day in days:
+                    html = _cell_html(
+                        entries_by_name_and_day.get((name, day), []),
+                        show_client=show_client_in_cells,
+                        show_group=show_group_in_cells,
+                    )
+                    row_cells.append(Paragraph(html, cell_style) if html else '')
+                table_data.append(row_cells)
+
+            available_width = landscape(A4)[0] - document.leftMargin - document.rightMargin
+            name_width = 42 * mm
+            day_width = (available_width - name_width) / max(1, len(days))
+            table = Table(
+                table_data,
+                repeatRows=1,
+                colWidths=[name_width] + [day_width] * len(days),
+                hAlign='CENTER',
+            )
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#242424')),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('GRID', (0, 0), (-1, -1), 0.45, colors.HexColor('#D0D5DD')),
+                ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('BACKGROUND', (0, 1), (0, -1), colors.HexColor('#F8FAFC')),
+                ('ROWBACKGROUNDS', (1, 1), (-1, -1), [colors.white, colors.HexColor('#FCFCFD')]),
+            ]))
+            story.append(table)
+
+        if chunk_index < len(chunks) - 1:
+            story.append(PageBreak())
+
     document.build(story)
 
     response = HttpResponse(output.getvalue(), content_type='application/pdf')
