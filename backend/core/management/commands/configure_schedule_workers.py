@@ -25,15 +25,22 @@ WORKER_CONFIG = {
     'Ilayda Tarhan': ['service', 'front_office'],
     'Francesco Trulli': ['service'],
     'Akeel Zafar': ['service'],
-    'Izabella Somodo': ['housekeeping'],
+    'Izabella Somodi': ['housekeeping'],
     'Musa Jamali': ['service', 'housekeeping', 'front_office'],
     'Max Najmudinov': ['service'],
+}
+
+# Historic data used the spelling "Somodo" in a few local configuration files,
+# while the approved employee email and the existing account use "Somodi".
+# Treat both spellings as the same employee instead of creating/renaming accounts.
+WORKER_NAME_ALIASES = {
+    'Izabella Somodi': {'Izabella Somodo'},
 }
 
 # Explicitly requested on 2026-09-02. Pending addresses are reserved, non-routable
 # identifiers required by the unique email login schema; no invitations are sent.
 APPROVED_NEW_WORKERS = {
-    'Izabella Somodo': ('izabellasomodi21@yahoo.com', 'LOCAL-IZABELLA-SOMODO'),
+    'Izabella Somodi': ('izabellasomodi21@yahoo.com', 'LOCAL-IZABELLA-SOMODI'),
     'Musa Jamali': ('musa.jamali@pending.invalid', 'LOCAL-MUSA-JAMALI'),
     'Max Najmudinov': ('max.najmudinov@pending.invalid', 'LOCAL-MAX-NAJMUDINOV'),
 }
@@ -49,28 +56,38 @@ def normalize_name(value: str) -> str:
     return re.sub(r'[^a-z0-9]+', ' ', text).strip()
 
 
+def accepted_names(target: str) -> set[str]:
+    values = {target, *WORKER_NAME_ALIASES.get(target, set())}
+    return {normalize_name(value) for value in values}
+
+
 def worker_name(worker: WorkerProfile) -> str:
     return (worker.user.get_full_name() or worker.user.email or '').strip()
 
 
 def _find_worker(workers: list[WorkerProfile], target: str):
-    wanted = normalize_name(target)
-    exact = [worker for worker in workers if normalize_name(worker_name(worker)) == wanted]
+    wanted_names = accepted_names(target)
+    exact = [worker for worker in workers if normalize_name(worker_name(worker)) in wanted_names]
     if len(exact) == 1:
         return exact[0]
-    # Names imported from WIW can occasionally omit punctuation/initial dots.
-    wanted_parts = wanted.split()
+
+    wanted_parts = [value.split() for value in wanted_names if value]
     fuzzy = []
     for worker in workers:
         current = normalize_name(worker_name(worker))
         parts = current.split()
-        if not wanted_parts or not parts:
+        if not parts:
             continue
-        if current.startswith(wanted) or wanted.startswith(current):
-            fuzzy.append(worker)
-            continue
-        if parts[0] == wanted_parts[0] and parts[-1] == wanted_parts[-1]:
-            fuzzy.append(worker)
+        for target_parts in wanted_parts:
+            if not target_parts:
+                continue
+            target_text = ' '.join(target_parts)
+            if current.startswith(target_text) or target_text.startswith(current):
+                fuzzy.append(worker)
+                break
+            if parts[0] == target_parts[0] and parts[-1] == target_parts[-1]:
+                fuzzy.append(worker)
+                break
     return fuzzy[0] if len(fuzzy) == 1 else None
 
 
@@ -87,21 +104,34 @@ class Command(BaseCommand):
             for name, (email, employee_number) in APPROVED_NEW_WORKERS.items():
                 if _find_worker(workers, name):
                     continue
+
                 first_name, last_name = name.split(' ', 1)
-                candidates = User.objects.filter(first_name__iexact=first_name, last_name__iexact=last_name)
+                aliases = accepted_names(name)
                 user = User.objects.filter(email__iexact=email).first()
-                if not user and candidates.count() == 1:
-                    user = candidates.first()
+                if not user:
+                    candidates = list(User.objects.filter(first_name__iexact=first_name))
+                    matching = [candidate for candidate in candidates if normalize_name(candidate.get_full_name()) in aliases]
+                    if len(matching) == 1:
+                        user = matching[0]
+                    elif len(matching) > 1:
+                        raise ValueError(f'Ambiguous requested worker: {name}')
+
                 if user:
-                    if normalize_name(user.get_full_name()) != normalize_name(name) or user.role != User.Role.WORKER:
-                        raise ValueError(f'Existing account does not match requested worker: {name}')
-                elif candidates.exists():
-                    raise ValueError(f'Ambiguous requested worker: {name}')
+                    has_client_identity = user.role == User.Role.CLIENT or user.client_companies.exists()
+                    if has_client_identity and not hasattr(user, 'worker_profile'):
+                        raise ValueError(f'Existing client account cannot be reused as worker: {name}')
+                    if user.role != User.Role.WORKER:
+                        user.role = User.Role.WORKER
+                        user.save(update_fields=['role'])
                 else:
                     user = User.objects.create_user(email, first_name=first_name, last_name=last_name, role=User.Role.WORKER)
+
                 worker, created = WorkerProfile.objects.get_or_create(
                     user=user, defaults={'employee_number': employee_number, 'active': True}
                 )
+                if not worker.active:
+                    worker.active = True
+                    worker.save(update_fields=['active', 'updated_at'])
                 if created:
                     EmployeeMasterData.objects.get_or_create(
                         worker=worker,
@@ -116,7 +146,6 @@ class Command(BaseCommand):
                     missing.append(target)
                     continue
                 worker.schedule_groups = normalized_groups(groups)
-                # Empty means unrestricted/all clients in shift_visible_to_worker().
                 worker.open_shift_client_ids = []
                 worker.active = True
                 worker.save(update_fields=['schedule_groups', 'open_shift_client_ids', 'active', 'updated_at'])
@@ -126,13 +155,9 @@ class Command(BaseCommand):
                 matches = [worker for worker in workers if normalize_name(worker_name(worker)) == normalize_name(target)]
                 worker = matches[0] if len(matches) == 1 else None
                 if not worker:
-                    # Already removed is a valid idempotent state.
                     continue
                 label = worker_name(worker)
                 user = worker.user
-                # Julia is a client in the business data. If an inconsistent
-                # client-role account has a WorkerProfile, remove only that
-                # employee profile and preserve the client login/contact.
                 if target == 'Julia Stahl' or user.role == User.Role.CLIENT or user.client_companies.exists():
                     worker.delete()
                     if target == 'Julia Stahl' and user.role == User.Role.WORKER:
