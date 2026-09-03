@@ -73,7 +73,7 @@ def sync_when_i_work(self, mode='incremental', triggered_by_id=None):
     if not settings.WIW_SYNC_ENABLED:
         return {'status': 'disabled', 'counts': {}, 'errors': []}
     from .models import User
-    from .wiw_sync import WhenIWorkSynchronizer
+    from .wiw_schedule_sync import WhenIWorkSynchronizer
     user = User.objects.filter(pk=triggered_by_id).first() if triggered_by_id else None
     run = WhenIWorkSynchronizer(triggered_by=user).sync(mode=mode)
     _reapply_schedule_worker_config(run)
@@ -89,7 +89,7 @@ def process_wiw_webhook(self, event_id):
         event.processing_error = 'WIW sync disabled; A+ Workforce is source of truth.'
         event.save(update_fields=['processed_at', 'processing_error', 'updated_at'])
         return {'event': str(event.id), 'status': 'ignored'}
-    from .wiw_sync import WhenIWorkSynchronizer
+    from .wiw_schedule_sync import WhenIWorkSynchronizer
     try:
         run = WhenIWorkSynchronizer().sync(mode='incremental')
         _reapply_schedule_worker_config(run)

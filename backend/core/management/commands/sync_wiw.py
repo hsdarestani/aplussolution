@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand, CommandError
 
-from core.wiw_sync import WhenIWorkSynchronizer
+from core.wiw_schedule_sync import WhenIWorkSynchronizer
 
 
 class Command(BaseCommand):
