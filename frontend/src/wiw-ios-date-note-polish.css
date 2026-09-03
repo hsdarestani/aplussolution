@@ -1,0 +1,58 @@
+/* Mobile date emphasis + iOS keyboard-safe shift note editing (2026-09-03). */
+@media (max-width: 900px) {
+  /* Make the visible day/date label read as a primary navigation cue. */
+  .wiw-day-section > header strong {
+    color: #000 !important;
+    font-size: 17px !important;
+    font-weight: 850 !important;
+  }
+
+  .wiw-day-section > header span {
+    color: #000 !important;
+    font-size: 16px !important;
+    font-weight: 800 !important;
+  }
+
+  /* The first row in the shift editor is the selected date. */
+  .wiw-form-scroll > .wiw-form-row:first-child .wiw-form-row-copy span {
+    color: #000 !important;
+    font-size: 18px !important;
+    font-weight: 800 !important;
+  }
+
+  .wiw-form-scroll > .wiw-form-row:first-child > ion-icon {
+    color: #111 !important;
+  }
+}
+
+/*
+ * iOS Safari/WKWebView keeps 100dvh based on the layout viewport while the
+ * software keyboard reduces visualViewport.height. WiwScheduleMobile already
+ * calculates that difference and exposes it as --wiw-keyboard-inset. Consume
+ * it here only on WebKit/iOS so Android's already-correct resize behaviour is
+ * left untouched.
+ */
+@supports (-webkit-touch-callout: none) {
+  @media (max-width: 900px) {
+    .wiw-shift-form-screen .wiw-form-scroll {
+      height: calc(
+        100dvh - 58px - env(safe-area-inset-top) - var(--wiw-keyboard-inset, 0px)
+      ) !important;
+      min-height: 0;
+      padding-bottom: calc(56px + env(safe-area-inset-bottom));
+      scroll-padding-top: 18px;
+      scroll-padding-bottom: 132px;
+      overscroll-behavior-y: contain;
+    }
+
+    .wiw-shift-form-screen .wiw-extra-options {
+      scroll-margin-top: 18px;
+      scroll-margin-bottom: 132px;
+    }
+
+    .wiw-shift-form-screen .wiw-extra-options textarea {
+      scroll-margin-top: 22px;
+      scroll-margin-bottom: 150px;
+    }
+  }
+}
