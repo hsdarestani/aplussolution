@@ -1,0 +1,16 @@
+@media (max-width: 900px) {
+  /* Mobile Dienstplan: the text filter is intentionally removed to keep the
+     schedule controls compact. Keep sticky offsets aligned with the remaining
+     two toolbar rows (tabs + service filters). */
+  .wiw-schedule-mobile .wiw-search-row {
+    display: none !important;
+  }
+
+  .wiw-schedule-mobile .wiw-week-strip {
+    top: 81px !important;
+  }
+
+  .wiw-schedule-mobile .wiw-day-section {
+    scroll-margin-top: 138px !important;
+  }
+}
