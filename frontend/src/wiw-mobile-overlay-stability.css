@@ -1,0 +1,149 @@
+@media (max-width: 900px) {
+  /* Every schedule overlay must stay inside the physical viewport. The previous
+     PDF sheet could grow wider/taller than the available mobile viewport and its
+     flex scroll child had no min-height:0, so iOS/Android could show clipped,
+     non-scrollable content. */
+  .wiw-sheet-backdrop,
+  .wiw-enhancer-backdrop,
+  .wiw-calendar-backdrop {
+    box-sizing: border-box !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    overflow: hidden !important;
+    overscroll-behavior: contain;
+  }
+
+  .wiw-choice-sheet,
+  .wiw-date-sheet,
+  .wiw-pdf-sheet,
+  .wiw-calendar-sheet,
+  .wiw-enhancer-sheet,
+  .wiw-location-create-sheet {
+    box-sizing: border-box !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    min-width: 0 !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  /* Choice sheets: header stays visible and only the list scrolls. */
+  .wiw-choice-sheet {
+    display: flex !important;
+    flex-direction: column !important;
+    max-height: min(78dvh, calc(100dvh - env(safe-area-inset-top) - 8px)) !important;
+    overflow: hidden !important;
+  }
+
+  .wiw-choice-sheet > header {
+    flex: 0 0 auto !important;
+  }
+
+  .wiw-choice-sheet > div {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+  }
+
+  .wiw-choice-sheet > div > button,
+  .wiw-choice-sheet > header button {
+    touch-action: manipulation;
+  }
+
+  .wiw-choice-sheet > div > button[data-wiw-eligibility='legacy-current'] {
+    opacity: .58;
+  }
+
+  /* PDF export: make the inner content the scroll owner. This fixes the form
+     shown clipped in the supplied phone screenshot. */
+  .wiw-pdf-backdrop {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+
+  .wiw-pdf-sheet {
+    display: flex !important;
+    flex-direction: column !important;
+    max-height: calc(100dvh - max(env(safe-area-inset-top), 8px)) !important;
+    overflow: hidden !important;
+  }
+
+  .wiw-pdf-sheet > header,
+  .wiw-pdf-sheet > footer {
+    flex: 0 0 auto !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  .wiw-pdf-sheet > header > div {
+    min-width: 0 !important;
+  }
+
+  .wiw-pdf-scroll {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+  }
+
+  .wiw-pdf-dates,
+  .wiw-pdf-dates label,
+  .wiw-pdf-dates label > button,
+  .wiw-pdf-filter-block,
+  .wiw-pdf-chip-grid {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .wiw-pdf-dates label > button {
+    width: 100% !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .wiw-pdf-chip-grid button {
+    max-width: 100% !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    touch-action: manipulation;
+  }
+
+  /* Other bottom sheets opened from the shift form get the same safe bounds. */
+  .wiw-date-sheet,
+  .wiw-calendar-sheet,
+  .wiw-enhancer-sheet,
+  .wiw-location-create-sheet {
+    max-height: calc(100dvh - max(env(safe-area-inset-top), 8px)) !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+  }
+}
+
+@media (max-width: 360px) {
+  .wiw-pdf-dates {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .wiw-pdf-sheet > header {
+    gap: 8px !important;
+  }
+
+  .wiw-pdf-sheet > header b {
+    font-size: 15px !important;
+  }
+}
