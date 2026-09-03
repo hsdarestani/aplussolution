@@ -26,6 +26,7 @@ import ApiHealthBanner from './ApiHealthBanner';
 import HeaderQuickAccess from './HeaderQuickAccess';
 import ScheduleMobileEnhancer from './ScheduleMobileEnhancer';
 import ScheduleEntryFilterEnhancer from './ScheduleEntryFilterEnhancer';
+import SchedulePdfLocationFilter from './SchedulePdfLocationFilter';
 import WiwScheduleMobile from './WiwScheduleMobile';
 import WiwEmployeeScheduleMobile from './WiwEmployeeScheduleMobile';
 import WiwShiftFormUxEnhancer from './WiwShiftFormUxEnhancer';
@@ -75,6 +76,7 @@ function renderApp() {
           <HeaderQuickAccess />
           <ScheduleMobileEnhancer />
           <ScheduleEntryFilterEnhancer />
+          <SchedulePdfLocationFilter />
           <WiwScheduleMobile />
           <WiwEmployeeScheduleMobile />
           <WiwShiftFormUxEnhancer />
