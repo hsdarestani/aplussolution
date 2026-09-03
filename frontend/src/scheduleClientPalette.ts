@@ -44,18 +44,49 @@ function vividPalette(hue: number): SchedulePalette {
   };
 }
 
-const blackPalette: SchedulePalette = {
-  hue: 0,
-  accent: '#111111',
-  openBackground: 'linear-gradient(90deg,#d9d9d9 0%,#f2f2f2 52%,#fff 100%)',
-  filledBackground: 'linear-gradient(90deg,#050505 0%,#1b1b1b 55%,#606060 100%)',
-  openText: '#151515',
-  filledText: '#ffffff',
-  openMuted: '#5c5c5c',
-  filledMuted: '#ededed',
-  legendBackground: '#1a1a1a',
-  legendText: '#ffffff',
-};
+function hexToRgb(hex: string) {
+  const value = hex.replace('#', '');
+  const normalized = value.length === 3 ? value.split('').map((part) => `${part}${part}`).join('') : value;
+  return {
+    r: parseInt(normalized.slice(0, 2), 16),
+    g: parseInt(normalized.slice(2, 4), 16),
+    b: parseInt(normalized.slice(4, 6), 16),
+  };
+}
+
+function mixWithWhite(hex: string, amount: number) {
+  const { r, g, b } = hexToRgb(hex);
+  const mix = (value: number) => Math.round(value + (255 - value) * amount);
+  return `rgb(${mix(r)} ${mix(g)} ${mix(b)})`;
+}
+
+function relativeLuminance(hex: string) {
+  const { r, g, b } = hexToRgb(hex);
+  const channel = (value: number) => {
+    const normalized = value / 255;
+    return normalized <= 0.03928 ? normalized / 12.92 : Math.pow((normalized + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+}
+
+function exactPalette(hex: string): SchedulePalette {
+  const accent = hex.toUpperCase();
+  const darkText = relativeLuminance(accent) > 0.5 ? '#1b1b1b' : '#ffffff';
+  return {
+    hue: 0,
+    accent,
+    openBackground: `linear-gradient(90deg,${mixWithWhite(accent, 0.78)} 0%,${mixWithWhite(accent, 0.92)} 52%,#fff 100%)`,
+    filledBackground: `linear-gradient(90deg,${accent} 0%,${accent} 58%,${mixWithWhite(accent, 0.42)} 100%)`,
+    openText: '#182230',
+    filledText: darkText,
+    openMuted: '#667085',
+    filledMuted: darkText === '#ffffff' ? 'rgba(255,255,255,.88)' : 'rgba(27,27,27,.76)',
+    legendBackground: mixWithWhite(accent, 0.84),
+    legendText: '#182230',
+  };
+}
+
+const blackPalette: SchedulePalette = exactPalette('#000000');
 
 const fallbackHues = [8, 42, 88, 138, 184, 224, 270, 318];
 function fallbackPalette(key: string): SchedulePalette {
@@ -70,21 +101,27 @@ function customHuePalette(hue: number): SchedulePalette {
   return vividPalette(normalized);
 }
 
-export function schedulePalette(clientName?: string, _positionName?: string, customHue?: number | null): SchedulePalette {
-  if (customHue != null && Number.isFinite(Number(customHue))) return customHuePalette(Number(customHue));
+export function schedulePalette(clientName?: string, positionName?: string, customHue?: number | null): SchedulePalette {
   const client = normalizeScheduleLabel(clientName);
+  const position = normalizeScheduleLabel(positionName);
 
-  // Requested operational order is intentionally also reflected in a highly
-  // separated color sequence: orange, wine, royal blue, black, green, gold,
-  // violet, teal, magenta.
-  if (client.includes('martha')) return vividPalette(24);
-  if (client.includes('stadthausammarkt') || client.includes('stadhaus')) return vividPalette(350);
-  if (isHotelClientName(clientName)) return vividPalette(220);
-  if (client.includes('hofelcatering') || client.includes('hofel') || client.includes('hoefel')) return blackPalette;
-  if (client.includes('hirschgarten') || client.includes('restauranthirschgarten')) return vividPalette(132);
+  // Fixed operational colors requested for the WIW schedule. These take
+  // precedence over historic/manual shift hues so old cards immediately use
+  // the same customer/department color as newly created shifts.
+  if (isHotelClientName(clientName)) {
+    if (position.includes('housekeeping') || position.includes('houskeeping')) return exactPalette('#58B2EE');
+    if (position.includes('frontoffice') || position.includes('rezeption') || position.includes('reception')) return exactPalette('#030E6C');
+    return exactPalette('#030E6C');
+  }
+  if (client.includes('stadthausammarkt') || client.includes('stadhaus')) return exactPalette('#AB5209');
+  if (client.includes('martha')) return exactPalette('#FFBF00');
+  if (client.includes('hirschgarten') || client.includes('restauranthirschgarten')) return exactPalette('#2C9B16');
+  if (client.includes('citybeach')) return blackPalette;
+  if (client.includes('manuelhofel') || client.includes('hofelcatering') || client.includes('hofel') || client.includes('hoefel')) return exactPalette('#515151');
+
+  if (customHue != null && Number.isFinite(Number(customHue))) return customHuePalette(Number(customHue));
   if (client.includes('messefrankfurt') || client === 'messe') return vividPalette(46);
   if (client.includes('ommia') || client.includes('omnia')) return vividPalette(282);
-  if (client.includes('citybeach')) return vividPalette(184);
   if (client.includes('hofgut')) return vividPalette(320);
   return fallbackPalette(client);
 }
