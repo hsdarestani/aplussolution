@@ -156,7 +156,7 @@ def reconcile_izabella_housekeeping(apps, schema_editor):
                 'confirmation_decided_at', 'updated_at',
             ])
         else:
-            ShiftSlot.objects.create(
+            slot = ShiftSlot.objects.create(
                 shift=target,
                 worker=worker,
                 status='claimed',
@@ -168,7 +168,7 @@ def reconcile_izabella_housekeeping(apps, schema_editor):
 
         # A one-person shift must have exactly one active slot. Cancel stale extras
         # rather than leaving an accidental OpenShift beside Izabella's assignment.
-        extras = active_slots.exclude(pk=slot.pk if slot else None)
+        extras = ShiftSlot.objects.filter(shift=target).exclude(status='cancelled').exclude(pk=slot.pk)
         if extras.exists():
             extras.update(status='cancelled', worker=None, released_at=now)
 
