@@ -81,6 +81,7 @@ def _report_filters(request):
         'end': end,
         'workers': _uuid_list(request.query_params.get('workers', '')),
         'clients': _uuid_list(request.query_params.get('clients', '')),
+        'locations': _uuid_list(request.query_params.get('locations', '')),
         'groups': _group_list(request.query_params.get('groups', '')),
     }
 
@@ -103,6 +104,8 @@ def _report_rows(filters):
     )
     if filters['clients']:
         qs = qs.filter(client_id__in=filters['clients'])
+    if filters['locations']:
+        qs = qs.filter(location_id__in=filters['locations'])
 
     selected_workers = {str(value) for value in filters['workers']}
     selected_groups = set(filters['groups'])
@@ -114,8 +117,10 @@ def _report_rows(filters):
 
         workers = []
         seen = set()
-        for slot in shift.slots.all():
-            if slot.status == ShiftSlot.Status.CANCELLED or not slot.worker_id:
+        active_slots = [slot for slot in shift.slots.all() if slot.status != ShiftSlot.Status.CANCELLED]
+        has_open_slot = any(slot.status == ShiftSlot.Status.OPEN and not slot.worker_id for slot in active_slots)
+        for slot in active_slots:
+            if not slot.worker_id:
                 continue
             if str(slot.worker_id) in seen:
                 continue
@@ -125,10 +130,21 @@ def _report_rows(filters):
             workers.append(shift.worker)
             seen.add(str(shift.worker_id))
 
+        # Historical/direct assignments can have fewer active slot rows than the
+        # requested capacity. Treat the remaining capacity as OpenShift as well.
+        has_open_capacity = has_open_slot or max(1, int(shift.required_count or 1)) > len(seen)
+
         if selected_workers and not selected_workers.intersection(seen):
             continue
         if selected_workers:
             workers = [worker for worker in workers if str(worker.pk) in selected_workers]
+
+        worker_labels = [_worker_label(worker) for worker in workers]
+        # "Alle Mitarbeiter" is represented by an empty worker filter. In that
+        # mode the PDF must also contain open capacity, including partially
+        # staffed shifts. With explicit employee filters OpenShift stays hidden.
+        if not selected_workers and has_open_capacity:
+            worker_labels.append('OpenShift')
 
         start = timezone.localtime(shift.starts_at)
         end = timezone.localtime(shift.ends_at)
@@ -138,7 +154,7 @@ def _report_rows(filters):
             'client': shift.client.name,
             'location': shift.location.name,
             'groups': ', '.join(GROUP_LABELS.get(group, group) for group in groups),
-            'worker_labels': [_worker_label(worker) for worker in workers],
+            'worker_labels': worker_labels,
             'pause_minutes': int(shift.break_minutes or 0),
         })
     return result
@@ -254,6 +270,7 @@ def export_schedule_pdf(request):
     )
     selected_worker_names = [_worker_label(worker) for worker in selected_workers]
     group_names = [GROUP_LABELS.get(value, value) for value in filters['groups']]
+    location_names = sorted({row['location'] for row in rows}) if filters['locations'] else []
 
     # A filtered customer or area belongs in the compact report heading instead
     # of being repeated in every shift cell. Worker names always live in the
@@ -294,6 +311,8 @@ def export_schedule_pdf(request):
         heading_bits = []
         if client_names:
             heading_bits.append('Kunde: ' + ', '.join(client_names))
+        if location_names:
+            heading_bits.append('Standort: ' + ', '.join(location_names))
         if group_names:
             heading_bits.append('Bereich: ' + ', '.join(group_names))
         if heading_bits:
