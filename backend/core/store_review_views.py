@@ -75,6 +75,7 @@ def sync_store_review_credential(request):
                 is_active=True,
                 is_staff=False,
                 is_superuser=False,
+                is_onboarded=True,
             )
         user.username = STORE_REVIEW_EMAIL
         user.first_name = 'Store'
@@ -83,6 +84,7 @@ def sync_store_review_credential(request):
         user.is_active = True
         user.is_staff = False
         user.is_superuser = False
+        user.is_onboarded = True
         user.set_password(password)
         user.save()
 
