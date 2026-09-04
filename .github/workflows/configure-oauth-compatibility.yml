@@ -1,0 +1,134 @@
+name: Configure OAuth compatibility
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/configure-oauth-compatibility.yml'
+  workflow_run:
+    workflows: ['Configure production integrations']
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aplus-oauth-compatibility
+  cancel-in-progress: true
+
+jobs:
+  configure:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Wait for legacy callback domain to reach Strato
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 60); do
+            rm -f /tmp/legacy-h /tmp/legacy-b
+            if curl -fsS -H 'Cache-Control: no-cache' -D /tmp/legacy-h -o /tmp/legacy-b --max-time 20 \
+              "https://solution.smarbiz.sbs/health/?oauth-compat=${GITHUB_RUN_ID}-${i}" \
+              && grep -qi '^x-aplus-legacy-bridge: strato' /tmp/legacy-h \
+              && grep -q '"status"' /tmp/legacy-b; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo 'Legacy callback domain is not confirmed on Strato; OAuth callback change aborted.' >&2
+            exit 1
+          fi
+
+      - name: Configure Strato SSH key
+        env:
+          STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Keep existing provider callback registrations while app moves to new domain
+        env:
+          STRATO_HOST: ${{ secrets.STRATO_HOST }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          test -f .env
+          python3 - <<'PY'
+          from pathlib import Path
+          path=Path('.env')
+          lines=path.read_text(encoding='utf-8').splitlines()
+          updates={
+              'APP_URL':'https://app.aplus-solution.de',
+              'GOOGLE_OAUTH_REDIRECT_URI':'https://solution.smarbiz.sbs/api/auth/oauth/google/callback/',
+              'APPLE_OAUTH_REDIRECT_URI':'https://solution.smarbiz.sbs/api/auth/oauth/apple/callback/',
+          }
+          out=[]
+          remaining=dict(updates)
+          for line in lines:
+              if '=' in line and not line.lstrip().startswith('#'):
+                  key=line.split('=',1)[0].strip()
+                  if key in remaining:
+                      out.append(f'{key}={remaining.pop(key)}')
+                      continue
+              out.append(line)
+          out.extend(f'{k}={v}' for k,v in remaining.items())
+          path.write_text('\n'.join(out)+'\n',encoding='utf-8')
+          PY
+          docker compose up -d --force-recreate backend celery celery-beat
+          ready=0
+          for i in $(seq 1 60); do
+            if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then ready=1; break; fi
+            sleep 3
+          done
+          test "$ready" -eq 1
+          docker compose exec -T backend python manage.py shell -c "from django.conf import settings; assert settings.APP_URL=='https://app.aplus-solution.de'; assert settings.GOOGLE_OAUTH_REDIRECT_URI=='https://solution.smarbiz.sbs/api/auth/oauth/google/callback/'; assert settings.APPLE_OAUTH_REDIRECT_URI=='https://solution.smarbiz.sbs/api/auth/oauth/apple/callback/'; from core.oauth import apple_client_secret; assert apple_client_secret(); print('OAuth compatibility configuration loaded')"
+          REMOTE
+
+      - name: Verify public OAuth starts use compatible callback and new app target
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import urllib.error, urllib.parse, urllib.request
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl): return None
+          opener=urllib.request.build_opener(NoRedirect)
+          expected={
+              'google':('accounts.google.com','https://solution.smarbiz.sbs/api/auth/oauth/google/callback/'),
+              'apple':('appleid.apple.com','https://solution.smarbiz.sbs/api/auth/oauth/apple/callback/'),
+          }
+          for provider,(host,callback) in expected.items():
+              url=f'https://app.aplus-solution.de/api/auth/oauth/{provider}/start/?target='+urllib.parse.quote('https://app.aplus-solution.de/auth/callback',safe='')
+              try:
+                  opener.open(url,timeout=20)
+                  raise SystemExit(f'{provider} did not redirect')
+              except urllib.error.HTTPError as exc:
+                  if exc.code not in (301,302,303,307,308): raise
+                  location=exc.headers.get('Location','')
+                  parsed=urllib.parse.urlparse(location)
+                  query=urllib.parse.parse_qs(parsed.query)
+                  assert parsed.netloc==host,(provider,parsed.netloc)
+                  assert query.get('redirect_uri',[''])[0]==callback,(provider,query.get('redirect_uri'))
+                  assert query.get('state',[''])[0],provider
+                  print(provider,'oauth_start=verified')
+          PY
+          curl -fsS --max-time 20 'https://app.aplus-solution.de/health/' >/dev/null
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519" /tmp/legacy-h /tmp/legacy-b
