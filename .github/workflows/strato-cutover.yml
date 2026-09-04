@@ -219,7 +219,7 @@ jobs:
 
           docker compose exec -T backend python manage.py check
           docker compose exec -T backend python manage.py migrate --check
-          docker compose exec -T backend python manage.py shell -c "from core.models import User, Shift; print('Sanity counts:', {'users': User.objects.count(), 'shifts': Shift.objects.count()})"
+          docker compose exec -T backend python manage.py shell -c "from django.contrib.auth import get_user_model; print('User count:', get_user_model().objects.count())"
           docker compose ps
           rm -f /tmp/aplussolution-release.tgz /tmp/aplussolution.env /tmp/aplussolution.sql /tmp/aplussolution-media.tgz
           REMOTE
