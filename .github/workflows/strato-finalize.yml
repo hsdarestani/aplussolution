@@ -1,0 +1,142 @@
+name: Finalize Strato production
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-finalize.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aplus-strato-finalize
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      OLD_HOST: ${{ secrets.HOST }}
+      OLD_PASSWORD: ${{ secrets.PASS }}
+      NEW_HOST: ${{ secrets.STRATO_HOST }}
+      NEW_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+      DOMAIN: app.aplus-solution.de
+    steps:
+      - name: Configure SSH authentication
+        run: |
+          set -euo pipefail
+          test -n "$OLD_HOST" && test -n "$OLD_PASSWORD"
+          test -n "$NEW_HOST" && test -n "$NEW_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$NEW_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+          cat > /tmp/aplus-old-askpass.sh <<'ASKPASS'
+          #!/bin/sh
+          printf '%s\n' "$OLD_PASSWORD"
+          ASKPASS
+          chmod 700 /tmp/aplus-old-askpass.sh
+
+      - name: Export legacy media without stopping old production
+        env:
+          SSH_ASKPASS: /tmp/aplus-old-askpass.sh
+          SSH_ASKPASS_REQUIRE: force
+          DISPLAY: :0
+        run: |
+          set -euo pipefail
+          export OLD_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
+          setsid -w ssh -qT \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            root@"$OLD_HOST" \
+            'cd /opt/aplussolution && docker compose exec -T backend tar -C /app/media -czf - .' \
+            > /tmp/aplussolution-media.tgz
+          test -s /tmp/aplussolution-media.tgz
+          echo "Legacy media archive: $(du -h /tmp/aplussolution-media.tgz | cut -f1)"
+
+      - name: Upload media archive to Strato
+        run: |
+          set -euo pipefail
+          scp -q \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            /tmp/aplussolution-media.tgz root@"$NEW_HOST":/tmp/aplussolution-media.tgz
+
+      - name: Restore media and ensure every production service is running
+        run: |
+          set -euo pipefail
+          ssh \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=12 \
+            root@"$NEW_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+
+          echo '=== Before finalization ==='
+          docker compose ps -a
+
+          # Merge the legacy media archive into the persistent Strato media volume.
+          # Do not delete anything first, so any files already created on the new host survive.
+          cat /tmp/aplussolution-media.tgz | docker compose run --rm --no-deps -T backend sh -c 'mkdir -p /app/media && tar -C /app/media -xzf -'
+
+          docker compose up -d --build --remove-orphans
+
+          backend_ready=0
+          for i in $(seq 1 60); do
+            if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
+              backend_ready=1
+              break
+            fi
+            sleep 3
+          done
+          if [ "$backend_ready" -ne 1 ]; then
+            echo 'Backend readiness failed.' >&2
+            docker compose ps -a >&2 || true
+            docker compose logs --no-color --tail=250 backend >&2 || true
+            exit 1
+          fi
+
+          # Give Celery/Caddy a few seconds to settle after recreation.
+          sleep 6
+          docker compose ps -a
+
+          for service in backend frontend caddy celery celery-beat db redis; do
+            cid=$(docker compose ps -q "$service")
+            if [ -z "$cid" ] || [ "$(docker inspect -f '{{.State.Running}}' "$cid")" != 'true' ]; then
+              echo "Required service is not running: $service" >&2
+              docker compose logs --no-color --tail=180 "$service" >&2 || true
+              exit 1
+            fi
+          done
+
+          docker compose exec -T backend python manage.py check
+          docker compose exec -T backend python manage.py migrate --check
+          docker compose exec -T backend python manage.py shell -c "from django.contrib.auth import get_user_model; from pathlib import Path; p=Path('/app/media'); print('users=', get_user_model().objects.count(), 'media_files=', sum(1 for x in p.rglob('*') if x.is_file()))"
+
+          curl -fsS --max-time 15 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/
+          rm -f /tmp/aplussolution-media.tgz
+          REMOTE
+
+      - name: Verify public production through Cloudflare
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 12 --retry-delay 5 --max-time 20 "https://${DOMAIN}/health/"
+          curl -fsS --retry 6 --retry-delay 5 --max-time 20 -o /tmp/home.html "https://${DOMAIN}/"
+          test -s /tmp/home.html
+          echo "Strato production is healthy at https://${DOMAIN}"
+
+      - name: Cleanup runner secrets and migration archive
+        if: always()
+        run: |
+          rm -f "$HOME/.ssh/strato_ed25519" /tmp/aplus-old-askpass.sh /tmp/aplussolution-media.tgz /tmp/home.html
