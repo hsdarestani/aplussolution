@@ -1,0 +1,38 @@
+name: Check legacy bridge prerequisites
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/strato-legacy-state.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check safe bridge booleans
+        env:
+          OLD_HOST: ${{ secrets.HOST }}
+          OLD_PASSWORD: ${{ secrets.PASS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/askpass.sh <<'EOF'
+          #!/bin/sh
+          printf '%s\n' "$OLD_PASSWORD"
+          EOF
+          chmod 700 /tmp/askpass.sh
+          export SSH_ASKPASS=/tmp/askpass.sh SSH_ASKPASS_REQUIRE=force DISPLAY=:0 OLD_PASSWORD
+          setsid -w ssh -qT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$OLD_HOST" 'bash -s' <<'REMOTE'
+          set -u
+          cd /opt/aplussolution
+          test -f Caddyfile && echo caddyfile=true || echo caddyfile=false
+          test -f Caddyfile.pre-strato-bridge && echo backup=true || echo backup=false
+          grep -q 'reverse_proxy https://app.aplus-solution.de' Caddyfile 2>/dev/null && echo route=true || echo route=false
+          curl -fsS --max-time 20 https://app.aplus-solution.de/health/ >/dev/null && echo new_from_old=true || echo new_from_old=false
+          curl -ksS --resolve solution.smarbiz.sbs:443:127.0.0.1 -D /tmp/h -o /tmp/b --max-time 20 https://solution.smarbiz.sbs/health/ >/dev/null 2>&1 || true
+          grep -qi '^x-aplus-legacy-bridge: strato' /tmp/h 2>/dev/null && echo local_marker=true || echo local_marker=false
+          grep -q '"status"' /tmp/b 2>/dev/null && echo local_health=true || echo local_health=false
+          REMOTE
+          rm -f /tmp/askpass.sh
