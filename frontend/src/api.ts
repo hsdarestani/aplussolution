@@ -2,7 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import { enrichLocationPayload, installLocationPicker } from './locationPicker';
 import { installSignaturePad } from './signaturePad';
 
-const PRODUCTION_API = 'https://solution.smarbiz.sbs/api';
+const PRODUCTION_API = 'https://app.aplus-solution.de/api';
 const DEVELOPMENT_API = 'http://localhost:8000/api';
 const DEFAULT_API = Capacitor.isNativePlatform() ? PRODUCTION_API : DEVELOPMENT_API;
 const API = (import.meta.env.VITE_API_URL || DEFAULT_API).replace(/\/$/, '');
@@ -60,7 +60,7 @@ async function reliableCoordinates(): Promise<{ lat: number; lng: number }> {
     return { lat: position.coords.latitude, lng: position.coords.longitude };
   } catch (first: any) {
     if (first?.code === 1) {
-      throw new Error('Standortzugriff ist blockiert. Bitte für solution.smarbiz.sbs Standort erlauben und erneut versuchen.');
+      throw new Error('Standortzugriff ist blockiert. Bitte für app.aplus-solution.de Standort erlauben und erneut versuchen.');
     }
   }
   try {
@@ -68,7 +68,7 @@ async function reliableCoordinates(): Promise<{ lat: number; lng: number }> {
     return { lat: position.coords.latitude, lng: position.coords.longitude };
   } catch (second: any) {
     if (second?.code === 1) {
-      throw new Error('Standortzugriff ist blockiert. Bitte für solution.smarbiz.sbs Standort erlauben und erneut versuchen.');
+      throw new Error('Standortzugriff ist blockiert. Bitte für app.aplus-solution.de Standort erlauben und erneut versuchen.');
     }
     throw new Error('Der aktuelle Standort konnte nicht bestimmt werden. Bitte GPS aktivieren, kurz ins Freie/Fensternähe gehen oder die Standortberechtigung prüfen.');
   }

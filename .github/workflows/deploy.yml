@@ -1,31 +1,22 @@
-name: Validate and deploy production
+name: Validate A+ Solution
+
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
+
 permissions:
   contents: read
-  issues: write
+
 concurrency:
-  group: aplus-${{ github.event_name }}-${{ github.ref }}
+  group: aplus-validate-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - name: Publish deployment start
-        if: github.event_name == 'push'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          COMMIT_SHA: ${{ github.sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          body=$(printf 'Production deployment is running.\n\n- Commit: %s\n- Phase: **validation**\n- Workflow run: %s\n' "$COMMIT_SHA" "$RUN_URL")
-          gh api --method PATCH "repos/${{ github.repository }}/issues/84" -f body="$body" -f state=open >/dev/null
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -65,223 +56,8 @@ jobs:
       - name: Run frontend tests
         working-directory: frontend
         run: npm test
-      - name: Build frontend
+      - name: Build frontend for new production domain
         working-directory: frontend
         env:
-          VITE_API_URL: https://solution.smarbiz.sbs/api
+          VITE_API_URL: https://app.aplus-solution.de/api
         run: npm run build
-      - name: Install Playwright Chromium
-        if: github.event_name != 'push'
-        timeout-minutes: 5
-        working-directory: frontend
-        run: npx playwright install --with-deps chromium
-      - name: Run frontend E2E smoke tests
-        if: github.event_name != 'push'
-        working-directory: frontend
-        run: npm run test:e2e
-  deploy:
-    if: github.event_name == 'push'
-    needs: validate
-    runs-on: ubuntu-latest
-    timeout-minutes: 75
-    steps:
-      - name: Publish deploy phase
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          COMMIT_SHA: ${{ github.sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          body=$(printf 'Production deployment is running.\n\n- Commit: %s\n- Validation: **success**\n- Phase: **deploying**\n- Workflow run: %s\n' "$COMMIT_SHA" "$RUN_URL")
-          gh api --method PATCH "repos/hsdarestani/aplussolution/issues/84" -f body="$body" -f state=open >/dev/null
-      - uses: actions/checkout@v4
-      - name: Prepare password SSH authentication
-        timeout-minutes: 1
-        env:
-          DEPLOY_PASSWORD: ${{ secrets.PASS }}
-        run: |
-          set -euo pipefail
-          test -n "$DEPLOY_PASSWORD"
-          command -v ssh >/dev/null
-          command -v scp >/dev/null
-          command -v setsid >/dev/null
-          cat > /tmp/aplus-askpass.sh <<'ASKPASS'
-          #!/bin/sh
-          printf '%s\n' "$DEPLOY_PASSWORD"
-          ASKPASS
-          chmod 700 /tmp/aplus-askpass.sh
-      - name: Preflight production connectivity
-        timeout-minutes: 2
-        env:
-          DEPLOY_PASSWORD: ${{ secrets.PASS }}
-          HOST: ${{ secrets.HOST }}
-          SSH_ASKPASS: /tmp/aplus-askpass.sh
-          SSH_ASKPASS_REQUIRE: force
-          DISPLAY: :0
-        run: |
-          set -euo pipefail
-          test -n "$HOST" && test -n "$DEPLOY_PASSWORD"
-          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
-          setsid -w ssh -qT \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=15 \
-            -o ServerAliveInterval=10 \
-            -o ServerAliveCountMax=3 \
-            root@"$HOST" 'mkdir -p /opt/aplussolution && test -d /opt/aplussolution'
-      - name: Upload release
-        timeout-minutes: 5
-        env:
-          DEPLOY_PASSWORD: ${{ secrets.PASS }}
-          HOST: ${{ secrets.HOST }}
-          SSH_ASKPASS: /tmp/aplus-askpass.sh
-          SSH_ASKPASS_REQUIRE: force
-          DISPLAY: :0
-        run: |
-          set -euo pipefail
-          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
-          tar \
-            --exclude='.git' \
-            --exclude='.env' \
-            --exclude='frontend/node_modules' \
-            -czf /tmp/aplussolution-release.tgz .
-          setsid -w scp -q \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=15 \
-            /tmp/aplussolution-release.tgz root@"$HOST":/tmp/aplussolution-release.tgz
-          setsid -w ssh -qT \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=15 \
-            root@"$HOST" \
-            "mkdir -p /opt/aplussolution && find /opt/aplussolution -mindepth 1 -maxdepth 1 ! -name .env -exec rm -rf {} + && tar -xzf /tmp/aplussolution-release.tgz -C /opt/aplussolution && rm -f /tmp/aplussolution-release.tgz"
-      - name: Configure and start production release
-        timeout-minutes: 12
-        env:
-          DEPLOY_PASSWORD: ${{ secrets.PASS }}
-          HOST: ${{ secrets.HOST }}
-          SSH_ASKPASS: /tmp/aplus-askpass.sh
-          SSH_ASKPASS_REQUIRE: force
-          DISPLAY: :0
-        run: |
-          set -euo pipefail
-          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
-          setsid -w ssh \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=15 \
-            -o ServerAliveInterval=10 \
-            -o ServerAliveCountMax=6 \
-            root@"$HOST" 'bash -s' <<'REMOTE'
-          set -euo pipefail
-          cd /opt/aplussolution
-          if [ ! -f .env ]; then
-            cp .env.example .env
-            DB_PASS=$(openssl rand -hex 24)
-            DJANGO_KEY=$(openssl rand -hex 48)
-            ADMIN_PASS=$(openssl rand -base64 32 | tr -d '/+=' | head -c 28)
-            sed -i 's/^DEBUG=.*/DEBUG=0/' .env
-            sed -i "s/^DJANGO_SECRET_KEY=.*/DJANGO_SECRET_KEY=$DJANGO_KEY/" .env
-            sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$DB_PASS/" .env
-            sed -i "s#^DATABASE_URL=.*#DATABASE_URL=postgresql://aplussolution:$DB_PASS@db:5432/aplussolution#" .env
-            sed -i "s/^DJANGO_SUPERUSER_PASSWORD=.*/DJANGO_SUPERUSER_PASSWORD=$ADMIN_PASS/" .env
-            printf 'Admin: admin@aplus-solution.de\nPasswort: %s\n' "$ADMIN_PASS" > /root/aplussolution-initial-admin.txt
-            chmod 600 /root/aplussolution-initial-admin.txt
-          fi
-          if grep -q '^WIW_SYNC_ENABLED=' .env; then
-            sed -i 's/^WIW_SYNC_ENABLED=.*/WIW_SYNC_ENABLED=1/' .env
-          else
-            printf 'WIW_SYNC_ENABLED=1\n' >> .env
-          fi
-          if grep -q '^WIW_READ_ONLY=' .env; then
-            sed -i 's/^WIW_READ_ONLY=.*/WIW_READ_ONLY=1/' .env
-          else
-            printf 'WIW_READ_ONLY=1\n' >> .env
-          fi
-          if ! command -v docker >/dev/null 2>&1; then curl -fsSL https://get.docker.com | sh; fi
-          docker compose pull db redis caddy || true
-          # Remove stale app-service containers before recreation. This avoids a
-          # Docker name-allocation race while preserving db/redis/caddy volumes.
-          docker compose rm -sf backend frontend celery celery-beat || true
-          docker rm -f aplussolution-backend-1 aplussolution-frontend-1 aplussolution-celery-1 aplussolution-celery-beat-1 >/dev/null 2>&1 || true
-          docker compose up -d --build --remove-orphans
-
-          backend_ready=0
-          for i in $(seq 1 60); do
-            if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
-              backend_ready=1
-              break
-            fi
-            sleep 5
-          done
-          if [ "$backend_ready" -ne 1 ]; then
-            echo 'Backend did not become ready; recent backend logs:' >&2
-            docker compose logs --no-color --tail=250 backend >&2 || true
-            exit 1
-          fi
-
-          docker compose exec -T backend python manage.py migrate --check
-          docker compose exec -T backend python manage.py check
-          docker compose exec -T backend python manage.py shell -c "from django.conf import settings; assert settings.WIW_SYNC_ENABLED is True; assert settings.WIW_READ_ONLY is True; print('WIW one-way read-only feed OK')"
-          # Prime current WIW data immediately. The 5-minute Celery beat task keeps
-          # it refreshed afterwards. An upstream WIW outage must not block a safe
-          # application deployment; the dashboard falls back to local data.
-          docker compose exec -T backend python manage.py sync_wiw --full || echo 'WARNING: initial WIW refresh failed; scheduled read-only sync will retry.' >&2
-          # Temporary rollback-only production probe. It exercises the exact
-          # Client Order -> Shift path against real QA data and prints the real
-          # production exception without persisting a Shift.
-          docker compose exec -T backend python manage.py diagnose_order_planning --title 'QA Client Order'
-          curl -fsS --retry 10 --retry-delay 5 https://solution.smarbiz.sbs/health/ >/dev/null
-          docker compose ps
-          docker image prune -f
-          REMOTE
-      - name: Authorized one-time WIW full reset and import
-        timeout-minutes: 50
-        env:
-          DEPLOY_PASSWORD: ${{ secrets.PASS }}
-          HOST: ${{ secrets.HOST }}
-          SSH_ASKPASS: /tmp/aplus-askpass.sh
-          SSH_ASKPASS_REQUIRE: force
-          DISPLAY: :0
-        run: |
-          set -euo pipefail
-          export DEPLOY_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
-          setsid -w ssh \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=15 \
-            -o ServerAliveInterval=20 \
-            -o ServerAliveCountMax=20 \
-            root@"$HOST" 'bash /opt/aplussolution/scripts/production_wiw_full_reset.sh'
-  deployment-status:
-    if: always() && github.event_name == 'push'
-    needs: [validate, deploy]
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    env:
-      GH_TOKEN: ${{ github.token }}
-      COMMIT_SHA: ${{ github.sha }}
-      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-    steps:
-      - name: Publish deployment status
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          validate='${{ needs.validate.result }}'
-          deploy='${{ needs.deploy.result }}'
-          if [ "$validate" = 'success' ] && [ "$deploy" = 'success' ]; then
-            overall='success'
-          else
-            overall='failed'
-          fi
-          body=$(printf '%s\n\n- Commit: %s\n- Validation: **%s**\n- Deploy: **%s**\n- Overall: **%s**\n- Production: https://solution.smarbiz.sbs\n- Workflow run: %s\n\nNo secrets are included in this issue.\n' \
-            'Automated production deployment status.' \
-            "$COMMIT_SHA" \
-            "$validate" \
-            "$deploy" \
-            "$overall" \
-            "$RUN_URL")
-          gh api --method PATCH "repos/${{ github.repository }}/issues/84" \
-            -f body="$body" \
-            -f state=closed >/dev/null

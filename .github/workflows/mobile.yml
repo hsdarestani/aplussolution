@@ -28,7 +28,7 @@ jobs:
         with: {distribution: temurin, java-version: '21'}
       - name: Build Android App Bundle with official launcher assets
         working-directory: frontend
-        env: {VITE_API_URL: 'https://solution.smarbiz.sbs/api'}
+        env: {VITE_API_URL: 'https://app.aplus-solution.de/api'}
         run: |
           npm install --no-audit --no-fund
           npm run build
@@ -52,7 +52,7 @@ jobs:
         with: {node-version: '22'}
       - name: Create iOS Xcode project
         working-directory: frontend
-        env: {VITE_API_URL: 'https://solution.smarbiz.sbs/api'}
+        env: {VITE_API_URL: 'https://app.aplus-solution.de/api'}
         run: |
           npm install --no-audit --no-fund
           npm run build
