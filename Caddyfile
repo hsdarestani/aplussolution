@@ -1,4 +1,4 @@
-{$APP_DOMAIN:app.aplus-solution.de} {
+{$APP_DOMAIN:app.aplus-solution.de}, solution.smarbiz.sbs {
     encode zstd gzip
 
     handle /api/* {
