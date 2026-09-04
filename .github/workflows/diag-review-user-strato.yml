@@ -1,0 +1,52 @@
+name: Diagnose App Review user on Strato
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diag-review-user-strato.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure Strato SSH key
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Check reviewer account state
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from core.models import User, WorkerProfile
+          email='store-review@aplus-solution.de'
+          qs=User.objects.filter(email=email)
+          print('review_user_exists=', qs.exists())
+          if qs.exists():
+              u=qs.get()
+              print('review_user_active=', u.is_active)
+              print('review_user_role=', u.role)
+              print('review_user_onboarded=', u.is_onboarded)
+              print('review_user_has_usable_password=', u.has_usable_password())
+              print('review_worker_profile=', WorkerProfile.objects.filter(user=u).exists())
+          PY
+          REMOTE
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
