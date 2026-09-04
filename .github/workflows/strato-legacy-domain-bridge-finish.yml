@@ -1,0 +1,147 @@
+name: Finalize legacy A+ domain bridge
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-legacy-domain-bridge-finish.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aplus-legacy-domain-bridge-finish
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OLD_DOMAIN: solution.smarbiz.sbs
+      NEW_DOMAIN: app.aplus-solution.de
+    steps:
+      - name: Configure old-server authentication
+        env:
+          OLD_HOST: ${{ secrets.HOST }}
+          OLD_PASSWORD: ${{ secrets.PASS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OLD_HOST" && test -n "$OLD_PASSWORD"
+          cat > /tmp/aplus-old-askpass.sh <<'ASKPASS'
+          #!/bin/sh
+          printf '%s\n' "$OLD_PASSWORD"
+          ASKPASS
+          chmod 700 /tmp/aplus-old-askpass.sh
+
+      - name: Verify Strato and public compatibility bridge
+        env:
+          OLD_HOST: ${{ secrets.HOST }}
+          OLD_PASSWORD: ${{ secrets.PASS }}
+          SSH_ASKPASS: /tmp/aplus-old-askpass.sh
+          SSH_ASKPASS_REQUIRE: force
+          DISPLAY: :0
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 "https://${NEW_DOMAIN}/health/?bridge=${GITHUB_RUN_ID}" | grep -q '"status"'
+          export OLD_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
+
+          # Confirm the old origin itself is already proxying to Strato.
+          setsid -w ssh -qT \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 \
+            root@"$OLD_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          test -f Caddyfile.pre-strato-bridge
+          grep -q 'reverse_proxy https://app.aplus-solution.de' Caddyfile
+          rm -f /tmp/bridge-h /tmp/bridge-b
+          curl -ksS --resolve solution.smarbiz.sbs:443:127.0.0.1 \
+            -D /tmp/bridge-h -o /tmp/bridge-b --max-time 20 \
+            'https://solution.smarbiz.sbs/health/?origin-check=1'
+          grep -qi '^x-aplus-legacy-bridge: strato' /tmp/bridge-h
+          grep -q '"status"' /tmp/bridge-b
+          REMOTE
+
+          # Bypass any Cloudflare cache and require the bridge marker publicly.
+          ok=0
+          for i in $(seq 1 30); do
+            rm -f /tmp/public-h /tmp/public-b
+            if curl -fsS -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+              -D /tmp/public-h -o /tmp/public-b --max-time 20 \
+              "https://${OLD_DOMAIN}/health/?bridge=${GITHUB_RUN_ID}-${i}" \
+              && grep -qi '^x-aplus-legacy-bridge: strato' /tmp/public-h \
+              && grep -q '"status"' /tmp/public-b; then
+              ok=1
+              break
+            fi
+            sleep 4
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo 'Public bridge marker was not observed. Leaving the old application stack running for safety.' >&2
+            echo 'Safe public response headers:' >&2
+            sed -E '/^(set-cookie|authorization|cookie):/Id' /tmp/public-h >&2 || true
+            exit 1
+          fi
+
+      - name: Stop duplicate old writers only after bridge verification
+        env:
+          OLD_HOST: ${{ secrets.HOST }}
+          OLD_PASSWORD: ${{ secrets.PASS }}
+          SSH_ASKPASS: /tmp/aplus-old-askpass.sh
+          SSH_ASKPASS_REQUIRE: force
+          DISPLAY: :0
+        shell: bash
+        run: |
+          set -euo pipefail
+          export OLD_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
+          setsid -w ssh -qT \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 \
+            root@"$OLD_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          for service in celery celery-beat backend frontend redis db; do
+            cid="$(docker compose ps -q "$service" 2>/dev/null || true)"
+            if [ -n "$cid" ]; then
+              docker update --restart=no "$cid" >/dev/null
+              docker stop "$cid" >/dev/null || true
+            fi
+          done
+          caddy_id="$(docker compose ps -q caddy)"
+          test -n "$caddy_id"
+          test "$(docker inspect -f '{{.State.Running}}' "$caddy_id")" = 'true'
+          rm -f /tmp/bridge-h /tmp/bridge-b
+          if ! curl -ksS --resolve solution.smarbiz.sbs:443:127.0.0.1 \
+            -D /tmp/bridge-h -o /tmp/bridge-b --max-time 20 \
+            'https://solution.smarbiz.sbs/health/?post-stop=1' \
+            || ! grep -qi '^x-aplus-legacy-bridge: strato' /tmp/bridge-h \
+            || ! grep -q '"status"' /tmp/bridge-b; then
+            echo 'Compatibility proxy failed after stopping old writers; restoring old stack.' >&2
+            cp -f Caddyfile.pre-strato-bridge Caddyfile
+            docker compose restart caddy
+            docker compose up -d db redis backend frontend celery celery-beat
+            for service in db redis backend frontend celery celery-beat; do
+              cid="$(docker compose ps -q "$service" 2>/dev/null || true)"
+              [ -n "$cid" ] && docker update --restart=unless-stopped "$cid" >/dev/null || true
+            done
+            exit 1
+          fi
+          echo 'Legacy host now runs Caddy compatibility proxy only; duplicate writers are stopped.'
+          REMOTE
+
+      - name: Final public checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 "https://${NEW_DOMAIN}/health/?final=${GITHUB_RUN_ID}" | grep -q '"status"'
+          curl -fsS -H 'Cache-Control: no-cache' -D /tmp/final-h -o /tmp/final-b --max-time 20 \
+            "https://${OLD_DOMAIN}/health/?final=${GITHUB_RUN_ID}"
+          grep -qi '^x-aplus-legacy-bridge: strato' /tmp/final-h
+          grep -q '"status"' /tmp/final-b
+          echo 'New and legacy URLs both terminate on the Strato production stack.'
+
+      - name: Cleanup runner credentials
+        if: always()
+        run: rm -f /tmp/aplus-old-askpass.sh /tmp/public-h /tmp/public-b /tmp/final-h /tmp/final-b
