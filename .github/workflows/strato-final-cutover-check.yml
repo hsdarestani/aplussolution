@@ -18,7 +18,7 @@ jobs:
       STRATO_HOST: ${{ secrets.STRATO_HOST }}
       STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
     steps:
-      - name: Check public DNS and HTTPS
+      - name: Check public DNS HTTPS and origin headers
         run: |
           set -euo pipefail
           echo 'new_dns:'
@@ -26,13 +26,15 @@ jobs:
           echo 'old_dns:'
           getent ahostsv4 solution.smarbiz.sbs | awk '{print $1}' | sort -u || true
           echo 'new_health:'
-          curl -sS -o /tmp/new-health -w 'http=%{http_code} ip=%{remote_ip}\n' --max-time 20 https://app.aplus-solution.de/health/ || true
+          curl -sS -D /tmp/new-headers -o /tmp/new-health -w 'http=%{http_code} ip=%{remote_ip}\n' --max-time 20 https://app.aplus-solution.de/health/ || true
           cat /tmp/new-health 2>/dev/null || true
           echo
+          grep -iE '^(server|x-aplus-origin|cf-ray):' /tmp/new-headers 2>/dev/null || true
           echo 'old_health:'
-          curl -sS -o /tmp/old-health -w 'http=%{http_code} ip=%{remote_ip}\n' --max-time 20 https://solution.smarbiz.sbs/health/ || true
+          curl -sS -D /tmp/old-headers -o /tmp/old-health -w 'http=%{http_code} ip=%{remote_ip}\n' --max-time 20 https://solution.smarbiz.sbs/health/ || true
           cat /tmp/old-health 2>/dev/null || true
           echo
+          grep -iE '^(server|x-aplus-origin|cf-ray):' /tmp/old-headers 2>/dev/null || true
 
       - name: Inspect Strato domain configuration
         run: |
@@ -65,4 +67,4 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: rm -f "$HOME/.ssh/strato_ed25519" /tmp/new-health /tmp/old-health
+        run: rm -f "$HOME/.ssh/strato_ed25519" /tmp/new-health /tmp/old-health /tmp/new-headers /tmp/old-headers
