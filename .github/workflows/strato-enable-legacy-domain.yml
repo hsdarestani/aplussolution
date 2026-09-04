@@ -1,0 +1,92 @@
+name: Enable legacy A+ domain on Strato
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-enable-legacy-domain.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  enable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure Strato SSH key
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Add legacy host compatibility and restart services
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          cp .env .env.before-legacy-domain
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.env')
+          lines = path.read_text().splitlines()
+          updates = {
+              'ALLOWED_HOSTS': ['app.aplus-solution.de','solution.smarbiz.sbs','localhost','127.0.0.1'],
+              'CSRF_TRUSTED_ORIGINS': ['https://app.aplus-solution.de','https://solution.smarbiz.sbs','https://localhost'],
+              'CORS_ALLOWED_ORIGINS': ['https://app.aplus-solution.de','https://solution.smarbiz.sbs','https://localhost','capacitor://localhost','http://localhost'],
+          }
+          seen = set()
+          out = []
+          for line in lines:
+              if '=' not in line or line.lstrip().startswith('#'):
+                  out.append(line)
+                  continue
+              key, value = line.split('=', 1)
+              if key not in updates:
+                  out.append(line)
+                  continue
+              existing = [x.strip() for x in value.split(',') if x.strip()]
+              merged = []
+              for item in updates[key] + existing:
+                  if item not in merged:
+                      merged.append(item)
+              out.append(f'{key}={",".join(merged)}')
+              seen.add(key)
+          for key, values in updates.items():
+              if key not in seen:
+                  out.append(f'{key}={",".join(values)}')
+          path.write_text('\n'.join(out) + '\n')
+          PY
+
+          # Ensure the deployed Caddyfile also has both hostnames immediately,
+          # even if the main deploy workflow is still finishing in parallel.
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('Caddyfile')
+          text = path.read_text()
+          first, rest = text.split('\n', 1)
+          if 'solution.smarbiz.sbs' not in first:
+              first = first.replace(' {', ', solution.smarbiz.sbs {')
+              path.write_text(first + '\n' + rest)
+          PY
+
+          docker compose up -d backend caddy
+          sleep 5
+          docker compose exec -T backend python manage.py check
+          curl -fsS --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/
+          curl -fsS --resolve solution.smarbiz.sbs:443:127.0.0.1 https://solution.smarbiz.sbs/health/
+          echo 'legacy_domain_ready_on_strato=true'
+          REMOTE
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
