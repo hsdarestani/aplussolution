@@ -1,0 +1,94 @@
+name: Finalize legacy bridge with Strato origin marker
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/strato-legacy-domain-bridge-v2.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Wait for Strato origin marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 60); do
+            rm -f /tmp/new-h /tmp/new-b
+            if curl -fsS -H 'Cache-Control: no-cache' -D /tmp/new-h -o /tmp/new-b --max-time 20 \
+              "https://app.aplus-solution.de/health/?origin=${GITHUB_RUN_ID}-${i}" \
+              && grep -qi '^x-aplus-origin: strato' /tmp/new-h \
+              && grep -q '"status"' /tmp/new-b; then ok=1; break; fi
+            sleep 5
+          done
+          test "$ok" -eq 1
+      - name: Verify old proxy reaches marked Strato and stop duplicate writers
+        env:
+          OLD_HOST: ${{ secrets.HOST }}
+          OLD_PASSWORD: ${{ secrets.PASS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/askpass.sh <<'EOF'
+          #!/bin/sh
+          printf '%s\n' "$OLD_PASSWORD"
+          EOF
+          chmod 700 /tmp/askpass.sh
+          export SSH_ASKPASS=/tmp/askpass.sh SSH_ASKPASS_REQUIRE=force DISPLAY=:0 OLD_PASSWORD
+          setsid -w ssh -qT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 root@"$OLD_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          test -f Caddyfile.pre-strato-bridge
+          grep -q 'reverse_proxy https://app.aplus-solution.de' Caddyfile
+          docker compose restart caddy >/dev/null
+          sleep 3
+          ok=0
+          for i in $(seq 1 20); do
+            rm -f /tmp/h /tmp/b
+            if curl -ksS --resolve solution.smarbiz.sbs:443:127.0.0.1 -D /tmp/h -o /tmp/b --max-time 20 \
+              "https://solution.smarbiz.sbs/health/?origin-local=$i" \
+              && grep -qi '^x-aplus-origin: strato' /tmp/h \
+              && grep -q '"status"' /tmp/b; then ok=1; break; fi
+            sleep 3
+          done
+          test "$ok" -eq 1
+          for service in celery celery-beat backend frontend redis db; do
+            cid="$(docker compose ps -q "$service" 2>/dev/null || true)"
+            if [ -n "$cid" ]; then docker update --restart=no "$cid" >/dev/null; docker stop "$cid" >/dev/null || true; fi
+          done
+          caddy_id="$(docker compose ps -q caddy)"
+          test -n "$caddy_id"
+          test "$(docker inspect -f '{{.State.Running}}' "$caddy_id")" = true
+          rm -f /tmp/h /tmp/b
+          if ! curl -ksS --resolve solution.smarbiz.sbs:443:127.0.0.1 -D /tmp/h -o /tmp/b --max-time 20 \
+            'https://solution.smarbiz.sbs/health/?after-stop=1' \
+            || ! grep -qi '^x-aplus-origin: strato' /tmp/h || ! grep -q '"status"' /tmp/b; then
+            echo 'Proxy verification failed after stopping old writers; restoring old application services.' >&2
+            cp -f Caddyfile.pre-strato-bridge Caddyfile
+            docker compose restart caddy >/dev/null
+            docker compose up -d db redis backend frontend celery celery-beat
+            exit 1
+          fi
+          echo 'old_stack_mode=caddy_proxy_only'
+          REMOTE
+      - name: Verify legacy public URL resolves to marked Strato
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 30); do
+            rm -f /tmp/old-h /tmp/old-b
+            if curl -fsS -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' -D /tmp/old-h -o /tmp/old-b --max-time 20 \
+              "https://solution.smarbiz.sbs/health/?origin-public=${GITHUB_RUN_ID}-${i}" \
+              && grep -qi '^x-aplus-origin: strato' /tmp/old-h \
+              && grep -q '"status"' /tmp/old-b; then ok=1; break; fi
+            sleep 4
+          done
+          test "$ok" -eq 1
+          echo 'legacy_public_origin=strato'
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/askpass.sh /tmp/new-h /tmp/new-b /tmp/old-h /tmp/old-b
