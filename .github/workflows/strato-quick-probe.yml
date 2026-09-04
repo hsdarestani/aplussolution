@@ -1,0 +1,42 @@
+name: Quick Strato network probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-quick-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DOMAIN: app.aplus-solution.de
+      HOST: ${{ secrets.STRATO_HOST }}
+      KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Probe server and public ports
+        run: |
+          set -u
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$KEY" > "$HOME/.ssh/key"
+          chmod 600 "$HOME/.ssh/key"
+
+          echo '=== Remote state ==='
+          timeout 25 ssh -i "$HOME/.ssh/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" \
+            "cd /opt/aplussolution; docker compose ps; echo PORTS; ss -lntp | grep -E ':(80|443)\\b' || true; echo UFW; (ufw status verbose || true); echo CADDY; docker compose logs --no-color --tail=80 caddy || true" || true
+
+          echo '=== Origin HTTP from runner ==='
+          timeout 15 curl -v -H "Host: $DOMAIN" "http://$HOST/health/" || true
+
+          echo '=== Origin HTTPS from runner ==='
+          timeout 20 curl -vk --resolve "$DOMAIN:443:$HOST" "https://$DOMAIN/health/" || true
+
+          echo '=== Public Cloudflare ==='
+          timeout 20 curl -vk "https://$DOMAIN/health/" || true
+
+          rm -f "$HOME/.ssh/key"
