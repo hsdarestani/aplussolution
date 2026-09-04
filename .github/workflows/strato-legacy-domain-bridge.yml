@@ -1,0 +1,202 @@
+name: Bridge legacy A+ domain to Strato
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-legacy-domain-bridge.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aplus-legacy-domain-bridge
+  cancel-in-progress: false
+
+jobs:
+  bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OLD_DOMAIN: solution.smarbiz.sbs
+      NEW_DOMAIN: app.aplus-solution.de
+    steps:
+      - name: Configure old-server authentication
+        env:
+          OLD_HOST: ${{ secrets.HOST }}
+          OLD_PASSWORD: ${{ secrets.PASS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OLD_HOST" && test -n "$OLD_PASSWORD"
+          cat > /tmp/aplus-old-askpass.sh <<'ASKPASS'
+          #!/bin/sh
+          printf '%s\n' "$OLD_PASSWORD"
+          ASKPASS
+          chmod 700 /tmp/aplus-old-askpass.sh
+
+      - name: Confirm Strato production before cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 20 "https://${NEW_DOMAIN}/health/" | grep -q '"status"'; then
+              echo 'Strato production is healthy.'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Strato production is not healthy; legacy bridge will not be changed.' >&2
+          exit 1
+
+      - name: Turn the old domain into a rollback-safe proxy
+        env:
+          OLD_HOST: ${{ secrets.HOST }}
+          OLD_PASSWORD: ${{ secrets.PASS }}
+          SSH_ASKPASS: /tmp/aplus-old-askpass.sh
+          SSH_ASKPASS_REQUIRE: force
+          DISPLAY: :0
+        shell: bash
+        run: |
+          set -euo pipefail
+          export OLD_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
+          setsid -w ssh -qT \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            root@"$OLD_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          test -f Caddyfile
+          test -f docker-compose.yml
+          curl -fsS --max-time 20 https://app.aplus-solution.de/health/ >/dev/null
+
+          cp -f Caddyfile Caddyfile.pre-strato-bridge
+          cat > Caddyfile <<'CADDY'
+          solution.smarbiz.sbs {
+              reverse_proxy https://app.aplus-solution.de {
+                  header_up Host app.aplus-solution.de
+                  header_down X-Aplus-Legacy-Bridge strato
+                  transport http {
+                      tls_server_name app.aplus-solution.de
+                  }
+              }
+          }
+          CADDY
+
+          if ! docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
+            cp -f Caddyfile.pre-strato-bridge Caddyfile
+            docker compose restart caddy
+            exit 1
+          fi
+          if ! docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
+            cp -f Caddyfile.pre-strato-bridge Caddyfile
+            docker compose restart caddy
+            exit 1
+          fi
+
+          ok=0
+          for i in $(seq 1 12); do
+            rm -f /tmp/legacy-headers /tmp/legacy-body
+            if curl -ksS --resolve solution.smarbiz.sbs:443:127.0.0.1 \
+              -D /tmp/legacy-headers -o /tmp/legacy-body --max-time 20 \
+              https://solution.smarbiz.sbs/health/ \
+              && grep -qi '^x-aplus-legacy-bridge: strato' /tmp/legacy-headers \
+              && grep -q '"status"' /tmp/legacy-body; then
+              ok=1
+              break
+            fi
+            sleep 3
+          done
+          if [ "$ok" -ne 1 ]; then
+            cp -f Caddyfile.pre-strato-bridge Caddyfile
+            docker compose restart caddy
+            echo 'Local legacy proxy verification failed; restored old Caddy configuration.' >&2
+            exit 1
+          fi
+          REMOTE
+
+      - name: Verify old public URL is now served by Strato
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            rm -f /tmp/legacy-public-headers /tmp/legacy-public-body
+            if curl -fsS -D /tmp/legacy-public-headers -o /tmp/legacy-public-body --max-time 20 \
+              "https://${OLD_DOMAIN}/health/" \
+              && grep -qi '^x-aplus-legacy-bridge: strato' /tmp/legacy-public-headers \
+              && grep -q '"status"' /tmp/legacy-public-body; then
+              echo 'Legacy public domain is forwarding to Strato.'
+              exit 0
+            fi
+            sleep 4
+          done
+          echo 'Public legacy-domain bridge verification failed.' >&2
+          exit 1
+
+      - name: Stop old application writers after proxy verification
+        env:
+          OLD_HOST: ${{ secrets.HOST }}
+          OLD_PASSWORD: ${{ secrets.PASS }}
+          SSH_ASKPASS: /tmp/aplus-old-askpass.sh
+          SSH_ASKPASS_REQUIRE: force
+          DISPLAY: :0
+        shell: bash
+        run: |
+          set -euo pipefail
+          export OLD_PASSWORD SSH_ASKPASS SSH_ASKPASS_REQUIRE DISPLAY
+          setsid -w ssh -qT \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            root@"$OLD_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+
+          for service in celery celery-beat backend frontend redis db; do
+            cid="$(docker compose ps -q "$service" 2>/dev/null || true)"
+            if [ -n "$cid" ]; then
+              docker update --restart=no "$cid" >/dev/null
+              docker stop "$cid" >/dev/null || true
+            fi
+          done
+
+          caddy_id="$(docker compose ps -q caddy)"
+          test -n "$caddy_id"
+          test "$(docker inspect -f '{{.State.Running}}' "$caddy_id")" = 'true'
+
+          rm -f /tmp/legacy-headers /tmp/legacy-body
+          if ! curl -ksS --resolve solution.smarbiz.sbs:443:127.0.0.1 \
+            -D /tmp/legacy-headers -o /tmp/legacy-body --max-time 20 \
+            https://solution.smarbiz.sbs/health/ \
+            || ! grep -qi '^x-aplus-legacy-bridge: strato' /tmp/legacy-headers \
+            || ! grep -q '"status"' /tmp/legacy-body; then
+            echo 'Bridge failed after stopping old writers; rolling back old stack.' >&2
+            cp -f Caddyfile.pre-strato-bridge Caddyfile
+            docker compose restart caddy
+            for service in db redis backend frontend celery celery-beat; do
+              cid="$(docker compose ps -aq "$service" 2>/dev/null || true)"
+              [ -n "$cid" ] && docker update --restart=unless-stopped "$cid" >/dev/null || true
+            done
+            docker compose up -d db redis backend frontend celery celery-beat
+            exit 1
+          fi
+
+          echo 'Old backend/database/workers stopped; Caddy compatibility bridge remains active.'
+          docker compose ps -a
+          REMOTE
+
+      - name: Final compatibility check
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 "https://${NEW_DOMAIN}/health/" >/dev/null
+          curl -fsS -D /tmp/final-headers -o /tmp/final-body --max-time 20 "https://${OLD_DOMAIN}/health/"
+          grep -qi '^x-aplus-legacy-bridge: strato' /tmp/final-headers
+          grep -q '"status"' /tmp/final-body
+          echo 'Both new and legacy app URLs now terminate on the Strato production stack.'
+
+      - name: Cleanup runner credentials
+        if: always()
+        run: rm -f /tmp/aplus-old-askpass.sh /tmp/legacy-public-headers /tmp/legacy-public-body /tmp/final-headers /tmp/final-body
