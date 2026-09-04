@@ -1,0 +1,54 @@
+name: Disable A+ worker emails on Strato
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-disable-worker-emails.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  disable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Disable worker email delivery and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.env')
+          lines = p.read_text(encoding='utf-8').splitlines()
+          out = []
+          found = False
+          for line in lines:
+              if line.startswith('WORKER_EMAILS_ENABLED='):
+                  out.append('WORKER_EMAILS_ENABLED=0')
+                  found = True
+              else:
+                  out.append(line)
+          if not found:
+              out.append('WORKER_EMAILS_ENABLED=0')
+          p.write_text('\n'.join(out) + '\n', encoding='utf-8')
+          PY
+          docker compose up -d backend celery celery-beat
+          sleep 5
+          docker compose exec -T backend python manage.py shell -c "from django.conf import settings; assert settings.WORKER_EMAILS_ENABLED is False; print('worker_emails_enabled=false')"
+          curl -fsS --max-time 20 https://app.aplus-solution.de/health/ >/dev/null
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
