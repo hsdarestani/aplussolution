@@ -1,6 +1,10 @@
-name: Validate A+ Solution
+name: Validate and deploy A+ Solution
 
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '.github/workflows/strato-*.yml'
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -9,8 +13,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: aplus-validate-${{ github.event_name }}-${{ github.ref }}
+  group: aplus-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  PRODUCTION_DOMAIN: app.aplus-solution.de
 
 jobs:
   validate:
@@ -37,7 +44,6 @@ jobs:
           python -m compileall .
           python manage.py check
           python manage.py makemigrations --check --dry-run
-          bash -n ../scripts/production_wiw_full_reset.sh
       - name: Run backend tests with coverage
         working-directory: backend
         env:
@@ -56,8 +62,117 @@ jobs:
       - name: Run frontend tests
         working-directory: frontend
         run: npm test
-      - name: Build frontend for new production domain
+      - name: Build frontend for production
         working-directory: frontend
         env:
           VITE_API_URL: https://app.aplus-solution.de/api
         run: npm run build
+
+  deploy:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure Strato SSH key
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Package release
+        run: |
+          set -euo pipefail
+          tar \
+            --exclude='.git' \
+            --exclude='.env' \
+            --exclude='frontend/node_modules' \
+            -czf /tmp/aplussolution-release.tgz .
+
+      - name: Upload release to Strato
+        run: |
+          set -euo pipefail
+          scp -q \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            /tmp/aplussolution-release.tgz root@"$STRATO_HOST":/tmp/aplussolution-release.tgz
+
+      - name: Deploy release without replacing production data
+        run: |
+          set -euo pipefail
+          ssh \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=12 \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          mkdir -p /opt/aplussolution
+          cd /opt/aplussolution
+          test -f .env
+
+          # Replace application source only. Docker volumes and the production .env
+          # remain untouched, so PostgreSQL, Redis state, media and TLS data persist.
+          find /opt/aplussolution -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
+          tar -xzf /tmp/aplussolution-release.tgz -C /opt/aplussolution
+          rm -f /tmp/aplussolution-release.tgz
+
+          docker compose pull db redis caddy || true
+          docker compose up -d --build --remove-orphans
+
+          backend_ready=0
+          for i in $(seq 1 60); do
+            if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
+              backend_ready=1
+              break
+            fi
+            sleep 3
+          done
+          if [ "$backend_ready" -ne 1 ]; then
+            docker compose ps -a >&2 || true
+            docker compose logs --no-color --tail=250 backend >&2 || true
+            exit 1
+          fi
+
+          sleep 4
+          for service in backend frontend caddy celery celery-beat db redis; do
+            cid=$(docker compose ps -q "$service")
+            if [ -z "$cid" ] || [ "$(docker inspect -f '{{.State.Running}}' "$cid")" != 'true' ]; then
+              echo "Required service is not running: $service" >&2
+              docker compose logs --no-color --tail=180 "$service" >&2 || true
+              exit 1
+            fi
+          done
+
+          docker compose exec -T backend python manage.py check
+          docker compose exec -T backend python manage.py migrate --check
+          curl -fsS --max-time 15 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/
+          docker compose ps
+          docker image prune -f >/dev/null 2>&1 || true
+          REMOTE
+
+      - name: Verify public production
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 12 --retry-delay 5 --max-time 20 "https://${PRODUCTION_DOMAIN}/health/"
+          curl -fsS --retry 6 --retry-delay 5 --max-time 20 -o /tmp/home.html "https://${PRODUCTION_DOMAIN}/"
+          test -s /tmp/home.html
+          echo "A+ Solution deployed successfully to https://${PRODUCTION_DOMAIN}"
+
+      - name: Cleanup runner key
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519" /tmp/aplussolution-release.tgz /tmp/home.html
