@@ -118,10 +118,10 @@ export function schedulePalette(clientName?: string, positionName?: string, cust
   if (client.includes('hirschgarten') || client.includes('restauranthirschgarten')) return exactPalette('#2C9B16');
   if (client.includes('citybeach')) return blackPalette;
   if (client.includes('manuelhofel') || client.includes('hofelcatering') || client.includes('hofel') || client.includes('hoefel')) return exactPalette('#515151');
+  if (client.includes('messefrankfurt') || client === 'messe') return exactPalette('#FFFFFF');
+  if (client.includes('ommia') || client.includes('omnia')) return exactPalette('#FFFFFF');
+  if (client.includes('hofgut')) return exactPalette('#FFFFFF');
 
   if (customHue != null && Number.isFinite(Number(customHue))) return customHuePalette(Number(customHue));
-  if (client.includes('messefrankfurt') || client === 'messe') return vividPalette(46);
-  if (client.includes('ommia') || client.includes('omnia')) return vividPalette(282);
-  if (client.includes('hofgut')) return vividPalette(320);
   return fallbackPalette(client);
 }
