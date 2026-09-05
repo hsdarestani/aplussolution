@@ -2,20 +2,55 @@ from datetime import timedelta
 
 from celery import shared_task
 from django.conf import settings
+from django.core.cache import cache
 from django.core.mail import send_mail
 from django.core.management import call_command
 from django.utils import timezone
 
 from .document_center import dispatch_contract_reminders
-from .models import Notification, Shift, ShiftImportPackage
+from .models import IntegrationSyncRun, Notification, Shift, ShiftImportPackage
 from .operational_notifications import dispatch_attendance_reminders
 from .shift_slots import ShiftSlot
+from .wiw import WhenIWorkError
+
+
+WIW_FULL_RECONCILE_INTERVAL = timedelta(hours=24)
+WIW_FULL_RECONCILE_LOCK_KEY = 'wiw:full-reconciliation:queued'
+WIW_FULL_RECONCILE_LOCK_SECONDS = 2 * 60 * 60
 
 
 def _reapply_schedule_worker_config(run):
     """Keep business-owned Dienstplan worker rules authoritative over WIW imports."""
     if getattr(run, 'status', '') == 'success':
         call_command('configure_schedule_workers')
+
+
+def _queue_full_wiw_reconciliation_if_due():
+    """Queue an all-time WIW reconciliation when the last verified pass is stale.
+
+    The normal five-minute sync keeps current operations fresh. This second
+    safety net walks the complete WIW history/future range and proves that every
+    remote record exists locally, so a temporary API gap cannot become a
+    permanent missing shift. A short cache lock prevents duplicate heavy jobs.
+    """
+    if not settings.WIW_SYNC_ENABLED:
+        return False
+
+    cutoff = timezone.now() - WIW_FULL_RECONCILE_INTERVAL
+    recent_verified = IntegrationSyncRun.objects.filter(
+        provider='wiw',
+        mode='final_full',
+        status=IntegrationSyncRun.Status.SUCCESS,
+        finished_at__gte=cutoff,
+    ).exists()
+    if recent_verified:
+        return False
+
+    if not cache.add(WIW_FULL_RECONCILE_LOCK_KEY, 'queued', timeout=WIW_FULL_RECONCILE_LOCK_SECONDS):
+        return False
+
+    reconcile_when_i_work_full.delay()
+    return True
 
 
 @shared_task
@@ -68,6 +103,54 @@ def send_shift_reminders():
 
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3})
+def reconcile_when_i_work_full(self):
+    """Backfill and verify the complete WIW dataset from old history to future.
+
+    ``build_wiw_migration_report`` already fetches dynamic WIW resources in
+    bounded windows from 2000 through 2100, imports them transactionally, and
+    compares remote/local identities afterwards. We keep that proven path as a
+    recurring self-healing reconciliation instead of relying on a one-time
+    migration pass.
+    """
+    if not settings.WIW_SYNC_ENABLED:
+        return {'status': 'disabled', 'complete': False}
+
+    from .wiw_migration import build_wiw_migration_report
+
+    report = build_wiw_migration_report(apply_full_sync=True)
+    sync = report.get('sync') or {}
+    incomplete = [
+        name
+        for name, row in (report.get('resources') or {}).items()
+        if not row.get('complete')
+    ]
+    if sync.get('status') != IntegrationSyncRun.Status.SUCCESS or not report.get('complete'):
+        raise WhenIWorkError(
+            'WIW full reconciliation incomplete: '
+            + (', '.join(incomplete) if incomplete else str(sync.get('errors') or 'unknown error'))
+        )
+
+    # Full imports touch WIW-owned workforce data, so immediately restore the
+    # locally approved operational worker scope afterwards.
+    call_command('configure_schedule_workers')
+    cache.delete(WIW_FULL_RECONCILE_LOCK_KEY)
+    return {
+        'status': 'success',
+        'complete': True,
+        'sync_id': sync.get('id'),
+        'history_window': report.get('history_window'),
+        'resources': {
+            name: {
+                'remote_count': row.get('remote_count', 0),
+                'local_count': row.get('local_count', 0),
+                'missing_local_count': row.get('missing_local_count', 0),
+            }
+            for name, row in (report.get('resources') or {}).items()
+        },
+    }
+
+
+@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3})
 def sync_when_i_work(self, mode='incremental', triggered_by_id=None):
     """Refresh the temporary one-way WIW -> A+ migration feed."""
     if not settings.WIW_SYNC_ENABLED:
@@ -77,7 +160,14 @@ def sync_when_i_work(self, mode='incremental', triggered_by_id=None):
     user = User.objects.filter(pk=triggered_by_id).first() if triggered_by_id else None
     run = WhenIWorkSynchronizer(triggered_by=user).sync(mode=mode)
     _reapply_schedule_worker_config(run)
-    return {'id': str(run.id), 'status': run.status, 'counts': run.counts, 'errors': run.errors}
+    full_reconciliation_queued = _queue_full_wiw_reconciliation_if_due()
+    return {
+        'id': str(run.id),
+        'status': run.status,
+        'counts': run.counts,
+        'errors': run.errors,
+        'full_reconciliation_queued': full_reconciliation_queued,
+    }
 
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3})
@@ -93,6 +183,7 @@ def process_wiw_webhook(self, event_id):
     try:
         run = WhenIWorkSynchronizer().sync(mode='incremental')
         _reapply_schedule_worker_config(run)
+        _queue_full_wiw_reconciliation_if_due()
         event.processed_at = timezone.now()
         event.processing_error = ''
         event.save(update_fields=['processed_at', 'processing_error', 'updated_at'])
