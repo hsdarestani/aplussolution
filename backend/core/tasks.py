@@ -1,8 +1,9 @@
 from datetime import timedelta
+from uuid import uuid4
 
+import redis
 from celery import shared_task
 from django.conf import settings
-from django.core.cache import cache
 from django.core.mail import send_mail
 from django.core.management import call_command
 from django.utils import timezone
@@ -13,22 +14,36 @@ from .operational_notifications import dispatch_attendance_reminders
 from .shift_slots import ShiftSlot
 
 
-WIW_RECONCILIATION_LOCK_KEY = 'wiw:reconciliation:exclusive:v1'
+WIW_RECONCILIATION_LOCK_KEY = 'wiw:reconciliation:exclusive:v2'
 WIW_RECONCILIATION_LOCK_SECONDS = 60 * 60
 WIW_RECONCILIATION_BUSY_RETRY_SECONDS = 5 * 60
 WIW_RECONCILIATION_BUSY_MAX_RETRIES = 12
 
 
+def _redis_client():
+    return redis.Redis.from_url(settings.CELERY_BROKER_URL, decode_responses=True)
+
+
 def _acquire_wiw_reconciliation_lock():
-    return cache.add(
+    token = uuid4().hex
+    acquired = _redis_client().set(
         WIW_RECONCILIATION_LOCK_KEY,
-        timezone.now().isoformat(),
-        timeout=WIW_RECONCILIATION_LOCK_SECONDS,
+        token,
+        nx=True,
+        ex=WIW_RECONCILIATION_LOCK_SECONDS,
     )
+    return token if acquired else None
 
 
-def _release_wiw_reconciliation_lock():
-    cache.delete(WIW_RECONCILIATION_LOCK_KEY)
+def _release_wiw_reconciliation_lock(token):
+    # Compare-and-delete keeps an expired/reacquired lock owned by another task safe.
+    _redis_client().eval(
+        "if redis.call('get', KEYS[1]) == ARGV[1] then "
+        "return redis.call('del', KEYS[1]) else return 0 end",
+        1,
+        WIW_RECONCILIATION_LOCK_KEY,
+        token,
+    )
 
 
 def _retry_wiw_reconciliation_when_busy(task):
@@ -170,7 +185,8 @@ def reconcile_when_i_work_schedule(self):
     """Self-heal every API-visible WIW shift, regardless of age or future date."""
     if not settings.WIW_SYNC_ENABLED:
         return {'status': 'disabled', 'resource': 'shifts'}
-    if not _acquire_wiw_reconciliation_lock():
+    lock_token = _acquire_wiw_reconciliation_lock()
+    if not lock_token:
         return _retry_wiw_reconciliation_when_busy(self)
 
     try:
@@ -222,7 +238,7 @@ def reconcile_when_i_work_schedule(self):
             'counts': dict(synchronizer.counts),
         }
     finally:
-        _release_wiw_reconciliation_lock()
+        _release_wiw_reconciliation_lock(lock_token)
 
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 4})
@@ -230,7 +246,8 @@ def reconcile_when_i_work_full(self):
     """Daily complete WIW -> A+ reconciliation with a strict post-import proof."""
     if not settings.WIW_SYNC_ENABLED:
         return {'status': 'disabled'}
-    if not _acquire_wiw_reconciliation_lock():
+    lock_token = _acquire_wiw_reconciliation_lock()
+    if not lock_token:
         return _retry_wiw_reconciliation_when_busy(self)
 
     try:
@@ -262,7 +279,7 @@ def reconcile_when_i_work_full(self):
             },
         }
     finally:
-        _release_wiw_reconciliation_lock()
+        _release_wiw_reconciliation_lock(lock_token)
 
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3})
