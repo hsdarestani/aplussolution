@@ -33,6 +33,7 @@ jobs:
           set -euo pipefail
           cd /opt/aplussolution
           docker compose exec -T backend python manage.py shell <<'PY'
+          from django.db import models
           from core.models import ClientCompany, Location, Shift
 
           print('=== ACTIVE CLIENTS ===')
