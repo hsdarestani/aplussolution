@@ -54,6 +54,7 @@ import './wiw-mobile-20260902.css';
 import './mobile-schedule-filter-removal.css';
 import './wiw-ios-date-note-polish.css';
 import './wiw-mobile-overlay-stability.css';
+import './schedule-client-exact-colors.css';
 
 installBerlinLocaleDefaults();
 installOperationalFetchResilience();
