@@ -162,6 +162,11 @@ jobs:
           docker compose exec -T backend python manage.py migrate --check
           curl -fsS --max-time 15 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/
 
+          # A deployment can restart a worker during a previous long reconciliation.
+          # Clear only our disposable coordination lock so the fresh repair pass can
+          # start immediately instead of waiting for a stale timeout.
+          docker compose exec -T backend python manage.py shell -c "from django.core.cache import cache; cache.delete('wiw:reconciliation:exclusive:v1')" || true
+
           # Do not wait for the potentially long WIW history scan inside deploy.
           # Queue both repair layers so the freshly deployed code immediately
           # backfills all API-visible past/future shifts and then proves full
