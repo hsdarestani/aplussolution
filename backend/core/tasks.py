@@ -15,6 +15,8 @@ from .shift_slots import ShiftSlot
 
 WIW_RECONCILIATION_LOCK_KEY = 'wiw:reconciliation:exclusive:v1'
 WIW_RECONCILIATION_LOCK_SECONDS = 60 * 60
+WIW_RECONCILIATION_BUSY_RETRY_SECONDS = 5 * 60
+WIW_RECONCILIATION_BUSY_MAX_RETRIES = 12
 
 
 def _acquire_wiw_reconciliation_lock():
@@ -27,6 +29,14 @@ def _acquire_wiw_reconciliation_lock():
 
 def _release_wiw_reconciliation_lock():
     cache.delete(WIW_RECONCILIATION_LOCK_KEY)
+
+
+def _retry_wiw_reconciliation_when_busy(task):
+    raise task.retry(
+        exc=RuntimeError('Another WIW reconciliation is still running.'),
+        countdown=WIW_RECONCILIATION_BUSY_RETRY_SECONDS,
+        max_retries=WIW_RECONCILIATION_BUSY_MAX_RETRIES,
+    )
 
 
 def _reapply_schedule_worker_config(run=None):
@@ -161,7 +171,7 @@ def reconcile_when_i_work_schedule(self):
     if not settings.WIW_SYNC_ENABLED:
         return {'status': 'disabled', 'resource': 'shifts'}
     if not _acquire_wiw_reconciliation_lock():
-        raise RuntimeError('Another WIW reconciliation is still running.')
+        return _retry_wiw_reconciliation_when_busy(self)
 
     try:
         from .wiw import WhenIWorkClient, WhenIWorkError
@@ -221,7 +231,7 @@ def reconcile_when_i_work_full(self):
     if not settings.WIW_SYNC_ENABLED:
         return {'status': 'disabled'}
     if not _acquire_wiw_reconciliation_lock():
-        raise RuntimeError('Another WIW reconciliation is still running.')
+        return _retry_wiw_reconciliation_when_busy(self)
 
     try:
         from .wiw import WhenIWorkError
