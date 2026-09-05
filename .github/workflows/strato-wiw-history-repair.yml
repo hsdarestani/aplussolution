@@ -1,0 +1,117 @@
+name: Repair and verify complete WIW shift history
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-wiw-history-repair.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: strato-wiw-history-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Backfill every API-visible WIW shift and verify production
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=12 \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from django.utils import timezone
+          from django.core.management import call_command
+          from core.models import Shift
+          from core.tasks import _ensure_schedule_worker_stubs
+          from core.wiw import WhenIWorkClient, WhenIWorkError
+          from core.wiw_schedule_sync import WhenIWorkSynchronizer, fetch_complete_schedule_snapshot
+          from core.wiw_sync import as_id, first
+
+          client = WhenIWorkClient()
+          sync = WhenIWorkSynchronizer(client=client)
+
+          # Refresh all master-data dependencies used by shift rows.
+          sync.sync_users(client.collection('users', params={'limit': 1000}).items)
+          sync.sync_positions(client.collection('positions', params={'limit': 1000}, optional=True).items)
+          sync.sync_locations(client.collection('locations', params={'limit': 1000}, optional=True).items)
+          sync.sync_sites(client.collection('sites', params={'limit': 1000}, optional=True).items)
+
+          rows = fetch_complete_schedule_snapshot(client)
+          if not rows:
+              raise WhenIWorkError('Complete WIW schedule snapshot unexpectedly returned zero shifts.')
+
+          stub_count = _ensure_schedule_worker_stubs(rows, sync)
+          sync.sync_shifts(rows)
+          if sync.errors:
+              raise WhenIWorkError(f'WIW shift import produced errors: {sync.errors[:10]}')
+
+          remote_ids = {
+              value for item in rows
+              if (value := as_id(first(item, 'id', 'shift_id')))
+          }
+          local_ids = {
+              str(value) for value in
+              Shift.objects.exclude(wiw_shift_id__isnull=True)
+              .exclude(wiw_shift_id='')
+              .values_list('wiw_shift_id', flat=True)
+          }
+          missing = sorted(remote_ids - local_ids)
+          if missing:
+              raise WhenIWorkError(
+                  f'After backfill {len(missing)} WIW shifts are still missing locally. '
+                  f'First IDs: {missing[:20]}'
+              )
+
+          call_command('configure_schedule_workers')
+
+          # Aggregate verification for the exact dates that were reported missing.
+          reported = Shift.objects.filter(
+              starts_at__date__gte='2026-08-31',
+              starts_at__date__lte='2026-09-02',
+              wiw_shift_id__isnull=False,
+          ).exclude(wiw_shift_id='')
+
+          bounds = Shift.objects.exclude(wiw_shift_id__isnull=True).exclude(wiw_shift_id='').order_by('starts_at')
+          first_date = timezone.localtime(bounds.first().starts_at).date().isoformat() if bounds.exists() else 'none'
+          last_date = timezone.localtime(bounds.last().starts_at).date().isoformat() if bounds.exists() else 'none'
+          print(f'WIW_REPAIR_OK remote_shift_count={len(remote_ids)} local_wiw_shift_count={len(local_ids)} missing_local=0')
+          print(f'WIW_REPAIR_REPORTED_DATES_2026_08_31_TO_09_02={reported.count()}')
+          print(f'WIW_REPAIR_LOCAL_BOUNDS={first_date}..{last_date}')
+          print(f'WIW_REPAIR_HISTORICAL_WORKER_STUBS_CREATED={stub_count}')
+          print(f'WIW_REPAIR_SYNC_COUNTS={dict(sync.counts)}')
+          PY
+          REMOTE
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
