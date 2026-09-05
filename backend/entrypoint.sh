@@ -2,6 +2,10 @@
 set -e
 
 python manage.py migrate --noinput
+# Keep the business-owned A+ customer/location directory canonical before any
+# worker/web process starts consuming WIW data. The command is idempotent and
+# preserves all historical WIW ids as aliases on the canonical locations.
+python manage.py normalize_wiw_directory
 python manage.py collectstatic --noinput
 python manage.py bootstrap
 # Contract source files live on the persistent media volume. A database reset can
