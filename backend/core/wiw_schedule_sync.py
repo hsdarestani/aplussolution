@@ -8,7 +8,7 @@ from .wiw_sync import WhenIWorkSynchronizer as BaseWhenIWorkSynchronizer
 
 # The five-minute operational sync intentionally covers a generous rolling
 # window so a temporary WIW/API failure cannot permanently strand a shift once
-# it moves into the past.  Complete all-time reconciliation is handled by the
+# it moves into the past. Complete all-time reconciliation is handled by the
 # background history task in core.tasks.
 SCHEDULE_LOOKBACK_DAYS = 30
 SCHEDULE_LOOKAHEAD_DAYS = 180
@@ -38,9 +38,9 @@ class _ScheduleWindowClient:
     """Keep incremental master-data sync while making shift refresh self-healing.
 
     WIW's plain /shifts response is intentionally short-lived and does not
-    include OpenShifts.  For shifts we therefore refresh an explicit rolling
+    include OpenShifts. For shifts we therefore refresh an explicit rolling
     window, include OpenShifts, and never carry ``updated_since`` into that
-    request.  If WIW returns the configured safety limit, the date range is
+    request. If WIW returns the configured safety limit, the date range is
     recursively split so a dense schedule cannot be silently truncated at 500
     rows.
     """
@@ -74,9 +74,12 @@ class _ScheduleWindowClient:
                     'schedule completeness cannot be guaranteed.'
                 )
             midpoint = start + (span / 2)
-            return _dedupe_shifts(
-                self._shift_collection(params, optional, start, midpoint, depth + 1).items
-                + self._shift_collection(params, optional, midpoint, end, depth + 1).items
+            left = self._shift_collection(params, optional, start, midpoint, depth + 1)
+            right = self._shift_collection(params, optional, midpoint, end, depth + 1)
+            return ResourceResult(
+                'shifts',
+                _dedupe_shifts(left.items + right.items),
+                200,
             )
 
         return ResourceResult('shifts', rows, getattr(result, 'status_code', 200))
@@ -87,10 +90,7 @@ class _ScheduleWindowClient:
 
         start = self._now - timedelta(days=SCHEDULE_LOOKBACK_DAYS)
         end = self._now + timedelta(days=SCHEDULE_LOOKAHEAD_DAYS)
-        result = self._shift_collection(params, optional, start, end)
-        if isinstance(result, list):
-            return ResourceResult('shifts', result, 200)
-        return result
+        return self._shift_collection(params, optional, start, end)
 
 
 class WhenIWorkSynchronizer(BaseWhenIWorkSynchronizer):
