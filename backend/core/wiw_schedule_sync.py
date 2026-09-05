@@ -5,7 +5,6 @@ from datetime import date, timedelta
 from .models import Location
 from .wiw_directory import (
     ACTIVE_CLIENT_NAMES,
-    MARTHA_LOCATION_NAMES,
     cache_location_aliases,
     canonical_client_name,
     canonical_martha_location_name,
@@ -217,7 +216,9 @@ class WhenIWorkSynchronizer(BaseWhenIWorkSynchronizer):
                 if not wiw_id:
                     continue
                 raw_name = self._raw_location_name(item, f'WIW Standort {wiw_id}')
-                obj = find_location_by_external('location', wiw_id)
+                # Inactive unknown rows are deliberately retained. Reuse them so
+                # the same external id can never create a fresh duplicate later.
+                obj = find_location_by_external('location', wiw_id, active_only=False)
                 created = False
 
                 if not obj:
@@ -256,9 +257,11 @@ class WhenIWorkSynchronizer(BaseWhenIWorkSynchronizer):
                     continue
 
                 raw_name = self._raw_location_name(item, f'WIW Einsatzort {site_id}')
-                obj = find_location_by_external('site', site_id)
+                obj = find_location_by_external('site', site_id, active_only=False)
                 created = False
-                parent = self.locations.get(parent_id) or find_location_by_external('location', parent_id)
+                parent = self.locations.get(parent_id) or find_location_by_external(
+                    'location', parent_id, active_only=False
+                )
 
                 if not obj:
                     client = parent.client if parent and parent.client_id else self.location_clients.get(parent_id)
@@ -296,11 +299,26 @@ class WhenIWorkSynchronizer(BaseWhenIWorkSynchronizer):
             location_id = as_id(first(item, 'location_id', 'location'))
             site_id = as_id(first(item, 'site_id', 'site'))
             if site_id and f'site:{site_id}' not in self.locations:
-                mapped = find_location_by_external('site', site_id)
+                mapped = find_location_by_external('site', site_id, active_only=False)
                 if mapped:
                     self.locations[f'site:{site_id}'] = mapped
             if location_id and location_id not in self.locations:
-                mapped = find_location_by_external('location', location_id)
+                mapped = find_location_by_external('location', location_id, active_only=False)
                 if mapped:
                     self.locations[location_id] = mapped
+
+            # If WIW sends a shift before its dependency metadata, create one
+            # non-operational placeholder instead of letting the base fallback
+            # create an active duplicate. The next location/site sync will reuse
+            # this external id and enrich the same row.
+            if location_id and location_id not in self.locations:
+                client = self._client_for_location(item, location_id)
+                placeholder = Location.objects.create(
+                    client=client,
+                    name='WIW Einsatzort',
+                    address=client.address or 'Aus WIW importiert',
+                    active=False,
+                )
+                self._update_location_from_wiw(placeholder, item, location_id=location_id)
+                self.locations[location_id] = placeholder
         super().sync_shifts(rows)
