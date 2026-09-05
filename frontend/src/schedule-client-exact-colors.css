@@ -1,0 +1,72 @@
+/* Final ScheduleV2 customer-color bridge.
+ * schedulePalette() already exposes exact accent/background/text values. The
+ * legacy ScheduleV2 CSS still painted cards from --sv2-client-hue, which loses
+ * exact brand colors (Martha amber, white customers, etc.). Consume the exact
+ * variables here and keep this file loaded after all legacy schedule styles.
+ */
+
+.sv2-card,
+.sv2-event {
+  border-left-color: var(--sv2-client-accent, #155eef) !important;
+  background: var(--sv2-client-bg, #ffffff) !important;
+  color: var(--sv2-client-text, #101828) !important;
+}
+
+.sv2-card {
+  border-color: color-mix(in srgb, var(--sv2-client-accent, #155eef) 70%, #c7ced8 30%) !important;
+  border-left-width: 5px !important;
+}
+
+.sv2-event {
+  border-color: color-mix(in srgb, var(--sv2-client-accent, #155eef) 62%, #cfd6df 38%) !important;
+  border-left-width: 4px !important;
+}
+
+.sv2-event:hover {
+  background: var(--sv2-client-bg, #ffffff) !important;
+  border-color: color-mix(in srgb, var(--sv2-client-accent, #155eef) 78%, #b9c1cc 22%) !important;
+}
+
+.sv2-card .sv2-date {
+  background: var(--sv2-client-chip, #eef4ff) !important;
+  color: var(--sv2-client-chip-text, #344054) !important;
+}
+
+.sv2-card .sv2-meter span,
+.sv2-client-label i,
+.sv2-client-legend i {
+  background: var(--sv2-client-accent, #155eef) !important;
+}
+
+.sv2-event .sv2-event-head,
+.sv2-event .sv2-event-head strong,
+.sv2-event .sv2-event-head > span,
+.sv2-event .sv2-event-line,
+.sv2-event .sv2-field-copy,
+.sv2-event .sv2-field-copy > span,
+.sv2-event .sv2-worker-names,
+.sv2-event .sv2-entity-link {
+  color: var(--sv2-client-text, #101828) !important;
+}
+
+.sv2-event .sv2-field-copy > small,
+.sv2-event .sv2-no-profile,
+.sv2-event .sv2-event-line ion-icon {
+  color: var(--sv2-client-muted, #667085) !important;
+}
+
+.sv2-client-label {
+  color: var(--sv2-client-text, #101828) !important;
+}
+
+.sv2-client-legend > span {
+  background: var(--sv2-client-chip, #eef4ff) !important;
+  color: var(--sv2-client-chip-text, #344054) !important;
+  border-color: color-mix(in srgb, var(--sv2-client-accent, #155eef) 42%, #d9e0e8 58%) !important;
+}
+
+/* White-designated customers still need a visible card edge on a white page. */
+.sv2-card[style*="--sv2-client-accent: rgb(255"],
+.sv2-event[style*="--sv2-client-accent: rgb(255"] {
+  border-color: #d5d9df !important;
+}
