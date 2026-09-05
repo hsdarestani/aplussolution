@@ -14,7 +14,7 @@ from .shift_slots import ShiftSlot
 
 
 WIW_RECONCILIATION_LOCK_KEY = 'wiw:reconciliation:exclusive:v1'
-WIW_RECONCILIATION_LOCK_SECONDS = 6 * 60 * 60
+WIW_RECONCILIATION_LOCK_SECONDS = 60 * 60
 
 
 def _acquire_wiw_reconciliation_lock():
