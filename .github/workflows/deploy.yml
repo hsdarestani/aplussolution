@@ -161,6 +161,14 @@ jobs:
           docker compose exec -T backend python manage.py check
           docker compose exec -T backend python manage.py migrate --check
           curl -fsS --max-time 15 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/
+
+          # Do not wait for the potentially long WIW history scan inside deploy.
+          # Queue both repair layers so the freshly deployed code immediately
+          # backfills all API-visible past/future shifts and then proves full
+          # supported-resource parity. Both tasks are idempotent and self-locking.
+          docker compose exec -T backend celery -A config call core.tasks.reconcile_when_i_work_schedule || true
+          docker compose exec -T backend celery -A config call core.tasks.reconcile_when_i_work_full || true
+
           docker compose ps
           docker image prune -f >/dev/null 2>&1 || true
           REMOTE
