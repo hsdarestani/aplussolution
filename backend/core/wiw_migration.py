@@ -75,6 +75,20 @@ def _fetch_static_resource(client, resource):
     return rows
 
 
+def _dynamic_params(resource, start: date, end: date):
+    params = {'start': _range_param(start), 'end': _range_param(end), 'limit': FETCH_LIMIT}
+    if resource == 'shifts':
+        # A normal WIW shifts request can omit OpenShifts or shifts outside the
+        # caller's default location scope. Full reconciliation must explicitly
+        # request both or it could incorrectly prove a partial snapshot complete.
+        params.update({
+            'include_open': 'true',
+            'include_allopen': 'true',
+            'all_locations': 'true',
+        })
+    return params
+
+
 def _fetch_dynamic_range(client, resource, start: date, end: date, depth=0):
     """Fetch a complete range without trusting WIW to honor very broad date windows.
 
@@ -94,7 +108,7 @@ def _fetch_dynamic_range(client, resource, start: date, end: date, depth=0):
             + _fetch_dynamic_range(client, resource, midpoint, end, depth + 1),
         )
 
-    params = {'start': _range_param(start), 'end': _range_param(end), 'limit': FETCH_LIMIT}
+    params = _dynamic_params(resource, start, end)
     try:
         rows = client.collection(resource, params=params, optional=False).items
     except WhenIWorkError:
@@ -124,7 +138,14 @@ def _fetch_dynamic_range(client, resource, start: date, end: date, depth=0):
 
 def _assert_dynamic_probe_is_in_snapshot(client, resource, rows):
     """Guard against a silent-empty range response using WIW's default/current view."""
-    probe = client.collection(resource, params={'limit': 50}, optional=False).items
+    probe_params = {'limit': 50}
+    if resource == 'shifts':
+        probe_params.update({
+            'include_open': 'true',
+            'include_allopen': 'true',
+            'all_locations': 'true',
+        })
+    probe = client.collection(resource, params=probe_params, optional=False).items
     probe_keys = {key for item in probe if (key := _item_identity(resource, item))}
     snapshot_keys = {key for item in rows if (key := _item_identity(resource, item))}
     missing = sorted(probe_keys - snapshot_keys)
