@@ -164,7 +164,6 @@ def reconcile_when_i_work_schedule(self):
         raise RuntimeError('Another WIW reconciliation is still running.')
 
     try:
-        from .models import WorkerProfile
         from .wiw import WhenIWorkClient, WhenIWorkError
         from .wiw_schedule_sync import WhenIWorkSynchronizer, fetch_complete_schedule_snapshot
         from .wiw_sync import as_id, first
@@ -203,9 +202,6 @@ def reconcile_when_i_work_schedule(self):
                 + ', '.join(missing[:20])
             )
 
-        # Make sure every historical placeholder is persisted as a worker before
-        # the business-specific workforce rules are re-applied.
-        WorkerProfile.objects.filter(wiw_user_id__in=remote_ids).exists()
         _reapply_schedule_worker_config()
         return {
             'status': 'success',
