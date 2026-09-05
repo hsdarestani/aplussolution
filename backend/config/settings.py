@@ -30,7 +30,22 @@ REST_FRAMEWORK={'DEFAULT_AUTHENTICATION_CLASSES':('rest_framework_simplejwt.auth
 SIMPLE_JWT={'ACCESS_TOKEN_LIFETIME':timedelta(minutes=30),'REFRESH_TOKEN_LIFETIME':timedelta(days=30),'ROTATE_REFRESH_TOKENS':True,'BLACKLIST_AFTER_ROTATION':False}
 CELERY_BROKER_URL=os.getenv('REDIS_URL','redis://localhost:6379/0'); CELERY_RESULT_BACKEND=CELERY_BROKER_URL
 ATTENDANCE_REMINDER_MINUTES=int(os.getenv('ATTENDANCE_REMINDER_MINUTES','15'))
-CELERY_BEAT_SCHEDULE={'attendance-reminders-5min':{'task':'core.tasks.send_attendance_reminders','schedule':300},'contract-reminders-daily':{'task':'core.tasks.send_contract_reminders','schedule':86400},'shift-reminders-hourly':{'task':'core.tasks.send_shift_reminders','schedule':3600},'client-contract-generation-hourly':{'task':'core.tasks.generate_due_client_contracts','schedule':3600},'working-time-sync-daily':{'task':'core.tasks.sync_working_time_current_year','schedule':86400},'working-time-backup-weekly':{'task':'core.tasks.backup_working_time','schedule':604800},'wiw-readonly-sync-5min':{'task':'core.tasks.sync_when_i_work','schedule':300,'args':['incremental']}}
+CELERY_BEAT_SCHEDULE={
+    'attendance-reminders-5min':{'task':'core.tasks.send_attendance_reminders','schedule':300},
+    'contract-reminders-daily':{'task':'core.tasks.send_contract_reminders','schedule':86400},
+    'shift-reminders-hourly':{'task':'core.tasks.send_shift_reminders','schedule':3600},
+    'client-contract-generation-hourly':{'task':'core.tasks.generate_due_client_contracts','schedule':3600},
+    'working-time-sync-daily':{'task':'core.tasks.sync_working_time_current_year','schedule':86400},
+    'working-time-backup-weekly':{'task':'core.tasks.backup_working_time','schedule':604800},
+    'wiw-readonly-sync-5min':{'task':'core.tasks.sync_when_i_work','schedule':300,'args':['incremental']},
+    # Layer 2: independently re-scan the complete schedule in bounded WIW date
+    # windows, including OpenShifts and all locations. This self-heals any shift
+    # a webhook/incremental request may have missed, regardless of age/future date.
+    'wiw-schedule-reconcile-6h':{'task':'core.tasks.reconcile_when_i_work_schedule','schedule':21600},
+    # Layer 3: strict daily reconciliation of every supported WIW resource. The
+    # task fails/retries instead of silently accepting a partial migration.
+    'wiw-full-reconcile-daily':{'task':'core.tasks.reconcile_when_i_work_full','schedule':86400},
+}
 WORKER_EMAILS_ENABLED=os.getenv('WORKER_EMAILS_ENABLED','0')=='1'
 EMAIL_BACKEND='core.email_backend.WorkerAwareSMTPEmailBackend' if os.getenv('EMAIL_HOST') else 'django.core.mail.backends.console.EmailBackend'
 EMAIL_HOST=os.getenv('EMAIL_HOST',''); EMAIL_PORT=int(os.getenv('EMAIL_PORT','587')); EMAIL_HOST_USER=os.getenv('EMAIL_HOST_USER',''); EMAIL_HOST_PASSWORD=os.getenv('EMAIL_HOST_PASSWORD',''); EMAIL_USE_TLS=os.getenv('EMAIL_USE_TLS','1')=='1'
