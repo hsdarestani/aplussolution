@@ -1,9 +1,11 @@
 import base64
+import io
 import re
 import tempfile
 from pathlib import Path
 
 import fitz
+from PIL import Image, ImageChops
 from django.core.files.base import ContentFile
 
 from .models import ContractSignature
@@ -39,6 +41,48 @@ def _image_bytes(value):
         return base64.b64decode(match.group(1), validate=True)
     except Exception:
         return None
+
+
+def _trim_signature_image(image_bytes):
+    """Crop empty signature-pad canvas space before stamping it into the PDF.
+
+    Mobile signature canvases are intentionally large so drawing feels natural.  The
+    useful ink can occupy only a small part of that canvas; fitting the whole canvas
+    into a PDF field makes the actual signature tiny and can visually shift it away
+    from the signature line.  Crop to the visible ink while retaining a small margin.
+    """
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as original:
+            image = original.convert('RGBA')
+            # Composite onto white so both transparent canvases and white-background
+            # JPEG/PNG canvases can be analysed the same way.
+            white = Image.new('RGBA', image.size, (255, 255, 255, 255))
+            composite = Image.alpha_composite(white, image)
+            grayscale = composite.convert('L')
+            darkness = ImageChops.invert(grayscale)
+            # Ignore anti-aliased near-white noise while keeping normal pen strokes.
+            mask = darkness.point(lambda value: 255 if value >= 12 else 0)
+            bbox = mask.getbbox()
+            if not bbox:
+                alpha = image.getchannel('A').point(lambda value: 255 if value >= 12 else 0)
+                bbox = alpha.getbbox()
+            if not bbox:
+                return image_bytes
+
+            pad = max(3, int(round(max(image.size) * 0.012)))
+            left = max(0, bbox[0] - pad)
+            top = max(0, bbox[1] - pad)
+            right = min(image.width, bbox[2] + pad)
+            bottom = min(image.height, bbox[3] + pad)
+            cropped = image.crop((left, top, right, bottom))
+            if cropped.width < 2 or cropped.height < 2:
+                return image_bytes
+
+            output = io.BytesIO()
+            cropped.save(output, format='PNG', optimize=True)
+            return output.getvalue()
+    except Exception:
+        return image_bytes
 
 
 def _normalise_placement(raw, *, source='template'):
@@ -98,6 +142,16 @@ def _smartdocs_placements(source, roles):
     for role in roles:
         value = resolved.get(f'signature_{role}')
         if not value:
+            continue
+        # SmartDocs is excellent for ordinary form fields, but a role label such as
+        # "Mitarbeiter" can otherwise score highly enough to masquerade as the
+        # signature field.  A signature placement must itself be anchored by an
+        # actual Unterschrift/Signatur/Signature label (or field name).
+        anchor_text = ' '.join(
+            str(value.get(key) or '')
+            for key in ('label', 'field_name')
+        )
+        if not _SIGNATURE_WORDS.search(anchor_text):
             continue
         parsed = _normalise_placement(
             {
@@ -169,7 +223,11 @@ def _candidate_rect(page, label_rect):
         vertical = abs(y - label_rect.y0)
         if vertical > 80 or (overlap <= 0 and abs(x0 - label_rect.x0) > 140):
             continue
-        rank = (vertical, -overlap)
+        # A printed "Unterschrift" label is commonly placed just below its line.
+        # Prefer the line immediately above / level with the label over later date
+        # lines below it, then use distance and horizontal overlap as tie-breakers.
+        side_penalty = 0 if y <= label_rect.y0 + 3 else 1
+        rank = (side_penalty, vertical, -overlap)
         if best is None or rank < best[0]:
             best = (rank, x0, x1, y)
     if best:
@@ -314,7 +372,7 @@ def stamp_drawn_signatures(contract):
     for signature in contract.signatures.order_by('signed_at'):
         image = _image_bytes(signature.signature_data)
         if image:
-            signatures.append((signature, image))
+            signatures.append((signature, _trim_signature_image(image)))
     if not signatures:
         return False
 
@@ -355,16 +413,19 @@ def stamp_drawn_signatures(contract):
                 continue
 
             # Preserve the canonical signer role and identity as searchable/auditable
-            # text for every placement. Avoid duplicating a role label that the form
-            # already prints itself.
+            # text for every placement. Avoid duplicating labels/names already printed
+            # by a DOCX/PDF template.
             role_label = _ROLE_LABELS.get(signature.role, role)
-            existing_text = (page.get_text('text') or '').lower()
-            if role_label.lower() not in existing_text:
+            existing_text = page.get_text('text') or ''
+            existing_lower = existing_text.casefold()
+            if role_label.casefold() not in existing_lower:
                 label_y = max(7.0, rect.y0 - 8.0)
                 page.insert_text((rect.x0, label_y), role_label, fontsize=7, color=(0.35, 0.39, 0.45), overlay=True)
 
-            name_y = min(page.rect.height - 5.0, rect.y1 + 9.0)
-            page.insert_text((rect.x0, name_y), signature.signer_name[:70], fontsize=7, color=(0.15, 0.18, 0.22), overlay=True)
+            signer_name = str(signature.signer_name or '').strip()
+            if signer_name and signer_name.casefold() not in existing_lower:
+                name_y = min(page.rect.height - 5.0, rect.y1 + 9.0)
+                page.insert_text((rect.x0, name_y), signer_name[:70], fontsize=7, color=(0.15, 0.18, 0.22), overlay=True)
 
         if not stamped:
             return False
