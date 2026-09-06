@@ -1,6 +1,3 @@
-import secrets
-
-from django.db import transaction
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -8,16 +5,20 @@ from rest_framework.response import Response
 
 from . import views
 from .client_order_planning import plan_client_order
+from .credential_reset import (
+    clear_reset_batch,
+    read_reset_batch,
+    reset_active_worker_passwords,
+    store_reset_batch,
+)
 from .models import ClientOrder, User
 from .permissions import IsAdminOrManager
 
 
 SYNTHETIC_MIGRATION_EMAIL_SUFFIX = '@sync.invalid'
 RESET_PASSWORD_CONFIRMATION = 'RESET_ACTIVE_WORKER_PASSWORDS'
-PASSWORD_UPPER = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
-PASSWORD_LOWER = 'abcdefghijkmnopqrstuvwxyz'
-PASSWORD_DIGITS = '23456789'
-PASSWORD_ALPHABET = PASSWORD_UPPER + PASSWORD_LOWER + PASSWORD_DIGITS
+REVEAL_PASSWORD_CONFIRMATION = 'SHOW_ACTIVE_WORKER_PASSWORDS'
+CLEAR_PASSWORD_CONFIRMATION = 'CLEAR_ACTIVE_WORKER_PASSWORDS'
 
 
 def _mark_worker_pending_activation(worker):
@@ -29,19 +30,11 @@ def _mark_worker_pending_activation(worker):
     return worker
 
 
-def _generated_worker_password(length=10):
-    """Short enough to send manually, while remaining random and typo-resistant."""
-    if length < 10:
-        raise ValueError('Worker passwords must be at least 10 characters long.')
-    chars = [
-        secrets.choice(PASSWORD_UPPER),
-        secrets.choice(PASSWORD_LOWER),
-        secrets.choice(PASSWORD_DIGITS),
-        secrets.choice(PASSWORD_DIGITS),
-    ]
-    chars.extend(secrets.choice(PASSWORD_ALPHABET) for _ in range(length - len(chars)))
-    secrets.SystemRandom().shuffle(chars)
-    return ''.join(chars)
+def _private_response(payload, *, status_code=status.HTTP_200_OK):
+    response = Response(payload, status=status_code)
+    response['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+    response['Pragma'] = 'no-cache'
+    return response
 
 
 class ClientCompanyViewSet(views.ClientCompanyViewSet):
@@ -103,47 +96,55 @@ class WorkerViewSet(views.WorkerViewSet):
         permission_classes=[IsAdminOrManager],
     )
     def reset_active_passwords(self, request):
-        # A bulk credential reset is intentionally stricter than ordinary
-        # manager mutations. Passwords are returned once over the authenticated
-        # HTTPS response and are never stored in plaintext or written to logs.
+        # Bulk credential resets are intentionally admin-only. Plaintext is
+        # returned only in this authenticated no-store response; the temporary
+        # server copy is encrypted and expires automatically.
         if request.user.role != User.Role.ADMIN:
             return Response({'detail': 'Nur die Administration darf alle Mitarbeiter-Zugänge neu setzen.'}, status=403)
         if request.data.get('confirm') != RESET_PASSWORD_CONFIRMATION:
             return Response({'detail': 'Bestätigung für das Zurücksetzen aller aktiven Mitarbeiter fehlt.'}, status=400)
 
-        workers = list(
-            self.get_queryset()
-            .filter(active=True, user__is_active=True)
-            .select_related('user')
-            .order_by('user__last_name', 'user__first_name', 'user__email')
-        )
-        credentials = []
-        with transaction.atomic():
-            for worker in workers:
-                password = _generated_worker_password()
-                worker.user.set_password(password)
-                worker.user.save(update_fields=['password'])
-                credentials.append({
-                    'name': worker.user.get_full_name().strip() or worker.employee_number or 'Mitarbeiter',
-                    'email': worker.user.email,
-                    'username': worker.user.email,
-                    'password': password,
-                })
-
-        views.audit(
-            request,
-            'worker.bulk_password_reset',
-            request.user,
-            {'count': len(credentials)},
-        )
-        response = Response({
+        credentials = reset_active_worker_passwords()
+        batch = store_reset_batch(credentials)
+        views.audit(request, 'worker.bulk_password_reset', request.user, {'count': len(credentials)})
+        return _private_response({
             'count': len(credentials),
             'credentials': credentials,
             'shown_once': True,
+            'batch_created_at': batch['created_at'],
         })
-        response['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
-        response['Pragma'] = 'no-cache'
-        return response
+
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='active-password-batch',
+        permission_classes=[IsAdminOrManager],
+    )
+    def active_password_batch(self, request):
+        if request.user.role != User.Role.ADMIN:
+            return Response({'detail': 'Nur die Administration darf Zugangsdaten anzeigen.'}, status=403)
+        if request.data.get('confirm') != REVEAL_PASSWORD_CONFIRMATION:
+            return Response({'detail': 'Bestätigung zum Anzeigen der Zugangsdaten fehlt.'}, status=400)
+        payload = read_reset_batch()
+        if not payload:
+            return Response({'detail': 'Keine aktuelle Zugangsdaten-Liste vorhanden oder die Liste ist bereits abgelaufen.'}, status=404)
+        views.audit(request, 'worker.bulk_password_batch_viewed', request.user, {'count': payload.get('count', 0)})
+        return _private_response(payload)
+
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='clear-password-batch',
+        permission_classes=[IsAdminOrManager],
+    )
+    def clear_password_batch(self, request):
+        if request.user.role != User.Role.ADMIN:
+            return Response({'detail': 'Nur die Administration darf die Zugangsdaten-Liste löschen.'}, status=403)
+        if request.data.get('confirm') != CLEAR_PASSWORD_CONFIRMATION:
+            return Response({'detail': 'Bestätigung zum Löschen der Zugangsdaten-Liste fehlt.'}, status=400)
+        cleared = clear_reset_batch()
+        views.audit(request, 'worker.bulk_password_batch_cleared', request.user, {'cleared': cleared})
+        return _private_response({'cleared': cleared})
 
 
 class OrderViewSet(views.OrderViewSet):
