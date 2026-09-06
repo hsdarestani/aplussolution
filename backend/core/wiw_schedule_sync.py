@@ -28,6 +28,7 @@ SCHEDULE_PAGE_LIMIT = 500
 FULL_SCHEDULE_START = date(2000, 1, 1)
 FULL_SCHEDULE_END = date(2100, 1, 1)
 WIW_UNASSIGNED_USER_ID = '0'
+WIW_UNASSIGNED_NORMALIZED_ID = '__wiw_unassigned__'
 
 
 class _ScheduleWindowClient:
@@ -329,9 +330,11 @@ class WhenIWorkSynchronizer(BaseWhenIWorkSynchronizer):
             item = dict(original)
             if self._wiw_user_id(item) == WIW_UNASSIGNED_USER_ID:
                 # Normalize WIW's user 0 sentinel before the base importer sees
-                # it. The existing shift then becomes a normal open assignment.
-                item['user_id'] = None
-                item['user'] = None
+                # it. A non-database sentinel is intentional: passing None would
+                # let a ``wiw_user_id IS NULL`` local worker match accidentally.
+                item['_aplus_original_user_id'] = WIW_UNASSIGNED_USER_ID
+                item['user_id'] = WIW_UNASSIGNED_NORMALIZED_ID
+                item['user'] = WIW_UNASSIGNED_NORMALIZED_ID
             rows.append(item)
 
         # Repair dependency lookup before the base importer runs. This prevents
