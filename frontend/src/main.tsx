@@ -30,6 +30,7 @@ import SchedulePdfLocationFilter from './SchedulePdfLocationFilter';
 import WiwScheduleMobile from './WiwScheduleMobile';
 import WiwEmployeeScheduleMobile from './WiwEmployeeScheduleMobile';
 import WiwShiftFormUxEnhancer from './WiwShiftFormUxEnhancer';
+import WiwShiftKeyboardGuard from './WiwShiftKeyboardGuard';
 import WiwWorkerPickerEligibilityEnhancer from './WiwWorkerPickerEligibilityEnhancer';
 import ShiftReleaseApprovalPanel from './ShiftReleaseApprovalPanel';
 import AdminScheduleTools from './AdminScheduleTools';
@@ -56,6 +57,7 @@ import './wiw-ios-date-note-polish.css';
 import './wiw-mobile-overlay-stability.css';
 import './schedule-client-exact-colors.css';
 import './wiw-schedule-bottom-clearance.css';
+import './wiw-shift-keyboard-guard.css';
 
 installBerlinLocaleDefaults();
 installOperationalFetchResilience();
@@ -85,6 +87,7 @@ function renderApp() {
           <WiwScheduleMobile />
           <WiwEmployeeScheduleMobile />
           <WiwShiftFormUxEnhancer />
+          <WiwShiftKeyboardGuard />
           <WiwWorkerPickerEligibilityEnhancer />
           <ShiftReleaseApprovalPanel />
           <AdminScheduleTools />
