@@ -54,7 +54,9 @@ jobs:
             -o ConnectTimeout=20 root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
-          docker compose exec -T backend python manage.py calibrate_signature_templates
+          # docker compose exec reads stdin by default. Detach this one-shot command
+          # from the SSH script so it cannot consume the Python heredoc below.
+          docker compose exec -T backend python manage.py calibrate_signature_templates </dev/null
           docker compose exec -T backend python manage.py shell <<'PY'
           import fitz
 
@@ -144,4 +146,4 @@ jobs:
         if: always()
         run: rm -f "$HOME/.ssh/strato_ed25519"
 
-# 2026-09-06: production verification now requires handwriting + signer caption on the real employee line.
+# 2026-09-06: one-shot calibration stdin is detached so production restamp + visual verification always runs.
