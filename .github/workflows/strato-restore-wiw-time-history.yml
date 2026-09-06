@@ -1,0 +1,99 @@
+name: Restore complete WIW attendance history on production
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-restore-wiw-time-history.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: strato-restore-wiw-time-history
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure Strato SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Run full WIW final migration and strict reconciliation
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=20 \
+            -o ServerAliveCountMax=30 \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py migrate_wiw_final --apply --strict --compact | tee /tmp/wiw-final-migration.json
+          grep -q '"cutover_ready": true' /tmp/wiw-final-migration.json
+          grep -q '"complete": true' /tmp/wiw-final-migration.json
+          REMOTE
+
+      - name: Verify restored attendance history range
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python - <<'PY'
+          import os
+          os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+          import django
+          django.setup()
+          from django.db.models import Min, Max
+          from core.models import TimeEntry
+
+          closed = TimeEntry.objects.filter(clock_out__isnull=False)
+          imported = closed.exclude(wiw_time_id__isnull=True).exclude(wiw_time_id='')
+          visible = closed.exclude(worker__user__email__iendswith='@sync.invalid')
+          bounds = visible.aggregate(oldest=Min('clock_in'), newest=Max('clock_in'))
+          imported_bounds = imported.aggregate(oldest=Min('clock_in'), newest=Max('clock_in'))
+
+          if imported.count() < 100:
+              raise RuntimeError(f'WIW history restore is still incomplete: only {imported.count()} imported closed rows.')
+          if not bounds['oldest'] or bounds['oldest'].date().isoformat() >= '2026-09-01':
+              raise RuntimeError(f'Manager-visible history still starts too late: {bounds["oldest"]}')
+
+          print(
+              'WIW_TIME_HISTORY_RESTORE_OK '
+              f'closed_total={closed.count()} imported_wiw={imported.count()} manager_visible={visible.count()} '
+              f'visible_oldest={bounds["oldest"].date().isoformat()} visible_newest={bounds["newest"].date().isoformat()} '
+              f'imported_oldest={imported_bounds["oldest"].date().isoformat() if imported_bounds["oldest"] else "none"} '
+              f'imported_newest={imported_bounds["newest"].date().isoformat() if imported_bounds["newest"] else "none"}'
+          )
+          PY
+          REMOTE
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
