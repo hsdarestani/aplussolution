@@ -51,7 +51,7 @@ jobs:
           if contract.signatures.count() < 1:
               raise RuntimeError('The Store Review test contract has no recorded signatures.')
 
-          # Build an unsigned/current-layout PDF first.
+          # Build a clean/current-layout PDF first.
           generate_contract_files(contract, validate=False)
           contract.refresh_from_db()
           contract.pdf.open('rb')
@@ -67,8 +67,6 @@ jobs:
               page_no = doc.page_count
               page = doc[-1]
 
-              # Employment template invariant: the final page contains two signature
-              # captions in document order: Arbeitnehmer first, Arbeitgeber second.
               rows = {}
               for word in page.get_text('words') or []:
                   if len(word) < 8:
@@ -89,40 +87,17 @@ jobs:
               if len(signature_rows) != 2:
                   raise RuntimeError(f'Expected exactly two final-page signature captions, got {len(signature_rows)}')
 
-              horizontal = []
-              for drawing in page.get_drawings() or []:
-                  for item in drawing.get('items', []):
-                      if item[0] == 'l':
-                          p1, p2 = item[1], item[2]
-                          if abs(p1.y - p2.y) <= 1.8 and abs(p2.x - p1.x) >= 65:
-                              horizontal.append((min(p1.x, p2.x), max(p1.x, p2.x), (p1.y + p2.y) / 2))
-                      elif item[0] == 're':
-                          rect = fitz.Rect(item[1])
-                          if rect.width >= 65 and rect.height <= 45:
-                              horizontal.append((rect.x0, rect.x1, rect.y1))
-
+              # In this DOCX-derived template the visual signature line is not exposed
+              # as a PDF drawing. The caption itself is stable, so anchor the handwriting
+              # directly above it. The first caption is Arbeitnehmer, the second Arbeitgeber.
               placements = {}
               for role, label_rect in zip(('employee', 'employer'), signature_rows):
-                  candidates = []
-                  for x0, x1, y in horizontal:
-                      # The intended signature line sits immediately above its caption.
-                      if y > label_rect.y0 + 3:
-                          continue
-                      delta = label_rect.y0 - y
-                      if not (0 <= delta <= 48):
-                          continue
-                      overlap = max(0.0, min(x1, label_rect.x1 + 180) - max(x0, label_rect.x0 - 90))
-                      if overlap <= 0 and abs(x0 - label_rect.x0) > 120:
-                          continue
-                      candidates.append((delta, -overlap, x0, x1, y))
-                  if not candidates:
-                      raise RuntimeError(f'No signature line found for {role}.')
-                  _, _, x0, x1, y = sorted(candidates)[0]
-
-                  left = x0 + 5
-                  right = x1 - 5
-                  top = max(6.0, y - 38.0)
-                  bottom = y - 1.5
+                  left = max(8.0, label_rect.x0)
+                  # The printed line is roughly 210pt wide in this template. Keep the
+                  # image within that field rather than letting it drift to the right.
+                  right = min(page.rect.width - 8.0, left + 210.0)
+                  bottom = max(12.0, label_rect.y0 - 4.0)
+                  top = max(8.0, bottom - 40.0)
                   placements[role] = {
                       'page': page_no,
                       'x': left / page.rect.width,
@@ -139,7 +114,6 @@ jobs:
           contract.template.schema = schema
           contract.template.save(update_fields=['schema', 'updated_at'])
 
-          # Regenerate and stamp with exact template coordinates.
           generate_contract_files(contract, validate=False)
           if not stamp_drawn_signatures(contract):
               raise RuntimeError('Signature restamp did not produce a stamped PDF.')
