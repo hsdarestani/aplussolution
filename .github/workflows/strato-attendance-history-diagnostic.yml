@@ -1,0 +1,62 @@
+name: Diagnose production attendance history visibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-attendance-history-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+      - name: Audit attendance history aggregates
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from django.db.models import Q, Min, Max, Count
+          from django.db.models.functions import TruncMonth
+          from core.models import TimeEntry, WorkerProfile
+
+          synthetic = Q(worker__user__email__iendswith='@sync.invalid')
+          wiw = Q(wiw_time_id__isnull=False) & ~Q(wiw_time_id='')
+          all_closed = TimeEntry.objects.filter(clock_out__isnull=False)
+          imported = all_closed.filter(wiw)
+          synthetic_rows = all_closed.filter(synthetic)
+          manager_visible = all_closed.exclude(worker__user__email__iendswith='@sync.invalid')
+
+          def show(label, qs):
+              b = qs.aggregate(oldest=Min('clock_in'), newest=Max('clock_in'))
+              months = qs.annotate(month=TruncMonth('clock_in')).values('month').annotate(n=Count('id')).order_by('month')
+              print(f'{label}_count={qs.count()}')
+              print(f"{label}_oldest=" + (b['oldest'].date().isoformat() if b['oldest'] else 'none'))
+              print(f"{label}_newest=" + (b['newest'].date().isoformat() if b['newest'] else 'none'))
+              print(label + '_months=' + ','.join(f"{r['month'].date().isoformat()}:{r['n']}" for r in months if r['month']))
+
+          print('synthetic_workers=' + str(WorkerProfile.objects.filter(user__email__iendswith='@sync.invalid').count()))
+          show('all_closed', all_closed)
+          show('imported_wiw', imported)
+          show('synthetic_history', synthetic_rows)
+          show('manager_visible', manager_visible)
+          PY
+          REMOTE
+      - name: Cleanup key
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
