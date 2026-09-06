@@ -46,7 +46,8 @@ jobs:
           set -euo pipefail
           cd /opt/aplussolution
           docker compose exec -T backend python manage.py shell <<'PY'
-          from django.db.models import Q, Min, Max
+          from django.db.models import Q, Min, Max, Count
+          from django.db.models.functions import TruncMonth
           from django.utils import timezone
           from datetime import timedelta
           from core.models import TimeEntry, WorkerProfile
@@ -65,6 +66,15 @@ jobs:
           def count(label, qs):
               print(f'{label}={qs.count()}')
 
+          def bounds(label, qs):
+              row = qs.aggregate(oldest=Min('clock_in'), newest=Max('clock_in'))
+              print(f"{label}_oldest=" + (row['oldest'].date().isoformat() if row['oldest'] else 'none'))
+              print(f"{label}_newest=" + (row['newest'].date().isoformat() if row['newest'] else 'none'))
+
+          def months(label, qs):
+              rows = qs.annotate(month=TruncMonth('clock_in')).values('month').annotate(n=Count('id')).order_by('month')
+              print(label + '=' + ','.join(f"{r['month'].date().isoformat()}:{r['n']}" for r in rows if r['month']))
+
           count('time_entries_total', TimeEntry.objects.all())
           count('workers_active_operational', WorkerProfile.objects.filter(active=True, user__is_active=True).exclude(user__email__iendswith='@sync.invalid'))
           count('workers_synthetic_migration', WorkerProfile.objects.filter(user__email__iendswith='@sync.invalid'))
@@ -82,9 +92,21 @@ jobs:
           count('open_over_12h_wiw_id', long_open.filter(wiw_id))
           count('open_over_12h_synthetic_worker', long_open.filter(synthetic))
           count('attendance_operational_open_over_12h', attendance_operational().filter(clock_out__isnull=True, clock_in__lte=timezone.now() - timedelta(hours=12)))
-          bounds = attendance_operational().filter(approved=False, clock_out__isnull=False).aggregate(oldest=Min('clock_in'), newest=Max('clock_in'))
-          print('attendance_operational_oldest_date=' + (bounds['oldest'].date().isoformat() if bounds['oldest'] else 'none'))
-          print('attendance_operational_newest_date=' + (bounds['newest'].date().isoformat() if bounds['newest'] else 'none'))
+
+          all_closed = TimeEntry.objects.filter(clock_out__isnull=False)
+          imported_closed = all_closed.filter(wiw_id)
+          synthetic_closed = all_closed.filter(synthetic)
+          manager_visible = all_closed.exclude(worker__user__email__iendswith='@sync.invalid')
+          count('history_all_closed', all_closed)
+          count('history_imported_wiw_closed', imported_closed)
+          count('history_synthetic_closed', synthetic_closed)
+          count('history_manager_visible_closed', manager_visible)
+          bounds('history_all_closed', all_closed)
+          bounds('history_imported_wiw_closed', imported_closed)
+          bounds('history_synthetic_closed', synthetic_closed)
+          bounds('history_manager_visible_closed', manager_visible)
+          months('history_all_months', all_closed)
+          months('history_manager_visible_months', manager_visible)
           PY
           REMOTE
 
