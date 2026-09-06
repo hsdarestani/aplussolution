@@ -13,6 +13,7 @@ from .models import WorkerProfile
 
 
 SYNTHETIC_MIGRATION_EMAIL_SUFFIX = '@sync.invalid'
+STORE_REVIEW_EMAIL = 'store-review@aplus-solution.de'
 PASSWORD_RESET_BATCH_KEY = 'security:active-worker-password-reset:v1'
 PASSWORD_RESET_BATCH_TTL_SECONDS = 6 * 60 * 60
 PASSWORD_UPPER = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
@@ -41,6 +42,7 @@ def active_real_workers():
         WorkerProfile.objects.select_related('user')
         .filter(active=True, user__is_active=True)
         .exclude(user__email__iendswith=SYNTHETIC_MIGRATION_EMAIL_SUFFIX)
+        .exclude(user__email__iexact=STORE_REVIEW_EMAIL)
         .order_by('user__last_name', 'user__first_name', 'user__email')
     )
 
