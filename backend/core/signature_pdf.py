@@ -335,11 +335,10 @@ def _refine_template_rect(template, rect):
     if getattr(template, 'slug', '') != 'arbeitsvertrag-dgb-gvp':
         return rect
 
-    # Reserve the lower part of the calibrated slot for the typed signer caption.
-    # The handwriting remains visually dominant but no longer collides with the
-    # printed Unterschrift line or the signer identity underneath it.
-    target_width = min(rect.width * 0.68, 148.0)
-    target_height = min(rect.height * 0.52, 21.0)
+    # Keep the typed signer caption unchanged while making only the handwriting
+    # 20% larger than the previous polished DGB/GVP rendering.
+    target_width = min(rect.width * 0.816, 177.6)
+    target_height = min(rect.height * 0.624, 25.2)
     center_x = (rect.x0 + rect.x1) / 2.0
     center_y = rect.y0 + (target_height / 2.0) + 1.5
     refined = fitz.Rect(
