@@ -1,6 +1,10 @@
 import io
+from datetime import datetime
+from types import SimpleNamespace
 
+import fitz
 from PIL import Image, ImageDraw
+from django.utils import timezone
 
 from core.models import ContractSignature
 from core import signature_pdf
@@ -62,3 +66,23 @@ def test_smartdocs_accepts_explicit_signature_anchor(monkeypatch):
     placements = signature_pdf._smartdocs_placements(b'not-a-real-pdf', [ContractSignature.Role.EMPLOYEE])
     assert placements[ContractSignature.Role.EMPLOYEE]['page'] == 6
     assert placements[ContractSignature.Role.EMPLOYEE]['source'] == 'smartdocs-line'
+
+
+def test_dgb_signature_caption_prints_entered_name_role_and_date():
+    document = fitz.open()
+    page = document.new_page(width=595, height=842)
+    signed_at = timezone.make_aware(datetime(2026, 9, 6, 12, 30))
+    signature = SimpleNamespace(
+        signer_name='Max Mustermann',
+        role=ContractSignature.Role.EMPLOYEE,
+        signed_at=signed_at,
+    )
+    template = SimpleNamespace(slug='arbeitsvertrag-dgb-gvp')
+    slot = fitz.Rect(80, 100, 300, 140)
+
+    assert signature_pdf._stamp_signature_caption(page, slot, signature, template) is True
+    text = page.get_text()
+    assert 'Max Mustermann' in text
+    assert 'Arbeitnehmer' in text
+    assert '06.09.2026' in text
+    document.close()
