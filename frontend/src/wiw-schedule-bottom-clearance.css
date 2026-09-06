@@ -1,0 +1,19 @@
+/* Keep the final Dienstplan rows fully reachable above the persistent mobile nav. */
+@media (max-width: 900px) {
+  body.wiw-native-schedule-active .wiw-schedule-mobile {
+    padding-bottom: calc(138px + env(safe-area-inset-bottom)) !important;
+  }
+
+  body.wiw-native-schedule-active .wiw-week-scroll {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+
+  body.wiw-native-schedule-active .wiw-day-section:last-child {
+    margin-bottom: 18px;
+  }
+
+  /* If the weekly total is shown, keep it above the app bottom navigation too. */
+  body.wiw-native-schedule-active .wiw-week-total {
+    bottom: calc(82px + env(safe-area-inset-bottom));
+  }
+}
