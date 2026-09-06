@@ -7,6 +7,7 @@ from pathlib import Path
 import fitz
 from PIL import Image, ImageChops
 from django.core.files.base import ContentFile
+from django.utils import timezone
 
 from .models import ContractSignature
 from .smart_pdf_overlay import analyse_pdf_template
@@ -16,6 +17,11 @@ _DATA_URL = re.compile(r'^data:image/(?:png|jpeg|jpg);base64,(.+)$', re.IGNORECA
 _SIGNATURE_WORDS = re.compile(r'\b(unterschrift|signatur|signature)\b', re.IGNORECASE)
 _ROLE_LABELS = {
     ContractSignature.Role.EMPLOYEE: 'Mitarbeiter',
+    ContractSignature.Role.EMPLOYER: 'Arbeitgeber',
+    ContractSignature.Role.CLIENT: 'Kunde',
+}
+_VISIBLE_ROLE_LABELS = {
+    ContractSignature.Role.EMPLOYEE: 'Arbeitnehmer',
     ContractSignature.Role.EMPLOYER: 'Arbeitgeber',
     ContractSignature.Role.CLIENT: 'Kunde',
 }
@@ -54,13 +60,10 @@ def _trim_signature_image(image_bytes):
     try:
         with Image.open(io.BytesIO(image_bytes)) as original:
             image = original.convert('RGBA')
-            # Composite onto white so both transparent canvases and white-background
-            # JPEG/PNG canvases can be analysed the same way.
             white = Image.new('RGBA', image.size, (255, 255, 255, 255))
             composite = Image.alpha_composite(white, image)
             grayscale = composite.convert('L')
             darkness = ImageChops.invert(grayscale)
-            # Ignore anti-aliased near-white noise while keeping normal pen strokes.
             mask = darkness.point(lambda value: 255 if value >= 12 else 0)
             bbox = mask.getbbox()
             if not bbox:
@@ -143,10 +146,6 @@ def _smartdocs_placements(source, roles):
         value = resolved.get(f'signature_{role}')
         if not value:
             continue
-        # SmartDocs is excellent for ordinary form fields, but a role label such as
-        # "Mitarbeiter" can otherwise score highly enough to masquerade as the
-        # signature field.  A signature placement must itself be anchored by an
-        # actual Unterschrift/Signatur/Signature label (or field name).
         anchor_text = ' '.join(
             str(value.get(key) or '')
             for key in ('label', 'field_name')
@@ -223,9 +222,6 @@ def _candidate_rect(page, label_rect):
         vertical = abs(y - label_rect.y0)
         if vertical > 80 or (overlap <= 0 and abs(x0 - label_rect.x0) > 140):
             continue
-        # A printed "Unterschrift" label is commonly placed just below its line.
-        # Prefer the line immediately above / level with the label over later date
-        # lines below it, then use distance and horizontal overlap as tie-breakers.
         side_penalty = 0 if y <= label_rect.y0 + 3 else 1
         rank = (side_penalty, vertical, -overlap)
         if best is None or rank < best[0]:
@@ -285,8 +281,6 @@ def _fallback_detected_placements(source, roles, already=None):
             if not ranked:
                 continue
             score, index, item = ranked[0]
-            # A generic "Unterschrift" is still useful when there is only one unresolved
-            # signature target. With multiple targets, require role context to avoid swaps.
             if score < 3 and len(unresolved) > 1:
                 continue
             used.add(index)
@@ -341,13 +335,13 @@ def _refine_template_rect(template, rect):
     if getattr(template, 'slug', '') != 'arbeitsvertrag-dgb-gvp':
         return rect
 
-    # The calibrated DGB/GVP slot intentionally covers the full printed line so it is
-    # easy to locate.  Handwriting looks more natural when rendered smaller and a few
-    # points above the baseline instead of filling that entire slot.
-    target_width = min(rect.width * 0.82, 172.0)
-    target_height = min(rect.height * 0.72, 29.0)
+    # Reserve the lower part of the calibrated slot for the typed signer caption.
+    # The handwriting remains visually dominant but no longer collides with the
+    # printed Unterschrift line or the signer identity underneath it.
+    target_width = min(rect.width * 0.68, 148.0)
+    target_height = min(rect.height * 0.52, 21.0)
     center_x = (rect.x0 + rect.x1) / 2.0
-    center_y = (rect.y0 + rect.y1) / 2.0 - 6.0
+    center_y = rect.y0 + (target_height / 2.0) + 1.5
     refined = fitz.Rect(
         center_x - (target_width / 2.0),
         center_y - (target_height / 2.0),
@@ -355,6 +349,59 @@ def _refine_template_rect(template, rect):
         center_y + (target_height / 2.0),
     )
     return refined
+
+
+def _fit_font_size(text, max_width, preferred, minimum):
+    size = float(preferred)
+    if not text or max_width <= 0:
+        return size
+    while size > minimum and fitz.get_text_length(text, fontname='helv', fontsize=size) > max_width:
+        size -= 0.25
+    return max(float(minimum), size)
+
+
+def _stamp_signature_caption(page, slot_rect, signature, template):
+    """Print the entered signer name plus role/date in the calibrated DGB/GVP slot."""
+    if getattr(template, 'slug', '') != 'arbeitsvertrag-dgb-gvp':
+        return False
+
+    signer_name = str(getattr(signature, 'signer_name', '') or '').strip()
+    if not signer_name:
+        return False
+
+    signed_at = getattr(signature, 'signed_at', None)
+    if signed_at:
+        try:
+            signed_at = timezone.localtime(signed_at)
+        except (ValueError, TypeError):
+            pass
+    date_text = signed_at.strftime('%d.%m.%Y') if signed_at else ''
+    role_label = _VISIBLE_ROLE_LABELS.get(str(getattr(signature, 'role', '')), 'Unterzeichner')
+    meta_text = ' · '.join(part for part in (role_label, date_text) if part)
+
+    max_width = max(40.0, slot_rect.width - 10.0)
+    name_size = _fit_font_size(signer_name, max_width, 7.4, 5.8)
+    meta_size = _fit_font_size(meta_text, max_width, 6.2, 5.2)
+    name_width = fitz.get_text_length(signer_name, fontname='helv', fontsize=name_size)
+    meta_width = fitz.get_text_length(meta_text, fontname='helv', fontsize=meta_size)
+
+    name_x = slot_rect.x0 + max(5.0, (slot_rect.width - name_width) / 2.0)
+    meta_x = slot_rect.x0 + max(5.0, (slot_rect.width - meta_width) / 2.0)
+    name_y = slot_rect.y1 - 9.0
+    meta_y = slot_rect.y1 - 2.4
+
+    try:
+        page.insert_text(
+            fitz.Point(name_x, name_y), signer_name,
+            fontsize=name_size, fontname='helv', color=(0.12, 0.12, 0.12), overlay=True,
+        )
+        page.insert_text(
+            fitz.Point(meta_x, meta_y), meta_text,
+            fontsize=meta_size, fontname='helv', color=(0.38, 0.38, 0.38), overlay=True,
+        )
+        return True
+    except Exception:
+        return False
 
 
 def _fallback_slots(document, signatures):
@@ -422,21 +469,22 @@ def stamp_drawn_signatures(contract):
             placement = placements.get(role) or fallbacks[role]
             page_index = max(0, min(document.page_count - 1, int(placement.get('page', 1)) - 1))
             page = document[page_index]
-            rect = _rect_from_placement(page, placement)
-            if rect.is_empty or rect.width < 12 or rect.height < 10:
+            slot_rect = _rect_from_placement(page, placement)
+            if slot_rect.is_empty or slot_rect.width < 12 or slot_rect.height < 10:
                 placement = fallbacks[role]
                 page = document[-1]
-                rect = _rect_from_placement(page, placement)
-            rect = _refine_template_rect(contract.template, rect) & page.rect
+                slot_rect = _rect_from_placement(page, placement)
+            image_rect = _refine_template_rect(contract.template, slot_rect) & page.rect
             try:
-                page.insert_image(rect, stream=image_bytes, keep_proportion=True, overlay=True)
+                page.insert_image(image_rect, stream=image_bytes, keep_proportion=True, overlay=True)
                 stamped = True
             except Exception:
                 continue
 
-            # Signer identity and role are already canonical in ContractSignature and
-            # the audit trail. Do not inject helper labels/names into the legal PDF:
-            # they can collide with the template's printed Unterschrift/date fields.
+            # Keep generic templates free of helper labels.  The calibrated DGB/GVP
+            # contract intentionally shows the exact entered signer name and a compact
+            # role/date caption below the handwriting, without touching printed fields.
+            _stamp_signature_caption(page, slot_rect, signature, contract.template)
 
         if not stamped:
             return False
