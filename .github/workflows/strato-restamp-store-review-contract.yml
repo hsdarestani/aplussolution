@@ -28,7 +28,24 @@ jobs:
           printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
           chmod 600 "$HOME/.ssh/strato_ed25519"
 
-      - name: Calibrate signature fields and restamp Store Review contract
+      - name: Wait for polished signature renderer deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 90); do
+            if ssh -i "$HOME/.ssh/strato_ed25519" \
+              -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=20 root@"$STRATO_HOST" \
+              "grep -q '_refine_template_rect' /opt/aplussolution/backend/core/signature_pdf.py && grep -q 'Do not inject helper labels/names' /opt/aplussolution/backend/core/signature_pdf.py"; then
+              echo 'POLISHED_SIGNATURE_RENDERER_DEPLOYED'
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Timed out waiting for polished signature renderer.' >&2
+          exit 1
+
+      - name: Regenerate and restamp Store Review contract
         shell: bash
         run: |
           set -euo pipefail
@@ -38,8 +55,6 @@ jobs:
           set -euo pipefail
           cd /opt/aplussolution
           docker compose exec -T backend python manage.py shell <<'PY'
-          import fitz
-
           from core.document_engine import generate_contract_files
           from core.models import Contract
           from core.signature_pdf import stamp_drawn_signatures
@@ -51,77 +66,14 @@ jobs:
           if contract.signatures.count() < 1:
               raise RuntimeError('The Store Review test contract has no recorded signatures.')
 
-          # Build a clean/current-layout PDF first.
-          generate_contract_files(contract, validate=False)
-          contract.refresh_from_db()
-          contract.pdf.open('rb')
-          try:
-              source = contract.pdf.read()
-          finally:
-              contract.pdf.close()
-
-          doc = fitz.open(stream=source, filetype='pdf')
-          try:
-              if doc.page_count < 1:
-                  raise RuntimeError('Generated PDF has no pages.')
-              page_no = doc.page_count
-              page = doc[-1]
-
-              rows = {}
-              for word in page.get_text('words') or []:
-                  if len(word) < 8:
-                      continue
-                  x0, y0, x1, y1, text, block, line, _ = word[:8]
-                  key = (block, line)
-                  row = rows.setdefault(key, {'rect': fitz.Rect(x0, y0, x1, y1), 'parts': []})
-                  row['rect'] |= fitz.Rect(x0, y0, x1, y1)
-                  row['parts'].append((x0, str(text)))
-
-              signature_rows = []
-              for row in rows.values():
-                  row['parts'].sort(key=lambda item: item[0])
-                  text = ' '.join(item[1] for item in row['parts'])
-                  if 'unterschrift' in text.casefold():
-                      signature_rows.append(row['rect'])
-              signature_rows.sort(key=lambda rect: (rect.y0, rect.x0))
-              if len(signature_rows) != 2:
-                  raise RuntimeError(f'Expected exactly two final-page signature captions, got {len(signature_rows)}')
-
-              # In this DOCX-derived template the visual signature line is not exposed
-              # as a PDF drawing. The caption itself is stable, so anchor the handwriting
-              # directly above it. The first caption is Arbeitnehmer, the second Arbeitgeber.
-              placements = {}
-              for role, label_rect in zip(('employee', 'employer'), signature_rows):
-                  left = max(8.0, label_rect.x0)
-                  # The printed line is roughly 210pt wide in this template. Keep the
-                  # image within that field rather than letting it drift to the right.
-                  right = min(page.rect.width - 8.0, left + 210.0)
-                  bottom = max(12.0, label_rect.y0 - 4.0)
-                  top = max(8.0, bottom - 40.0)
-                  placements[role] = {
-                      'page': page_no,
-                      'x': left / page.rect.width,
-                      'y': top / page.rect.height,
-                      'width': (right - left) / page.rect.width,
-                      'height': (bottom - top) / page.rect.height,
-                      'confidence': 1.0,
-                  }
-          finally:
-              doc.close()
-
-          schema = dict(contract.template.schema or {})
-          schema['signature_placements'] = placements
-          contract.template.schema = schema
-          contract.template.save(update_fields=['schema', 'updated_at'])
-
           generate_contract_files(contract, validate=False)
           if not stamp_drawn_signatures(contract):
               raise RuntimeError('Signature restamp did not produce a stamped PDF.')
           contract.refresh_from_db()
           print(
-              'CONTRACT_SIGNATURE_CALIBRATED_OK '
+              'CONTRACT_SIGNATURE_POLISH_OK '
               f'id={contract.pk} status={contract.status} signatures={contract.signatures.count()} '
-              f'page={page_no} pdf={contract.pdf.name}'
+              f'pdf={contract.pdf.name}'
           )
           PY
           REMOTE
