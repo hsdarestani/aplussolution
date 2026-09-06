@@ -1,0 +1,49 @@
+/* Real keyboard-safe viewport for the WIW shift editor on Android + iOS.
+   The native keyboard can overlay a fixed 100dvh WebView instead of resizing it,
+   so WiwShiftKeyboardGuard exposes the actually usable viewport in CSS pixels. */
+@media (max-width: 900px) {
+  body.wiw-shift-form-active .wiw-shift-form-screen.wiw-keyboard-guarded {
+    inset: auto 0 auto 0 !important;
+    top: var(--wiw-visible-viewport-top, 0px) !important;
+    width: 100% !important;
+    height: var(--wiw-visible-viewport-height, 100dvh) !important;
+    min-height: 0 !important;
+    max-height: var(--wiw-visible-viewport-height, 100dvh) !important;
+    overflow: hidden !important;
+  }
+
+  body.wiw-shift-form-active .wiw-shift-form-screen.wiw-keyboard-guarded .wiw-form-scroll {
+    box-sizing: border-box !important;
+    height: calc(var(--wiw-visible-viewport-height, 100dvh) - 58px - env(safe-area-inset-top)) !important;
+    min-height: 0 !important;
+    max-height: calc(var(--wiw-visible-viewport-height, 100dvh) - 58px - env(safe-area-inset-top)) !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    padding-bottom: calc(32px + env(safe-area-inset-bottom)) !important;
+    scroll-padding-top: 18px !important;
+    scroll-padding-bottom: 28px !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+  }
+
+  body.wiw-shift-form-active .wiw-shift-form-screen.wiw-keyboard-guarded.wiw-keyboard-visible .wiw-form-scroll {
+    padding-bottom: 34px !important;
+    scroll-padding-bottom: 34px !important;
+  }
+
+  body.wiw-shift-form-active .wiw-shift-form-screen.wiw-keyboard-guarded .wiw-extra-options,
+  body.wiw-shift-form-active .wiw-shift-form-screen.wiw-keyboard-guarded .wiw-extra-options textarea {
+    scroll-margin-top: 18px !important;
+    scroll-margin-bottom: 28px !important;
+  }
+
+  body.wiw-shift-form-active .wiw-shift-form-screen.wiw-keyboard-guarded .wiw-extra-options textarea {
+    box-sizing: border-box;
+    width: 100%;
+    font-size: 16px !important; /* prevents iOS focus zoom from changing viewport geometry */
+  }
+
+  body.wiw-shift-form-active .wiw-shift-form-screen.wiw-keyboard-guarded.wiw-keyboard-visible .wiw-keyboard-focus-target {
+    scroll-margin-bottom: 34px !important;
+  }
+}
