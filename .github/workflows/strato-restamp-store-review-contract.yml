@@ -28,7 +28,7 @@ jobs:
           printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
           chmod 600 "$HOME/.ssh/strato_ed25519"
 
-      - name: Wait for signer caption renderer deployment
+      - name: Wait for calibrated signer renderer deployment
         shell: bash
         run: |
           set -euo pipefail
@@ -36,16 +36,16 @@ jobs:
             if ssh -i "$HOME/.ssh/strato_ed25519" \
               -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
               -o ConnectTimeout=20 root@"$STRATO_HOST" \
-              "grep -q '_stamp_signature_caption' /opt/aplussolution/backend/core/signature_pdf.py && grep -q '_VISIBLE_ROLE_LABELS' /opt/aplussolution/backend/core/signature_pdf.py"; then
-              echo 'SIGNER_CAPTION_RENDERER_DEPLOYED'
+              "test -f /opt/aplussolution/backend/core/management/commands/calibrate_signature_templates.py && grep -q '_stamp_signature_caption' /opt/aplussolution/backend/core/signature_pdf.py"; then
+              echo 'CALIBRATED_SIGNATURE_RENDERER_DEPLOYED'
               exit 0
             fi
             sleep 10
           done
-          echo 'Timed out waiting for signer caption renderer.' >&2
+          echo 'Timed out waiting for calibrated signature renderer.' >&2
           exit 1
 
-      - name: Regenerate and restamp Store Review contract
+      - name: Regenerate, restamp and verify Store Review contract
         shell: bash
         run: |
           set -euo pipefail
@@ -54,7 +54,10 @@ jobs:
             -o ConnectTimeout=20 root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
+          docker compose exec -T backend python manage.py calibrate_signature_templates
           docker compose exec -T backend python manage.py shell <<'PY'
+          import fitz
+
           from core.document_engine import generate_contract_files
           from core.models import Contract
           from core.signature_pdf import stamp_drawn_signatures
@@ -63,16 +66,75 @@ jobs:
           contract = Contract.objects.select_related('template').get(pk=contract_id)
           if contract.template.slug != 'arbeitsvertrag-dgb-gvp':
               raise RuntimeError(f'Unexpected template: {contract.template.slug}')
-          if contract.signatures.count() < 1:
+          signatures = list(contract.signatures.order_by('signed_at'))
+          if not signatures:
               raise RuntimeError('The Store Review test contract has no recorded signatures.')
+
+          placements = (contract.template.schema or {}).get('signature_placements') or {}
+          employee_placement = placements.get('employee') or {}
+          if employee_placement.get('page') != 6 or float(employee_placement.get('x', 1)) >= 0.12:
+              raise RuntimeError(f'Employee signature placement is not calibrated: {employee_placement}')
 
           generate_contract_files(contract, validate=False)
           if not stamp_drawn_signatures(contract):
               raise RuntimeError('Signature restamp did not produce a stamped PDF.')
           contract.refresh_from_db()
+
+          contract.pdf.open('rb')
+          try:
+              pdf_bytes = contract.pdf.read()
+          finally:
+              contract.pdf.close()
+          document = fitz.open(stream=pdf_bytes, filetype='pdf')
+          try:
+              if document.page_count < 6:
+                  raise RuntimeError(f'Expected 6-page DGB/GVP PDF, got {document.page_count}.')
+              page = document[5]
+
+              image_rects = []
+              for image in page.get_images(full=True):
+                  for rect in page.get_image_rects(image[0]):
+                      image_rects.append(rect)
+              signature_rects = [
+                  rect for rect in image_rects
+                  if rect.x0 < 250 and rect.x1 > 70 and rect.y0 < 225 and rect.y1 > 175
+                  and rect.width >= 20 and rect.height >= 10
+              ]
+              if not signature_rects:
+                  raise RuntimeError(
+                      'No visible employee handwriting found over the calibrated signature line. '
+                      f'Images={[(round(r.x0,1), round(r.y0,1), round(r.x1,1), round(r.y1,1)) for r in image_rects]}'
+                  )
+
+              employee_signature = signatures[0]
+              signer_hits = page.search_for(employee_signature.signer_name)
+              signer_hits = [r for r in signer_hits if r.x0 < 260 and 205 <= r.y0 <= 235]
+              if not signer_hits:
+                  raise RuntimeError(
+                      f'Signer name is not below the employee signature line: {employee_signature.signer_name!r}'
+                  )
+
+              role_hits = [r for r in page.search_for('Arbeitnehmer') if r.x0 < 260 and r.y0 < 245]
+              date_text = employee_signature.signed_at.strftime('%d.%m.%Y')
+              date_hits = [r for r in page.search_for(date_text) if r.x0 < 260 and r.y0 < 245]
+              if not role_hits or not date_hits:
+                  raise RuntimeError(
+                      f'Role/date caption is not aligned with the employee signature: '
+                      f'role_hits={role_hits} date_hits={date_hits}'
+                  )
+
+              rect = signature_rects[0]
+              print(
+                  'CONTRACT_SIGNATURE_VISUAL_VERIFIED '
+                  f'image_rect=({rect.x0:.1f},{rect.y0:.1f},{rect.x1:.1f},{rect.y1:.1f}) '
+                  f'signer={employee_signature.signer_name!r} date={date_text}'
+              )
+          finally:
+              document.close()
+
           print(
               'CONTRACT_SIGNER_CAPTION_OK '
-              f'id={contract.pk} status={contract.status} signatures={contract.signatures.count()} '
+              f'id={contract.pk} status={contract.status} signatures={len(signatures)} '
               f'pdf={contract.pdf.name}'
           )
           PY
@@ -82,4 +144,4 @@ jobs:
         if: always()
         run: rm -f "$HOME/.ssh/strato_ed25519"
 
-# 2026-09-06: retrigger after adding visible signer name, role and signed date.
+# 2026-09-06: production verification now requires handwriting + signer caption on the real employee line.
