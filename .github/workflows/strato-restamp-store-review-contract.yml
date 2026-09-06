@@ -28,7 +28,7 @@ jobs:
           printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
           chmod 600 "$HOME/.ssh/strato_ed25519"
 
-      - name: Wait for polished signature renderer deployment
+      - name: Wait for signer caption renderer deployment
         shell: bash
         run: |
           set -euo pipefail
@@ -36,13 +36,13 @@ jobs:
             if ssh -i "$HOME/.ssh/strato_ed25519" \
               -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
               -o ConnectTimeout=20 root@"$STRATO_HOST" \
-              "grep -q '_refine_template_rect' /opt/aplussolution/backend/core/signature_pdf.py && grep -q 'Do not inject helper labels/names' /opt/aplussolution/backend/core/signature_pdf.py"; then
-              echo 'POLISHED_SIGNATURE_RENDERER_DEPLOYED'
+              "grep -q '_stamp_signature_caption' /opt/aplussolution/backend/core/signature_pdf.py && grep -q '_VISIBLE_ROLE_LABELS' /opt/aplussolution/backend/core/signature_pdf.py"; then
+              echo 'SIGNER_CAPTION_RENDERER_DEPLOYED'
               exit 0
             fi
             sleep 10
           done
-          echo 'Timed out waiting for polished signature renderer.' >&2
+          echo 'Timed out waiting for signer caption renderer.' >&2
           exit 1
 
       - name: Regenerate and restamp Store Review contract
@@ -71,7 +71,7 @@ jobs:
               raise RuntimeError('Signature restamp did not produce a stamped PDF.')
           contract.refresh_from_db()
           print(
-              'CONTRACT_SIGNATURE_POLISH_OK '
+              'CONTRACT_SIGNER_CAPTION_OK '
               f'id={contract.pk} status={contract.status} signatures={contract.signatures.count()} '
               f'pdf={contract.pdf.name}'
           )
@@ -81,3 +81,5 @@ jobs:
       - name: Cleanup SSH key
         if: always()
         run: rm -f "$HOME/.ssh/strato_ed25519"
+
+# 2026-09-06: retrigger after adding visible signer name, role and signed date.
