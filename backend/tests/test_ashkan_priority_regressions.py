@@ -184,6 +184,8 @@ def test_drawn_two_party_signatures_are_hashed_and_stamped_into_final_pdf(
     assert all(len(item.signature_hash) == 64 for item in signatures)
     assert len(contract.signature_hash) == 64
     assert all(item.signature_data.startswith('data:image/png;base64,') for item in signatures)
+    assert [item.signer_name for item in signatures] == ['Anna Becker', 'A+ Solution GmbH']
+    assert [item.role for item in signatures] == ['employee', 'employer']
 
     contract.pdf.open('rb')
     try:
@@ -194,10 +196,13 @@ def test_drawn_two_party_signatures_are_hashed_and_stamped_into_final_pdf(
     reader = PdfReader(io.BytesIO(pdf_bytes))
     assert reader.pages
     final_text = reader.pages[-1].extract_text() or ''
-    assert 'Anna Becker' in final_text
-    assert 'A+ Solution GmbH' in final_text
-    assert 'Mitarbeiter' in final_text
-    assert 'Arbeitgeber' in final_text
+    # Signer identity stays canonical in ContractSignature / audit data; the legal
+    # PDF itself must not inject helper labels or names that can collide with the
+    # template's printed signature and date fields.
+    assert 'Anna Becker' not in final_text
+    assert 'A+ Solution GmbH' not in final_text
+    assert 'Mitarbeiter' not in final_text
+    assert 'Arbeitgeber' not in final_text
 
 
 @pytest.mark.django_db
