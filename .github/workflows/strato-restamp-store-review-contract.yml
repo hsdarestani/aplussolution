@@ -46,11 +46,12 @@ jobs:
 
           contract_id = '98c112fa-3c87-449b-92c4-e360b393dc26'
           contract = Contract.objects.select_related('template').get(pk=contract_id)
+          if contract.template.slug != 'arbeitsvertrag-dgb-gvp':
+              raise RuntimeError(f'Unexpected template: {contract.template.slug}')
           if contract.signatures.count() < 1:
               raise RuntimeError('The Store Review test contract has no recorded signatures.')
 
-          # Rebuild the clean document first; calibration must use the original layout,
-          # not a PDF that already contains a misplaced signature image.
+          # Build an unsigned/current-layout PDF first.
           generate_contract_files(contract, validate=False)
           contract.refresh_from_db()
           contract.pdf.open('rb')
@@ -60,98 +61,85 @@ jobs:
               contract.pdf.close()
 
           doc = fitz.open(stream=source, filetype='pdf')
-          placements = {}
           try:
-              for page_no, page in enumerate(doc, start=1):
-                  words = page.get_text('words') or []
-                  rows = {}
-                  for word in words:
-                      if len(word) < 8:
-                          continue
-                      x0, y0, x1, y1, text, block, line, _ = word[:8]
-                      key = (block, line)
-                      row = rows.setdefault(key, {'rect': fitz.Rect(x0, y0, x1, y1), 'parts': []})
-                      row['rect'] |= fitz.Rect(x0, y0, x1, y1)
-                      row['parts'].append((x0, str(text)))
-                  signature_rows = []
-                  for row in rows.values():
-                      row['parts'].sort(key=lambda item: item[0])
-                      text = ' '.join(item[1] for item in row['parts'])
-                      if 'unterschrift' in text.casefold():
-                          signature_rows.append((row['rect'], text))
-                  if not signature_rows:
+              if doc.page_count < 1:
+                  raise RuntimeError('Generated PDF has no pages.')
+              page_no = doc.page_count
+              page = doc[-1]
+
+              # Employment template invariant: the final page contains two signature
+              # captions in document order: Arbeitnehmer first, Arbeitgeber second.
+              rows = {}
+              for word in page.get_text('words') or []:
+                  if len(word) < 8:
                       continue
+                  x0, y0, x1, y1, text, block, line, _ = word[:8]
+                  key = (block, line)
+                  row = rows.setdefault(key, {'rect': fitz.Rect(x0, y0, x1, y1), 'parts': []})
+                  row['rect'] |= fitz.Rect(x0, y0, x1, y1)
+                  row['parts'].append((x0, str(text)))
 
-                  horizontal = []
-                  for drawing in page.get_drawings() or []:
-                      for item in drawing.get('items', []):
-                          if item[0] == 'l':
-                              p1, p2 = item[1], item[2]
-                              if abs(p1.y - p2.y) <= 1.8 and abs(p2.x - p1.x) >= 65:
-                                  horizontal.append((min(p1.x, p2.x), max(p1.x, p2.x), (p1.y + p2.y) / 2))
-                          elif item[0] == 're':
-                              rect = fitz.Rect(item[1])
-                              if rect.width >= 65 and rect.height <= 45:
-                                  horizontal.append((rect.x0, rect.x1, rect.y1))
+              signature_rows = []
+              for row in rows.values():
+                  row['parts'].sort(key=lambda item: item[0])
+                  text = ' '.join(item[1] for item in row['parts'])
+                  if 'unterschrift' in text.casefold():
+                      signature_rows.append(row['rect'])
+              signature_rows.sort(key=lambda rect: (rect.y0, rect.x0))
+              if len(signature_rows) != 2:
+                  raise RuntimeError(f'Expected exactly two final-page signature captions, got {len(signature_rows)}')
 
-                  for label_rect, _ in signature_rows:
-                      # The role is printed shortly below each Unterschrift label in this
-                      # template. Read only that local band so employee/employer cannot cross-match.
-                      context = page.get_textbox(fitz.Rect(
-                          max(0, label_rect.x0 - 12),
-                          label_rect.y0,
-                          min(page.rect.width, label_rect.x1 + 260),
-                          min(page.rect.height, label_rect.y1 + 72),
-                      )).casefold().replace('ä', 'ae').replace('ö', 'oe').replace('ü', 'ue').replace('ß', 'ss')
-                      role = None
-                      if 'arbeitnehmer' in context:
-                          role = 'employee'
-                      elif 'arbeitgeber' in context:
-                          role = 'employer'
-                      if not role or role in placements:
+              horizontal = []
+              for drawing in page.get_drawings() or []:
+                  for item in drawing.get('items', []):
+                      if item[0] == 'l':
+                          p1, p2 = item[1], item[2]
+                          if abs(p1.y - p2.y) <= 1.8 and abs(p2.x - p1.x) >= 65:
+                              horizontal.append((min(p1.x, p2.x), max(p1.x, p2.x), (p1.y + p2.y) / 2))
+                      elif item[0] == 're':
+                          rect = fitz.Rect(item[1])
+                          if rect.width >= 65 and rect.height <= 45:
+                              horizontal.append((rect.x0, rect.x1, rect.y1))
+
+              placements = {}
+              for role, label_rect in zip(('employee', 'employer'), signature_rows):
+                  candidates = []
+                  for x0, x1, y in horizontal:
+                      # The intended signature line sits immediately above its caption.
+                      if y > label_rect.y0 + 3:
                           continue
-
-                      candidates = []
-                      for x0, x1, y in horizontal:
-                          if y > label_rect.y0 + 3:
-                              continue
-                          delta = label_rect.y0 - y
-                          if delta < -2 or delta > 55:
-                              continue
-                          overlap = max(0.0, min(x1, label_rect.x1 + 180) - max(x0, label_rect.x0 - 90))
-                          if overlap <= 0 and abs(x0 - label_rect.x0) > 120:
-                              continue
-                          candidates.append((delta, -overlap, x0, x1, y))
-                      if not candidates:
+                      delta = label_rect.y0 - y
+                      if not (0 <= delta <= 48):
                           continue
-                      _, _, x0, x1, y = sorted(candidates)[0]
+                      overlap = max(0.0, min(x1, label_rect.x1 + 180) - max(x0, label_rect.x0 - 90))
+                      if overlap <= 0 and abs(x0 - label_rect.x0) > 120:
+                          continue
+                      candidates.append((delta, -overlap, x0, x1, y))
+                  if not candidates:
+                      raise RuntimeError(f'No signature line found for {role}.')
+                  _, _, x0, x1, y = sorted(candidates)[0]
 
-                      # Put the handwriting immediately above the real signature line.
-                      # A 38pt-high box gives a natural handwritten size after whitespace crop.
-                      left = x0 + 5
-                      right = x1 - 5
-                      top = max(6.0, y - 38.0)
-                      bottom = y - 1.5
-                      placements[role] = {
-                          'page': page_no,
-                          'x': left / page.rect.width,
-                          'y': top / page.rect.height,
-                          'width': (right - left) / page.rect.width,
-                          'height': (bottom - top) / page.rect.height,
-                          'confidence': 1.0,
-                      }
+                  left = x0 + 5
+                  right = x1 - 5
+                  top = max(6.0, y - 38.0)
+                  bottom = y - 1.5
+                  placements[role] = {
+                      'page': page_no,
+                      'x': left / page.rect.width,
+                      'y': top / page.rect.height,
+                      'width': (right - left) / page.rect.width,
+                      'height': (bottom - top) / page.rect.height,
+                      'confidence': 1.0,
+                  }
           finally:
               doc.close()
-
-          if 'employee' not in placements or 'employer' not in placements:
-              raise RuntimeError(f'Could not calibrate both signature fields: roles={sorted(placements)}')
 
           schema = dict(contract.template.schema or {})
           schema['signature_placements'] = placements
           contract.template.schema = schema
           contract.template.save(update_fields=['schema', 'updated_at'])
 
-          # Regenerate once more and stamp using the now-explicit template coordinates.
+          # Regenerate and stamp with exact template coordinates.
           generate_contract_files(contract, validate=False)
           if not stamp_drawn_signatures(contract):
               raise RuntimeError('Signature restamp did not produce a stamped PDF.')
@@ -159,8 +147,7 @@ jobs:
           print(
               'CONTRACT_SIGNATURE_CALIBRATED_OK '
               f'id={contract.pk} status={contract.status} signatures={contract.signatures.count()} '
-              f'pages={placements["employee"]["page"]}/{placements["employer"]["page"]} '
-              f'pdf={contract.pdf.name}'
+              f'page={page_no} pdf={contract.pdf.name}'
           )
           PY
           REMOTE
