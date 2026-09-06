@@ -1,3 +1,6 @@
+import secrets
+
+from django.db import transaction
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -10,6 +13,11 @@ from .permissions import IsAdminOrManager
 
 
 SYNTHETIC_MIGRATION_EMAIL_SUFFIX = '@sync.invalid'
+RESET_PASSWORD_CONFIRMATION = 'RESET_ACTIVE_WORKER_PASSWORDS'
+PASSWORD_UPPER = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
+PASSWORD_LOWER = 'abcdefghijkmnopqrstuvwxyz'
+PASSWORD_DIGITS = '23456789'
+PASSWORD_ALPHABET = PASSWORD_UPPER + PASSWORD_LOWER + PASSWORD_DIGITS
 
 
 def _mark_worker_pending_activation(worker):
@@ -19,6 +27,21 @@ def _mark_worker_pending_activation(worker):
     user.is_onboarded = False
     user.save(update_fields=['password', 'is_onboarded'])
     return worker
+
+
+def _generated_worker_password(length=10):
+    """Short enough to send manually, while remaining random and typo-resistant."""
+    if length < 10:
+        raise ValueError('Worker passwords must be at least 10 characters long.')
+    chars = [
+        secrets.choice(PASSWORD_UPPER),
+        secrets.choice(PASSWORD_LOWER),
+        secrets.choice(PASSWORD_DIGITS),
+        secrets.choice(PASSWORD_DIGITS),
+    ]
+    chars.extend(secrets.choice(PASSWORD_ALPHABET) for _ in range(length - len(chars)))
+    secrets.SystemRandom().shuffle(chars)
+    return ''.join(chars)
 
 
 class ClientCompanyViewSet(views.ClientCompanyViewSet):
@@ -72,6 +95,55 @@ class WorkerViewSet(views.WorkerViewSet):
             'credentials': [],
             'requires_activation': True,
         })
+
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='reset-active-passwords',
+        permission_classes=[IsAdminOrManager],
+    )
+    def reset_active_passwords(self, request):
+        # A bulk credential reset is intentionally stricter than ordinary
+        # manager mutations. Passwords are returned once over the authenticated
+        # HTTPS response and are never stored in plaintext or written to logs.
+        if request.user.role != User.Role.ADMIN:
+            return Response({'detail': 'Nur die Administration darf alle Mitarbeiter-Zugänge neu setzen.'}, status=403)
+        if request.data.get('confirm') != RESET_PASSWORD_CONFIRMATION:
+            return Response({'detail': 'Bestätigung für das Zurücksetzen aller aktiven Mitarbeiter fehlt.'}, status=400)
+
+        workers = list(
+            self.get_queryset()
+            .filter(active=True, user__is_active=True)
+            .select_related('user')
+            .order_by('user__last_name', 'user__first_name', 'user__email')
+        )
+        credentials = []
+        with transaction.atomic():
+            for worker in workers:
+                password = _generated_worker_password()
+                worker.user.set_password(password)
+                worker.user.save(update_fields=['password'])
+                credentials.append({
+                    'name': worker.user.get_full_name().strip() or worker.employee_number or 'Mitarbeiter',
+                    'email': worker.user.email,
+                    'username': worker.user.email,
+                    'password': password,
+                })
+
+        views.audit(
+            request,
+            'worker.bulk_password_reset',
+            request.user,
+            {'count': len(credentials)},
+        )
+        response = Response({
+            'count': len(credentials),
+            'credentials': credentials,
+            'shown_once': True,
+        })
+        response['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+        response['Pragma'] = 'no-cache'
+        return response
 
 
 class OrderViewSet(views.OrderViewSet):
