@@ -1,0 +1,142 @@
+@media (max-width: 767px) {
+  .mobile-operations-hidden,
+  .mobile-operations-collapsed,
+  .mobile-operations-grid-empty {
+    display: none !important;
+  }
+
+  .mobile-operations-active {
+    display: block !important;
+    scroll-margin-top: 88px;
+  }
+
+  .mobile-operations-picker-button {
+    position: fixed;
+    left: 12px;
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+    z-index: 10030;
+    min-height: 42px;
+    max-width: min(58vw, 240px);
+    border: 0;
+    border-radius: 999px;
+    padding: 10px 14px;
+    background: #0b3654;
+    color: #fff;
+    box-shadow: 0 8px 24px rgba(3, 28, 48, .22);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .mobile-operations-picker-button span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mobile-operations-picker-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 10040;
+    background: rgba(4, 21, 35, .42);
+    display: flex;
+    align-items: flex-end;
+  }
+
+  .mobile-operations-picker-sheet {
+    width: 100%;
+    max-height: min(70vh, 620px);
+    overflow: auto;
+    border-radius: 22px 22px 0 0;
+    background: #f7f9fb;
+    padding: 14px 14px calc(18px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -18px 50px rgba(4, 21, 35, .2);
+  }
+
+  .mobile-operations-picker-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 2px 2px 12px;
+  }
+
+  .mobile-operations-picker-head > div {
+    display: grid;
+    gap: 2px;
+  }
+
+  .mobile-operations-picker-head strong {
+    font-size: 18px;
+    color: #142b3b;
+  }
+
+  .mobile-operations-picker-head small {
+    color: #647586;
+    font-size: 12px;
+  }
+
+  .mobile-operations-picker-head > button {
+    width: 36px;
+    height: 36px;
+    border: 0;
+    border-radius: 50%;
+    background: #e8eef3;
+    color: #17384f;
+    font-size: 25px;
+    line-height: 1;
+  }
+
+  .mobile-operations-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+  }
+
+  .mobile-operations-picker-grid > button {
+    min-height: 76px;
+    border: 1px solid #d8e1e8;
+    border-radius: 14px;
+    background: #fff;
+    padding: 11px;
+    text-align: left;
+    color: #17384f;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    font: inherit;
+  }
+
+  .mobile-operations-picker-grid > button strong {
+    font-size: 14px;
+    line-height: 1.2;
+  }
+
+  .mobile-operations-picker-grid > button small {
+    font-size: 10px;
+    line-height: 1.25;
+    color: #71808e;
+  }
+
+  .mobile-operations-picker-grid > button.active {
+    border-color: #0b3654;
+    background: #eaf3f8;
+    box-shadow: inset 0 0 0 1px #0b3654;
+  }
+
+  /* When a selected card sits in a desktop two-column grid, make it own the
+     mobile row instead of leaving ghost space for its collapsed sibling. */
+  .operations-grid:has(> .mobile-operations-active) {
+    display: block !important;
+  }
+
+  .operations-grid:has(> .mobile-operations-active) > .mobile-operations-active {
+    width: 100% !important;
+    margin-inline: 0 !important;
+  }
+}
