@@ -26,7 +26,7 @@ jobs:
           printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
           chmod 600 "$HOME/.ssh/strato_ed25519"
 
-      - name: Inspect production template and current PDF geometry
+      - name: Inspect and assert production signature geometry
         shell: bash
         run: |
           set -euo pipefail
@@ -39,36 +39,42 @@ jobs:
           import json
           import fitz
           from core.models import Contract
-          from core.signature_pdf import _image_bytes, _trim_signature_image
-          from PIL import Image
-          import io
 
           cid='98c112fa-3c87-449b-92c4-e360b393dc26'
           c=Contract.objects.select_related('template').get(pk=cid)
-          print('TEMPLATE_SCHEMA', json.dumps(c.template.schema, ensure_ascii=False, sort_keys=True))
+          signature=c.signatures.order_by('signed_at').first()
+          assert signature is not None
+          placements=(c.template.schema or {}).get('signature_placements') or {}
+          print('PLACEMENTS', json.dumps(placements, sort_keys=True))
+          assert placements.get('employee',{}).get('page') == 6
+          assert float(placements['employee']['x']) < 0.12
           print('PDF_NAME', c.pdf.name)
-          for s in c.signatures.order_by('signed_at'):
-              raw=_image_bytes(s.signature_data)
-              trimmed=_trim_signature_image(raw) if raw else None
-              print('SIGNATURE', s.role, repr(s.signer_name), s.signed_at.isoformat(), 'raw', len(raw or b''), 'trimmed', len(trimmed or b''))
-              if trimmed:
-                  im=Image.open(io.BytesIO(trimmed))
-                  print('SIGNATURE_IMAGE_SIZE', s.role, im.size, im.mode)
+
           c.pdf.open('rb')
           data=c.pdf.read(); c.pdf.close()
           d=fitz.open(stream=data,filetype='pdf')
-          print('PAGE_COUNT',d.page_count)
-          p=d[-1]
+          assert d.page_count == 6
+          p=d[5]
           print('PAGE_RECT',tuple(p.rect))
-          for w in p.get_text('words'):
-              txt=str(w[4])
-              if 'Unterschrift' in txt or 'Arbeitnehmer' in txt or 'Arbeitgeber' in txt or txt=='test' or '06.09.2026' in txt:
-                  print('WORD',txt,tuple(round(float(x),2) for x in w[:4]))
-          print('IMAGES', len(p.get_images(full=True)))
-          for i,img in enumerate(p.get_images(full=True)):
-              xref=img[0]
-              rects=p.get_image_rects(xref)
-              print('IMAGE',i,'xref',xref,'rects',[tuple(round(float(v),2) for v in r) for r in rects])
+
+          image_rects=[]
+          for img in p.get_images(full=True):
+              image_rects.extend(p.get_image_rects(img[0]))
+          print('IMAGE_RECTS',[tuple(round(float(v),2) for v in r) for r in image_rects])
+          signature_rects=[r for r in image_rects if r.x0 < 250 and r.x1 > 70 and r.y0 < 225 and r.y1 > 175 and r.width >= 20 and r.height >= 10]
+          assert signature_rects, 'Handwriting is not on the employee signature line.'
+
+          signer_hits=[r for r in p.search_for(signature.signer_name) if r.x0 < 260 and 205 <= r.y0 <= 235]
+          role_hits=[r for r in p.search_for('Arbeitnehmer') if r.x0 < 260 and r.y0 < 245]
+          date_text=signature.signed_at.strftime('%d.%m.%Y')
+          date_hits=[r for r in p.search_for(date_text) if r.x0 < 260 and r.y0 < 245]
+          print('SIGNER',repr(signature.signer_name),'HITS',[tuple(round(float(v),2) for v in r) for r in signer_hits])
+          print('ROLE_HITS',[tuple(round(float(v),2) for v in r) for r in role_hits])
+          print('DATE',date_text,'HITS',[tuple(round(float(v),2) for v in r) for r in date_hits])
+          assert signer_hits, 'Signer name is not aligned beneath the signature.'
+          assert role_hits, 'Role caption is not aligned beneath the signature.'
+          assert date_hits, 'Signed date is not aligned beneath the signature.'
+          print('DGB_SIGNATURE_GEOMETRY_VERIFIED')
           d.close()
           PY
           REMOTE
