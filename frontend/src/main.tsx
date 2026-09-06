@@ -38,6 +38,7 @@ import AdminAvailabilityManager from './AdminAvailabilityManager';
 import CheckoutReviewEnhancer from './CheckoutReviewEnhancer';
 import DesktopAttendanceHistoryEnhancer from './DesktopAttendanceHistoryEnhancer';
 import MobileAttendanceClarityEnhancer from './MobileAttendanceClarityEnhancer';
+import MobileOperationsSectionMenu from './MobileOperationsSectionMenu';
 import NativePushRegistration from './NativePushRegistration';
 import AppLaunchSplash, { isSplashPreviewMode } from './AppLaunchSplash';
 import { installBerlinLocaleDefaults } from './berlinLocale';
@@ -95,6 +96,7 @@ function renderApp() {
           <CheckoutReviewEnhancer />
           <DesktopAttendanceHistoryEnhancer />
           <MobileAttendanceClarityEnhancer />
+          <MobileOperationsSectionMenu />
           <NativePushRegistration />
           <StoreComplianceLinks />
           <FriendlyDateTimePicker />
