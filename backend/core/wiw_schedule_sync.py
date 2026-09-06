@@ -27,6 +27,7 @@ SCHEDULE_LOOKAHEAD_DAYS = 28
 SCHEDULE_PAGE_LIMIT = 500
 FULL_SCHEDULE_START = date(2000, 1, 1)
 FULL_SCHEDULE_END = date(2100, 1, 1)
+WIW_UNASSIGNED_USER_ID = '0'
 
 
 class _ScheduleWindowClient:
@@ -112,6 +113,38 @@ class WhenIWorkSynchronizer(BaseWhenIWorkSynchronizer):
         # Critical for incremental runs: a shift can change while its WIW
         # location does not, so the locations endpoint may omit that dependency.
         cache_location_aliases(self.locations)
+
+    @staticmethod
+    def _wiw_user_id(item):
+        return as_id(first(item, 'user_id', 'user'))
+
+    @classmethod
+    def _without_unassigned_users(cls, items):
+        """Drop WIW's user-id 0 sentinel from worker-owned resources.
+
+        WIW uses user id 0 for an unassigned/OpenShift card. It is not a real
+        employee and must never become ``wiw-0@sync.invalid`` in A+.
+        """
+        return [item for item in items if cls._wiw_user_id(item) != WIW_UNASSIGNED_USER_ID]
+
+    def sync_users(self, items):
+        rows = []
+        for item in items:
+            wiw_id = as_id(first(item, 'id', 'user_id'))
+            if wiw_id == WIW_UNASSIGNED_USER_ID:
+                continue
+            rows.append(item)
+        super().sync_users(rows)
+        self.workers.pop(WIW_UNASSIGNED_USER_ID, None)
+
+    def sync_times(self, items):
+        super().sync_times(self._without_unassigned_users(items))
+
+    def sync_availabilities(self, items):
+        super().sync_availabilities(self._without_unassigned_users(items))
+
+    def sync_requests(self, items):
+        super().sync_requests(self._without_unassigned_users(items))
 
     @staticmethod
     def _raw_location_name(item, fallback=''):
@@ -291,7 +324,16 @@ class WhenIWorkSynchronizer(BaseWhenIWorkSynchronizer):
                 self.errors.append({'resource': 'sites', 'id': item.get('id'), 'error': str(exc)})
 
     def sync_shifts(self, items):
-        rows = list(items)
+        rows = []
+        for original in items:
+            item = dict(original)
+            if self._wiw_user_id(item) == WIW_UNASSIGNED_USER_ID:
+                # Normalize WIW's user 0 sentinel before the base importer sees
+                # it. The existing shift then becomes a normal open assignment.
+                item['user_id'] = None
+                item['user'] = None
+            rows.append(item)
+
         # Repair dependency lookup before the base importer runs. This prevents
         # its emergency fallback from creating another operational customer or
         # location when WIW only returned a changed shift in an incremental run.
