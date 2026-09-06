@@ -1,0 +1,78 @@
+name: Diagnose DGB signature geometry
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-dgb-signature.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Inspect production template and current PDF geometry
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell <<'PY'
+          import json
+          import fitz
+          from core.models import Contract
+          from core.signature_pdf import _image_bytes, _trim_signature_image
+          from PIL import Image
+          import io
+
+          cid='98c112fa-3c87-449b-92c4-e360b393dc26'
+          c=Contract.objects.select_related('template').get(pk=cid)
+          print('TEMPLATE_SCHEMA', json.dumps(c.template.schema, ensure_ascii=False, sort_keys=True))
+          print('PDF_NAME', c.pdf.name)
+          for s in c.signatures.order_by('signed_at'):
+              raw=_image_bytes(s.signature_data)
+              trimmed=_trim_signature_image(raw) if raw else None
+              print('SIGNATURE', s.role, repr(s.signer_name), s.signed_at.isoformat(), 'raw', len(raw or b''), 'trimmed', len(trimmed or b''))
+              if trimmed:
+                  im=Image.open(io.BytesIO(trimmed))
+                  print('SIGNATURE_IMAGE_SIZE', s.role, im.size, im.mode)
+          c.pdf.open('rb')
+          data=c.pdf.read(); c.pdf.close()
+          d=fitz.open(stream=data,filetype='pdf')
+          print('PAGE_COUNT',d.page_count)
+          p=d[-1]
+          print('PAGE_RECT',tuple(p.rect))
+          for w in p.get_text('words'):
+              txt=str(w[4])
+              if 'Unterschrift' in txt or 'Arbeitnehmer' in txt or 'Arbeitgeber' in txt or txt=='test' or '06.09.2026' in txt:
+                  print('WORD',txt,tuple(round(float(x),2) for x in w[:4]))
+          print('IMAGES', len(p.get_images(full=True)))
+          for i,img in enumerate(p.get_images(full=True)):
+              xref=img[0]
+              rects=p.get_image_rects(xref)
+              print('IMAGE',i,'xref',xref,'rects',[tuple(round(float(v),2) for v in r) for r in rects])
+          d.close()
+          PY
+          REMOTE
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
