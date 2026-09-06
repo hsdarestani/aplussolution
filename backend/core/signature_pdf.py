@@ -336,6 +336,27 @@ def _rect_from_placement(page, placement):
     return rect & page.rect
 
 
+def _refine_template_rect(template, rect):
+    """Apply small visual refinements for templates with calibrated signature slots."""
+    if getattr(template, 'slug', '') != 'arbeitsvertrag-dgb-gvp':
+        return rect
+
+    # The calibrated DGB/GVP slot intentionally covers the full printed line so it is
+    # easy to locate.  Handwriting looks more natural when rendered smaller and a few
+    # points above the baseline instead of filling that entire slot.
+    target_width = min(rect.width * 0.82, 172.0)
+    target_height = min(rect.height * 0.72, 29.0)
+    center_x = (rect.x0 + rect.x1) / 2.0
+    center_y = (rect.y0 + rect.y1) / 2.0 - 6.0
+    refined = fitz.Rect(
+        center_x - (target_width / 2.0),
+        center_y - (target_height / 2.0),
+        center_x + (target_width / 2.0),
+        center_y + (target_height / 2.0),
+    )
+    return refined
+
+
 def _fallback_slots(document, signatures):
     page = document[-1]
     count = max(1, len(signatures))
@@ -406,26 +427,16 @@ def stamp_drawn_signatures(contract):
                 placement = fallbacks[role]
                 page = document[-1]
                 rect = _rect_from_placement(page, placement)
+            rect = _refine_template_rect(contract.template, rect) & page.rect
             try:
                 page.insert_image(rect, stream=image_bytes, keep_proportion=True, overlay=True)
                 stamped = True
             except Exception:
                 continue
 
-            # Preserve the canonical signer role and identity as searchable/auditable
-            # text for every placement. Avoid duplicating labels/names already printed
-            # by a DOCX/PDF template.
-            role_label = _ROLE_LABELS.get(signature.role, role)
-            existing_text = page.get_text('text') or ''
-            existing_lower = existing_text.casefold()
-            if role_label.casefold() not in existing_lower:
-                label_y = max(7.0, rect.y0 - 8.0)
-                page.insert_text((rect.x0, label_y), role_label, fontsize=7, color=(0.35, 0.39, 0.45), overlay=True)
-
-            signer_name = str(signature.signer_name or '').strip()
-            if signer_name and signer_name.casefold() not in existing_lower:
-                name_y = min(page.rect.height - 5.0, rect.y1 + 9.0)
-                page.insert_text((rect.x0, name_y), signer_name[:70], fontsize=7, color=(0.15, 0.18, 0.22), overlay=True)
+            # Signer identity and role are already canonical in ContractSignature and
+            # the audit trail. Do not inject helper labels/names into the legal PDF:
+            # they can collide with the template's printed Unterschrift/date fields.
 
         if not stamped:
             return False
