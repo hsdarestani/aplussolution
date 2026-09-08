@@ -1,7 +1,7 @@
+from datetime import datetime, timezone as dt_timezone
 from unittest.mock import Mock
 
 import pytest
-from django.utils import timezone
 
 from core.models import ClientCompany, Location, Position, Shift, User, WorkerProfile
 from core.shift_slots import ShiftSlot
@@ -54,8 +54,8 @@ def _incoming(*, wiw_id, worker_id=None, start, end, break_minutes=0, published=
 def test_identical_assigned_local_shift_is_bound_instead_of_duplicated(schedule_setup):
     client, location, position = schedule_setup
     worker = _worker('dedup-a@example.com', 'DEDUP-A', '10')
-    start = timezone.datetime(2026, 9, 10, 6, 0, tzinfo=timezone.utc)
-    end = timezone.datetime(2026, 9, 10, 11, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 9, 10, 6, 0, tzinfo=dt_timezone.utc)
+    end = datetime(2026, 9, 10, 11, 0, tzinfo=dt_timezone.utc)
     local = Shift.objects.create(
         client=client,
         location=location,
@@ -90,8 +90,8 @@ def test_identical_assigned_local_shift_is_bound_instead_of_duplicated(schedule_
 @pytest.mark.django_db
 def test_identical_open_local_shift_is_bound_instead_of_duplicated(schedule_setup):
     client, location, position = schedule_setup
-    start = timezone.datetime(2026, 9, 12, 6, 0, tzinfo=timezone.utc)
-    end = timezone.datetime(2026, 9, 12, 11, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 9, 12, 6, 0, tzinfo=dt_timezone.utc)
+    end = datetime(2026, 9, 12, 11, 0, tzinfo=dt_timezone.utc)
     local = Shift.objects.create(
         client=client,
         location=location,
@@ -122,8 +122,8 @@ def test_changed_worker_is_imported_as_distinct_shift(schedule_setup):
     client, location, position = schedule_setup
     local_worker = _worker('dedup-local@example.com', 'DEDUP-LOCAL', '10')
     wiw_worker = _worker('dedup-wiw@example.com', 'DEDUP-WIW', '11')
-    start = timezone.datetime(2026, 9, 11, 6, 0, tzinfo=timezone.utc)
-    end = timezone.datetime(2026, 9, 11, 11, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 9, 11, 6, 0, tzinfo=dt_timezone.utc)
+    end = datetime(2026, 9, 11, 11, 0, tzinfo=dt_timezone.utc)
     local = Shift.objects.create(
         client=client,
         location=location,
