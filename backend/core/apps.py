@@ -25,7 +25,9 @@ class CoreConfig(AppConfig):
         from .smart_docx_integration import install_smart_docx_renderer
         from .smartdocs_contract_integration import install_smartdocs_contract_renderer
         from .wiw_position_protection import install_wiw_position_protection
+        from .wiw_shift_dedup import install_wiw_shift_dedup
 
         install_smart_docx_renderer()
         install_smartdocs_contract_renderer()
         install_wiw_position_protection()
+        install_wiw_shift_dedup()
