@@ -1,4 +1,4 @@
-name: Add 31 Oct private event
+name: Patch always-visible shift note editor
 
 on:
   push:
@@ -7,174 +7,112 @@ on:
       - '.github/workflows/add-private-event-20261031.yml'
 
 permissions:
-  contents: read
-  actions: read
+  contents: write
 
 jobs:
-  add-event:
+  patch-note-editor:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      STRATO_HOST: ${{ secrets.STRATO_HOST }}
-      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
-      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Wait for matching production deploy
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ github.token }}
+
+      - name: Make note field always visible with Finish button
         run: |
-          set -euo pipefail
-          for i in $(seq 1 100); do
-            payload=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${GITHUB_SHA}&per_page=20")
-            status=$(printf '%s' "$payload" | jq -r '[.workflow_runs[] | select(.name == "Validate and deploy A+ Solution")][0].status // "missing"')
-            conclusion=$(printf '%s' "$payload" | jq -r '[.workflow_runs[] | select(.name == "Validate and deploy A+ Solution")][0].conclusion // ""')
-            echo "deploy status=$status conclusion=$conclusion"
-            if [ "$status" = "completed" ]; then
-              test "$conclusion" = "success"
-              break
-            fi
-            sleep 10
-          done
-          test "$status" = "completed"
-          test "$conclusion" = "success"
+          python - <<'PY'
+          from pathlib import Path
 
-      - name: Configure Strato SSH key
-        run: |
-          set -euo pipefail
-          test -n "$STRATO_HOST"
-          test -n "$STRATO_SSH_PRIVATE_KEY"
-          mkdir -p "$HOME/.ssh"
-          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
-          chmod 600 "$HOME/.ssh/strato_ed25519"
+          tsx_path = Path('frontend/src/WiwScheduleMobile.tsx')
+          text = tsx_path.read_text()
 
-      - name: Add event through the standard Shift API path
-        run: |
-          set -euo pipefail
-          ssh \
-            -i "$HOME/.ssh/strato_ed25519" \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=20 \
-            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
-          set -euo pipefail
-          cd /opt/aplussolution
+          old = '''          <Row icon={documentTextOutline} label={form.notes ? 'Notiz bearbeiten' : 'Füge Notiz hinzu'} onClick={toggleNotes} />
+          {extrasOpen ? <div className="wiw-extra-options"><label>Notiz<textarea ref={noteRef} value={form.notes} onFocus={() => window.setTimeout(() => noteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 120)} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Hinweis für Mitarbeiter …" /></label></div> : null}
+'''
+          new = '''          <div className="wiw-note-editor">
+            <div className="wiw-note-editor-toolbar">
+              <span className="wiw-note-editor-title"><IonIcon icon={documentTextOutline} /><span>Notiz</span></span>
+              <button type="button" onClick={() => { noteRef.current?.blur(); setToast('Notiz übernommen.'); }}>Fertig</button>
+            </div>
+            <textarea
+              ref={noteRef}
+              aria-label="Notiz"
+              value={form.notes}
+              onFocus={() => window.setTimeout(() => noteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 120)}
+              onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+              placeholder="Hinweis für Mitarbeiter …"
+            />
+          </div>
+'''
+          if old not in text:
+              raise SystemExit('Expected note editor block not found')
+          text = text.replace(old, new, 1)
 
-          cat >/tmp/add_private_event_20261031.py <<'PY'
-          from datetime import datetime
-          from zoneinfo import ZoneInfo
+          text = text.replace("  const [extrasOpen, setExtrasOpen] = useState(false);\n", "", 1)
+          text = text.replace("    setExtrasOpen(false);\n", "")
 
-          from rest_framework.test import APIRequestFactory, force_authenticate
+          toggle = '''  function toggleNotes() {
+    if (extrasOpen) {
+      noteRef.current?.blur();
+      setExtrasOpen(false);
+      return;
+    }
+    setExtrasOpen(true);
+    window.setTimeout(() => {
+      noteRef.current?.focus({ preventScroll: true });
+      noteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+  }
 
-          from core.models import ClientCompany, Location, Position, Shift, User
-          from core.shift_views import StaffingShiftViewSet
+'''
+          if toggle in text:
+              text = text.replace(toggle, "", 1)
+          else:
+              # The generic setExtrasOpen(false) cleanup above changes this block,
+              # so remove the normalized remainder if present.
+              normalized_toggle = '''  function toggleNotes() {
+    if (extrasOpen) {
+      noteRef.current?.blur();
+      return;
+    }
+    setExtrasOpen(true);
+    window.setTimeout(() => {
+      noteRef.current?.focus({ preventScroll: true });
+      noteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+  }
 
-          EVENT_NAME = 'Private Veranstaltung'
-          ADDRESS = 'Fuldastrasse 30, 63308 Dreieich'
-          START = datetime(2026, 10, 31, 16, 0, tzinfo=ZoneInfo('Europe/Berlin'))
-          END = datetime(2026, 10, 31, 22, 0, tzinfo=ZoneInfo('Europe/Berlin'))
+'''
+              text = text.replace(normalized_toggle, "", 1)
 
-          client = ClientCompany.objects.filter(name__iexact=EVENT_NAME).first()
-          if client is None:
-              base_number = 'PV-20261031'
-              number = base_number
-              suffix = 1
-              while ClientCompany.objects.filter(customer_number=number).exists():
-                  suffix += 1
-                  number = f'{base_number}-{suffix}'
-              client = ClientCompany.objects.create(
-                  name=EVENT_NAME,
-                  customer_number=number,
-                  address=ADDRESS,
-                  active=True,
-              )
+          if 'extrasOpen' in text or 'setExtrasOpen' in text or 'toggleNotes' in text:
+              raise SystemExit('Stale collapsible-note state remains')
+          tsx_path.write_text(text)
 
-          location = Location.objects.filter(client=client, address__iexact=ADDRESS).first()
-          if location is None:
-              location = Location.objects.create(
-                  client=client,
-                  name='Fuldastrasse 30, Dreieich',
-                  address=ADDRESS,
-                  timezone='Europe/Berlin',
-                  active=True,
-              )
-
-          actor = (
-              User.objects.filter(role=User.Role.ADMIN, is_active=True).order_by('date_joined').first()
-              or User.objects.filter(role=User.Role.MANAGER, is_active=True).order_by('date_joined').first()
-          )
-          if actor is None:
-              raise RuntimeError('No active admin/manager available for the standard Shift API path.')
-
-          service_position = Position.objects.filter(name__iexact='Servicekraft', active=True).first()
-          bar_position = (
-              Position.objects.filter(name__iexact='Bar', active=True).first()
-              or Position.objects.filter(name__iexact='Bar-Support', active=True).first()
-          )
-          if service_position is None or bar_position is None:
-              raise RuntimeError('Required Servicekraft / Bar position is not active.')
-
-          factory = APIRequestFactory()
-          create_view = StaffingShiftViewSet.as_view({'post': 'create'})
-
-          def ensure_open_shift(position, required_count):
-              existing = (
-                  Shift.objects.filter(
-                      client=client,
-                      location=location,
-                      position=position,
-                      starts_at=START,
-                      ends_at=END,
-                      required_count=required_count,
-                  )
-                  .exclude(status=Shift.Status.CANCELLED)
-                  .first()
-              )
-              if existing is not None:
-                  return existing, False
-
-              payload = {
-                  'client': str(client.id),
-                  'location': str(location.id),
-                  'position': str(position.id),
-                  'starts_at': START.isoformat(),
-                  'ends_at': END.isoformat(),
-                  'status': Shift.Status.PUBLISHED,
-                  'notes': EVENT_NAME,
-                  'required_count': required_count,
-                  'confirmation_required': False,
-                  'schedule_groups': ['service'],
-              }
-              request = factory.post('/api/shifts/', payload, format='json')
-              force_authenticate(request, user=actor)
-              response = create_view(request)
-              response.render()
-              if response.status_code not in (200, 201):
-                  raise RuntimeError(f'Shift create failed ({response.status_code}): {response.data}')
-              return Shift.objects.get(pk=response.data['id']), True
-
-          service_shift, service_created = ensure_open_shift(service_position, 2)
-          bar_shift, bar_created = ensure_open_shift(bar_position, 1)
-
-          service_shift.refresh_from_db()
-          bar_shift.refresh_from_db()
-          print({
-              'event': EVENT_NAME,
-              'address': ADDRESS,
-              'service_shift_id': str(service_shift.id),
-              'service_created': service_created,
-              'service_required_count': service_shift.required_count,
-              'service_open_slots': service_shift.slots.filter(status='open', worker__isnull=True).count(),
-              'bar_shift_id': str(bar_shift.id),
-              'bar_created': bar_created,
-              'bar_required_count': bar_shift.required_count,
-              'bar_open_slots': bar_shift.slots.filter(status='open', worker__isnull=True).count(),
-              'statuses': [service_shift.status, bar_shift.status],
-          })
+          css_path = Path('frontend/src/wiw-schedule-mobile.css')
+          css = css_path.read_text()
+          marker = '  .wiw-note-editor{padding:0;background:#fff;border-bottom:1px solid #ddd}'
+          if marker not in css:
+              anchor = '  .wiw-extra-options textarea{min-height:88px;padding:10px;border:1px solid #d7d7d7;border-radius:8px;resize:vertical;background:#fafafa;color:#333;font:inherit;font-size:14px}\n'
+              addition = '''  .wiw-note-editor{padding:0;background:#fff;border-bottom:1px solid #ddd}
+  .wiw-note-editor-toolbar{min-height:42px;padding:0 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #ededed}
+  .wiw-note-editor-title{display:flex;align-items:center;gap:8px;color:#454545;font-size:15px}
+  .wiw-note-editor-title ion-icon{font-size:18px;color:#9b9b9b}
+  .wiw-note-editor-toolbar button{padding:8px 0;border:0;background:transparent;color:#0b4d6b;font:inherit;font-size:14px;font-weight:700}
+  .wiw-note-editor textarea{display:block;width:calc(100% - 28px);min-height:96px;margin:10px 14px 12px;padding:10px 12px;box-sizing:border-box;border:1px solid #d7d7d7;border-radius:8px;resize:vertical;background:#fafafa;color:#333;font:inherit;font-size:14px;line-height:1.4}
+  .wiw-note-editor textarea:focus{outline:2px solid rgba(11,77,107,.16);border-color:#0b4d6b}
+'''
+              if anchor not in css:
+                  raise SystemExit('CSS anchor not found')
+              css = css.replace(anchor, anchor + addition, 1)
+              css_path.write_text(css)
           PY
 
-          docker compose exec -T backend python manage.py shell < /tmp/add_private_event_20261031.py
-          rm -f /tmp/add_private_event_20261031.py
-          REMOTE
-
-      - name: Cleanup runner key
-        if: always()
-        run: rm -f "$HOME/.ssh/strato_ed25519"
+      - name: Commit source changes and remove temporary workflow
+        run: |
+          set -euo pipefail
+          rm .github/workflows/add-private-event-20261031.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/WiwScheduleMobile.tsx frontend/src/wiw-schedule-mobile.css .github/workflows/add-private-event-20261031.yml
+          git commit -m "Keep shift notes visible and add Finish action"
+          git push origin HEAD:main
