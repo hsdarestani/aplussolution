@@ -33,8 +33,13 @@ jobs:
           SSHPASS: ${{ secrets.PASS }}
           HOST: ${{ secrets.HOST }}
         run: |
-          set -euo pipefail
-          test -n "$HOST" && test -n "$SSHPASS"
+          set -uo pipefail
+          : > /tmp/push-diagnostic.txt
+          if [ -z "${HOST:-}" ] || [ -z "${SSHPASS:-}" ]; then
+            echo 'diagnostic_error=missing HOST or PASS GitHub Actions secret' | tee /tmp/push-diagnostic.txt
+            exit 1
+          fi
+          set +e
           sshpass -e ssh \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
@@ -51,4 +56,10 @@ jobs:
           docker compose logs --since=2h --no-color celery 2>&1 | grep -E 'send_notification_push|FCM|APNs|Task core\.push_notifications' | tail -n 120 || true
           echo 'PUSH_DIAGNOSTIC_END'
           REMOTE
+          diagnostic_exit=$?
+          set -e
           cat /tmp/push-diagnostic.txt
+          if [ "$diagnostic_exit" -ne 0 ]; then
+            echo "diagnostic_ssh_exit=$diagnostic_exit"
+            exit "$diagnostic_exit"
+          fi
