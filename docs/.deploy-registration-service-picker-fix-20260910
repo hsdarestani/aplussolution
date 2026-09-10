@@ -1,0 +1,3 @@
+Deploy source: 3d22d8b532df53c6ea74ac2a540572f8a83e7fe6
+Registration completion now only fires on onboarding transition.
+Service picker always exposes Servicekraft, Serviceleitung and Bar.
