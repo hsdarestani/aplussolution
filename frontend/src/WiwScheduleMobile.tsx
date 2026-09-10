@@ -66,14 +66,14 @@ type CardRow = {
 const BERLIN = 'Europe/Berlin';
 const QUARTER = 15;
 const WHEEL_ROW = 32;
-const META_CACHE_KEY = 'aplus:wiw-mobile-meta:v4';
+const META_CACHE_KEY = 'aplus:wiw-mobile-meta:v5';
 const WEEK_CACHE_PREFIX = 'aplus:wiw-mobile-week:v4:';
 const POSITION_ORDER = [
   { label: 'Servicekraft', aliases: ['servicekraft', 'servicekrat'] },
   { label: 'Serviceleitung', aliases: ['serviceleitung'] },
+  { label: 'Bar', aliases: ['bar', 'barsupport'] },
   { label: 'Front-Office', aliases: ['frontoffice'] },
   { label: 'Housekeeping', aliases: ['housekeeping', 'houskeeping'] },
-  { label: 'Bar-Support', aliases: ['barsupport'] },
 ];
 const SCHEDULE_GROUPS: Choice[] = [
   { value: 'service', label: 'Service' },

@@ -147,9 +147,15 @@ class Command(BaseCommand):
             )
         )
 
-        # Seed missing standard positions, but never overwrite the locally managed
-        # active/inactive choice for an existing position during a deployment.
-        for name in ['Servicekraft', 'Serviceleitung', 'Front Office', 'Housekeeping', 'Bar-Support']:
+        # Service positions are part of the fixed scheduling contract and must
+        # always be available in the mobile Service picker. Other groups keep
+        # their locally managed active/inactive state.
+        for name in ['Servicekraft', 'Serviceleitung', 'Bar-Support']:
+            position, _ = Position.objects.get_or_create(name=name, defaults={'active': True})
+            if not position.active:
+                position.active = True
+                position.save(update_fields=['active', 'updated_at'])
+        for name in ['Front Office', 'Housekeeping']:
             Position.objects.get_or_create(name=name, defaults={'active': True})
         result = seed_document_catalog()
         self.stdout.write(self.style.SUCCESS(f'Grunddaten sind bereit. Dokumentkatalog: {result}'))

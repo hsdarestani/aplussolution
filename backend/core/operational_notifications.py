@@ -206,12 +206,7 @@ def dispatch_attendance_reminders() -> dict:
 
 
 def ensure_registration_completed_notification(user: User) -> int:
-    """Notify managers once when an employee/customer has actually entered the portal.
-
-    New invitation/onboarding flows call this via the onboarding state transition.
-    Legacy accounts that were historically created as already-onboarded are covered
-    by calling the same idempotent helper after their first successful login.
-    """
+    """Notify managers once for a real employee/customer onboarding transition."""
     if user.role not in {User.Role.WORKER, User.Role.CLIENT}:
         return 0
     role_label = 'Mitarbeiter' if user.role == User.Role.WORKER else 'Kunde'
