@@ -29,9 +29,6 @@ jobs:
               assert actual == count, f'{path}: expected {count} occurrence(s), found {actual}'
               p.write_text(text.replace(old, new, count))
 
-          # A normal successful login must never be treated as a newly completed
-          # registration. The real activation flow already emits this event on the
-          # is_onboarded False -> True transition.
           replace(
               'backend/core/views.py',
               'from .operational_notifications import ensure_registration_completed_notification\n',
@@ -55,9 +52,6 @@ jobs:
               '    """Notify managers once for a real employee/customer onboarding transition."""\n',
           )
 
-          # The mobile Service picker is a fixed business contract: it must always
-          # offer Servicekraft, Serviceleitung and Bar. Reactivate those positions
-          # on every deploy; keep local active/inactive ownership for other groups.
           replace(
               'backend/core/management/commands/bootstrap.py',
               "        # Seed missing standard positions, but never overwrite the locally managed\n"
@@ -99,10 +93,37 @@ jobs:
               "];",
           )
 
-          # Regression: logging in again must not create another
-          # "Mitarbeiter registriert" notification.
-          Path('backend/tests/test_registration_notification_regression.py').write_text('''\
-import pytest\nfrom rest_framework.test import APIClient\n\nfrom core.models import Notification\n\n\n@pytest.mark.django_db\ndef test_normal_login_does_not_reemit_registration_completed(admin_user, worker_user):\n    password = 'LoginPass123!'\n    worker_user.set_password(password)\n    worker_user.is_onboarded = True\n    worker_user.save(update_fields=['password', 'is_onboarded'])\n\n    kind = f'portal-registration-complete-{worker_user.id}'\n    Notification.objects.filter(user=admin_user, kind=kind).delete()\n\n    response = APIClient().post(\n        '/api/auth/login/',\n        {'email': worker_user.email, 'password': password},\n        format='json',\n    )\n\n    assert response.status_code == 200\n    assert not Notification.objects.filter(user=admin_user, kind=kind).exists()\n\n\n@pytest.mark.django_db\ndef test_real_onboarding_transition_still_notifies_once(admin_user, worker_user):\n    worker_user.is_onboarded = False\n    worker_user.save(update_fields=['is_onboarded'])\n    kind = f'portal-registration-complete-{worker_user.id}'\n    Notification.objects.filter(user=admin_user, kind=kind).delete()\n\n    worker_user.is_onboarded = True\n    worker_user.save(update_fields=['is_onboarded'])\n    worker_user.save(update_fields=['last_name'])\n\n    assert Notification.objects.filter(user=admin_user, kind=kind).count() == 1\n''')
+          test_content = (
+              "import pytest\n"
+              "from rest_framework.test import APIClient\n\n"
+              "from core.models import Notification\n\n\n"
+              "@pytest.mark.django_db\n"
+              "def test_normal_login_does_not_reemit_registration_completed(admin_user, worker_user):\n"
+              "    password = 'LoginPass123!'\n"
+              "    worker_user.set_password(password)\n"
+              "    worker_user.is_onboarded = True\n"
+              "    worker_user.save(update_fields=['password', 'is_onboarded'])\n\n"
+              "    kind = f'portal-registration-complete-{worker_user.id}'\n"
+              "    Notification.objects.filter(user=admin_user, kind=kind).delete()\n\n"
+              "    response = APIClient().post(\n"
+              "        '/api/auth/login/',\n"
+              "        {'email': worker_user.email, 'password': password},\n"
+              "        format='json',\n"
+              "    )\n\n"
+              "    assert response.status_code == 200\n"
+              "    assert not Notification.objects.filter(user=admin_user, kind=kind).exists()\n\n\n"
+              "@pytest.mark.django_db\n"
+              "def test_real_onboarding_transition_still_notifies_once(admin_user, worker_user):\n"
+              "    worker_user.is_onboarded = False\n"
+              "    worker_user.save(update_fields=['is_onboarded'])\n"
+              "    kind = f'portal-registration-complete-{worker_user.id}'\n"
+              "    Notification.objects.filter(user=admin_user, kind=kind).delete()\n\n"
+              "    worker_user.is_onboarded = True\n"
+              "    worker_user.save(update_fields=['is_onboarded'])\n"
+              "    worker_user.save(update_fields=['last_name'])\n\n"
+              "    assert Notification.objects.filter(user=admin_user, kind=kind).count() == 1\n"
+          )
+          Path('backend/tests/test_registration_notification_regression.py').write_text(test_content)
 
           Path('.github/workflows/apply-registration-service-picker-fix.yml').unlink()
           PY
