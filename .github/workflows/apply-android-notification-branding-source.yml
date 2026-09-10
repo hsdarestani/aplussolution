@@ -71,7 +71,8 @@ jobs:
           git add \
             backend/core/push_notifications.py \
             frontend/src/NativePushRegistration.tsx \
-            frontend/scripts/prepare-native.mjs \
+            frontend/scripts/prepare-native.mjs
+          git add -f \
             frontend/native-assets/android/solution_signature.wav \
             frontend/native-assets/android/ic_stat_aplus.xml
           if git diff --cached --quiet; then
