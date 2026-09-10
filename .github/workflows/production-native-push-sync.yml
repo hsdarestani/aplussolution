@@ -40,12 +40,20 @@ jobs:
           from django.utils import timezone
           from core.models import Notification, User
           from core.push_models import PushDevice, PushDelivery
-          from core.push_notifications import push_provider_status
+          from core.push_notifications import push_provider_status, _apns_values
 
           recent = timezone.now() - timedelta(hours=3)
           admins = User.objects.filter(role='admin', is_active=True).order_by('email')
+          team_id, key_id, private_key, bundle_id, sandbox = _apns_values()
           payload = {
               'providers': push_provider_status(),
+              'apns_config': {
+                  'team_id': team_id,
+                  'key_id': key_id,
+                  'bundle_id': bundle_id,
+                  'sandbox': sandbox,
+                  'private_key_present': bool(private_key),
+              },
               'active_admin_users': admins.count(),
               'active_devices_total': PushDevice.objects.filter(active=True).count(),
               'admin_android_active': PushDevice.objects.filter(user__role='admin', active=True, platform='android').count(),
