@@ -32,7 +32,9 @@ jobs:
 
       - name: Inspect production push path
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          : > /tmp/push-diagnostic.txt
+          set +e
           ssh \
             -i "$HOME/.ssh/strato_ed25519" \
             -o IdentitiesOnly=yes \
@@ -41,7 +43,7 @@ jobs:
             -o ConnectTimeout=20 \
             -o ServerAliveInterval=10 \
             -o ServerAliveCountMax=3 \
-            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+            root@"$STRATO_HOST" 'bash -s' > /tmp/push-diagnostic.txt 2>&1 <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
           docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null
@@ -116,7 +118,24 @@ jobs:
           docker compose logs --since=3h --no-color celery 2>&1 | grep -E 'send_notification_push|FCM|APNs|Task core\.push_notifications' | tail -n 200 || true
           echo 'PUSH_DIAGNOSTIC_END'
           REMOTE
+          diagnostic_exit=$?
+          set -e
+          echo "diagnostic_exit=$diagnostic_exit"
+          echo "diagnostic_bytes=$(wc -c < /tmp/push-diagnostic.txt)"
+          if [ "$diagnostic_exit" -ne 0 ]; then
+            tail -n 80 /tmp/push-diagnostic.txt || true
+            exit "$diagnostic_exit"
+          fi
+
+      - name: Upload diagnostic artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-push-production-diagnostic
+          path: /tmp/push-diagnostic.txt
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Cleanup
         if: always()
-        run: rm -f "$HOME/.ssh/strato_ed25519"
+        run: rm -f "$HOME/.ssh/strato_ed25519" /tmp/push-diagnostic.txt
