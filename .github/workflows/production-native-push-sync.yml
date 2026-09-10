@@ -10,56 +10,113 @@ permissions:
   contents: read
 
 concurrency:
-  group: aplus-native-push-diagnostics
+  group: aplus-native-push-diagnostics-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   diagnose:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
     steps:
-      - name: Ensure SSH tooling
+      - name: Configure Strato SSH key
         run: |
           set -euo pipefail
-          if ! command -v sshpass >/dev/null 2>&1; then
-            sudo -n timeout 60s apt-get install -y -qq sshpass || {
-              sudo -n timeout 90s apt-get update -qq
-              sudo -n timeout 60s apt-get install -y -qq sshpass
-            }
-          fi
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
 
       - name: Inspect production push path
-        env:
-          SSHPASS: ${{ secrets.PASS }}
-          HOST: ${{ secrets.HOST }}
         run: |
-          set -uo pipefail
-          : > /tmp/push-diagnostic.txt
-          if [ -z "${HOST:-}" ] || [ -z "${SSHPASS:-}" ]; then
-            echo 'diagnostic_error=missing HOST or PASS GitHub Actions secret' | tee /tmp/push-diagnostic.txt
-            exit 1
-          fi
-          set +e
-          sshpass -e ssh \
+          set -euo pipefail
+          ssh \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=15 \
+            -o ConnectTimeout=20 \
             -o ServerAliveInterval=10 \
             -o ServerAliveCountMax=3 \
-            root@"$HOST" 'bash -s' > /tmp/push-diagnostic.txt 2>&1 <<'REMOTE'
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
           docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null
           echo 'PUSH_DIAGNOSTIC_BEGIN'
-          docker compose exec -T backend python manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from core.models import Notification,User; from core.push_models import PushDevice; from core.push_notifications import push_provider_status; recent=timezone.now()-timedelta(hours=2); active=PushDevice.objects.filter(active=True); admin=PushDevice.objects.filter(user__role='admin'); print('push_providers=',push_provider_status(),flush=True); print('active_admin_users=',User.objects.filter(role='admin',is_active=True).count(),flush=True); print('active_devices_total=',active.count(),flush=True); print('admin_android_active=',admin.filter(active=True,platform='android').count(),flush=True); print('admin_ios_active=',admin.filter(active=True,platform='ios').count(),flush=True); print('admin_android_inactive=',admin.filter(active=False,platform='android').count(),flush=True); print('admin_ios_inactive=',admin.filter(active=False,platform='ios').count(),flush=True); print('recent_admin_open_shift_notifications=',Notification.objects.filter(user__role='admin',kind__startswith='admin-open-shift-summary-',created_at__gte=recent).count(),flush=True); print('admin_device_state=',list(admin.order_by('-last_seen_at').values('platform','active','last_seen_at','last_error')[:10]),flush=True)"
-          echo '--- celery push task log tail ---'
-          docker compose logs --since=2h --no-color celery 2>&1 | grep -E 'send_notification_push|FCM|APNs|Task core\.push_notifications' | tail -n 120 || true
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from datetime import timedelta
+          from django.utils import timezone
+          from core.models import Notification, User
+          from core.push_models import PushDevice, PushDelivery
+          from core.push_notifications import push_provider_status
+
+          recent = timezone.now() - timedelta(hours=3)
+          admins = User.objects.filter(role='admin', is_active=True).order_by('email')
+          print('push_providers=', push_provider_status(), flush=True)
+          print('active_admin_users=', admins.count(), flush=True)
+          print('active_devices_total=', PushDevice.objects.filter(active=True).count(), flush=True)
+          print('admin_android_active=', PushDevice.objects.filter(user__role='admin', active=True, platform='android').count(), flush=True)
+          print('admin_ios_active=', PushDevice.objects.filter(user__role='admin', active=True, platform='ios').count(), flush=True)
+          print('admin_android_inactive=', PushDevice.objects.filter(user__role='admin', active=False, platform='android').count(), flush=True)
+          print('admin_ios_inactive=', PushDevice.objects.filter(user__role='admin', active=False, platform='ios').count(), flush=True)
+
+          print('--- ADMIN DEVICE STATE ---', flush=True)
+          for admin in admins:
+              print('ADMIN', {
+                  'user_id': str(admin.id),
+                  'email': admin.email,
+                  'name': admin.get_full_name(),
+              }, flush=True)
+              devices = PushDevice.objects.filter(user=admin).order_by('-last_seen_at')
+              for d in devices:
+                  print(' DEVICE', {
+                      'id': str(d.id),
+                      'platform': d.platform,
+                      'active': d.active,
+                      'last_seen_at': d.last_seen_at.isoformat() if d.last_seen_at else None,
+                      'last_error': d.last_error,
+                      'app_id': d.app_id,
+                      'device_name': d.device_name,
+                  }, flush=True)
+
+          print('--- RECENT ADMIN OPEN SHIFT NOTIFICATIONS ---', flush=True)
+          notes = Notification.objects.filter(
+              user__role='admin',
+              kind__startswith='admin-open-shift-summary-',
+              created_at__gte=recent,
+          ).select_related('user').order_by('-created_at')[:20]
+          print('recent_count=', notes.count(), flush=True)
+          for n in notes:
+              print(' NOTIFICATION', {
+                  'id': str(n.id),
+                  'user_email': n.user.email,
+                  'user_name': n.user.get_full_name(),
+                  'created_at': n.created_at.isoformat(),
+                  'kind': n.kind,
+                  'title': n.title,
+                  'body': n.body,
+              }, flush=True)
+              deliveries = PushDelivery.objects.filter(notification=n).select_related('device').order_by('device__platform', 'created_at')
+              if not deliveries.exists():
+                  print('  DELIVERY none', flush=True)
+              for delivery in deliveries:
+                  print('  DELIVERY', {
+                      'platform': delivery.device.platform,
+                      'device_active': delivery.device.active,
+                      'device_last_seen_at': delivery.device.last_seen_at.isoformat() if delivery.device.last_seen_at else None,
+                      'sent_at': delivery.sent_at.isoformat() if delivery.sent_at else None,
+                      'last_error': delivery.last_error,
+                      'device_last_error': delivery.device.last_error,
+                  }, flush=True)
+          PY
+          echo '--- CELERY PUSH TASK LOG TAIL ---'
+          docker compose logs --since=3h --no-color celery 2>&1 | grep -E 'send_notification_push|FCM|APNs|Task core\.push_notifications' | tail -n 200 || true
           echo 'PUSH_DIAGNOSTIC_END'
           REMOTE
-          diagnostic_exit=$?
-          set -e
-          cat /tmp/push-diagnostic.txt
-          if [ "$diagnostic_exit" -ne 0 ]; then
-            echo "diagnostic_ssh_exit=$diagnostic_exit"
-            exit "$diagnostic_exit"
-          fi
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
