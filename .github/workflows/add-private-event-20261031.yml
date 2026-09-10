@@ -98,8 +98,8 @@ jobs:
               )
 
           actor = (
-              User.objects.filter(role=User.Role.ADMIN, is_active=True).order_by('created_at').first()
-              or User.objects.filter(role=User.Role.MANAGER, is_active=True).order_by('created_at').first()
+              User.objects.filter(role=User.Role.ADMIN, is_active=True).order_by('date_joined').first()
+              or User.objects.filter(role=User.Role.MANAGER, is_active=True).order_by('date_joined').first()
           )
           if actor is None:
               raise RuntimeError('No active admin/manager available for the standard Shift API path.')
