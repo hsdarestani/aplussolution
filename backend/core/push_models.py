@@ -1,7 +1,7 @@
 from django.db import models
 from django.utils import timezone
 
-from .models import TimestampedModel, User
+from .models import Notification, TimestampedModel, User
 
 
 class PushDevice(TimestampedModel):
@@ -27,6 +27,29 @@ class PushDevice(TimestampedModel):
 
     def __str__(self):
         return f'{self.user} · {self.platform} · {"aktiv" if self.active else "inaktiv"}'
+
+
+class PushDelivery(TimestampedModel):
+    """One delivery claim for one notification/device pair.
+
+    Celery tasks can be retried or delivered more than once. The unique pair is
+    the server-side guard that prevents the same native alert from being sent to
+    the same registered device twice.
+    """
+
+    notification = models.ForeignKey(Notification, on_delete=models.CASCADE, related_name='push_deliveries')
+    device = models.ForeignKey(PushDevice, on_delete=models.CASCADE, related_name='deliveries')
+    sent_at = models.DateTimeField(blank=True, null=True)
+    last_error = models.TextField(blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['notification', 'device'], name='core_push_delivery_unique'),
+        ]
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.notification_id} · {self.device_id}'
 
 
 class NotificationPushRule(TimestampedModel):
