@@ -1,0 +1,114 @@
+name: Apply registration notification and service picker fix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-registration-service-picker-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch registration notifications and Service positions
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=1):
+              p = Path(path)
+              text = p.read_text()
+              actual = text.count(old)
+              assert actual == count, f'{path}: expected {count} occurrence(s), found {actual}'
+              p.write_text(text.replace(old, new, count))
+
+          # A normal successful login must never be treated as a newly completed
+          # registration. The real activation flow already emits this event on the
+          # is_onboarded False -> True transition.
+          replace(
+              'backend/core/views.py',
+              'from .operational_notifications import ensure_registration_completed_notification\n',
+              '',
+          )
+          replace(
+              'backend/core/views.py',
+              "    # Invitation/onboarding flows notify on the is_onboarded transition. Older\n"
+              "    # employee/customer accounts were historically created as already onboarded;\n"
+              "    # this idempotent fallback records their first real successful portal login.\n"
+              "    ensure_registration_completed_notification(user)\n",
+              '',
+          )
+          replace(
+              'backend/core/operational_notifications.py',
+              '    """Notify managers once when an employee/customer has actually entered the portal.\n\n'
+              '    New invitation/onboarding flows call this via the onboarding state transition.\n'
+              '    Legacy accounts that were historically created as already-onboarded are covered\n'
+              '    by calling the same idempotent helper after their first successful login.\n'
+              '    """\n',
+              '    """Notify managers once for a real employee/customer onboarding transition."""\n',
+          )
+
+          # The mobile Service picker is a fixed business contract: it must always
+          # offer Servicekraft, Serviceleitung and Bar. Reactivate those positions
+          # on every deploy; keep local active/inactive ownership for other groups.
+          replace(
+              'backend/core/management/commands/bootstrap.py',
+              "        # Seed missing standard positions, but never overwrite the locally managed\n"
+              "        # active/inactive choice for an existing position during a deployment.\n"
+              "        for name in ['Servicekraft', 'Serviceleitung', 'Front Office', 'Housekeeping', 'Bar-Support']:\n"
+              "            Position.objects.get_or_create(name=name, defaults={'active': True})\n",
+              "        # Service positions are part of the fixed scheduling contract and must\n"
+              "        # always be available in the mobile Service picker. Other groups keep\n"
+              "        # their locally managed active/inactive state.\n"
+              "        for name in ['Servicekraft', 'Serviceleitung', 'Bar-Support']:\n"
+              "            position, _ = Position.objects.get_or_create(name=name, defaults={'active': True})\n"
+              "            if not position.active:\n"
+              "                position.active = True\n"
+              "                position.save(update_fields=['active', 'updated_at'])\n"
+              "        for name in ['Front Office', 'Housekeeping']:\n"
+              "            Position.objects.get_or_create(name=name, defaults={'active': True})\n",
+          )
+
+          replace(
+              'frontend/src/WiwScheduleMobile.tsx',
+              "const META_CACHE_KEY = 'aplus:wiw-mobile-meta:v4';",
+              "const META_CACHE_KEY = 'aplus:wiw-mobile-meta:v5';",
+          )
+          replace(
+              'frontend/src/WiwScheduleMobile.tsx',
+              "const POSITION_ORDER = [\n"
+              "  { label: 'Servicekraft', aliases: ['servicekraft', 'servicekrat'] },\n"
+              "  { label: 'Serviceleitung', aliases: ['serviceleitung'] },\n"
+              "  { label: 'Front-Office', aliases: ['frontoffice'] },\n"
+              "  { label: 'Housekeeping', aliases: ['housekeeping', 'houskeeping'] },\n"
+              "  { label: 'Bar-Support', aliases: ['barsupport'] },\n"
+              "];",
+              "const POSITION_ORDER = [\n"
+              "  { label: 'Servicekraft', aliases: ['servicekraft', 'servicekrat'] },\n"
+              "  { label: 'Serviceleitung', aliases: ['serviceleitung'] },\n"
+              "  { label: 'Bar', aliases: ['bar', 'barsupport'] },\n"
+              "  { label: 'Front-Office', aliases: ['frontoffice'] },\n"
+              "  { label: 'Housekeeping', aliases: ['housekeeping', 'houskeeping'] },\n"
+              "];",
+          )
+
+          # Regression: logging in again must not create another
+          # "Mitarbeiter registriert" notification.
+          Path('backend/tests/test_registration_notification_regression.py').write_text('''\
+import pytest\nfrom rest_framework.test import APIClient\n\nfrom core.models import Notification\n\n\n@pytest.mark.django_db\ndef test_normal_login_does_not_reemit_registration_completed(admin_user, worker_user):\n    password = 'LoginPass123!'\n    worker_user.set_password(password)\n    worker_user.is_onboarded = True\n    worker_user.save(update_fields=['password', 'is_onboarded'])\n\n    kind = f'portal-registration-complete-{worker_user.id}'\n    Notification.objects.filter(user=admin_user, kind=kind).delete()\n\n    response = APIClient().post(\n        '/api/auth/login/',\n        {'email': worker_user.email, 'password': password},\n        format='json',\n    )\n\n    assert response.status_code == 200\n    assert not Notification.objects.filter(user=admin_user, kind=kind).exists()\n\n\n@pytest.mark.django_db\ndef test_real_onboarding_transition_still_notifies_once(admin_user, worker_user):\n    worker_user.is_onboarded = False\n    worker_user.save(update_fields=['is_onboarded'])\n    kind = f'portal-registration-complete-{worker_user.id}'\n    Notification.objects.filter(user=admin_user, kind=kind).delete()\n\n    worker_user.is_onboarded = True\n    worker_user.save(update_fields=['is_onboarded'])\n    worker_user.save(update_fields=['last_name'])\n\n    assert Notification.objects.filter(user=admin_user, kind=kind).count() == 1\n''')
+
+          Path('.github/workflows/apply-registration-service-picker-fix.yml').unlink()
+          PY
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'Fix repeated registration push and Service position picker'
+          git push origin HEAD:main
