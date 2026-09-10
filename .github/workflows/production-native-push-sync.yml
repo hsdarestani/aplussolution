@@ -30,7 +30,7 @@ jobs:
           printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
           chmod 600 "$HOME/.ssh/strato_ed25519"
 
-      - name: Inspect production push path
+      - name: Inspect and verify production iOS push
         run: |
           set -euo pipefail
           DIAG_B64="$(python3 - <<'PY'
@@ -40,7 +40,7 @@ jobs:
           from django.utils import timezone
           from core.models import Notification, User
           from core.push_models import PushDevice, PushDelivery
-          from core.push_notifications import push_provider_status, _apns_values
+          from core.push_notifications import push_provider_status, _apns_values, _send_ios
 
           recent = timezone.now() - timedelta(hours=3)
           admins = User.objects.filter(role='admin', is_active=True).order_by('email')
@@ -62,6 +62,7 @@ jobs:
               'admin_ios_inactive': PushDevice.objects.filter(user__role='admin', active=False, platform='ios').count(),
               'admins': [],
               'recent_open_shift_notifications': [],
+              'ios_test_send': None,
           }
           for admin in admins:
               payload['admins'].append({
@@ -105,6 +106,20 @@ jobs:
                       for x in PushDelivery.objects.filter(notification=n).select_related('device').order_by('device__platform', 'created_at')
                   ],
               })
+
+          ios = PushDevice.objects.filter(user__role='admin', active=True, platform='ios').order_by('-last_seen_at').first()
+          sample = Notification.objects.filter(user=ios.user).order_by('-created_at').first() if ios else None
+          if ios and sample:
+              ok, error, invalid = _send_ios(
+                  ios,
+                  sample,
+                  'A+ Solution Push-Test',
+                  'iOS-Push nach Servermigration erfolgreich geprüft.',
+              )
+              payload['ios_test_send'] = {'ok': ok, 'error': error, 'invalid': invalid}
+              if ok:
+                  ios.last_error = ''
+                  ios.save(update_fields=['last_error', 'updated_at'])
           print(json.dumps(payload, ensure_ascii=False, default=str))
           '''
           print(base64.b64encode(code.encode()).decode())
