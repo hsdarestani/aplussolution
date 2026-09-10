@@ -97,6 +97,13 @@
   .wiw-extra-options{padding:12px 14px;background:#fff;border-bottom:1px solid #ddd}
   .wiw-extra-options label{display:grid;gap:7px;font-size:11px;color:#888}
   .wiw-extra-options textarea{min-height:88px;padding:10px;border:1px solid #d7d7d7;border-radius:8px;resize:vertical;background:#fafafa;color:#333;font:inherit;font-size:14px}
+  .wiw-note-editor{padding:0;background:#fff;border-bottom:1px solid #ddd}
+  .wiw-note-editor-toolbar{min-height:42px;padding:0 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #ededed}
+  .wiw-note-editor-title{display:flex;align-items:center;gap:8px;color:#454545;font-size:15px}
+  .wiw-note-editor-title ion-icon{font-size:18px;color:#9b9b9b}
+  .wiw-note-editor-toolbar button{padding:8px 0;border:0;background:transparent;color:#0b4d6b;font:inherit;font-size:14px;font-weight:700}
+  .wiw-note-editor textarea{display:block;width:calc(100% - 28px);min-height:96px;margin:10px 14px 12px;padding:10px 12px;box-sizing:border-box;border:1px solid #d7d7d7;border-radius:8px;resize:vertical;background:#fafafa;color:#333;font:inherit;font-size:14px;line-height:1.4}
+  .wiw-note-editor textarea:focus{outline:2px solid rgba(11,77,107,.16);border-color:#0b4d6b}
 
   .wiw-sheet-backdrop{position:fixed;z-index:21000;inset:0;display:flex;align-items:flex-end;background:rgba(0,0,0,.22)}
   .wiw-choice-sheet,.wiw-date-sheet{width:100%;max-height:72dvh;padding-bottom:calc(12px + env(safe-area-inset-bottom));overflow:auto;border-radius:14px 14px 0 0;background:#f7f7f7;box-shadow:0 -8px 25px rgba(0,0,0,.18)}

@@ -421,7 +421,6 @@ export default function WiwScheduleMobile() {
   const [form, setForm] = useState<FormState>(() => emptyForm(berlinToday()));
   const [timeOpen, setTimeOpen] = useState(false);
   const [sheet, setSheet] = useState<'client' | 'position' | 'location' | 'workers' | 'groups' | 'color' | ''>('');
-  const [extrasOpen, setExtrasOpen] = useState(false);
   const [pdfOpen, setPdfOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdf, setPdf] = useState<PdfState>(() => ({ dateFrom: monday(berlinToday()), dateTo: addDays(monday(berlinToday()), 6), workers: [], clients: [], groups: [] }));
@@ -698,7 +697,6 @@ export default function WiwScheduleMobile() {
     setCopying(false);
     setForm(emptyForm(date));
     setTimeOpen(false);
-    setExtrasOpen(false);
     setDateOpen(false);
     setFormOpen(true);
   }
@@ -728,7 +726,6 @@ export default function WiwScheduleMobile() {
       apply_all: false,
     });
     setTimeOpen(false);
-    setExtrasOpen(false);
     setDateOpen(false);
     setFormOpen(true);
   }
@@ -739,19 +736,6 @@ export default function WiwScheduleMobile() {
     setForm((current) => ({ ...current, startMinute: start, endAbsolute: start + 360 }));
   }
 
-
-  function toggleNotes() {
-    if (extrasOpen) {
-      noteRef.current?.blur();
-      setExtrasOpen(false);
-      return;
-    }
-    setExtrasOpen(true);
-    window.setTimeout(() => {
-      noteRef.current?.focus({ preventScroll: true });
-      noteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 80);
-  }
 
   async function sendManualReminder() {
     if (!editing || !editing.workerName || busy) return;
@@ -793,7 +777,6 @@ export default function WiwScheduleMobile() {
     setEditing(undefined);
     setCopying(true);
     setTimeOpen(false);
-    setExtrasOpen(false);
     noteRef.current?.blur();
     formScrollRef.current?.scrollTo({ top: 0 });
     const screen = formScreenRef.current;
@@ -874,8 +857,7 @@ export default function WiwScheduleMobile() {
       setAnchor(form.date);
       setCopying(false);
       setFormOpen(false);
-      setExtrasOpen(false);
-      window.dispatchEvent(new Event('aplus:dashboard-invalidated'));
+        window.dispatchEvent(new Event('aplus:dashboard-invalidated'));
       await loadScheduleWeek(targetWeek, false);
     } catch (error: any) {
       setToast(error.message || 'Schicht konnte nicht gespeichert werden.');
@@ -1054,8 +1036,20 @@ export default function WiwScheduleMobile() {
             onClick={() => setSheet('color')}
             trailing={<span className="wiw-color-row-tail"><i style={form.color_hue == null ? ({ background: formPalette.accent } as React.CSSProperties) : ({ '--wiw-color-hue': String(form.color_hue ?? formAutoHue) } as React.CSSProperties)} /><b>{form.color_hue == null ? 'Kundenfarbe · automatisch' : (COLOR_CHOICES.find((choice) => choice.hue === form.color_hue)?.label || 'Individuell')}</b><IonIcon className="wiw-row-chevron" icon={chevronForwardOutline} /></span>}
           />
-          <Row icon={documentTextOutline} label={form.notes ? 'Notiz bearbeiten' : 'Füge Notiz hinzu'} onClick={toggleNotes} />
-          {extrasOpen ? <div className="wiw-extra-options"><label>Notiz<textarea ref={noteRef} value={form.notes} onFocus={() => window.setTimeout(() => noteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 120)} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Hinweis für Mitarbeiter …" /></label></div> : null}
+          <div className="wiw-note-editor">
+            <div className="wiw-note-editor-toolbar">
+              <span className="wiw-note-editor-title"><IonIcon icon={documentTextOutline} /><span>Notiz</span></span>
+              <button type="button" onClick={() => { noteRef.current?.blur(); setToast('Notiz übernommen.'); }}>Fertig</button>
+            </div>
+            <textarea
+              ref={noteRef}
+              aria-label="Notiz"
+              value={form.notes}
+              onFocus={() => window.setTimeout(() => noteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 120)}
+              onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+              placeholder="Hinweis für Mitarbeiter …"
+            />
+          </div>
 
           {editing ? <>
             <div className="wiw-form-separator" />
