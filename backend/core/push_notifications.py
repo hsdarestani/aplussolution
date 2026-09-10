@@ -7,12 +7,13 @@ from typing import Any
 import httpx
 import jwt
 from celery import shared_task
+from django.utils import timezone
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import service_account
 
 from .models import Notification
 from .notification_settings import render_push_notification
-from .push_models import PushDevice
+from .push_models import PushDelivery, PushDevice
 
 FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging'
 DEFAULT_BUNDLE_ID = 'de.aplussolution.workforce'
@@ -139,6 +140,10 @@ def _send_android(
                 'notification': {
                     'sound': 'default',
                     'channel_id': 'aplus_updates',
+                    # Stable tag is a second line of defence on Android: even if a
+                    # provider/network retry gets through, it replaces the same
+                    # notification instead of creating another visible card.
+                    'tag': f'aplus-{notification.id}',
                 },
             },
         },
@@ -182,6 +187,7 @@ def _send_ios(
         'apns-topic': bundle_id,
         'apns-push-type': 'alert',
         'apns-priority': '10',
+        'apns-collapse-id': f'aplus-{notification.id}',
     }
     try:
         with httpx.Client(http2=True, timeout=15.0) as client:
@@ -211,19 +217,40 @@ def deliver_notification(notification: Notification) -> dict[str, int]:
         if not providers.get(device.platform, False):
             result['skipped'] += 1
             continue
+
+        # Celery uses at-least-once task delivery. Claim this exact
+        # notification/device pair before talking to FCM/APNs so task retries or
+        # concurrent workers cannot show the same push twice on one device.
+        delivery, claimed = PushDelivery.objects.get_or_create(
+            notification=notification,
+            device=device,
+        )
+        if not claimed:
+            result['skipped'] += 1
+            continue
+
         if device.platform == PushDevice.Platform.ANDROID:
             ok, error, invalid = _send_android(device, notification, title, body)
         elif device.platform == PushDevice.Platform.IOS:
             ok, error, invalid = _send_ios(device, notification, title, body)
         else:
+            delivery.delete()
             result['skipped'] += 1
             continue
         if ok:
+            delivery.sent_at = timezone.now()
+            delivery.last_error = ''
+            delivery.save(update_fields=['sent_at', 'last_error', 'updated_at'])
             result['sent'] += 1
             if device.last_error:
                 device.last_error = ''
                 device.save(update_fields=['last_error', 'updated_at'])
             continue
+
+        # A provider/transport failure must remain retryable. Release the claim;
+        # a later Celery retry can attempt it again. Successful sends keep the
+        # claim permanently and therefore cannot be re-sent.
+        delivery.delete()
         result['failed'] += 1
         device.last_error = error[:2000]
         if invalid:
