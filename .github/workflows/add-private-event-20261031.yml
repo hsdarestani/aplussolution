@@ -20,50 +20,36 @@ jobs:
       - name: Make note field always visible with Finish button
         run: |
           python - <<'PY'
+          import re
           from pathlib import Path
 
           tsx_path = Path('frontend/src/WiwScheduleMobile.tsx')
           text = tsx_path.read_text()
-
-          old = '''          <Row icon={documentTextOutline} label={form.notes ? 'Notiz bearbeiten' : 'Füge Notiz hinzu'} onClick={toggleNotes} />
-          {extrasOpen ? <div className="wiw-extra-options"><label>Notiz<textarea ref={noteRef} value={form.notes} onFocus={() => window.setTimeout(() => noteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 120)} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Hinweis für Mitarbeiter …" /></label></div> : null}
-          '''
-          new = '''          <div className="wiw-note-editor">
-            <div className="wiw-note-editor-toolbar">
-              <span className="wiw-note-editor-title"><IonIcon icon={documentTextOutline} /><span>Notiz</span></span>
-              <button type="button" onClick={() => { noteRef.current?.blur(); setToast('Notiz übernommen.'); }}>Fertig</button>
-            </div>
-            <textarea
-              ref={noteRef}
-              aria-label="Notiz"
-              value={form.notes}
-              onFocus={() => window.setTimeout(() => noteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 120)}
-              onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
-              placeholder="Hinweis für Mitarbeiter …"
-            />
-          </div>
-          '''
+          old = "          <Row icon={documentTextOutline} label={form.notes ? 'Notiz bearbeiten' : 'Füge Notiz hinzu'} onClick={toggleNotes} />\n          {extrasOpen ? <div className=\"wiw-extra-options\"><label>Notiz<textarea ref={noteRef} value={form.notes} onFocus={() => window.setTimeout(() => noteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 120)} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} placeholder=\"Hinweis für Mitarbeiter …\" /></label></div> : null}\n"
+          new = (
+              "          <div className=\"wiw-note-editor\">\n"
+              "            <div className=\"wiw-note-editor-toolbar\">\n"
+              "              <span className=\"wiw-note-editor-title\"><IonIcon icon={documentTextOutline} /><span>Notiz</span></span>\n"
+              "              <button type=\"button\" onClick={() => { noteRef.current?.blur(); setToast('Notiz übernommen.'); }}>Fertig</button>\n"
+              "            </div>\n"
+              "            <textarea\n"
+              "              ref={noteRef}\n"
+              "              aria-label=\"Notiz\"\n"
+              "              value={form.notes}\n"
+              "              onFocus={() => window.setTimeout(() => noteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 120)}\n"
+              "              onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}\n"
+              "              placeholder=\"Hinweis für Mitarbeiter …\"\n"
+              "            />\n"
+              "          </div>\n"
+          )
           if old not in text:
               raise SystemExit('Expected note editor block not found')
           text = text.replace(old, new, 1)
-
+          text, removed = re.subn(r"  function toggleNotes\(\) \{\n.*?\n  \}\n\n", "", text, count=1, flags=re.S)
+          if removed != 1:
+              raise SystemExit('toggleNotes function not found')
           text = text.replace("  const [extrasOpen, setExtrasOpen] = useState(false);\n", "", 1)
           text = text.replace("    setExtrasOpen(false);\n", "")
-
-          toggle = '''  function toggleNotes() {
-    if (extrasOpen) {
-      noteRef.current?.blur();
-      return;
-    }
-    setExtrasOpen(true);
-    window.setTimeout(() => {
-      noteRef.current?.focus({ preventScroll: true });
-      noteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 80);
-  }
-
-          '''
-          text = text.replace(toggle, "", 1)
           if 'extrasOpen' in text or 'setExtrasOpen' in text or 'toggleNotes' in text:
               raise SystemExit('Stale collapsible-note state remains')
           tsx_path.write_text(text)
@@ -73,14 +59,15 @@ jobs:
           marker = '  .wiw-note-editor{padding:0;background:#fff;border-bottom:1px solid #ddd}'
           if marker not in css:
               anchor = '  .wiw-extra-options textarea{min-height:88px;padding:10px;border:1px solid #d7d7d7;border-radius:8px;resize:vertical;background:#fafafa;color:#333;font:inherit;font-size:14px}\n'
-              addition = '''  .wiw-note-editor{padding:0;background:#fff;border-bottom:1px solid #ddd}
-  .wiw-note-editor-toolbar{min-height:42px;padding:0 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #ededed}
-  .wiw-note-editor-title{display:flex;align-items:center;gap:8px;color:#454545;font-size:15px}
-  .wiw-note-editor-title ion-icon{font-size:18px;color:#9b9b9b}
-  .wiw-note-editor-toolbar button{padding:8px 0;border:0;background:transparent;color:#0b4d6b;font:inherit;font-size:14px;font-weight:700}
-  .wiw-note-editor textarea{display:block;width:calc(100% - 28px);min-height:96px;margin:10px 14px 12px;padding:10px 12px;box-sizing:border-box;border:1px solid #d7d7d7;border-radius:8px;resize:vertical;background:#fafafa;color:#333;font:inherit;font-size:14px;line-height:1.4}
-  .wiw-note-editor textarea:focus{outline:2px solid rgba(11,77,107,.16);border-color:#0b4d6b}
-          '''
+              addition = (
+                  '  .wiw-note-editor{padding:0;background:#fff;border-bottom:1px solid #ddd}\n'
+                  '  .wiw-note-editor-toolbar{min-height:42px;padding:0 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #ededed}\n'
+                  '  .wiw-note-editor-title{display:flex;align-items:center;gap:8px;color:#454545;font-size:15px}\n'
+                  '  .wiw-note-editor-title ion-icon{font-size:18px;color:#9b9b9b}\n'
+                  '  .wiw-note-editor-toolbar button{padding:8px 0;border:0;background:transparent;color:#0b4d6b;font:inherit;font-size:14px;font-weight:700}\n'
+                  '  .wiw-note-editor textarea{display:block;width:calc(100% - 28px);min-height:96px;margin:10px 14px 12px;padding:10px 12px;box-sizing:border-box;border:1px solid #d7d7d7;border-radius:8px;resize:vertical;background:#fafafa;color:#333;font:inherit;font-size:14px;line-height:1.4}\n'
+                  '  .wiw-note-editor textarea:focus{outline:2px solid rgba(11,77,107,.16);border-color:#0b4d6b}\n'
+              )
               if anchor not in css:
                   raise SystemExit('CSS anchor not found')
               css = css.replace(anchor, anchor + addition, 1)
