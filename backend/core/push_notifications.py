@@ -17,6 +17,9 @@ from .push_models import PushDelivery, PushDevice
 
 FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging'
 DEFAULT_BUNDLE_ID = 'de.aplussolution.workforce'
+ANDROID_NOTIFICATION_CHANNEL_ID = 'aplus_updates_signature_v1'
+ANDROID_NOTIFICATION_SOUND = 'solution_signature'
+ANDROID_NOTIFICATION_ICON = 'ic_stat_aplus'
 _FCM_CACHE: dict[str, Any] = {'token': '', 'expires_at': 0.0}
 _APNS_CACHE: dict[str, Any] = {'token': '', 'expires_at': 0.0, 'key_id': '', 'team_id': ''}
 
@@ -138,8 +141,9 @@ def _send_android(
             'android': {
                 'priority': 'high',
                 'notification': {
-                    'sound': 'default',
-                    'channel_id': 'aplus_updates',
+                    'sound': ANDROID_NOTIFICATION_SOUND,
+                    'channel_id': ANDROID_NOTIFICATION_CHANNEL_ID,
+                    'icon': ANDROID_NOTIFICATION_ICON,
                     # Stable tag is a second line of defence on Android: even if a
                     # provider/network retry gets through, it replaces the same
                     # notification instead of creating another visible card.

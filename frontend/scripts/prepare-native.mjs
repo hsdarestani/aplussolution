@@ -43,6 +43,34 @@ function installGoogleServices() {
   if (fs.existsSync(targetPath)) console.log('Firebase google-services.json installed for Android push.');
 }
 
+function installAndroidNotificationBranding(manifestPath) {
+  const assetsDir = path.join(cwd, 'native-assets', 'android');
+  const soundSource = path.join(assetsDir, 'solution_signature.wav');
+  const iconSource = path.join(assetsDir, 'ic_stat_aplus.xml');
+  if (!fs.existsSync(soundSource)) throw new Error(`Android notification sound source not found: ${soundSource}`);
+  if (!fs.existsSync(iconSource)) throw new Error(`Android notification icon source not found: ${iconSource}`);
+
+  const resDir = path.join(cwd, 'android', 'app', 'src', 'main', 'res');
+  const rawDir = path.join(resDir, 'raw');
+  const drawableDir = path.join(resDir, 'drawable');
+  fs.mkdirSync(rawDir, { recursive: true });
+  fs.mkdirSync(drawableDir, { recursive: true });
+  fs.copyFileSync(soundSource, path.join(rawDir, 'solution_signature.wav'));
+  fs.copyFileSync(iconSource, path.join(drawableDir, 'ic_stat_aplus.xml'));
+
+  let xml = fs.readFileSync(manifestPath, 'utf8');
+  const iconMeta = '        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_stat_aplus" />';
+  const channelMeta = '        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="aplus_updates_signature_v1" />';
+  if (!xml.includes('com.google.firebase.messaging.default_notification_icon')) {
+    xml = xml.replace(/<application\b[^>]*>/, (match) => `${match}\n${iconMeta}`);
+  }
+  if (!xml.includes('com.google.firebase.messaging.default_notification_channel_id')) {
+    xml = xml.replace(/<application\b[^>]*>/, (match) => `${match}\n${channelMeta}`);
+  }
+  fs.writeFileSync(manifestPath, xml);
+  console.log('Installed Android A+ notification icon and Signature Motif sound.');
+}
+
 function patchAndroid() {
   const manifestPath = path.join(cwd, 'android', 'app', 'src', 'main', 'AndroidManifest.xml');
   if (!fs.existsSync(manifestPath)) {
@@ -76,7 +104,8 @@ function patchAndroid() {
   fs.writeFileSync(variablesPath, variables);
   installGoogleServices();
   installAndroidLauncherArtwork(manifestPath);
-  console.log('Prepared Android API 36, foreground location and native push permissions.');
+  installAndroidNotificationBranding(manifestPath);
+  console.log('Prepared Android API 36, foreground location, native push permissions and notification branding.');
 }
 
 function ensurePlistKey(plist, key, value) {

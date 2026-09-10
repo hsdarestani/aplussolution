@@ -6,6 +6,9 @@ import { PushNotifications, type ActionPerformed, type PushNotificationSchema, t
 import { api } from './api';
 
 const APP_ID = 'de.aplussolution.workforce';
+const ANDROID_PUSH_CHANNEL_ID = 'aplus_updates_signature_v1';
+const ANDROID_PUSH_SOUND = 'solution_signature.wav';
+const ANDROID_PUSH_ICON = 'ic_stat_aplus';
 let nativePushStarted = false;
 
 function openActionUrl(actionUrl?: string) {
@@ -88,7 +91,9 @@ async function presentForegroundNotification(notification: PushNotificationSchem
         title: notification.title || 'A+ Solution',
         body: notification.body || '',
         schedule: { at: new Date(Date.now() + 80), allowWhileIdle: true },
-        channelId: Capacitor.getPlatform() === 'android' ? 'aplus_updates' : undefined,
+        channelId: Capacitor.getPlatform() === 'android' ? ANDROID_PUSH_CHANNEL_ID : undefined,
+        sound: Capacitor.getPlatform() === 'android' ? ANDROID_PUSH_SOUND : undefined,
+        smallIcon: Capacitor.getPlatform() === 'android' ? ANDROID_PUSH_ICON : undefined,
         extra: notification.data || {},
       }],
     });
@@ -169,22 +174,22 @@ export default function NativePushRegistration() {
         }
         if (Capacitor.getPlatform() === 'android') {
           await PushNotifications.createChannel({
-            id: 'aplus_updates',
+            id: ANDROID_PUSH_CHANNEL_ID,
             name: 'A+ Solution Updates',
             description: 'Schichten, Verträge, Nachrichten und wichtige Änderungen',
             importance: 5,
             visibility: 1,
-            sound: 'default',
+            sound: ANDROID_PUSH_SOUND,
             vibration: true,
           });
           try {
             await LocalNotifications.createChannel({
-              id: 'aplus_updates',
+              id: ANDROID_PUSH_CHANNEL_ID,
               name: 'A+ Solution Updates',
               description: 'Schichten, Verträge, Nachrichten und wichtige Änderungen',
               importance: 5,
               visibility: 1,
-              sound: 'default',
+              sound: ANDROID_PUSH_SOUND,
               vibration: true,
             });
           } catch {
