@@ -8,10 +8,14 @@ on:
         required: true
         type: choice
         options: [android, ios]
+  push:
+    branches: [main]
+    paths:
+      - '.mobile-store-release-trigger'
 
 jobs:
   android:
-    if: inputs.platform == 'android'
+    if: github.event_name == 'push' || inputs.platform == 'android'
     runs-on: ubuntu-latest
     env:
       VITE_API_URL: https://app.aplus-solution.de/api
@@ -74,7 +78,7 @@ jobs:
           if-no-files-found: error
 
   ios:
-    if: inputs.platform == 'ios'
+    if: github.event_name == 'push' || inputs.platform == 'ios'
     runs-on: macos-latest
     env:
       VITE_API_URL: https://app.aplus-solution.de/api
