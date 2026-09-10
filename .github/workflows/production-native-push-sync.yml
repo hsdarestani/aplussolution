@@ -32,23 +32,10 @@ jobs:
 
       - name: Inspect production push path
         run: |
-          set -uo pipefail
-          : > /tmp/push-diagnostic.txt
-          set +e
-          ssh \
-            -i "$HOME/.ssh/strato_ed25519" \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=20 \
-            -o ServerAliveInterval=10 \
-            -o ServerAliveCountMax=3 \
-            root@"$STRATO_HOST" 'bash -s' > /tmp/push-diagnostic.txt 2>&1 <<'REMOTE'
           set -euo pipefail
-          cd /opt/aplussolution
-          docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null
-          echo 'PUSH_DIAGNOSTIC_BEGIN'
-          docker compose exec -T backend python manage.py shell <<'PY'
+          DIAG_B64="$(python3 - <<'PY'
+          import base64
+          code = r'''import json
           from datetime import timedelta
           from django.utils import timezone
           from core.models import Notification, User
@@ -57,42 +44,40 @@ jobs:
 
           recent = timezone.now() - timedelta(hours=3)
           admins = User.objects.filter(role='admin', is_active=True).order_by('email')
-          print('push_providers=', push_provider_status(), flush=True)
-          print('active_admin_users=', admins.count(), flush=True)
-          print('active_devices_total=', PushDevice.objects.filter(active=True).count(), flush=True)
-          print('admin_android_active=', PushDevice.objects.filter(user__role='admin', active=True, platform='android').count(), flush=True)
-          print('admin_ios_active=', PushDevice.objects.filter(user__role='admin', active=True, platform='ios').count(), flush=True)
-          print('admin_android_inactive=', PushDevice.objects.filter(user__role='admin', active=False, platform='android').count(), flush=True)
-          print('admin_ios_inactive=', PushDevice.objects.filter(user__role='admin', active=False, platform='ios').count(), flush=True)
-
-          print('--- ADMIN DEVICE STATE ---', flush=True)
+          payload = {
+              'providers': push_provider_status(),
+              'active_admin_users': admins.count(),
+              'active_devices_total': PushDevice.objects.filter(active=True).count(),
+              'admin_android_active': PushDevice.objects.filter(user__role='admin', active=True, platform='android').count(),
+              'admin_ios_active': PushDevice.objects.filter(user__role='admin', active=True, platform='ios').count(),
+              'admin_android_inactive': PushDevice.objects.filter(user__role='admin', active=False, platform='android').count(),
+              'admin_ios_inactive': PushDevice.objects.filter(user__role='admin', active=False, platform='ios').count(),
+              'admins': [],
+              'recent_open_shift_notifications': [],
+          }
           for admin in admins:
-              print('ADMIN', {
-                  'user_id': str(admin.id),
+              payload['admins'].append({
                   'email': admin.email,
                   'name': admin.get_full_name(),
-              }, flush=True)
-              devices = PushDevice.objects.filter(user=admin).order_by('-last_seen_at')
-              for d in devices:
-                  print(' DEVICE', {
-                      'id': str(d.id),
-                      'platform': d.platform,
-                      'active': d.active,
-                      'last_seen_at': d.last_seen_at.isoformat() if d.last_seen_at else None,
-                      'last_error': d.last_error,
-                      'app_id': d.app_id,
-                      'device_name': d.device_name,
-                  }, flush=True)
-
-          print('--- RECENT ADMIN OPEN SHIFT NOTIFICATIONS ---', flush=True)
+                  'devices': [
+                      {
+                          'platform': d.platform,
+                          'active': d.active,
+                          'last_seen_at': d.last_seen_at.isoformat() if d.last_seen_at else None,
+                          'last_error': d.last_error,
+                          'app_id': d.app_id,
+                          'device_name': d.device_name,
+                      }
+                      for d in PushDevice.objects.filter(user=admin).order_by('-last_seen_at')
+                  ],
+              })
           notes = Notification.objects.filter(
               user__role='admin',
               kind__startswith='admin-open-shift-summary-',
               created_at__gte=recent,
-          ).select_related('user').order_by('-created_at')[:20]
-          print('recent_count=', notes.count(), flush=True)
+          ).select_related('user').order_by('-created_at')[:30]
           for n in notes:
-              print(' NOTIFICATION', {
+              payload['recent_open_shift_notifications'].append({
                   'id': str(n.id),
                   'user_email': n.user.email,
                   'user_name': n.user.get_full_name(),
@@ -100,32 +85,47 @@ jobs:
                   'kind': n.kind,
                   'title': n.title,
                   'body': n.body,
-              }, flush=True)
-              deliveries = PushDelivery.objects.filter(notification=n).select_related('device').order_by('device__platform', 'created_at')
-              if not deliveries.exists():
-                  print('  DELIVERY none', flush=True)
-              for delivery in deliveries:
-                  print('  DELIVERY', {
-                      'platform': delivery.device.platform,
-                      'device_active': delivery.device.active,
-                      'device_last_seen_at': delivery.device.last_seen_at.isoformat() if delivery.device.last_seen_at else None,
-                      'sent_at': delivery.sent_at.isoformat() if delivery.sent_at else None,
-                      'last_error': delivery.last_error,
-                      'device_last_error': delivery.device.last_error,
-                  }, flush=True)
+                  'deliveries': [
+                      {
+                          'platform': x.device.platform,
+                          'device_active': x.device.active,
+                          'device_last_seen_at': x.device.last_seen_at.isoformat() if x.device.last_seen_at else None,
+                          'sent_at': x.sent_at.isoformat() if x.sent_at else None,
+                          'delivery_last_error': x.last_error,
+                          'device_last_error': x.device.last_error,
+                      }
+                      for x in PushDelivery.objects.filter(notification=n).select_related('device').order_by('device__platform', 'created_at')
+                  ],
+              })
+          print(json.dumps(payload, ensure_ascii=False, default=str))
+          '''
+          print(base64.b64encode(code.encode()).decode())
           PY
-          echo '--- CELERY PUSH TASK LOG TAIL ---'
-          docker compose logs --since=3h --no-color celery 2>&1 | grep -E 'send_notification_push|FCM|APNs|Task core\.push_notifications' | tail -n 200 || true
-          echo 'PUSH_DIAGNOSTIC_END'
-          REMOTE
-          diagnostic_exit=$?
-          set -e
-          echo "diagnostic_exit=$diagnostic_exit"
+          )"
+
+          : > /tmp/push-diagnostic.txt
+          ssh \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            root@"$STRATO_HOST" \
+            "cd /opt/aplussolution && printf '%s' '$DIAG_B64' | base64 -d | docker compose exec -T backend python manage.py shell" \
+            > /tmp/push-diagnostic.txt 2>&1
+
+          echo '--- CELERY ---' >> /tmp/push-diagnostic.txt
+          ssh \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            root@"$STRATO_HOST" \
+            "cd /opt/aplussolution && docker compose logs --since=3h --no-color celery 2>&1 | grep -E 'send_notification_push|FCM|APNs|Task core\\.push_notifications' | tail -n 200 || true" \
+            >> /tmp/push-diagnostic.txt 2>&1
+
           echo "diagnostic_bytes=$(wc -c < /tmp/push-diagnostic.txt)"
-          if [ "$diagnostic_exit" -ne 0 ]; then
-            tail -n 80 /tmp/push-diagnostic.txt || true
-            exit "$diagnostic_exit"
-          fi
 
       - name: Upload diagnostic artifact
         if: always()
