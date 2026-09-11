@@ -1,0 +1,139 @@
+name: Assign Shaha Spenerhaus shifts now
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-assign-shaha-spenerhaus-now.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  assign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Assign via production standard API flow
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/key"
+          chmod 600 "$HOME/.ssh/key"
+          ssh -i "$HOME/.ssh/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python - <<'PY'
+          import os
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+          import django
+          django.setup()
+
+          from django.db.models import Q
+          from rest_framework.test import APIRequestFactory, force_authenticate
+          from core.models import ClientCompany, Location, Notification, Position, Shift, User, WorkerProfile
+          from core.notification_settings import push_rule_payload
+          from core.push_models import PushDevice
+          from core.push_notifications import push_provider_configured
+          from core.shift_slots import ShiftSlot
+          from core.shift_views import StaffingShiftViewSet
+
+          worker = WorkerProfile.objects.select_related('user').get(employee_number='MA-0061', active=True, user__is_active=True)
+          hotel = ClientCompany.objects.filter(name__iexact='Hotel Spenerhaus', active=True).first()
+          if not hotel:
+              matches = list(ClientCompany.objects.filter(name__icontains='Spenerhaus', active=True)[:2])
+              hotel = matches[0] if len(matches) == 1 else None
+          if not hotel:
+              raise RuntimeError('Hotel Spenerhaus customer not found uniquely')
+          location = Location.objects.filter(client=hotel, name__icontains='Spenerhaus', active=True).first()
+          if not location:
+              matches = list(Location.objects.filter(client=hotel, active=True)[:2])
+              location = matches[0] if len(matches) == 1 else None
+          if not location:
+              raise RuntimeError('Hotel Spenerhaus location not found uniquely')
+          position = Position.objects.filter(name__iexact='Housekeeping', active=True).first() or Position.objects.filter(name__iexact='Houskeeping', active=True).first()
+          if not position:
+              raise RuntimeError('Housekeeping position not found')
+          admin = User.objects.filter(is_active=True, is_superuser=True).order_by('date_joined').first() or User.objects.filter(is_active=True, role__in=['admin','manager']).order_by('date_joined').first()
+          if not admin:
+              raise RuntimeError('No admin/manager available')
+
+          provider_ok = push_provider_configured()
+          rule_ok = bool(push_rule_payload('shift_assignment').get('enabled'))
+          if not provider_ok or not rule_ok:
+              raise RuntimeError(f'Push infrastructure not ready provider={provider_ok} assignment_rule={rule_ok}')
+          active_devices = PushDevice.objects.filter(user=worker.user, active=True).count()
+
+          berlin = ZoneInfo('Europe/Berlin')
+          dates = {
+              11: (8,0,13,30), 12: (8,0,13,0), 14: (8,0,13,0),
+              18: (8,0,13,0), 19: (8,0,13,0), 21: (8,0,13,0),
+              22: (8,0,13,0), 23: (8,0,13,0), 24: (8,0,13,0),
+              26: (8,0,13,0), 27: (8,0,13,0),
+          }
+          factory = APIRequestFactory()
+          create_view = StaffingShiftViewSet.as_view({'post':'create'})
+          assign_view = StaffingShiftViewSet.as_view({'post':'assign'})
+          created = assigned = already = 0
+          result_rows = []
+
+          def ensure_ok(resp, label):
+              if resp.status_code >= 400:
+                  raise RuntimeError(f'{label}: HTTP {resp.status_code} {resp.data}')
+              return resp
+
+          for day, (sh,sm,eh,em) in dates.items():
+              start = datetime(2026,9,day,sh,sm,tzinfo=berlin)
+              end = datetime(2026,9,day,eh,em,tzinfo=berlin)
+              matching = Shift.objects.filter(client=hotel, location=location, position=position, starts_at=start, ends_at=end).exclude(status=Shift.Status.CANCELLED).distinct()
+              target = matching.filter(Q(worker=worker) | Q(slots__worker=worker, slots__status=ShiftSlot.Status.CLAIMED)).distinct().first()
+              if target:
+                  already += 1
+                  result_rows.append((day, target, False))
+                  continue
+              target = matching.filter(Q(is_open=True) | Q(slots__worker__isnull=True, slots__status=ShiftSlot.Status.OPEN)).distinct().order_by('created_at').first()
+              if not target:
+                  req = factory.post('/api/shifts/', {
+                      'client': str(hotel.id), 'location': str(location.id), 'position': str(position.id),
+                      'starts_at': start.isoformat(), 'ends_at': end.isoformat(), 'status': Shift.Status.DRAFT,
+                      'notes': '', 'required_count': 1, 'confirmation_required': False,
+                      'schedule_groups': ['housekeeping'],
+                  }, format='json')
+                  force_authenticate(req, user=admin)
+                  resp = ensure_ok(create_view(req), f'create {day:02d}.09')
+                  target = Shift.objects.get(pk=resp.data['id'])
+                  created += 1
+              req = factory.post(f'/api/shifts/{target.id}/assign/', {'workers':[str(worker.id)], 'publish_remaining':False}, format='json')
+              force_authenticate(req, user=admin)
+              ensure_ok(assign_view(req, pk=str(target.id)), f'assign {day:02d}.09')
+              target.refresh_from_db()
+              assigned += 1
+              result_rows.append((day, target, True))
+
+          notifications = 0
+          for day, shift, changed in result_rows:
+              slot = ShiftSlot.objects.filter(shift=shift, worker=worker, status=ShiftSlot.Status.CLAIMED).first()
+              if not slot:
+                  raise RuntimeError(f'No claimed slot for {day:02d}.09')
+              if changed:
+                  n = Notification.objects.filter(user=worker.user, kind=f'shift-admin-assigned-{slot.id}').first()
+                  if not n:
+                      raise RuntimeError(f'Standard assignment notification missing for {day:02d}.09')
+                  notifications += 1
+
+          print('SHAHA_SHIFT_ASSIGN_OK '
+                f'created={created} assigned={assigned} already={already} notifications={notifications} '
+                f'active_push_devices={active_devices} dates=' + ','.join(f'{d:02d}.09' for d,_,_ in result_rows))
+          PY
+          REMOTE
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/key"
