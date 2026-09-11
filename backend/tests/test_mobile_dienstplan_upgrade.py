@@ -161,7 +161,12 @@ def test_configure_schedule_workers_changes_only_approved_workforce(db):
     lara_user = User.objects.create_user(
         'lara@example.com', 'Pass123456!', first_name='Lara', last_name='Mohieddine', role=User.Role.WORKER
     )
-    WorkerProfile.objects.create(user=lara_user, employee_number='CFG-LARA')
+    lara = WorkerProfile.objects.create(
+        user=lara_user,
+        employee_number='CFG-LARA',
+        schedule_groups=['service'],
+        open_shift_client_ids=['00000000-0000-0000-0000-000000000003'],
+    )
     julia_user = User.objects.create_user(
         'julia@example.com', 'Pass123456!', first_name='Julia', last_name='Stahl', role=User.Role.CLIENT
     )
@@ -179,12 +184,18 @@ def test_configure_schedule_workers_changes_only_approved_workforce(db):
     call_command('configure_schedule_workers')
 
     tooba.refresh_from_db()
+    lara.refresh_from_db()
+    lara_user.refresh_from_db()
     other.refresh_from_db()
     assert tooba.schedule_groups == ['service']
     assert tooba.open_shift_client_ids == []
     assert other.schedule_groups == ['housekeeping']
     assert other.open_shift_client_ids == ['00000000-0000-0000-0000-000000000002']
-    assert not User.objects.filter(pk=lara_user.pk).exists()
+    assert User.objects.filter(pk=lara_user.pk).exists()
+    assert lara.active is False
+    assert lara.schedule_groups == []
+    assert lara.open_shift_client_ids == []
+    assert lara_user.is_active is False
     assert User.objects.filter(pk=julia_user.pk).exists()
     assert not WorkerProfile.objects.filter(user_id=julia_user.pk).exists()
 
