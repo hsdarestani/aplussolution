@@ -1,4 +1,5 @@
 import os
+import socket
 from datetime import timedelta
 from pathlib import Path
 import dj_database_url
@@ -6,6 +7,14 @@ BASE_DIR=Path(__file__).resolve().parent.parent
 SECRET_KEY=os.getenv('DJANGO_SECRET_KEY','development-only-key')
 DEBUG=os.getenv('DEBUG','0')=='1'
 ALLOWED_HOSTS=[x.strip() for x in os.getenv('ALLOWED_HOSTS','localhost,127.0.0.1').split(',') if x.strip()]
+# Permit only this running container's own private address for host-local
+# operational calls. Public host validation remains restricted by ALLOWED_HOSTS.
+try:
+    _container_self_host=socket.gethostbyname(socket.gethostname())
+    if _container_self_host and _container_self_host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(_container_self_host)
+except OSError:
+    pass
 INSTALLED_APPS=['django.contrib.admin','django.contrib.auth','django.contrib.contenttypes','django.contrib.sessions','django.contrib.messages','django.contrib.staticfiles','corsheaders','rest_framework','django_filters','core']
 MIDDLEWARE=['django.middleware.security.SecurityMiddleware','corsheaders.middleware.CorsMiddleware','django.contrib.sessions.middleware.SessionMiddleware','django.middleware.common.CommonMiddleware','django.middleware.csrf.CsrfViewMiddleware','django.contrib.auth.middleware.AuthenticationMiddleware','django.contrib.messages.middleware.MessageMiddleware','django.middleware.clickjacking.XFrameOptionsMiddleware']
 ROOT_URLCONF='config.urls'
@@ -36,14 +45,9 @@ CELERY_BEAT_SCHEDULE={
     'shift-reminders-hourly':{'task':'core.tasks.send_shift_reminders','schedule':3600},
     'client-contract-generation-hourly':{'task':'core.tasks.generate_due_client_contracts','schedule':3600},
     'working-time-sync-daily':{'task':'core.tasks.sync_working_time_current_year','schedule':86400},
-    'working-time-backup-weekly':{'task':'core.tasks.backup_working_time','schedule':604800},
+    'working-time-backup-weekly':{'task':'core.tasks.backup_working_time_current_year','schedule':604800},
     'wiw-readonly-sync-5min':{'task':'core.tasks.sync_when_i_work','schedule':300,'args':['incremental']},
-    # Layer 2: independently re-scan the complete schedule in bounded WIW date
-    # windows, including OpenShifts and all locations. This self-heals any shift
-    # a webhook/incremental request may have missed, regardless of age/future date.
     'wiw-schedule-reconcile-6h':{'task':'core.tasks.reconcile_when_i_work_schedule','schedule':21600},
-    # Layer 3: strict daily reconciliation of every supported WIW resource. The
-    # task fails/retries instead of silently accepting a partial migration.
     'wiw-full-reconcile-daily':{'task':'core.tasks.reconcile_when_i_work_full','schedule':86400},
 }
 WORKER_EMAILS_ENABLED=os.getenv('WORKER_EMAILS_ENABLED','0')=='1'
