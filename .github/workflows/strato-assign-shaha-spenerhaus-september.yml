@@ -99,14 +99,12 @@ jobs:
           if not position:
               raise RuntimeError('Housekeeping position not found.')
 
-          admin = User.objects.filter(is_active=True, is_superuser=True).order_by('created_at').first()
+          admin = User.objects.filter(is_active=True, is_superuser=True).order_by('date_joined').first()
           if not admin:
-              admin = User.objects.filter(is_active=True, role__in=['admin', 'manager']).order_by('created_at').first()
+              admin = User.objects.filter(is_active=True, role__in=['admin', 'manager']).order_by('date_joined').first()
           if not admin:
               raise RuntimeError('No active admin/manager account available for standard API operation.')
 
-          # Real notification-delivery prerequisites. Abort before any mutation if
-          # native push cannot currently reach this worker.
           if not push_provider_configured():
               raise RuntimeError('Native push provider is not configured; refusing to create assignments without push delivery.')
           assignment_rule = push_rule_payload('shift_assignment')
@@ -184,9 +182,6 @@ jobs:
               assigned_count += 1
               touched.append((day, target, True))
 
-          # Operational verification only: ensure every requested shift is assigned
-          # and that the standard assignment Notification row exists for each newly
-          # assigned slot. Native delivery is handled by the normal post_save signal.
           notification_ids = []
           for day, shift, changed in touched:
               slot = ShiftSlot.objects.filter(
