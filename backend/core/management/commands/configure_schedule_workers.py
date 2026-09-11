@@ -164,7 +164,17 @@ class Command(BaseCommand):
                         user.role = User.Role.CLIENT
                         user.save(update_fields=['role'])
                 else:
-                    user.delete()
+                    # Keep the WIW identity as an inactive tombstone instead of
+                    # deleting it after every reconciliation. Deleting Lara here
+                    # allowed the next WIW pass to create a fresh local User id,
+                    # which repeatedly looked like a new registration elsewhere.
+                    worker.active = False
+                    worker.schedule_groups = []
+                    worker.open_shift_client_ids = []
+                    worker.save(update_fields=['active', 'schedule_groups', 'open_shift_client_ids', 'updated_at'])
+                    if user.is_active:
+                        user.is_active = False
+                        user.save(update_fields=['is_active'])
                 deleted.append(label)
 
         self.stdout.write(self.style.SUCCESS(
