@@ -47,10 +47,10 @@ jobs:
               Q(first_name__icontains='Lara') |
               Q(last_name__icontains='Mohieddine') |
               Q(email__icontains='lara')
-          ).order_by('created_at'))
+          ).order_by('date_joined'))
           print(f'LARA_USER_COUNT={len(users)}')
           for u in users:
-              print('USER', u.id, 'role=', u.role, 'onboarded=', u.is_onboarded, 'created=', u.created_at.isoformat(), 'updated=', u.updated_at.isoformat())
+              print('USER', u.id, 'role=', u.role, 'onboarded=', u.is_onboarded, 'date_joined=', u.date_joined.isoformat(), 'last_login=', u.last_login.isoformat() if u.last_login else None)
               notes = list(Notification.objects.filter(user__role__in=['admin','manager'], kind=f'portal-registration-complete-{u.id}').order_by('created_at'))
               print(f'REGISTRATION_NOTIFICATION_COUNT user={u.id} count={len(notes)}')
               for n in notes:
