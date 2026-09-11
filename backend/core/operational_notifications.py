@@ -20,6 +20,12 @@ def _event_key(prefix: str) -> str:
     return f'{prefix}-{uuid.uuid4().hex[:12]}'
 
 
+def _is_external_sync_identity(user: User) -> bool:
+    """External WIW identities are imports, not completed portal registrations."""
+    email = str(getattr(user, 'email', '') or '').strip().lower()
+    return bool(getattr(user, 'wiw_id', None)) or email.endswith(SYNTHETIC_MIGRATION_EMAIL_SUFFIX)
+
+
 def _shift_body(shift: Shift) -> str:
     local_start = timezone.localtime(shift.starts_at)
     location = getattr(shift.location, 'name', '') or 'Einsatzort'
@@ -206,8 +212,8 @@ def dispatch_attendance_reminders() -> dict:
 
 
 def ensure_registration_completed_notification(user: User) -> int:
-    """Notify managers once for a real employee/customer onboarding transition."""
-    if user.role not in {User.Role.WORKER, User.Role.CLIENT}:
+    """Notify managers once for a real native portal onboarding transition."""
+    if user.role not in {User.Role.WORKER, User.Role.CLIENT} or _is_external_sync_identity(user):
         return 0
     role_label = 'Mitarbeiter' if user.role == User.Role.WORKER else 'Kunde'
     name = user.get_full_name() or user.email
@@ -239,6 +245,11 @@ def remember_onboarding_state(sender, instance, **kwargs):
 @receiver(post_save, sender=User)
 def notify_registration_completed(sender, instance, created=False, **kwargs):
     if created or instance.role not in {User.Role.WORKER, User.Role.CLIENT}:
+        return
+    # A WIW sync can create/update/delete local shadow identities repeatedly as
+    # the external directory changes. That is data synchronization, not a user
+    # completing A+ portal registration, so it must never emit this event.
+    if _is_external_sync_identity(instance):
         return
     if not instance.is_onboarded or getattr(instance, '_aplus_was_onboarded', False):
         return
