@@ -24,9 +24,9 @@ node scripts/prepare-native.mjs android
 # Assert the exact notification branding before Gradle compiles resources.
 test -f android/app/src/main/res/drawable/ic_stat_aplus.xml
 test -f android/app/src/main/res/raw/solution_signature.wav
-grep -q 'M2.2,20 L6.6,4' android/app/src/main/res/drawable/ic_stat_aplus.xml
-grep -q 'com.google.firebase.messaging.default_notification_icon' android/app/src/main/AndroidManifest.xml
-grep -q 'aplus_updates_signature_v1' android/app/src/main/AndroidManifest.xml
+grep -Fq 'M2.2,20 L6.6,4' android/app/src/main/res/drawable/ic_stat_aplus.xml
+grep -Fq 'com.google.firebase.messaging.default_notification_icon' android/app/src/main/AndroidManifest.xml
+grep -Fq 'aplus_updates_signature_v1' android/app/src/main/AndroidManifest.xml
 
 cp "$ANDROID_KEYSTORE_PATH" android/app/aplus-release.jks
 chmod 600 android/app/aplus-release.jks
@@ -37,8 +37,15 @@ cd android
 
 APK="$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)"
 test -n "$APK"
-unzip -l "$APK" | grep -q 'res/raw/solution_signature.wav'
-AAPT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n1)/aapt"
-"$AAPT" dump resources "$APK" | grep -q 'ic_stat_aplus'
+test -s "$APK"
+
+# Inspect the compiled Android resource table rather than ZIP paths: aapt may
+# rewrite resource paths during packaging and pipefail can turn grep -q into a
+# false failure when an upstream command receives SIGPIPE.
+BUILD_TOOLS="$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n1)"
+AAPT="$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt"
+"$AAPT" dump resources "$APK" > /tmp/aplus-notification-resources.txt
+grep -Fq 'ic_stat_aplus' /tmp/aplus-notification-resources.txt
+grep -Fq 'solution_signature' /tmp/aplus-notification-resources.txt
 
 echo "Publisher Android smoke APK created and notification branding verified for ${APP_VERSION_NAME} (${APP_BUILD_NUMBER})."
