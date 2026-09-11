@@ -1,0 +1,74 @@
+name: Diagnose repeated registration push
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-diagnose-registration-push.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Inspect Lara registration notification state
+        run: |
+          set -euo pipefail
+          ssh \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from django.db.models import Q
+          from core.models import Notification, User
+          from core.push_models import PushDelivery, PushDevice
+
+          users = list(User.objects.filter(
+              Q(first_name__icontains='Lara') |
+              Q(last_name__icontains='Mohieddine') |
+              Q(email__icontains='lara')
+          ).order_by('created_at'))
+          print(f'LARA_USER_COUNT={len(users)}')
+          for u in users:
+              print('USER', u.id, 'role=', u.role, 'onboarded=', u.is_onboarded, 'created=', u.created_at.isoformat(), 'updated=', u.updated_at.isoformat())
+              notes = list(Notification.objects.filter(user__role__in=['admin','manager'], kind=f'portal-registration-complete-{u.id}').order_by('created_at'))
+              print(f'REGISTRATION_NOTIFICATION_COUNT user={u.id} count={len(notes)}')
+              for n in notes:
+                  deliveries = list(PushDelivery.objects.filter(notification=n).select_related('device').order_by('created_at'))
+                  print('NOTIFICATION', n.id, 'created=', n.created_at.isoformat(), 'updated=', n.updated_at.isoformat(), 'deliveries=', len(deliveries))
+                  for d in deliveries:
+                      print('DELIVERY', d.id, 'device=', d.device_id, 'platform=', d.device.platform, 'device_created=', d.device.created_at.isoformat(), 'last_seen=', d.device.last_seen_at.isoformat(), 'sent_at=', d.sent_at.isoformat() if d.sent_at else None)
+
+          admins = User.objects.filter(role__in=['admin','manager'], is_active=True)
+          for a in admins:
+              devices = list(PushDevice.objects.filter(user=a).order_by('created_at'))
+              if devices:
+                  print('RECIPIENT', a.id, 'role=', a.role, 'active_devices=', sum(1 for d in devices if d.active), 'total_devices=', len(devices))
+                  for d in devices:
+                      print('DEVICE', d.id, 'platform=', d.platform, 'active=', d.active, 'created=', d.created_at.isoformat(), 'last_seen=', d.last_seen_at.isoformat(), 'name=', (d.device_name or '')[:80])
+          PY
+          REMOTE
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
