@@ -1,0 +1,41 @@
+name: Prepare encrypted worker provisioning key
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-ops-provision-key.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+      - name: Generate ephemeral server key and print public half
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          KEY=/root/.aplus_worker_provision_key.pem
+          rm -f "$KEY" "$KEY.pub"
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out "$KEY" >/dev/null 2>&1
+          chmod 600 "$KEY"
+          openssl pkey -in "$KEY" -pubout -out "$KEY.pub" >/dev/null 2>&1
+          echo 'PROVISION_PUBLIC_KEY_B64='$(base64 -w0 "$KEY.pub")
+          REMOTE
+      - name: Cleanup SSH
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
