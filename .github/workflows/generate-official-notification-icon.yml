@@ -1,0 +1,118 @@
+name: Generate official Android notification icon
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'notif-icon.svg'
+      - '.github/workflows/generate-official-notification-icon.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate Android vector from the exact SVG font glyph
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -q fonttools requests
+          python <<'PY'
+          from pathlib import Path
+          import requests
+          from fontTools.ttLib import TTFont
+          from fontTools.pens.boundsPen import BoundsPen
+          from fontTools.pens.svgPathPen import SVGPathPen
+          from fontTools.pens.transformPen import TransformPen
+          from fontTools.misc.transform import Transform
+
+          source = Path('notif-icon.svg')
+          text = source.read_text(encoding='utf-8')
+          if "Ms Madi" not in text or ">+<" not in text:
+              raise SystemExit('notif-icon.svg is not the expected official Ms Madi + artwork')
+
+          font_url = 'https://raw.githubusercontent.com/google/fonts/main/ofl/msmadi/MsMadi-Regular.ttf'
+          response = requests.get(font_url, timeout=30)
+          response.raise_for_status()
+          font_path = Path('/tmp/MsMadi-Regular.ttf')
+          font_path.write_bytes(response.content)
+
+          font = TTFont(font_path)
+          glyph_set = font.getGlyphSet()
+          cmap = font.getBestCmap()
+          glyph_name = cmap.get(ord('+'))
+          if not glyph_name:
+              raise SystemExit('Ms Madi has no + glyph')
+          glyph = glyph_set[glyph_name]
+
+          bounds_pen = BoundsPen(glyph_set)
+          glyph.draw(bounds_pen)
+          if not bounds_pen.bounds:
+              raise SystemExit('Official + glyph has no outline')
+          x_min, y_min, x_max, y_max = bounds_pen.bounds
+          width = x_max - x_min
+          height = y_max - y_min
+          if width <= 0 or height <= 0:
+              raise SystemExit('Invalid official + glyph bounds')
+
+          # Android small-notification icons are alpha masks. Preserve the exact
+          # Ms Madi glyph outline from the SVG, but center it in the 24x24 mask
+          # and keep Android's recommended breathing room around the mark.
+          target = 18.0
+          scale = min(target / width, target / height)
+          cx = (x_min + x_max) / 2.0
+          cy = (y_min + y_max) / 2.0
+          transform = Transform(scale, 0, 0, -scale, 12 - scale * cx, 12 + scale * cy)
+          path_pen = SVGPathPen(glyph_set)
+          glyph.draw(TransformPen(path_pen, transform))
+          path_data = path_pen.getCommands()
+          if not path_data:
+              raise SystemExit('Could not create Android path data')
+
+          out = Path('frontend/native-assets/android/ic_stat_aplus.xml')
+          out.parent.mkdir(parents=True, exist_ok=True)
+          out.write_text(
+              '<?xml version="1.0" encoding="utf-8"?>\n'
+              '<vector xmlns:android="http://schemas.android.com/apk/res/android"\n'
+              '    android:width="24dp"\n'
+              '    android:height="24dp"\n'
+              '    android:viewportWidth="24"\n'
+              '    android:viewportHeight="24">\n'
+              '    <!-- Exact monochrome outline derived from notif-icon.svg / Ms Madi. -->\n'
+              '    <path\n'
+              '        android:fillColor="#FFFFFFFF"\n'
+              f'        android:pathData="{path_data}" />\n'
+              '</vector>\n',
+              encoding='utf-8',
+          )
+          print('Generated:', out)
+          print('Glyph:', glyph_name, 'bounds=', bounds_pen.bounds)
+          print('Path:', path_data)
+          PY
+
+      - name: Commit official notification icon
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/generate-official-notification-icon.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add notif-icon.svg frontend/native-assets/android/ic_stat_aplus.xml .github/workflows/generate-official-notification-icon.yml
+          if git diff --cached --quiet; then
+            echo 'No notification icon change was generated.' >&2
+            exit 1
+          fi
+          git commit -m "Use exact official SVG glyph for Android notifications"
+          git push origin HEAD:main
