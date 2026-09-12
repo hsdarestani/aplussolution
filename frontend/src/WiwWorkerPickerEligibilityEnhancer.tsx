@@ -102,6 +102,8 @@ export default function WiwWorkerPickerEligibilityEnhancer() {
 
     const loadWorkers = async () => {
       try {
+        const current: any = await api('auth/me/');
+        if (!['admin', 'manager'].includes(String(current?.role || ''))) return;
         const payload = await api('workers/?ordering=user__last_name');
         if (cancelled) return;
 

@@ -332,31 +332,12 @@ test.describe('Worker portal deep regression QA', () => {
     expect(forbiddenManagerFanout(state)).toEqual([]);
   });
 
-  test('worker signs contract using the real drawing pad', async ({ page }) => {
+  test('worker contracts stay deactivated even through a direct deep link', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const state = await mockWorkerApi(page);
     await page.goto('/?view=contracts');
-    await expect(page.getByRole('button', { name: 'Unterschreiben' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Neuer Vertrag' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Stornieren' })).toHaveCount(0);
-
-    await page.getByRole('button', { name: 'Unterschreiben' }).click();
-    await page.getByLabel('Vollständiger Name').fill(worker.name);
-    const canvas = page.getByLabel('Unterschrift zeichnen');
-    await expect(canvas).toBeVisible();
-    const box = await canvas.boundingBox();
-    expect(box).not.toBeNull();
-    if (!box) return;
-    await page.mouse.move(box.x + 30, box.y + 60);
-    await page.mouse.down();
-    await page.mouse.move(box.x + 105, box.y + 42, { steps: 5 });
-    await page.mouse.move(box.x + 180, box.y + 82, { steps: 5 });
-    await page.mouse.up();
-    await page.getByRole('button', { name: 'Verbindlich unterzeichnen' }).click();
-    await expect.poll(() => state.contractSigned).toBe(true);
-    await expect(page.getByRole('button', { name: 'Unterschreiben' })).toHaveCount(0);
-    await expect(page.locator('ion-badge').filter({ hasText: 'Unterzeichnet' })).toBeVisible();
-    expect(state.requests.some((r) => r.path === 'contracts/contract-worker-1/sign/' && r.method === 'POST')).toBe(true);
+    await expect(page.getByTestId('phase8-mobile-dashboard')).toBeVisible();
+    expect(state.requests.some((r) => r.path === 'contracts/' || r.path.startsWith('contracts/?'))).toBe(false);
     expect(forbiddenManagerFanout(state)).toEqual([]);
   });
 
