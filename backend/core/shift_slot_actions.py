@@ -6,7 +6,7 @@ from rest_framework.response import Response
 
 from .models import Shift
 from .permissions import IsAdminOrManager
-from .operational_notifications import notify_claimed_workers_shift_changed, notify_open_shift_available
+from .operational_notifications import notify_claimed_workers_shift_changed
 from .services import audit
 from .shift_api import ShiftApiSerializer
 from .shift_service import ensure_slots, open_slots, refresh_shift_state
@@ -61,7 +61,6 @@ def edit_shift_slot(request, shift_id, slot_id):
     explicit apply_all flag keeps the fast bulk-edit workflow.
     """
     apply_all = request.data.get('apply_all') in (True, 'true', '1', 1)
-
     with transaction.atomic():
         # Lock only the rows that are actually mutated. Joining nullable relations
         # (Shift.order and ShiftSlot.worker) before SELECT FOR UPDATE works on
@@ -87,9 +86,11 @@ def edit_shift_slot(request, shift_id, slot_id):
                 'slot': str(slot.id),
                 'apply_all': apply_all,
             })
-            if edited.status == Shift.Status.PUBLISHED and open_slots(edited).exists():
-                notify_open_shift_available(edited, 'card-update')
-            else:
+            # An OpenShift is advertised when it is first published. Saving its
+            # card is also the first half of the mobile assignment flow, so a
+            # second fan-out here would notify every eligible worker immediately
+            # before the targeted assignment notification is created.
+            if not open_slots(edited).exists():
                 notify_claimed_workers_shift_changed(edited)
             result = ShiftApiSerializer(
                 _shift_with_counts(edited.id), context={'request': request}
@@ -171,9 +172,7 @@ def edit_shift_slot(request, shift_id, slot_id):
             'from_slot': str(slot.id),
             'worker': str(selected['worker_id'] or ''),
         })
-        if clone.status == Shift.Status.PUBLISHED and open_slots(clone).exists():
-            notify_open_shift_available(clone, 'card-update')
-        else:
+        if not open_slots(clone).exists():
             notify_claimed_workers_shift_changed(clone)
 
         return Response({

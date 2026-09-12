@@ -3,7 +3,7 @@ from datetime import timedelta
 import pytest
 from django.utils import timezone
 
-from core.models import Availability, Shift
+from core.models import Availability, Notification, Shift
 from core.shift_service import ensure_slots, refresh_shift_state
 from core.shift_slots import ShiftSlot
 
@@ -450,6 +450,48 @@ def test_admin_can_create_and_assign_new_shift_to_worker(auth_admin, company, lo
     assert slot.confirmation_status == ShiftSlot.ConfirmationStatus.CONFIRMED
     assert assigned.data['filled_count'] == 1
     assert assigned.data['open_count'] == 0
+
+
+@pytest.mark.django_db
+def test_first_admin_assignment_does_not_readvertise_open_shift(
+    auth_admin, company, location, position, second_worker
+):
+    starts = timezone.now() + timedelta(days=12)
+    shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        starts_at=starts,
+        ends_at=starts + timedelta(hours=5),
+        required_count=1,
+        status=Shift.Status.PUBLISHED,
+    )
+    ensure_slots(shift)
+    slot = ShiftSlot.objects.get(shift=shift)
+
+    edited = auth_admin.patch(
+        f'/api/shifts/{shift.id}/cards/{slot.id}/',
+        {
+            'status': Shift.Status.PUBLISHED,
+        },
+        format='json',
+    )
+
+    assert edited.status_code == 200, edited.data
+    assert not Notification.objects.filter(kind__startswith='open-shift-card-update-').exists()
+
+    assigned = auth_admin.post(
+        f'/api/shifts/{shift.id}/assign/',
+        {'workers': [str(second_worker.id)], 'publish_remaining': True},
+        format='json',
+    )
+
+    assert assigned.status_code == 200, assigned.data
+    assert Notification.objects.filter(
+        user=second_worker.user,
+        kind__startswith='shift-admin-assigned-',
+    ).count() == 1
+    assert not Notification.objects.filter(kind__startswith='open-shift-card-update-').exists()
 
 @pytest.mark.django_db
 def test_admin_can_replace_worker_after_shift_creation_without_confirmation(
