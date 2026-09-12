@@ -201,6 +201,31 @@ def test_configure_schedule_workers_changes_only_approved_workforce(db):
 
 
 @pytest.mark.django_db
+def test_configure_schedule_workers_expands_loreen_abbreviated_name():
+    user = User.objects.create_user(
+        'loreen@example.com',
+        'Pass123456!',
+        first_name='Loreen',
+        last_name='G.',
+        role=User.Role.WORKER,
+    )
+    worker = WorkerProfile.objects.create(
+        user=user,
+        employee_number='CFG-LOREEN',
+        schedule_groups=['front_office'],
+    )
+
+    call_command('configure_schedule_workers')
+
+    user.refresh_from_db()
+    worker.refresh_from_db()
+    assert user.first_name == 'Loreen'
+    assert user.last_name == 'Gawlitza'
+    assert worker.schedule_groups == ['service']
+    assert WorkerProfile.objects.filter(user__first_name='Loreen').count() == 1
+
+
+@pytest.mark.django_db
 def test_julia_workforce_removal_preserves_account_even_with_stale_worker_role():
     user = User.objects.create_user(
         'julia.stale@example.com', 'Pass123456!', first_name='Julia', last_name='Stahl', role=User.Role.WORKER

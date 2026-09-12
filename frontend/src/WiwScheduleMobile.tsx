@@ -85,7 +85,7 @@ const WORKER_PICKER_NAMES = [
   'Shahrzad Bagheri',
   'Michelle Brettschneider',
   'Michele Corrado',
-  'Loreen G.',
+  'Loreen Gawlitza',
   'Katerina Gentsou',
   'Yohannes Kiffle',
   'Ksenia Marszalek',

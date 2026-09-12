@@ -15,7 +15,7 @@ WORKER_CONFIG = {
     'Shahrzad Bagheri': ['service'],
     'Michelle Brettschneider': ['service', 'front_office'],
     'Michele Corrado': ['service'],
-    'Loreen G.': ['service'],
+    'Loreen Gawlitza': ['service'],
     'Katerina Gentsou': ['service', 'front_office'],
     'Yohannes Kiffle': ['service'],
     'Ksenia Marszalek': ['service'],
@@ -34,8 +34,14 @@ WORKER_CONFIG = {
 # while the approved employee email and the existing account use "Somodi".
 # Treat both spellings as the same employee instead of creating/renaming accounts.
 WORKER_NAME_ALIASES = {
+    'Loreen Gawlitza': {'Loreen G.'},
     'Izabella Somodi': {'Izabella Somodo'},
 }
+
+# This formerly abbreviated employee name should be canonicalized in the user
+# record so every admin view shows the full approved name. Other aliases remain
+# lookup-only because their historical spelling must not rename accounts.
+CANONICALIZE_USER_NAMES = {'Loreen Gawlitza'}
 
 # Explicitly requested on 2026-09-02. Pending addresses are reserved, non-routable
 # identifiers required by the unique email login schema; no invitations are sent.
@@ -145,6 +151,11 @@ class Command(BaseCommand):
                 if not worker:
                     missing.append(target)
                     continue
+                if target in CANONICALIZE_USER_NAMES and normalize_name(worker_name(worker)) != normalize_name(target):
+                    first_name, last_name = target.split(' ', 1)
+                    worker.user.first_name = first_name
+                    worker.user.last_name = last_name
+                    worker.user.save(update_fields=['first_name', 'last_name'])
                 worker.schedule_groups = normalized_groups(groups)
                 worker.open_shift_client_ids = []
                 worker.active = True
