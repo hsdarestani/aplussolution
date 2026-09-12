@@ -51,15 +51,14 @@ def test_worker_cannot_mutate_master_data_of_other_worker(auth_worker, second_wo
 
 
 @pytest.mark.django_db
-def test_contract_queryset_is_scoped(api_client, admin_user, worker_user, second_worker, company):
+def test_contracts_are_deactivated_for_workers(api_client, admin_user, worker_user, second_worker, company):
     template = ContractTemplate.objects.create(name='T', slug='scope-test', kind='employment', schema={}, html_template='x')
-    own = Contract.objects.create(template=template, worker=worker_user.worker_profile, title='Own', created_by=admin_user)
+    Contract.objects.create(template=template, worker=worker_user.worker_profile, title='Own', created_by=admin_user)
     Contract.objects.create(template=template, worker=second_worker, title='Other', created_by=admin_user)
     api_client.force_authenticate(worker_user)
     response = api_client.get('/api/contracts/')
-    assert response.status_code == 200
-    rows = response.data['results'] if isinstance(response.data, dict) and 'results' in response.data else response.data
-    assert [row['id'] for row in rows] == [str(own.id)]
+    assert response.status_code == 403
+    assert 'deaktiviert' in response.data['detail']
 
 
 @pytest.mark.django_db

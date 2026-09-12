@@ -196,7 +196,15 @@ def apply_final_notification_copy(sender, instance: Notification, **kwargs):
                 f'{start:%d.%m.%Y} von {start:%H:%M}–{end:%H:%M} Uhr\n{_shift_detail(shift)}',
             )
         elif '-deleted-' in kind or '-card-delete-' in kind:
-            _set(instance, 'Schicht gelöscht am', _shift_lines(shift))
+            start = timezone.localtime(shift.starts_at)
+            end = timezone.localtime(shift.ends_at)
+            location = getattr(getattr(shift, 'location', None), 'name', '') or 'Einsatzort'
+            position = getattr(getattr(shift, 'position', None), 'name', '') or 'Position'
+            _set(
+                instance,
+                'Deine Schicht wurde gelöscht.',
+                f'{location} · {start:%d.%m.%Y} · {start:%H:%M}–{end:%H:%M} Uhr · {position}',
+            )
         else:
             start = timezone.localtime(shift.starts_at)
             end = timezone.localtime(shift.ends_at)

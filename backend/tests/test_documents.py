@@ -108,20 +108,15 @@ def test_static_pdf_generation(worker_user, admin_user):
 
 
 @pytest.mark.django_db
-def test_two_party_signature_completes_only_after_both(api_client, worker_user, admin_user):
+def test_worker_contract_signature_is_deactivated(api_client, worker_user, admin_user):
     template = ContractTemplate.objects.create(name='Agreement', slug='agreement-test', kind='termination', source_format='html', html_template='<h1>{{ employee_name }}</h1>', schema={'fields': [], 'signature_roles': ['employee', 'employer']})
     contract = Contract.objects.create(template=template, worker=worker_user.worker_profile, title='Agreement', status='ready', created_by=admin_user)
     api_client.force_authenticate(worker_user)
     first = api_client.post(f'/api/contracts/{contract.id}/sign/', {'name': 'Anna Becker', 'signature': 'Anna'}, format='json')
-    assert first.status_code == 200
+    assert first.status_code == 403
     contract.refresh_from_db()
-    assert contract.status == 'sent'
-    api_client.force_authenticate(admin_user)
-    second = api_client.post(f'/api/contracts/{contract.id}/sign/', {'name': 'A+ Solution GmbH', 'signature': 'Admin'}, format='json')
-    assert second.status_code == 200
-    contract.refresh_from_db()
-    assert contract.status == 'signed'
-    assert set(contract.signatures.values_list('role', flat=True)) == {'employee', 'employer'}
+    assert contract.status == 'ready'
+    assert not contract.signatures.exists()
 
 
 @pytest.mark.django_db

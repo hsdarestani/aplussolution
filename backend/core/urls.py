@@ -32,6 +32,7 @@ urlpatterns = [
     path('auth/store-review/sync/', store_review_views.sync_store_review_credential),
     path('auth/refresh/', TokenRefreshView.as_view()),
     path('auth/me/', views.me),
+    path('auth/profile/avatar/', views.profile_avatar),
     path('auth/change-password/', views.change_password),
     path('auth/account-deletion/', views.request_account_deletion),
     path('auth/oauth/<str:provider>/start/', oauth_views.oauth_start),

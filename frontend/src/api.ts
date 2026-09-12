@@ -18,6 +18,7 @@ export type User = {
   last_name: string;
   role: 'admin' | 'manager' | 'worker' | 'client';
   phone: string;
+  avatar?: string;
 };
 
 const accessToken = () => localStorage.getItem('access') || '';

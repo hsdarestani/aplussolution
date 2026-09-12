@@ -81,8 +81,7 @@ def test_contract_readiness_exposes_missing_required_data_to_owner(worker_user, 
 
     worker = APIClient(); worker.force_authenticate(worker_user)
     response = worker.get(f'/api/contracts/{contract.id}/readiness/')
-    assert response.status_code == 200
-    assert response.data['missing_fields'][0]['label'] == 'IBAN'
+    assert response.status_code == 403
 
 
 @pytest.mark.django_db
@@ -124,13 +123,10 @@ def test_generated_document_is_invalidated_on_edit_then_locked_after_send(auth_a
 
     worker = APIClient(); worker.force_authenticate(worker_user)
     first = worker.post(f'/api/contracts/{contract.id}/sign/', {'name': 'Anna Becker', 'signature': 'Anna'}, format='json')
-    assert first.status_code == 200
-    second = auth_admin.post(f'/api/contracts/{contract.id}/sign/', {'name': 'A+ Solution GmbH', 'signature': 'Admin'}, format='json')
-    assert second.status_code == 200
+    assert first.status_code == 403
     contract.refresh_from_db()
-    assert contract.status == Contract.Status.SIGNED
-    assert auth_admin.post(f'/api/contracts/{contract.id}/sign/', {'name': 'A+ Solution GmbH', 'signature': 'Overwrite'}, format='json').status_code == 400
-    assert auth_admin.post(f'/api/contracts/{contract.id}/cancel/', {'reason': 'Soll nicht möglich sein'}, format='json').status_code == 400
+    assert contract.status == Contract.Status.SENT
+    assert auth_admin.post(f'/api/contracts/{contract.id}/cancel/', {'reason': 'Mitarbeiterportal vorerst deaktiviert.'}, format='json').status_code == 200
 
 
 @pytest.mark.django_db

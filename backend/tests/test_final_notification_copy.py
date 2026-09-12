@@ -47,6 +47,26 @@ def test_open_shift_copy_uses_approved_compact_format(shift, worker_user):
 
 
 @pytest.mark.django_db
+def test_deleted_shift_copy_uses_requested_title_and_detail_line(shift, worker_user):
+    notification = Notification.objects.create(
+        user=worker_user,
+        kind=f'shift-event-deleted-{shift.id}-abcdef1234',
+        title='legacy',
+        body='legacy',
+        action_url='/schedule',
+    )
+    notification.refresh_from_db()
+
+    start = timezone.localtime(shift.starts_at)
+    end = timezone.localtime(shift.ends_at)
+    assert notification.title == 'Deine Schicht wurde gelöscht.'
+    assert notification.body == (
+        f'{shift.location.name} · {start:%d.%m.%Y} · '
+        f'{start:%H:%M}–{end:%H:%M} Uhr · {shift.position.name}'
+    )
+
+
+@pytest.mark.django_db
 def test_direct_assignment_copy_does_not_ask_for_confirmation(shift, second_worker):
     slot = ShiftSlot.objects.create(
         shift=shift,

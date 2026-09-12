@@ -140,7 +140,7 @@ def test_payout_and_manual_adjustment_recalculate_following_month_signed(worker_
 
 
 @pytest.mark.django_db
-def test_drawn_two_party_signatures_are_hashed_and_stamped_into_final_pdf(
+def test_drawn_worker_signature_is_blocked_while_employee_contracts_are_deactivated(
     api_client, worker_user, admin_user
 ):
     template = ContractTemplate.objects.create(
@@ -166,43 +166,12 @@ def test_drawn_two_party_signatures_are_hashed_and_stamped_into_final_pdf(
         {'name': 'Anna Becker', 'signature': signature},
         format='json',
     )
-    assert worker_response.status_code == 200
-
-    api_client.force_authenticate(admin_user)
-    employer_response = api_client.post(
-        f'/api/contracts/{contract.id}/sign/',
-        {'name': 'A+ Solution GmbH', 'signature': signature},
-        format='json',
-    )
-    assert employer_response.status_code == 200
+    assert worker_response.status_code == 403
 
     contract.refresh_from_db()
-    signatures = list(contract.signatures.order_by('signed_at'))
-    assert contract.status == Contract.Status.SIGNED
-    assert contract.pdf
-    assert len(signatures) == 2
-    assert all(len(item.signature_hash) == 64 for item in signatures)
-    assert len(contract.signature_hash) == 64
-    assert all(item.signature_data.startswith('data:image/png;base64,') for item in signatures)
-    assert [item.signer_name for item in signatures] == ['Anna Becker', 'A+ Solution GmbH']
-    assert [item.role for item in signatures] == ['employee', 'employer']
-
-    contract.pdf.open('rb')
-    try:
-        pdf_bytes = contract.pdf.read()
-    finally:
-        contract.pdf.close()
-    assert pdf_bytes.startswith(b'%PDF-')
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    assert reader.pages
-    final_text = reader.pages[-1].extract_text() or ''
-    # Signer identity stays canonical in ContractSignature / audit data; the legal
-    # PDF itself must not inject helper labels or names that can collide with the
-    # template's printed signature and date fields.
-    assert 'Anna Becker' not in final_text
-    assert 'A+ Solution GmbH' not in final_text
-    assert 'Mitarbeiter' not in final_text
-    assert 'Arbeitgeber' not in final_text
+    assert contract.status == Contract.Status.READY
+    assert not contract.signatures.exists()
+    assert not contract.pdf
 
 
 @pytest.mark.django_db
