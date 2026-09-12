@@ -3142,7 +3142,7 @@ export default function App() {
 
   if (view === 'schedule') content = <ScheduleV2 user={user} />;
   else if (view === 'time') content = <AttendanceV3 user={user} />;
-  else if (view === 'contracts') content = <Contracts user={user} />;
+  else if (view === 'contracts' && user.role !== 'worker') content = <Contracts user={user} />;
   else if (view === 'documents') content = <Documents user={user} />;
   else if (view === 'orders') content = <Orders user={user} />;
   else if (view === 'people') content = <People user={user} />;
