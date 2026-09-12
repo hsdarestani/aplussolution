@@ -190,8 +190,8 @@ test.describe('Phase 6 mobile QA', () => {
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Dienstplan' }).click();
     const workerSchedule = page.getByTestId('wiw-employee-schedule');
     await expect(workerSchedule).toBeVisible();
-    await expect(workerSchedule.getByTestId('phase8-week-strip')).toBeVisible();
     const dayView = workerSchedule.getByTestId('schedule-day-view');
+    await expect(dayView).toHaveAttribute('data-layout', 'list');
     await expect(dayView.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
     await expect(dayView.getByText('Frankfurt Innenstadt', { exact: true }).first()).toBeVisible();
     await expect(dayView).not.toContainText('Main Suites Frankfurt');
@@ -215,7 +215,7 @@ test.describe('Phase 6 mobile QA', () => {
     const moreMenu = page.getByTestId('wiw-more-screen');
     await expect(moreMenu).toBeVisible();
     await expect(moreMenu.getByText('Mehr', { exact: true })).toBeVisible();
-    await expect(moreMenu.getByRole('button', { name: 'Meine Verträge', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: 'Meine Verträge', exact: true })).toHaveCount(0);
     await expect(moreMenu.getByRole('button', { name: 'Dokumente', exact: true })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: 'Ranking', exact: true })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: 'Mitteilungen', exact: true })).toBeVisible();
@@ -227,11 +227,11 @@ test.describe('Phase 6 mobile QA', () => {
     await page.goto('/?view=schedule');
 
     const workerSchedule = page.getByTestId('wiw-employee-schedule');
-    await expect(workerSchedule.getByTestId('phase8-week-strip')).toBeVisible();
+    await expect(workerSchedule.getByTestId('schedule-day-view')).toHaveAttribute('data-layout', 'list');
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
 
     await page.reload();
-    await expect(workerSchedule.getByTestId('phase8-week-strip')).toBeVisible();
+    await expect(workerSchedule.getByTestId('schedule-day-view')).toHaveAttribute('data-layout', 'list');
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
 
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeiterfassung' }).click();
@@ -239,7 +239,7 @@ test.describe('Phase 6 mobile QA', () => {
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('time');
 
     await page.goBack();
-    await expect(workerSchedule.getByTestId('phase8-week-strip')).toBeVisible();
+    await expect(workerSchedule.getByTestId('schedule-day-view')).toHaveAttribute('data-layout', 'list');
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
 
     await page.goForward();
@@ -353,7 +353,6 @@ test.describe('Phase 6 desktop smoke', () => {
       'Mitteilungen',
       'Anfragen',
       'Dokumente',
-      'Meine Verträge',
       'Ranking',
       'Profil',
     ]);

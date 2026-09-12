@@ -126,7 +126,6 @@ const nav: Record<string, [View, string][]> = {
     ['messages', 'Mitteilungen'],
     ['operations', 'Anfragen'],
     ['documents', 'Dokumente'],
-    ['contracts', 'Meine Verträge'],
     ['ranking', 'Ranking'],
   ],
   client: [
@@ -2957,6 +2956,24 @@ function Ratings({ user }: { user: User }) {
 function Profile({ user }: { user: User }) {
   const [toast, setToast] = useState('');
   const [passwords, setPasswords] = useState<any>({});
+  const [avatar, setAvatar] = useState((user as any).avatar || '');
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
+  async function uploadAvatar(file?: File) {
+    if (!file) return;
+    const form = new FormData();
+    form.append('avatar', file);
+    setUploadingAvatar(true);
+    try {
+      const result: any = await api('auth/profile/avatar/', { method: 'POST', body: form });
+      setAvatar(result.avatar || '');
+      setToast('Profilfoto wurde aktualisiert.');
+    } catch (reason: any) {
+      setToast(reason.message);
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
 
   async function requestDeletion() {
     try {
@@ -2985,10 +3002,14 @@ function Profile({ user }: { user: User }) {
       <Title title="Mein Profil" text="Kontaktdaten, Sicherheit und Datenschutz." />
       <div className="profile-grid">
         <div className="panel profile">
-          <div className="avatar big">{user.name[0]}</div>
+          <div className="avatar big">{avatar ? <img src={avatar} alt="Profilfoto" /> : user.name[0]}</div>
           <h2>{user.name}</h2>
           <p>{user.email}</p>
           <IonBadge>{user.role}</IonBadge>
+          {user.role === 'worker' && <label className="file-field">
+            Profilfoto hochladen
+            <input type="file" accept="image/jpeg,image/png,image/webp" disabled={uploadingAvatar} onChange={(event) => void uploadAvatar(event.target.files?.[0])} />
+          </label>}
           <IonButton fill="outline" color="danger" onClick={requestDeletion}>
             Kontolöschung anfragen
           </IonButton>

@@ -33,14 +33,15 @@ test('Phase 8 attendance spans the complete imported history without removing cl
   expect(periods).not.toContain('Array.from({length:13}');
   expect(periods).toContain('Abrechnungszeiträume');
   expect(periods).toContain('entry.worked_minutes');
+  expect(periods).toContain("hasTime ? '✓' : '–'");
   expect(attendance).toContain("api('attendance/history/')");
   expect(attendance).toContain('<Phase8MobileAttendance data={data} showWorker={isManager(user)} />');
 });
 
-test('Phase 8 worker scheduler exposes WIW week strip, names, totals and approved release requests', async()=>{
+test('Phase 8 worker scheduler exposes dedicated shift lists and approved release requests', async()=>{
   const schedule=read('src/WiwEmployeeScheduleMobile.tsx');
-  expect(schedule).toContain('phase8-week-strip');
-  expect(schedule).toContain('phase8-week-total');
+  expect(schedule).toContain('data-layout="list"');
+  expect(schedule).not.toContain('className="wiw-employee-week-strip"');
   expect(schedule).toContain('Gesamtstunden');
   expect(schedule).toContain('Meine Schichten');
   expect(schedule).toContain('OpenShifts');

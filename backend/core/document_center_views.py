@@ -39,6 +39,8 @@ def document_center(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def contract_readiness_view(request, pk):
+    if request.user.role == User.Role.WORKER:
+        return Response({'detail': 'Verträge sind im Mitarbeiterportal derzeit deaktiviert.'}, status=403)
     contract = _visible_contract(request, pk)
     if not contract:
         return Response({'detail': 'Vertrag wurde nicht gefunden.'}, status=404)

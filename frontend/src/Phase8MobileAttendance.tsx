@@ -337,10 +337,19 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
 
   return <div className="wiw-pay-periods" data-testid="phase8-pay-periods">
     <div className="wiw-mobile-screen-title">Abrechnungszeiträume</div>
-    {periods.map((item) => <button type="button" className="wiw-period-row" key={item.key} onClick={() => { setSelected(item.key); setSelectedWorker(undefined); setSelectedEntry(undefined); }}>
-      <strong>{item.label}</strong>
-      <span className="wiw-period-circle" aria-hidden="true" />
-    </button>)}
+    {periods.map((item) => {
+      const entries = history.filter((entry: any) => {
+        const value = new Date(entry.clock_in).getTime();
+        return value >= item.start.getTime() && value < item.end.getTime();
+      });
+      const minutes = entries.reduce((sum: number, entry: any) => sum + entryMinutes(entry), 0);
+      const hasTime = entries.length > 0;
+      return <button type="button" className={`wiw-period-row ${hasTime ? 'has-time' : 'is-empty'}`} key={item.key} onClick={() => { setSelected(item.key); setSelectedWorker(undefined); setSelectedEntry(undefined); }}>
+        <strong>{item.label}</strong>
+        <small className="wiw-period-meta">{hasTime ? `${entries.length} Einträge · ${(minutes / 60).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} Std.` : 'Keine Arbeitszeit erfasst'}</small>
+        <span className={`wiw-period-circle ${hasTime ? 'has-data' : 'empty'}`} aria-label={hasTime ? 'Zeiten vorhanden' : 'Keine Zeiten vorhanden'}>{hasTime ? '✓' : '–'}</span>
+      </button>;
+    })}
   </div>;
 }
 

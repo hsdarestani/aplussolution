@@ -16,6 +16,8 @@ def test_worker_ranking_shows_active_workers_without_sensitive_profile_fields(au
     assert [row['employee_number'] for row in response.data] == ['MA-002', 'MA-001']
     assert response.data[0]['ranking_points'] == 30
     assert response.data[1]['is_current_user'] is True
+    assert response.data[0]['user_detail']['name'].endswith(' S.')
+    assert response.data[1]['user_detail']['name'].endswith(' B.')
 
     payload = str(response.data).lower()
     for forbidden in ('email', 'tariff_hourly_rate', 'extra_allowance', 'monthly_hours', 'iban', 'phone'):
@@ -51,3 +53,13 @@ def test_inactive_and_synthetic_workers_are_excluded(auth_worker, worker_user):
     employee_numbers = {row['employee_number'] for row in response.data}
     assert 'MA-INACTIVE' not in employee_numbers
     assert 'MA-SYNC' not in employee_numbers
+
+
+@pytest.mark.django_db
+def test_manager_profile_is_not_in_public_worker_ranking(auth_worker, manager_user):
+    WorkerProfile.objects.create(user=manager_user, employee_number='MA-MANAGER', ranking_points=999)
+
+    response = auth_worker.get('/api/employee/ranking/')
+
+    assert response.status_code == 200
+    assert 'MA-MANAGER' not in {row['employee_number'] for row in response.data}

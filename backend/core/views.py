@@ -10,11 +10,12 @@ from django.db import transaction
 from django.db.models import Avg, Sum, Q
 from django.http import HttpResponseRedirect
 from django.utils import timezone
+from PIL import Image, UnidentifiedImageError
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import *
@@ -197,6 +198,28 @@ def login(request):
 
 @api_view(['GET'])
 def me(request):
+    return Response(UserSerializer(request.user, context={'request': request}).data)
+
+
+@api_view(['POST'])
+def profile_avatar(request):
+    if request.user.role != User.Role.WORKER:
+        return Response({'detail': 'Profilfotos können hier nur Mitarbeiter ändern.'}, status=403)
+    uploaded = request.FILES.get('avatar')
+    if not uploaded:
+        return Response({'detail': 'Bitte ein Bild auswählen.'}, status=400)
+    if uploaded.size > 5 * 1024 * 1024:
+        return Response({'detail': 'Das Profilfoto darf maximal 5 MB groß sein.'}, status=400)
+    if uploaded.content_type not in {'image/jpeg', 'image/png', 'image/webp'}:
+        return Response({'detail': 'Erlaubt sind JPG, PNG und WebP.'}, status=400)
+    try:
+        Image.open(uploaded).verify()
+        uploaded.seek(0)
+    except (UnidentifiedImageError, OSError):
+        return Response({'detail': 'Die ausgewählte Datei ist kein gültiges Bild.'}, status=400)
+    request.user.avatar = uploaded
+    request.user.save(update_fields=['avatar'])
+    audit(request, 'account.avatar_updated', request.user)
     return Response(UserSerializer(request.user, context={'request': request}).data)
 
 
@@ -612,7 +635,7 @@ class ContractViewSet(ManagerMutationMixin, BaseModelViewSet):
         if user.role in {'admin', 'manager'}:
             return self.queryset
         if user.role == 'worker':
-            return self.queryset.filter(worker__user=user)
+            raise PermissionDenied('Verträge sind im Mitarbeiterportal derzeit deaktiviert.')
         return self.queryset.filter(client__contacts=user, client__contract_visibility_enabled=True)
 
     def perform_create(self, serializer):

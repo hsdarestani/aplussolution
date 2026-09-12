@@ -18,7 +18,7 @@ def employee_ranking(request):
 
     workers = (
         WorkerProfile.objects.select_related('user')
-        .filter(active=True, user__is_active=True)
+        .filter(active=True, user__is_active=True, user__role=User.Role.WORKER)
         .exclude(user__email__iendswith='@sync.invalid')
         .exclude(employee_number__startswith='STORE-REVIEW-')
         .order_by('-ranking_points', 'user__last_name', 'user__first_name', 'employee_number')
@@ -26,14 +26,17 @@ def employee_ranking(request):
 
     rows = []
     for worker in workers:
-        full_name = worker.user.get_full_name().strip() or worker.employee_number
+        first_name = worker.user.first_name.strip()
+        last_name = worker.user.last_name.strip()
+        public_name = ' '.join(part for part in [first_name, f'{last_name[0]}.' if last_name else ''] if part)
+        public_name = public_name or worker.employee_number
         rows.append({
             'id': str(worker.id),
             'employee_number': worker.employee_number,
             'ranking_points': worker.ranking_points,
             'active': True,
             'is_current_user': worker.user_id == request.user.id,
-            'user_detail': {'name': full_name},
+            'user_detail': {'name': public_name},
         })
     return Response(rows)
 
