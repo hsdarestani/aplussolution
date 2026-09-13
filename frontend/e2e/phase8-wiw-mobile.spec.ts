@@ -79,7 +79,7 @@ test('final Dienstplan UX keeps requested client order, hotel presets, copy labe
   expect(adminSchedule).toContain("'marthasfinest','stadthausammarkt','hotelspenerhaus','hofelcatering','restauranthirschgarten','messe','ommia','citybeach','hofgut'");
   expect(adminSchedule).toContain("label: 'Frühdienst', start: 6 * 60 + 30, end: 15 * 60");
   expect(adminSchedule).toContain("label: 'Spätdienst', start: 14 * 60 + 45, end: 22 * 60 + 45");
-  expect(adminSchedule).toContain("label: 'Nachtdienst', start: 22 * 60 + 30, end: 24 * 60 + 6 * 60 + 30");
+  expect(adminSchedule).toContain("label: 'Nachtdienst', start: 22 * 60 + 45, end: 24 * 60 + 6 * 60 + 46");
   expect(adminSchedule).toContain('Schicht kopieren');
   expect(adminSchedule).toContain("const uniqueLocation = matchingLocations.length === 1 ? String(matchingLocations[0].id) : ''");
   expect(adminSchedule).toContain("workerId: card.worker?.id ? String(card.worker.id) : ''");
@@ -90,14 +90,15 @@ test('final Dienstplan UX keeps requested client order, hotel presets, copy labe
 });
 
 
-test('WIW motion uses live quarter-hour ticks and strong swipe feedback', async()=>{
+test('WIW motion uses live quarter-hour ticks and attached adjacent-week swipe feedback', async()=>{
   const schedule=read('src/WiwScheduleMobile.tsx');
-  const css=read('src/wiw-schedule-mobile.css');
+  const css=read('src/sep13-dienstplan-polish.css');
   const employee=read('src/WiwEmployeeScheduleMobile.tsx');
   expect(schedule).toContain('window.requestAnimationFrame(emitTick)');
-  expect(schedule).toContain("classList.add('is-swipe-dragging')");
-  expect(css).toContain('scroll-snap-type:y mandatory');
-  expect(css).toContain('scroll-snap-stop:always');
-  expect(css).toContain('translate3d(24vw,0,0)');
+  expect(schedule).toContain("classList.add('is-settling')");
+  expect(schedule).toContain("style.setProperty('--wiw-swipe-x'");
+  expect(schedule).toContain('AdjacentWeekPreview');
+  expect(css).toContain('.wiw-week-swipe-track');
+  expect(css).toContain('width:300%');
   expect(employee).toContain('</div>, document.body) : null}');
 });
