@@ -124,9 +124,9 @@ def test_direct_worker_claim_notifies_admin_once(
     slot = ShiftSlot.objects.get(shift=shift, worker=worker_user.worker_profile)
     admin_notification = Notification.objects.get(
         user=admin_user,
-        kind=f'shift-claimed-admin-{slot.id}',
+        kind=f'admin-direct-shift-claim-{slot.id}',
     )
-    assert admin_notification.title == 'Schicht übernommen am'
+    assert admin_notification.title == 'OpenShift übernommen'
     assert 'Anna Becker hat eine OpenShift übernommen' in admin_notification.body
     assert location.name in admin_notification.body
     assert push_position.name in admin_notification.body
