@@ -126,7 +126,7 @@ def test_direct_worker_claim_notifies_admin_once(
         user=admin_user,
         kind=f'shift-claimed-admin-{slot.id}',
     )
-    assert admin_notification.title == 'OpenShift übernommen'
+    assert admin_notification.title == 'Schicht übernommen am'
     assert 'Anna Becker hat eine OpenShift übernommen' in admin_notification.body
     assert location.name in admin_notification.body
     assert push_position.name in admin_notification.body
