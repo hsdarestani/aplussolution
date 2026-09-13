@@ -8,7 +8,7 @@ from rest_framework.response import Response
 
 from .models import Notification, Shift, User, WorkerProfile
 from .permissions import IsAdminOrManager
-from .operational_notifications import notify_claimed_workers_shift_changed, notify_open_shift_available, notify_worker_shift_event
+from .operational_notifications import notify_admins_shift_claimed, notify_claimed_workers_shift_changed, notify_open_shift_available, notify_worker_shift_event
 from .premium_approval_models import ShiftPickupRequest
 from .premium_services import get_policy
 from .services import audit
@@ -399,6 +399,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
             user=request.user, kind=f'shift-claimed-{slot.id}',
             defaults={'title': 'Schicht übernommen', 'body': f'{slot.shift.starts_at:%d.%m.%Y %H:%M} – {slot.shift.location.name}', 'action_url': '/schedule'},
         )
+        notify_admins_shift_claimed(slot)
         audit(request, 'shift.claimed', slot.shift, {'slot': str(slot.id)})
         return Response(self.get_serializer(self.base_queryset().get(pk=pk)).data)
 
