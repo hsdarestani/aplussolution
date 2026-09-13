@@ -38,6 +38,31 @@ const SHORT_LABELS: Record<string, string> = {
   'Benachrichtigungen': 'Mitteilungen',
 };
 
+const HASH_SECTIONS: Record<string, string> = {
+  personalabdeckung: 'Personalabdeckung',
+  schichttausch: 'Schichttausch freigeben',
+  planungswerkzeuge: 'Planungswerkzeuge',
+  berichte: 'Berichte & Exporte',
+  'berichte-exporte': 'Berichte & Exporte',
+  arbeitszeit: 'Arbeitszeitkonto',
+  arbeitszeitkonto: 'Arbeitszeitkonto',
+  auftraege: 'Auftragsautomation & ANÜ',
+  'auftraege-anue': 'Auftragsautomation & ANÜ',
+  dokumente: '8 Dokumentmodelle',
+  wiw: 'WIW Migration / Altbestand',
+  workforce: 'Erweiterte Workforce-Steuerung',
+  'workforce-pro': 'Erweiterte Workforce-Steuerung',
+  benachrichtigungen: 'Benachrichtigungen',
+  mitteilungen: 'Benachrichtigungen',
+};
+
+function sectionFromHash() {
+  const hash = decodeURIComponent(window.location.hash.replace(/^#/, ''))
+    .trim()
+    .toLocaleLowerCase('de-DE');
+  return HASH_SECTIONS[hash] || '';
+}
+
 function panelTitle(panel: HTMLElement) {
   return panel.querySelector<HTMLElement>('h3')?.textContent?.trim() || '';
 }
@@ -78,7 +103,7 @@ function clearMobileClasses() {
 export default function MobileOperationsSectionMenu() {
   const [mobile, setMobile] = useState(() => window.matchMedia(MOBILE_QUERY).matches);
   const [available, setAvailable] = useState<string[]>([]);
-  const [active, setActive] = useState(() => sessionStorage.getItem('a-plus-mobile-operations-section') || '');
+  const [active, setActive] = useState(() => sectionFromHash() || sessionStorage.getItem('a-plus-mobile-operations-section') || '');
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -133,11 +158,10 @@ export default function MobileOperationsSectionMenu() {
         const nextAvailable = SECTION_ORDER.filter((title) => byTitle.has(title) && !HIDDEN_ON_MOBILE.has(title));
         setAvailable((current) => current.join('|') === nextAvailable.join('|') ? current : nextAvailable);
 
-        let selected = active;
-        if (!selected || !nextAvailable.includes(selected)) {
-          selected = nextAvailable[0] || '';
-          if (selected) setActive(selected);
-        }
+        const deepLinked = sectionFromHash();
+        let selected = deepLinked && nextAvailable.includes(deepLinked) ? deepLinked : active;
+        if (!selected || !nextAvailable.includes(selected)) selected = nextAvailable[0] || '';
+        if (selected && selected !== active) setActive(selected);
 
         panels.forEach((panel) => {
           const title = panelTitle(panel);
