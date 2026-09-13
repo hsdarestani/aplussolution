@@ -6,6 +6,14 @@
   body.wiw-native-schedule-active .wiw-week-total{position:fixed!important;left:0!important;right:0!important;bottom:calc(62px + env(safe-area-inset-bottom))!important;z-index:120!important;height:54px!important;min-height:54px!important;margin:0!important;padding:0 18px!important;font-size:15px!important;box-shadow:0 -3px 12px rgba(15,23,42,.16)}
   body.wiw-native-schedule-active .wiw-week-total strong{font-size:18px!important}
   body.wiw-native-schedule-active .wiw-week-scroll{padding-bottom:calc(132px + env(safe-area-inset-bottom))!important}
+
+  /* Adjacent weeks are visually identical to active days while remaining outside
+     the active .wiw-day-section semantics used for sticky headers/scroll targets. */
+  .wiw-adjacent-day-section{scroll-margin-top:136px;background:#fff;border-bottom:7px solid #ececec}
+  .wiw-adjacent-day-section>header{height:35px;padding:0 12px;display:flex;align-items:center;gap:6px;background:#ededed;border-bottom:1px solid #d8d8d8;color:#676767}
+  .wiw-adjacent-day-section>header strong{font-size:12px;font-weight:600}
+  .wiw-adjacent-day-section>header span{font-size:12px;font-weight:500}
+  .wiw-adjacent-day-section>header em{margin-left:auto;font-size:10px;font-style:normal;color:#a0a0a0}
 }
 
 .wiw-card-person{display:flex;align-items:center;gap:8px;min-width:0}
@@ -17,7 +25,7 @@
 .wiw-week-swipe-track.is-settling{transition:transform .18s ease-out}
 .wiw-week-pane{width:33.333333%;flex:0 0 33.333333%;min-width:0}
 .wiw-week-preview{pointer-events:none}
-.wiw-week-preview .wiw-day-section>header{position:static!important}
+.wiw-week-preview .wiw-adjacent-day-section>header{position:static!important}
 .wiw-week-swipe-track .wiw-week-turn-next,.wiw-week-swipe-track .wiw-week-turn-prev{animation:none!important}
 
 .wiw-pdf-sheet{display:flex;flex-direction:column;overflow:hidden}
