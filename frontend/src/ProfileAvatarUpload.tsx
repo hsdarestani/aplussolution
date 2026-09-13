@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { api } from './api';
 import './profile-avatar-upload.css';
+import './sep13-dienstplan-polish.css';
 
 type Props = {
   workerId?: string;
