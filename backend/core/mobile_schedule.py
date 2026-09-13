@@ -13,6 +13,33 @@ from .shift_api import ShiftApiSerializer
 from .shift_slots import ShiftSlot
 
 
+def _with_slot_avatars(shifts):
+    """Keep slot-card payloads lightweight while carrying the avatar already
+    exposed by assigned_workers into the mobile Dienstplan card model.
+    """
+    result = []
+    for raw_shift in shifts:
+        shift = dict(raw_shift)
+        avatars = {
+            str(worker.get('slot_id')): worker.get('avatar')
+            for worker in shift.get('assigned_workers', [])
+            if worker.get('slot_id') and worker.get('avatar')
+        }
+        cards = []
+        for raw_card in shift.get('slot_cards', []):
+            card = dict(raw_card)
+            if card.get('worker'):
+                worker = dict(card['worker'])
+                avatar = avatars.get(str(card.get('id')))
+                if avatar:
+                    worker['avatar'] = avatar
+                card['worker'] = worker
+            cards.append(card)
+        shift['slot_cards'] = cards
+        result.append(shift)
+    return result
+
+
 @api_view(['GET'])
 def mobile_schedule(request):
     if getattr(request.user, 'role', '') not in {User.Role.ADMIN, User.Role.MANAGER}:
@@ -46,8 +73,9 @@ def mobile_schedule(request):
         .distinct()
         .order_by('starts_at')
     )
+    serialized = ShiftApiSerializer(qs, many=True, context={'request': request}).data
     return Response({
         'date_from': start.isoformat(),
         'date_to': end.isoformat(),
-        'shifts': ShiftApiSerializer(qs, many=True, context={'request': request}).data,
+        'shifts': _with_slot_avatars(serialized),
     })

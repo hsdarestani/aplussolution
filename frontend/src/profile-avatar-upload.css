@@ -1,0 +1,13 @@
+.profile-avatar-upload{display:flex;align-items:center;gap:14px;padding:14px 16px;border:1px solid #e2e8f0;border-radius:14px;background:#fff;box-shadow:0 4px 16px rgba(15,23,42,.05)}
+.profile-avatar-upload.compact{padding:0;border:0;background:transparent;box-shadow:none}
+.profile-avatar-upload-image{width:58px;height:58px;flex:0 0 58px;border-radius:50%;overflow:hidden;background:#e8eef6;color:#17324d;display:grid;place-items:center;font-weight:800;font-size:18px}
+.profile-avatar-upload-image img{width:100%;height:100%;object-fit:cover;display:block}
+.profile-avatar-upload-copy{min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+.profile-avatar-upload-copy b{font-size:15px;color:#172033}
+.profile-avatar-upload-copy small{font-size:12px;color:#687386}
+.profile-avatar-upload-copy button{border:0;border-radius:9px;padding:8px 12px;background:#17324d;color:#fff;font:700 13px/1 system-ui;cursor:pointer}
+.profile-avatar-upload-copy button:disabled{opacity:.55;cursor:default}
+.profile-avatar-upload-copy em{font-size:11px;color:#526173;font-style:normal}
+.profile-avatar-self-host{margin:12px 16px 18px}
+.akte-hero .profile-avatar-upload{margin-left:auto}
+@media(max-width:700px){.akte-hero .profile-avatar-upload{width:100%;margin:10px 0 0}.profile-avatar-upload.compact{padding:8px 0}}
