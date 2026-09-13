@@ -3,9 +3,9 @@
 
 @media(max-width:900px){
   body.wiw-native-schedule-active .wiw-day-section>header{position:sticky!important;top:135px!important;z-index:6!important;background:#f0f0f0!important;box-shadow:0 1px 0 rgba(15,23,42,.08)}
-  body.wiw-native-schedule-active .wiw-week-total{position:fixed!important;left:0!important;right:0!important;bottom:calc(72px + env(safe-area-inset-bottom))!important;z-index:120!important;height:54px!important;min-height:54px!important;margin:0!important;padding:0 18px!important;font-size:15px!important;box-shadow:0 -3px 12px rgba(15,23,42,.16)}
+  body.wiw-native-schedule-active .wiw-week-total{position:fixed!important;left:0!important;right:0!important;bottom:calc(62px + env(safe-area-inset-bottom))!important;z-index:120!important;height:54px!important;min-height:54px!important;margin:0!important;padding:0 18px!important;font-size:15px!important;box-shadow:0 -3px 12px rgba(15,23,42,.16)}
   body.wiw-native-schedule-active .wiw-week-total strong{font-size:18px!important}
-  body.wiw-native-schedule-active .wiw-week-scroll{padding-bottom:calc(142px + env(safe-area-inset-bottom))!important}
+  body.wiw-native-schedule-active .wiw-week-scroll{padding-bottom:calc(132px + env(safe-area-inset-bottom))!important}
 }
 
 .wiw-card-person{display:flex;align-items:center;gap:8px;min-width:0}
