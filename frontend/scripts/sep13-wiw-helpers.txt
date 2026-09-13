@@ -1,0 +1,97 @@
+function shortWorkerName(value?: string) {
+  const parts = String(value || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return parts[0] || '';
+  const last = parts[parts.length - 1];
+  return `${parts[0]} ${(last[0] || '').toLocaleUpperCase('de-DE')}.`;
+}
+function positionShortLabel(name?: string) {
+  const key = normalize(String(name || ''));
+  if (key.includes('serviceleitung')) return 'SL';
+  if (key.includes('servicekraft') || key.includes('servicekrat')) return 'SK';
+  if (key.includes('frontoffice') || key.includes('rezeption') || key.includes('reception')) return 'FO';
+  if (key.includes('housekeeping') || key.includes('houskeeping') || key.includes('zimmer')) return 'HK';
+  if (key.includes('bar')) return 'Bar';
+  return String(name || 'Schicht');
+}
+function scheduleGroupRank(shift: any) {
+  const groups = shiftGroups(shift);
+  if (groups.includes('service')) return 0;
+  if (groups.includes('front_office')) return 1;
+  if (groups.includes('housekeeping')) return 2;
+  return 3;
+}
+function sortScheduleCards(left: CardRow, right: CardRow) {
+  let order = scheduleGroupRank(left.shift) - scheduleGroupRank(right.shift);
+  if (order) return order;
+  order = clientRank(left.shift.client_name) - clientRank(right.shift.client_name);
+  if (order) return order;
+  order = String(left.shift.client_name || '').localeCompare(String(right.shift.client_name || ''), 'de');
+  if (order) return order;
+  order = new Date(left.shift.starts_at).getTime() - new Date(right.shift.starts_at).getTime();
+  if (order) return order;
+  if (left.isOpen !== right.isOpen) return left.isOpen ? -1 : 1;
+  return String(left.key).localeCompare(String(right.key), 'de');
+}
+
+function AdjacentWeekPreview({ weekStart, groupFilter, query }: { weekStart: string; groupFilter: string[]; query: string }) {
+  const [shifts, setShifts] = useState<any[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    const cached = safeSessionGet(`${WEEK_CACHE_PREFIX}${weekStart}`);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        const cachedShifts = Array.isArray(parsed?.shifts) ? parsed.shifts : Array.isArray(parsed) ? parsed : [];
+        if (cachedShifts.length) setShifts(cachedShifts);
+      } catch { /* optional cache */ }
+    }
+    void api(`admin/mobile-schedule/?date_from=${weekStart}&date_to=${addDays(weekStart, 6)}`)
+      .then((result: any) => {
+        if (!alive) return;
+        const next = Array.isArray(result?.shifts) ? result.shifts : [];
+        setShifts(next);
+      })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [weekStart]);
+
+  const days = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
+  const byDay = useMemo(() => {
+    const map: Record<string, CardRow[]> = Object.fromEntries(days.map((day) => [day, []]));
+    const q = query.trim().toLocaleLowerCase('de-DE');
+    shifts.forEach((shift: any) => {
+      if (groupFilter.length && !shiftGroups(shift).some((group) => groupFilter.includes(group))) return;
+      const cards = activeSlots(shift).map((slot: any, index: number): CardRow => ({
+        key: `${shift.id}:${slot.id || index}`,
+        shift,
+        slot,
+        worker: slot.worker || null,
+        isOpen: Boolean(slot.is_open || slot.status === 'open' || !slot.worker),
+      }));
+      cards.forEach((card) => {
+        const haystack = `${shift.client_name || ''} ${shift.position_name || ''} ${shift.location_name || ''} ${card.worker?.name || ''}`.toLocaleLowerCase('de-DE');
+        if (q && !haystack.includes(q)) return;
+        const day = dateKeyFromIso(shift.starts_at);
+        if (map[day]) map[day].push(card);
+      });
+    });
+    Object.values(map).forEach((cards) => cards.sort(sortScheduleCards));
+    return map;
+  }, [days, shifts, groupFilter, query]);
+
+  return <div className="wiw-week-pane wiw-week-preview" aria-hidden="true">
+    {days.map((day) => {
+      const header = formatDayHeader(day);
+      const cards = byDay[day] || [];
+      return <section className="wiw-day-section" key={day}>
+        <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{cards.length}</em></header>
+        {cards.map((card) => <div className={`wiw-shift-card ${card.isOpen ? 'is-open' : 'is-filled'}`} key={card.key}>
+          <div className="wiw-card-line primary"><span className="wiw-card-person">{card.worker?.avatar ? <img className="wiw-worker-avatar" src={card.worker.avatar} alt="" /> : null}<b>{shortWorkerName(card.worker?.name) || 'OpenShift'}</b></span><span>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</span></div>
+          <div className="wiw-card-line secondary"><span>{positionShortLabel(card.shift.position_name)}</span><small>{card.shift.location_name || 'Einsatzort'}</small></div>
+        </div>)}
+        {!cards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
+      </section>;
+    })}
+  </div>;
+}
