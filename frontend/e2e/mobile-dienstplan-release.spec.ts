@@ -61,8 +61,7 @@ test('mobile filters stay multi-select and worker reassignment replaces the curr
   sheet = form.locator('.wiw-choice-sheet');
   await expect(sheet.locator('div > button')).toHaveText(['Akeel Zafar', 'Musa Jamali', 'Other Worker', 'Tooba Amjad']);
   await sheet.getByRole('button', { name: 'Musa Jamali' }).click();
-  await expect(sheet.locator('button.selected')).toHaveText('Musa Jamali');
-  await sheet.getByRole('button', { name: 'Fertig' }).click();
+  await expect(form.locator('.wiw-choice-sheet')).toHaveCount(0);
   const assignment = page.waitForRequest(request => request.url().endsWith('/shifts/shift-0/assign/') && request.method() === 'POST');
   await form.getByRole('button', { name: 'Sichern', exact: true }).click();
   expect((await assignment).postDataJSON().workers).toEqual(['musa']);
