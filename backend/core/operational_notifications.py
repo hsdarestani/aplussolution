@@ -112,7 +112,7 @@ def notify_admins_shift_claimed(slot: ShiftSlot) -> int:
     for admin in User.objects.filter(role=User.Role.ADMIN, is_active=True):
         _, was_created = Notification.objects.get_or_create(
             user=admin,
-            kind=f'shift-claimed-admin-{slot.id}',
+            kind=f'admin-direct-shift-claim-{slot.id}',
             defaults={
                 'title': 'OpenShift übernommen',
                 'body': body,
