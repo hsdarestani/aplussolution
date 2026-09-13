@@ -29,18 +29,20 @@ patchFile('WiwScheduleMobile.tsx', (source) => {
   const helpers = readFileSync(scriptAsset('sep13-wiw-helpers.txt'), 'utf8').trim();
   next = replaceRequired(next, '\nfunction WheelColumn(', `\n${helpers}\n\nfunction WheelColumn(`, 'Dienstplan helpers');
 
-  const oldSort = `  Object.values(map).forEach((dayCards) => {
-    dayCards.sort((left, right) => {
-      const groupOrder = clientRank(left.shift.client_name) - clientRank(right.shift.client_name);
-      if (groupOrder) return groupOrder;
-      const nameOrder = String(left.shift.client_name || '').localeCompare(String(right.shift.client_name || ''), 'de');
-      if (nameOrder) return nameOrder;
-      return new Date(left.shift.starts_at).getTime() - new Date(right.shift.starts_at).getTime();
-    });
-  });`;
-  next = replaceRequired(next, oldSort, `  Object.values(map).forEach((dayCards) => dayCards.sort(sortScheduleCards));`, 'daily card ordering');
+  // Anchor this replacement to the real byDay memo instead of duplicating its
+  // exact whitespace. prepare:build and the older WIW patch are intentionally
+  // allowed to rewrite nearby source before this patch runs.
+  const byDayIndex = next.indexOf('  const byDay = useMemo(() => {');
+  const sortStart = next.indexOf('    Object.values(map).forEach((dayCards) => {', byDayIndex);
+  const sortEnd = next.indexOf('    return map;', sortStart);
+  if (byDayIndex < 0 || sortStart < 0 || sortEnd < 0) {
+    throw new Error('SEP13 patch marker changed: daily card ordering');
+  }
+  next = `${next.slice(0, sortStart)}    Object.values(map).forEach((dayCards) => dayCards.sort(sortScheduleCards));\n${next.slice(sortEnd)}`;
 
-  const swipeStart = `\n      <div\n        key={weekStart}\n        className={\`wiw-week-scroll \${weekDirection ? \`wiw-week-turn-\${weekDirection}\` : ''}\`}`;
+  // Replace only the current-week scroll block. The exact class list has changed
+  // a few times, while key={weekStart} and the weekly-total boundary are stable.
+  const swipeStart = `\n      <div\n        key={weekStart}`;
   const totalMarker = `\n\n      {tab !== 'open' ? <div className="wiw-week-total">`;
   const startIndex = next.indexOf(swipeStart);
   const endIndex = next.indexOf(totalMarker, startIndex);
