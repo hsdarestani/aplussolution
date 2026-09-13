@@ -102,6 +102,26 @@ def notify_open_shift_available(shift: Shift, reason: str = 'available') -> int:
     return created
 
 
+
+def notify_admins_shift_claimed(slot: ShiftSlot) -> int:
+    """Notify each active admin exactly once after a direct OpenShift claim."""
+    shift = slot.shift
+    worker_name = slot.worker.user.get_full_name() or slot.worker.user.email
+    body = f'{worker_name} hat eine OpenShift übernommen · {_shift_body(shift)}'
+    created = 0
+    for admin in User.objects.filter(role=User.Role.ADMIN, is_active=True):
+        _, was_created = Notification.objects.get_or_create(
+            user=admin,
+            kind=f'shift-claimed-admin-{slot.id}',
+            defaults={
+                'title': 'OpenShift übernommen',
+                'body': body,
+                'action_url': '/schedule',
+            },
+        )
+        created += int(was_created)
+    return created
+
 def notify_worker_shift_event(user: User | None, shift: Shift, title: str, reason: str) -> int:
     if not user or not user.is_active:
         return 0
