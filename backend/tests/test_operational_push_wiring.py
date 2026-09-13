@@ -104,3 +104,34 @@ def test_open_shift_zero_worker_fanout_still_confirms_to_admin(admin_user, worke
     )
     assert summary.title == 'OpenShift veröffentlicht'
     assert 'Keine passenden Mitarbeiter benachrichtigt' in summary.body
+
+
+@pytest.mark.django_db
+def test_direct_worker_claim_notifies_admin_once(
+    auth_worker,
+    admin_user,
+    worker_user,
+    company,
+    location,
+    push_position,
+):
+    shift = _future_shift(company, location, push_position, status=Shift.Status.PUBLISHED)
+    ShiftSlot.objects.create(shift=shift)
+
+    response = auth_worker.post(f'/api/shifts/{shift.id}/claim/', {}, format='json')
+
+    assert response.status_code == 200, response.data
+    slot = ShiftSlot.objects.get(shift=shift, worker=worker_user.worker_profile)
+    admin_notification = Notification.objects.get(
+        user=admin_user,
+        kind=f'admin-direct-shift-claim-{slot.id}',
+    )
+    assert admin_notification.title == 'OpenShift übernommen'
+    assert 'Anna Becker hat eine OpenShift übernommen' in admin_notification.body
+    assert location.name in admin_notification.body
+    assert push_position.name in admin_notification.body
+    assert admin_notification.action_url == '/schedule'
+    assert Notification.objects.filter(
+        user=admin_user,
+        kind=f'admin-direct-shift-claim-{slot.id}',
+    ).count() == 1
