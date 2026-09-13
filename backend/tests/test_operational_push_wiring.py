@@ -133,5 +133,5 @@ def test_direct_worker_claim_notifies_admin_once(
     assert admin_notification.action_url == '/schedule'
     assert Notification.objects.filter(
         user=admin_user,
-        kind=f'shift-claimed-admin-{slot.id}',
+        kind=f'admin-direct-shift-claim-{slot.id}',
     ).count() == 1
