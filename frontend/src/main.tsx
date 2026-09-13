@@ -41,6 +41,8 @@ import MobileAttendanceClarityEnhancer from './MobileAttendanceClarityEnhancer';
 import MobileOperationsSectionMenu from './MobileOperationsSectionMenu';
 import NativePushRegistration from './NativePushRegistration';
 import AppLaunchSplash, { isSplashPreviewMode } from './AppLaunchSplash';
+import SelfProfileAvatarEnhancer from './SelfProfileAvatarEnhancer';
+import AdminAkteAvatarEnhancer from './AdminAkteAvatarEnhancer';
 import { installBerlinLocaleDefaults } from './berlinLocale';
 import { installOperationalFetchResilience } from './operationalFetchResilience';
 import { installSignaturePad } from './signaturePad';
@@ -98,6 +100,8 @@ function renderApp() {
           <MobileAttendanceClarityEnhancer />
           <MobileOperationsSectionMenu />
           <NativePushRegistration />
+          <SelfProfileAvatarEnhancer />
+          <AdminAkteAvatarEnhancer />
           <StoreComplianceLinks />
           <FriendlyDateTimePicker />
           <PayrollWorkspaceEnhancer />
