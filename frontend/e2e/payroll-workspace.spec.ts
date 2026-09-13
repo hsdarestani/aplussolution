@@ -69,9 +69,6 @@ test('admin payroll workspace shows monthly figures and persists adjustments wit
 
   await page.goto('/?view=operations#arbeitszeitkonto');
   const workspace = page.getByTestId('payroll-workspace');
-  if (!(await workspace.isVisible())) {
-    await page.getByRole('button', { name: 'Mitarbeiter-Zeitpläne', exact: true }).click();
-  }
   await expect(workspace).toBeVisible();
   await expect(page.getByText('Anna Becker')).toBeVisible();
   await expect(page.getByText('1.400,00 €').first()).toBeVisible();
