@@ -231,9 +231,20 @@ function patchIos() {
   plist = ensurePlistKey(plist, 'NSLocationAlwaysAndWhenInUseUsageDescription', 'Diese Standortberechtigung wird technisch für die Standortfunktion benötigt. A+ Solution verwendet den Standort ausschließlich beim Ein- und Ausstempeln im Vordergrund, um den vorgesehenen Einsatzort zu prüfen. Eine Hintergrundortung findet nicht statt.');
   plist = ensurePlistBooleanKey(plist, 'ITSAppUsesNonExemptEncryption', false);
   fs.writeFileSync(plistPath, plist);
-  patchIosPush();
+
+  // Production requires native push and keeps the APNs entitlement. Staging has
+  // no separate APNs/Firebase credentials yet, so do not demand an Apple profile
+  // with Push Notifications until REQUIRE_NATIVE_PUSH=1 is explicitly enabled.
+  if (!isStaging || requirePush) {
+    patchIosPush();
+  } else {
+    console.log('Staging iOS build has no native push requirement; APNs entitlement is disabled until staging push credentials are supplied.');
+  }
+
   patchIosFilePrivacy();
-  console.log(`Prepared iOS ${nativeAppId}, foreground-location purpose strings, export compliance and native push.`);
+  console.log(
+    `Prepared iOS ${nativeAppId}, foreground-location purpose strings, export compliance${!isStaging || requirePush ? ' and native push' : ''}.`,
+  );
 }
 
 if (target === 'android' || target === 'all') patchAndroid();
