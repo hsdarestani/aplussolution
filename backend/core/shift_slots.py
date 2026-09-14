@@ -52,6 +52,42 @@ def _reserve_wiw_slot_identity(instance: Shift, target_slot=None) -> None:
     duplicates.update(wiw_shift_id=None)
 
 
+def _restore_locally_managed_slot_state(instance: Shift, slot: ShiftSlot) -> bool:
+    """Keep an explicit A+ assignment/release authoritative over later WIW syncs.
+
+    A WIW-imported one-person shift starts with a ``source='wiw'`` slot. Once an
+    admin reassigns or releases that card (or a worker claims it), the slot source
+    changes to a native A+ source such as ``admin_assignment``. A later WIW sync
+    still saves the legacy ``Shift.worker`` value from WIW. Previously this signal
+    then copied that old worker back into the slot, undoing the admin's change.
+
+    For a locally managed card the slot is the source of truth. Repair the legacy
+    Shift mirror with a queryset update (so this post-save signal does not recurse)
+    and leave the slot untouched.
+    """
+    if slot.source in {'wiw', 'migration', 'system'}:
+        return False
+
+    claimed = slot.status == ShiftSlot.Status.CLAIMED and slot.worker_id is not None
+    expected_worker_id = slot.worker_id if claimed else None
+    expected_status = instance.status
+    if instance.status not in {Shift.Status.CANCELLED, Shift.Status.COMPLETED, Shift.Status.DRAFT}:
+        expected_status = Shift.Status.CONFIRMED if claimed else Shift.Status.PUBLISHED
+    expected_is_open = expected_status == Shift.Status.PUBLISHED and not claimed
+
+    updates = {}
+    if instance.worker_id != expected_worker_id:
+        updates['worker_id'] = expected_worker_id
+    if instance.status != expected_status:
+        updates['status'] = expected_status
+    if instance.is_open != expected_is_open:
+        updates['is_open'] = expected_is_open
+    if updates:
+        updates['updated_at'] = timezone.now()
+        Shift.objects.filter(pk=instance.pk).update(**updates)
+    return True
+
+
 @receiver(post_save, sender=Shift)
 def ensure_shift_capacity(sender, instance, raw=False, **kwargs):
     if raw:
@@ -80,6 +116,12 @@ def ensure_shift_capacity(sender, instance, raw=False, **kwargs):
     if instance.wiw_shift_id and requested == 1 and active:
         slot = active[0]
         _reserve_wiw_slot_identity(instance, slot)
+
+        # Once A+ explicitly manages this card, WIW may continue refreshing
+        # schedule metadata but must never take the assignment back.
+        if _restore_locally_managed_slot_state(instance, slot):
+            return
+
         if instance.worker_id:
             changed = (
                 slot.worker_id != instance.worker_id
