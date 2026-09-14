@@ -1,4 +1,4 @@
-name: Verify staging path after migration fix
+name: Read staging backend restart cause
 
 on:
   push:
@@ -11,67 +11,37 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
     env:
       STRATO_HOST: ${{ secrets.STRATO_HOST }}
       STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
     steps:
-      - name: Configure Strato SSH key
+      - name: Configure SSH
         run: |
           set -euo pipefail
-          test -n "$STRATO_HOST"
-          test -n "$STRATO_SSH_PRIVATE_KEY"
           mkdir -p "$HOME/.ssh"
           printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
           chmod 600 "$HOME/.ssh/strato_ed25519"
 
-      - name: Verify live staging chain
+      - name: Read backend failure
         run: |
           set -euo pipefail
           ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
           set +e
-          STAGING_DIR=/opt/aplussolution-staging
-          PROD_DIR=/opt/aplussolution
+          cd /opt/aplussolution-staging
           COMPOSE='docker compose -p aplus_staging -f docker-compose.staging.yml'
-
-          cd "$STAGING_DIR"
-          echo '=== staging state ==='
-          $COMPOSE ps -a
-          backend_id=$($COMPOSE ps -aq staging_backend | head -n1)
-          if [ -n "$backend_id" ]; then
-            docker inspect -f 'backend status={{.State.Status}} restarts={{.RestartCount}} exit={{.State.ExitCode}} ip={{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$backend_id" || true
-          fi
-
-          echo '=== backend localhost ==='
-          $COMPOSE exec -T staging_backend curl -fsS http://127.0.0.1:8000/health/ || true
-          echo
-          echo '=== edge to backend ==='
-          $COMPOSE exec -T staging_edge wget -S -O- http://staging_backend:8000/health/ 2>&1 || true
-          echo
-          echo '=== edge localhost route ==='
-          $COMPOSE exec -T staging_edge wget -S -O- http://127.0.0.1/health/ 2>&1 || true
-
-          echo '=== production Caddy to edge ==='
-          cd "$PROD_DIR"
-          docker compose exec -T caddy wget -S -O- http://aplus_staging_edge/health/ 2>&1 || true
-
-          echo '=== origin HTTPS ==='
-          curl -vk --connect-timeout 10 --max-time 20 --resolve staging.app.aplus-solution.de:443:127.0.0.1 https://staging.app.aplus-solution.de/health/ 2>&1 | tail -100 || true
-
-          echo '=== latest backend logs ==='
-          cd "$STAGING_DIR"
-          $COMPOSE logs --no-color --tail=160 staging_backend 2>&1 || true
+          cid=$($COMPOSE ps -aq staging_backend | head -n1)
+          echo "backend_id=$cid"
+          docker inspect -f 'status={{.State.Status}} restarts={{.RestartCount}} exit={{.State.ExitCode}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' "$cid" || true
+          echo '=== last backend logs ==='
+          docker logs --tail 120 "$cid" 2>&1 || true
+          echo '=== migration table from DB ==='
+          $COMPOSE exec -T staging_db psql -U aplussolution_staging -d aplussolution_staging -Atc "select app||'.'||name from django_migrations where app='core' order by id desc limit 12;" 2>&1 || true
           exit 0
           REMOTE
 
-      - name: Public staging probe
-        run: |
-          set +e
-          curl -v --connect-timeout 10 --max-time 20 https://staging.app.aplus-solution.de/health/
-          exit 0
-
-      - name: Cleanup runner key
+      - name: Cleanup
         if: always()
         run: rm -f "$HOME/.ssh/strato_ed25519"
