@@ -127,6 +127,13 @@ jobs:
           $COMPOSE up -d --force-recreate --no-deps staging_edge
           $COMPOSE exec -T staging_edge caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
+          # Recreating staging_edge can change its address on the shared production
+          # Docker network. Reload the already-running production gateway (no restart)
+          # so reverse_proxy resolves the aplus_staging_edge alias to the new address.
+          cd "$PROD_DIR"
+          docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+          cd "$STAGING_DIR"
+
           backend_ready=0
           for i in $(seq 1 60); do
             if $COMPOSE exec -T staging_backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
