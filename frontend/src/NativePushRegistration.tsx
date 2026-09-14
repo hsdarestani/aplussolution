@@ -5,7 +5,11 @@ import { PushNotifications, type ActionPerformed, type PushNotificationSchema, t
 
 import { api } from './api';
 
-const APP_ID = 'de.aplussolution.workforce';
+const APP_ENV = String(import.meta.env.VITE_APP_ENV || '').trim().toLowerCase();
+const APP_ID = String(
+  import.meta.env.VITE_NATIVE_APP_ID ||
+    (APP_ENV === 'staging' ? 'de.aplussolution.staging' : 'de.aplussolution.workforce'),
+).trim();
 const ANDROID_PUSH_CHANNEL_ID = 'aplus_updates_signature_v1';
 const ANDROID_PUSH_SOUND = 'solution_signature.wav';
 const ANDROID_PUSH_ICON = 'ic_stat_aplus';
@@ -98,8 +102,6 @@ async function presentForegroundNotification(notification: PushNotificationSchem
       }],
     });
   } catch (error) {
-    // The in-app banner above is the fallback for old binaries where the local
-    // notification plugin/channel has not been synced yet.
     console.warn('Foreground notification presentation failed', error);
   }
 }
@@ -123,7 +125,7 @@ export default function NativePushRegistration() {
               token: token.value,
               platform: Capacitor.getPlatform(),
               app_id: APP_ID,
-              device_name: `${Capacitor.getPlatform()} native app`,
+              device_name: `${Capacitor.getPlatform()} native app (${APP_ID})`,
             }),
           });
         } catch (error) {
@@ -151,8 +153,6 @@ export default function NativePushRegistration() {
           openActionUrl(actionUrl);
         }));
       } catch (error) {
-        // Older installed binaries can still register remote push and display
-        // the in-app banner without the optional local-notification plugin.
         console.warn('Local notification actions unavailable', error);
       }
     };
