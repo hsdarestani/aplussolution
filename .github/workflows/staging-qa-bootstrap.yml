@@ -1,0 +1,176 @@
+name: Bootstrap A+ Solution staging QA
+
+on:
+  push:
+    branches:
+      - staging
+    paths:
+      - '.github/workflows/staging-qa-bootstrap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure Strato SSH key
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Seed isolated QA worker and shifts
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=12 \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution-staging
+          COMPOSE="docker compose -p aplus_staging -f docker-compose.staging.yml"
+
+          ready=0
+          for i in $(seq 1 60); do
+            if $COMPOSE exec -T staging_backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 3
+          done
+          test "$ready" -eq 1
+
+          $COMPOSE exec -T staging_backend python manage.py shell <<'PY'
+          from datetime import timedelta
+          from django.conf import settings
+          from django.utils import timezone
+          from core.models import User, WorkerProfile, ClientCompany, Location, Position, Shift
+          from core.portal_service import create_portal_invitation
+
+          assert settings.DATABASES['default']['NAME'] == 'aplussolution_staging'
+          assert settings.APP_URL == 'https://staging.app.aplus-solution.de'
+          assert settings.WIW_SYNC_ENABLED is False
+
+          email = 'staging-qa@aplus-solution.de'
+          user, _ = User.objects.get_or_create(email=email, defaults={'username': email})
+          user.username = email
+          user.first_name = 'Staging'
+          user.last_name = 'QA'
+          user.role = User.Role.WORKER
+          user.is_active = True
+          user.is_staff = False
+          user.is_superuser = False
+          user.is_onboarded = False
+          user.set_unusable_password()
+          user.save()
+
+          worker, _ = WorkerProfile.objects.get_or_create(
+              user=user,
+              defaults={
+                  'employee_number': 'STAGING-QA-001',
+                  'employment_type': WorkerProfile.EmploymentType.MINI,
+                  'monthly_hours': 40,
+                  'tariff_hourly_rate': 0,
+                  'extra_allowance': 0,
+                  'ranking_points': 0,
+                  'skills': ['staging-qa'],
+                  'active': True,
+              },
+          )
+          worker.employee_number = 'STAGING-QA-001'
+          worker.active = True
+          worker.save()
+
+          client, _ = ClientCompany.objects.get_or_create(
+              customer_number='STAGING-QA',
+              defaults={
+                  'name': 'Staging QA Kunde',
+                  'address': 'Testumgebung – keine Produktivdaten',
+                  'notes': 'Nur für Staging-QA.',
+                  'active': True,
+              },
+          )
+          location, _ = Location.objects.get_or_create(
+              client=client,
+              name='Staging QA Location',
+              defaults={
+                  'address': 'Staging Test Location, Frankfurt am Main',
+                  'geofence_radius_m': 500,
+                  'active': True,
+              },
+          )
+          position, _ = Position.objects.get_or_create(name='Servicekraft', defaults={'active': True})
+          if not position.active:
+              position.active = True
+              position.save(update_fields=['active', 'updated_at'])
+
+          now = timezone.now()
+          assigned_start = (now + timedelta(days=1)).replace(minute=0, second=0, microsecond=0)
+          assigned_end = assigned_start + timedelta(hours=6)
+          assigned, _ = Shift.objects.update_or_create(
+              client=client,
+              location=location,
+              position=position,
+              worker=worker,
+              starts_at=assigned_start,
+              defaults={
+                  'ends_at': assigned_end,
+                  'break_minutes': 30,
+                  'status': Shift.Status.CONFIRMED,
+                  'is_open': False,
+                  'notes': 'STAGING QA – zugewiesene Testschicht',
+                  'required_count': 1,
+              },
+          )
+
+          open_start = (now + timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
+          open_end = open_start + timedelta(hours=5)
+          open_shift, _ = Shift.objects.update_or_create(
+              client=client,
+              location=location,
+              position=position,
+              worker=None,
+              starts_at=open_start,
+              defaults={
+                  'ends_at': open_end,
+                  'break_minutes': 30,
+                  'status': Shift.Status.PUBLISHED,
+                  'is_open': True,
+                  'notes': 'STAGING QA – OpenShift zum Übernehmen',
+                  'required_count': 1,
+                  'published_at': now,
+              },
+          )
+
+          invitation, activation_url, delivered = create_portal_invitation(worker, created_by=None, lifetime_hours=24)
+
+          assert not user.has_usable_password()
+          assert worker.active
+          assert assigned.worker_id == worker.id
+          assert open_shift.is_open and open_shift.worker_id is None
+
+          print('STAGING_QA_READY=1')
+          print('STAGING_QA_EMAIL=' + email)
+          print('STAGING_QA_ACTIVATION_URL=' + activation_url)
+          print('STAGING_QA_INVITATION_EXPIRES=' + invitation.expires_at.isoformat())
+          print('STAGING_QA_ASSIGNED_SHIFT=' + str(assigned.id))
+          print('STAGING_QA_OPEN_SHIFT=' + str(open_shift.id))
+          PY
+          REMOTE
+
+      - name: Cleanup runner key
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
