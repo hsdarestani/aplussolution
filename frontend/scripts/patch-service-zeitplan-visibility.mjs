@@ -25,7 +25,7 @@ replaceOnce(
 function shortPersonName(value: string) {
   const parts = String(value || '').trim().split(/\\s+/).filter(Boolean);
   if (parts.length <= 1) return parts[0] || '';
-  return `${parts[0]} ${parts.slice(1).map((part) => `${part.charAt(0)}.`).join(' ')}`;
+  return parts[0] + ' ' + parts.slice(1).map((part) => part.charAt(0) + '.').join(' ');
 }
 function assignedNames(shift: any) {
   const names = (shift?.assigned_workers || [])
