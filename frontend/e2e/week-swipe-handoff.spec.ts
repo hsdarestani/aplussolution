@@ -43,16 +43,28 @@ function tx(transform: string) {
   return m ? Number(m[1]) : 0;
 }
 
+async function dispatchSwipe(track: ReturnType<Page['locator']>, fromX: number, toX: number) {
+  await track.evaluate((element, { fromX, toX }) => {
+    const fire = (type: string, x: number, y: number, active: boolean) => {
+      const event = new Event(type, { bubbles: true, cancelable: true }) as any;
+      const point = { clientX: x, clientY: y };
+      Object.defineProperty(event, 'touches', { value: active ? [point] : [] });
+      Object.defineProperty(event, 'changedTouches', { value: [point] });
+      element.dispatchEvent(event);
+    };
+    fire('touchstart', fromX, 260, true);
+    fire('touchmove', (fromX + toX) / 2, 262, true);
+    fire('touchmove', toX, 263, true);
+    fire('touchend', toX, 263, false);
+  }, { fromX, toX });
+}
+
 test('completed swipe never flashes the old center week during async handoff', async ({ page }) => {
   await setup(page);
   await page.goto('/?view=schedule');
   const schedule = page.getByTestId('wiw-native-schedule');
   await expect(schedule).toBeVisible();
 
-  // Deliberately slow Ionic scroll lookup. The old implementation reset the
-  // track immediately while changeWeek awaited this promise, exposing the old
-  // center week for a visible frame. The fixed implementation keeps the incoming
-  // week at the endpoint until state + transform can be committed atomically.
   await page.locator('ion-content.app-content').evaluate((element: any) => {
     const original = element.getScrollElement.bind(element);
     element.getScrollElement = async () => {
@@ -62,32 +74,76 @@ test('completed swipe never flashes the old center week during async handoff', a
   });
 
   const track = schedule.locator('.wiw-week-swipe-track');
-  await track.evaluate(element => {
-    const fire = (type: string, x: number, y: number, active: boolean) => {
-      const event = new Event(type, { bubbles: true, cancelable: true }) as any;
-      const point = { clientX: x, clientY: y };
-      Object.defineProperty(event, 'touches', { value: active ? [point] : [] });
-      Object.defineProperty(event, 'changedTouches', { value: [point] });
-      element.dispatchEvent(event);
-    };
-    fire('touchstart', 335, 260, true);
-    fire('touchmove', 170, 262, true);
-    fire('touchmove', 80, 263, true);
-    fire('touchend', 60, 263, false);
-  });
+  await dispatchSwipe(track, 335, 60);
 
   await page.waitForTimeout(215);
   const mid = await track.evaluate(element => ({
     transform: getComputedStyle(element).transform,
     active: document.querySelector('.wiw-week-strip button.active b')?.textContent,
   }));
-  // While getScrollElement is still pending we must either still be holding the
-  // incoming pane at about -1 viewport, or already have the new active week. We
-  // must never be back at transform 0 with the old 14th active.
   expect(!(Math.abs(tx(mid.transform)) < 5 && mid.active === '14')).toBeTruthy();
 
   await page.waitForTimeout(220);
   await expect(schedule.locator('.wiw-week-strip button.active b')).toHaveText('21');
   const endTransform = await track.evaluate(element => getComputedStyle(element).transform);
   expect(Math.abs(tx(endTransform))).toBeLessThan(2);
+});
+
+test('adjacent week uses the same geometry and card styling before and after handoff', async ({ page }) => {
+  await setup(page);
+  await page.goto('/?view=schedule');
+  const schedule = page.getByTestId('wiw-native-schedule');
+  await expect(schedule).toBeVisible();
+
+  const panes = schedule.locator('.wiw-week-pane');
+  await expect(panes).toHaveCount(3);
+  const left = panes.nth(0);
+  await expect(left.locator('.wiw-shift-card').first()).toBeVisible();
+
+  const preview = await left.evaluate(element => {
+    const header = element.querySelector('.wiw-day-visual > header') as HTMLElement;
+    const card = element.querySelector('.wiw-shift-card') as HTMLElement;
+    const heading = element.querySelector('.wiw-day-heading') as HTMLElement;
+    const h = getComputedStyle(header);
+    const c = getComputedStyle(card);
+    const r = card.getBoundingClientRect();
+    return {
+      headerHeight: header.getBoundingClientRect().height,
+      headerDisplay: h.display,
+      headingX: heading.getBoundingClientRect().x,
+      cardHeight: r.height,
+      cardBackground: c.backgroundImage,
+      cardBorder: c.borderLeftColor,
+    };
+  });
+
+  const track = schedule.locator('.wiw-week-swipe-track');
+  await dispatchSwipe(track, 55, 335);
+  await page.waitForTimeout(520);
+  await expect(schedule.locator('.wiw-week-strip button.active b')).toHaveText('7');
+
+  const center = schedule.locator('.wiw-week-pane').nth(1);
+  const active = await center.evaluate(element => {
+    const header = element.querySelector('.wiw-day-visual > header') as HTMLElement;
+    const card = element.querySelector('.wiw-shift-card') as HTMLElement;
+    const heading = element.querySelector('.wiw-day-heading') as HTMLElement;
+    const h = getComputedStyle(header);
+    const c = getComputedStyle(card);
+    const r = card.getBoundingClientRect();
+    return {
+      headerHeight: header.getBoundingClientRect().height,
+      headerDisplay: h.display,
+      headingX: heading.getBoundingClientRect().x,
+      cardHeight: r.height,
+      cardBackground: c.backgroundImage,
+      cardBorder: c.borderLeftColor,
+    };
+  });
+
+  expect(active.headerHeight).toBe(preview.headerHeight);
+  expect(active.headerDisplay).toBe(preview.headerDisplay);
+  expect(Math.abs(active.headingX - preview.headingX)).toBeLessThanOrEqual(1);
+  expect(active.cardHeight).toBe(preview.cardHeight);
+  expect(active.cardBackground).toBe(preview.cardBackground);
+  expect(active.cardBorder).toBe(preview.cardBorder);
 });
