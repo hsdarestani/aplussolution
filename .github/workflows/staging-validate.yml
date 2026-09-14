@@ -17,6 +17,7 @@ env:
   CAPACITOR_APP_ID: de.aplussolution.staging
   CAPACITOR_APP_NAME: A+ Solution Staging
   VITE_APP_ENV: staging
+  VITE_NATIVE_APP_ID: de.aplussolution.staging
   VITE_API_URL: https://staging.app.aplus-solution.de/api
 
 jobs:
@@ -42,14 +43,20 @@ jobs:
         run: |
           grep -q "de.aplussolution.staging" capacitor.config.ts
           grep -q "A+ Solution Staging" capacitor.config.ts
+          grep -q "VITE_NATIVE_APP_ID=de.aplussolution.staging" .env.staging.example
+          grep -q "REQUIRE_NATIVE_PUSH=1" .env.staging.example
           grep -q "https://staging.app.aplus-solution.de/api" .env.staging.example
           bash -n scripts/build-publisher-android-staging.sh
           bash -n scripts/build-publisher-ios-staging.sh
           node --check scripts/prepare-native.mjs
 
-      - name: Guard against production routing in staging wrappers
+      - name: Guard staging native identity and push requirements
         working-directory: frontend
         run: |
+          grep -q 'VITE_NATIVE_APP_ID' src/NativePushRegistration.tsx
+          grep -q "APP_ENV === 'staging' ? 'de.aplussolution.staging'" src/NativePushRegistration.tsx
+          grep -q 'REQUIRE_NATIVE_PUSH="${REQUIRE_NATIVE_PUSH:-1}"' scripts/build-publisher-android-staging.sh
+          grep -q 'REQUIRE_NATIVE_PUSH="${REQUIRE_NATIVE_PUSH:-1}"' scripts/build-publisher-ios-staging.sh
           grep -q "Refusing staging build" scripts/build-publisher-android-staging.sh
           grep -q "Refusing staging build" scripts/build-publisher-ios-staging.sh
           grep -q "!isStaging && fs.existsSync(checkedIn)" scripts/prepare-native.mjs
