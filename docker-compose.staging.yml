@@ -24,7 +24,7 @@ services:
     build: ./backend
     restart: unless-stopped
     env_file: .env
-    command: /app/entrypoint.sh
+    command: sh /app/entrypoint-staging.sh
     volumes:
       - staging_media_data:/app/media
       - staging_static_data:/app/staticfiles
