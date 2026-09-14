@@ -1,0 +1,74 @@
+name: Diagnose staging TLS on Strato
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-staging-diagnose.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STAGING_DOMAIN: staging.app.aplus-solution.de
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Runner DNS and TLS view
+        run: |
+          set +e
+          echo '=== runner DNS ==='
+          getent ahostsv4 "$STAGING_DOMAIN"
+          echo '=== runner TLS ==='
+          curl -vkI --connect-timeout 10 --max-time 20 "https://${STAGING_DOMAIN}/health/" 2>&1 | sed -n '1,100p'
+          exit 0
+
+      - name: Configure Strato SSH key
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Diagnose Caddy and staging upstream on origin
+        run: |
+          set -euo pipefail
+          ssh \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set +e
+          cd /opt/aplussolution
+          echo '=== Caddy config validation ==='
+          docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+          echo '=== staging route present in live mounted file ==='
+          docker compose exec -T caddy grep -n 'staging.app.aplus-solution.de' /etc/caddy/Caddyfile
+
+          echo '=== staging upstream from production Caddy network ==='
+          docker compose exec -T caddy wget -S -O- http://aplus_staging_edge/health/ 2>&1 | tail -80
+
+          echo '=== local origin TLS with staging SNI ==='
+          curl -vk --connect-timeout 10 --max-time 20 --resolve staging.app.aplus-solution.de:443:127.0.0.1 https://staging.app.aplus-solution.de/health/ 2>&1 | tail -120
+
+          echo '=== stored staging certificates ==='
+          docker compose exec -T caddy sh -lc "find /data/caddy/certificates -type f 2>/dev/null | grep -F 'staging.app.aplus-solution.de' || true"
+
+          echo '=== recent Caddy logs ==='
+          docker compose logs --no-color --since=45m caddy 2>&1 | tail -300
+          exit 0
+          REMOTE
+
+      - name: Cleanup runner key
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
