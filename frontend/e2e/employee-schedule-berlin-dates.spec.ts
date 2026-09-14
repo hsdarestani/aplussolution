@@ -36,7 +36,32 @@ const shifts = [
   },
 ];
 
-test('employee Dienstplan keeps the weekly calendar and shows Service Zeitplan peer cards', async ({ page }) => {
+const openShifts = [
+  {
+    id: 'open-sep19',
+    client_name: 'A+',
+    location_name: 'A+',
+    position_name: 'Servicekraft',
+    starts_at: '2026-09-19T11:00:00+02:00',
+    ends_at: '2026-09-19T22:00:00+02:00',
+    break_minutes: 0,
+    status: 'published',
+    assigned_workers: [],
+  },
+  {
+    id: 'open-sep30',
+    client_name: 'Evangelische Akademie',
+    location_name: 'Evangelische Akademie',
+    position_name: 'Servicekraft',
+    starts_at: '2026-09-30T15:00:00+02:00',
+    ends_at: '2026-09-30T19:30:00+02:00',
+    break_minutes: 0,
+    status: 'published',
+    assigned_workers: [],
+  },
+];
+
+test('employee Dienstplan keeps worker logic while matching admin schedule cards and OpenShift list layout', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 780 });
   await page.clock.setFixedTime(new Date('2026-09-14T12:00:00Z'));
   await page.addInitScript(() => {
@@ -61,7 +86,7 @@ test('employee Dienstplan keeps the weekly calendar and shows Service Zeitplan p
     } else if (path.startsWith('employee/schedule/')) {
       body = { service_schedule: true, shifts };
     } else if (path.startsWith('shifts/available/')) {
-      body = [];
+      body = openShifts;
     } else if (path === 'employee/home/') {
       body = { worker: { name: 'Arina Martynko' }, unread_notifications: 0, available_shifts: [] };
     } else if (path === 'operations/') {
@@ -74,22 +99,21 @@ test('employee Dienstplan keeps the weekly calendar and shows Service Zeitplan p
   await page.goto('/?view=schedule');
   const schedule = page.getByTestId('wiw-employee-schedule');
   await expect(schedule).toBeVisible();
-  await expect(schedule.getByText('Service Zeitplan')).toBeVisible();
+  await expect(schedule.getByRole('tab', { name: 'Service Zeitplan' })).toBeVisible();
   await expect(page.getByTestId('phase8-week-strip')).toBeVisible();
 
-  const days = schedule.locator('.wiw-employee-day');
+  const days = schedule.locator('.wiw-day-section');
   await expect(days).toHaveCount(7);
   await expect(days.nth(0).locator('header')).toContainText('Mo');
-  await expect(days.nth(0).locator('header')).toContainText('14.09.');
+  await expect(days.nth(0).locator('header')).toContainText('14.09.2026');
   await expect(days.nth(2).locator('header')).toContainText('Mi');
-  await expect(days.nth(2).locator('header')).toContainText('16.09.');
+  await expect(days.nth(2).locator('header')).toContainText('16.09.2026');
 
-  const wednesdayCards = days.nth(2).locator('.wiw-employee-shift-card');
+  const wednesdayCards = days.nth(2).locator('.wiw-shift-card.is-filled');
   await expect(wednesdayCards).toHaveCount(2);
-  await expect(wednesdayCards.nth(0)).toContainText('Tooba A.');
-  await expect(wednesdayCards.nth(0)).toContainText('08:30–19:00');
-  await expect(wednesdayCards.nth(1)).toContainText('Arina M.');
-  await expect(wednesdayCards.nth(1)).toContainText('15:30–21:00');
+  await expect(wednesdayCards.filter({ hasText: 'Tooba A.' })).toContainText('08:30–19:00');
+  await expect(wednesdayCards.filter({ hasText: 'Arina M.' })).toContainText('15:30–21:00');
+  await expect(wednesdayCards.first()).toHaveCSS('border-left-style', 'solid');
 
   // Historical WIW rows may still be returned by the API, but they must never
   // replace the selected/current week in the worker calendar.
@@ -100,8 +124,23 @@ test('employee Dienstplan keeps the weekly calendar and shows Service Zeitplan p
   await expect(total).toContainText('Eigene Gesamtstunden');
   await expect(total).toContainText('5.5');
 
-  await wednesdayCards.nth(0).click();
+  await wednesdayCards.filter({ hasText: 'Tooba A.' }).click();
   const detail = page.getByTestId('wiw-employee-shift-detail');
   await expect(detail).toContainText('Tooba A.');
   await expect(detail.getByRole('button', { name: 'Nur sichtbar · Service Zeitplan' })).toBeDisabled();
+
+  await detail.getByRole('button', { name: 'Zurück' }).click();
+  await schedule.getByRole('tab', { name: 'OpenShifts' }).click();
+
+  // Employee OpenShifts now mirror the admin view: no weekly calendar, all
+  // available future dates listed vertically, using the same OpenShift cards.
+  await expect(page.getByTestId('phase8-week-strip')).toHaveCount(0);
+  await expect(page.getByTestId('phase8-week-total')).toHaveCount(0);
+  const openDays = schedule.locator('.wiw-day-section');
+  await expect(openDays).toHaveCount(2);
+  await expect(openDays.nth(0).locator('header')).toContainText('19.09.2026');
+  await expect(openDays.nth(1).locator('header')).toContainText('30.09.2026');
+  await expect(schedule.locator('.wiw-shift-card.is-open')).toHaveCount(2);
+  await expect(schedule.locator('.wiw-shift-card.is-open').first()).toContainText('OpenShift');
+  await expect(schedule.locator('.wiw-shift-card.is-open').first()).toContainText('SK');
 });
