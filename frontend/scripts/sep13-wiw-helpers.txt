@@ -4,6 +4,20 @@ function shortWorkerName(value?: string) {
   const last = parts[parts.length - 1];
   return `${parts[0]} ${(last[0] || '').toLocaleUpperCase('de-DE')}.`;
 }
+function workerInitials(value?: string) {
+  const parts = String(value || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return 'MA';
+  const first = parts[0]?.[0] || '';
+  const last = parts.length > 1 ? parts[parts.length - 1]?.[0] || '' : '';
+  return `${first}${last}`.toLocaleUpperCase('de-DE') || 'MA';
+}
+function WorkerAvatar({ worker }: { worker?: any }) {
+  if (!worker) return null;
+  return <span className="wiw-worker-avatar-shell" aria-hidden="true">
+    <span className="wiw-worker-avatar wiw-worker-avatar-fallback">{workerInitials(worker.name)}</span>
+    {worker.avatar ? <img className="wiw-worker-avatar wiw-worker-avatar-image" src={worker.avatar} alt="" onError={(event) => event.currentTarget.remove()} /> : null}
+  </span>;
+}
 function positionShortLabel(name?: string) {
   const key = normalize(String(name || ''));
   if (key.includes('serviceleitung')) return 'SL';
@@ -87,7 +101,7 @@ function AdjacentWeekPreview({ weekStart, groupFilter, query }: { weekStart: str
       return <section className="wiw-adjacent-day-section" key={day}>
         <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{cards.length}</em></header>
         {cards.map((card: CardRow) => <div className={`wiw-shift-card ${card.isOpen ? 'is-open' : 'is-filled'}`} key={card.key}>
-          <div className="wiw-card-line primary"><span className="wiw-card-person">{card.worker?.avatar ? <img className="wiw-worker-avatar" src={card.worker.avatar} alt="" /> : null}<b>{shortWorkerName(card.worker?.name) || 'OpenShift'}</b></span><span>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</span></div>
+          <div className="wiw-card-line primary"><span className="wiw-card-person"><WorkerAvatar worker={card.worker} /><b>{shortWorkerName(card.worker?.name) || 'OpenShift'}</b></span><span>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</span></div>
           <div className="wiw-card-line secondary"><span>{positionShortLabel(card.shift.position_name)}</span><small>{card.shift.location_name || 'Einsatzort'}</small></div>
         </div>)}
         {!cards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
