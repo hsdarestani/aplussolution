@@ -53,8 +53,9 @@ jobs:
           done
           test "$ready" -eq 1
 
-          $COMPOSE exec -T staging_backend python manage.py shell <<'PY' >/tmp/staging-qa-bootstrap.out
+          $COMPOSE exec -T staging_backend python manage.py shell <<'PY'
           from datetime import timedelta
+          from pathlib import Path
           from django.conf import settings
           from django.utils import timezone
           from core.models import User, WorkerProfile, ClientCompany, Location, Position, Shift
@@ -162,17 +163,21 @@ jobs:
           assert assigned.worker_id == worker.id
           assert open_shift.is_open and open_shift.worker_id is None
 
-          print('email=' + email)
-          print('activation_url=' + activation_url)
-          print('expires_at=' + invitation.expires_at.isoformat())
-          print('assigned_shift_id=' + str(assigned.id))
-          print('open_shift_id=' + str(open_shift.id))
+          note = '\n'.join([
+              'email=' + email,
+              'activation_url=' + activation_url,
+              'expires_at=' + invitation.expires_at.isoformat(),
+              'assigned_shift_id=' + str(assigned.id),
+              'open_shift_id=' + str(open_shift.id),
+          ]) + '\n'
+          Path('/tmp/staging-qa-access.txt').write_text(note, encoding='utf-8')
+          print('staging qa seed ready')
           PY
 
-          test -s /tmp/staging-qa-bootstrap.out
-          grep -q '^activation_url=https://staging.app.aplus-solution.de/aktivieren?token=' /tmp/staging-qa-bootstrap.out
-          base64 -w0 /tmp/staging-qa-bootstrap.out
-          rm -f /tmp/staging-qa-bootstrap.out /tmp/staging-qa-access.txt
+          $COMPOSE exec -T staging_backend test -s /tmp/staging-qa-access.txt
+          $COMPOSE exec -T staging_backend grep -q '^activation_url=https://staging.app.aplus-solution.de/aktivieren?token=' /tmp/staging-qa-access.txt
+          $COMPOSE exec -T staging_backend python -c "import base64; print(base64.b64encode(open('/tmp/staging-qa-access.txt','rb').read()).decode(), end='')"
+          $COMPOSE exec -T staging_backend rm -f /tmp/staging-qa-access.txt
           REMOTE
           )"
 
