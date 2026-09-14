@@ -97,7 +97,7 @@ def test_identical_shift_update_notifications_are_coalesced(
     duplicate_qs = Notification.objects.filter(
         user=worker.user,
         kind__startswith='shift-event-updated-',
-        title='Schicht aktualisiert',
+        title='Deine Schicht wurde aktualisiert',
     )
     assert duplicate_qs.count() == 1
 
