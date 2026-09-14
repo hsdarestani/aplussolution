@@ -1,0 +1,46 @@
+:80 {
+    encode zstd gzip
+
+    handle /api/* {
+        reverse_proxy staging_backend:8000 {
+            header_up Host staging.app.aplus-solution.de
+            header_up X-Forwarded-Proto https
+        }
+    }
+
+    handle /admin/* {
+        reverse_proxy staging_backend:8000 {
+            header_up Host staging.app.aplus-solution.de
+            header_up X-Forwarded-Proto https
+        }
+    }
+
+    handle_path /static/* {
+        root * /srv/static
+        file_server
+    }
+
+    handle_path /media/* {
+        root * /srv/media
+        file_server
+    }
+
+    handle /health/ {
+        reverse_proxy staging_backend:8000 {
+            header_up Host staging.app.aplus-solution.de
+            header_up X-Forwarded-Proto https
+        }
+    }
+
+    handle {
+        reverse_proxy staging_frontend:80
+    }
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(self), geolocation=(self), microphone=()"
+        X-Aplus-Origin "staging"
+    }
+}
