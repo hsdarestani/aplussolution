@@ -7,10 +7,17 @@ export APP_ENV=staging
 export CAPACITOR_APP_ID="${CAPACITOR_APP_ID:-de.aplussolution.staging}"
 export CAPACITOR_APP_NAME="${CAPACITOR_APP_NAME:-A+ Solution Staging}"
 export VITE_APP_ENV=staging
+export VITE_NATIVE_APP_ID="${VITE_NATIVE_APP_ID:-de.aplussolution.staging}"
 export VITE_API_URL="${VITE_API_URL:-https://staging.app.aplus-solution.de/api}"
+export REQUIRE_NATIVE_PUSH="${REQUIRE_NATIVE_PUSH:-1}"
 
 if [[ "$CAPACITOR_APP_ID" == "de.aplussolution.workforce" ]]; then
   echo "Refusing staging build with the production Android package." >&2
+  exit 1
+fi
+
+if [[ "$VITE_NATIVE_APP_ID" != "$CAPACITOR_APP_ID" ]]; then
+  echo "Refusing staging build with mismatched VITE_NATIVE_APP_ID=$VITE_NATIVE_APP_ID." >&2
   exit 1
 fi
 
@@ -21,5 +28,5 @@ case "$VITE_API_URL" in
     ;;
 esac
 
-echo "Building Android staging app ${CAPACITOR_APP_ID} against ${VITE_API_URL}."
+echo "Building push-ready Android staging app ${CAPACITOR_APP_ID} against ${VITE_API_URL}."
 bash "$SCRIPT_DIR/build-publisher-android.sh"
