@@ -1,4 +1,4 @@
-name: Inspect staging backend state
+name: Verify staging path after migration fix
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  inspect:
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -27,50 +27,50 @@ jobs:
           printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
           chmod 600 "$HOME/.ssh/strato_ed25519"
 
-      - name: Inspect staging backend containers
+      - name: Verify live staging chain
         run: |
           set -euo pipefail
-          ssh \
-            -i "$HOME/.ssh/strato_ed25519" \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=20 \
-            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
           set +e
-          cd /opt/aplussolution-staging
+          STAGING_DIR=/opt/aplussolution-staging
+          PROD_DIR=/opt/aplussolution
           COMPOSE='docker compose -p aplus_staging -f docker-compose.staging.yml'
 
-          echo '=== compose ps -a ==='
+          cd "$STAGING_DIR"
+          echo '=== staging state ==='
           $COMPOSE ps -a
-
-          for service in staging_backend staging_db staging_redis staging_celery staging_frontend staging_edge; do
-            echo "=== $service state ==="
-            cid=$($COMPOSE ps -aq "$service" | head -n1)
-            echo "cid=$cid"
-            if [ -n "$cid" ]; then
-              docker inspect -f 'status={{.State.Status}} running={{.State.Running}} restart_count={{.RestartCount}} exit_code={{.State.ExitCode}} error={{.State.Error}} oom_killed={{.State.OOMKilled}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' "$cid" || true
-              docker inspect -f '{{json .NetworkSettings.Networks}}' "$cid" || true
-            fi
-          done
-
-          echo '=== backend logs ==='
-          $COMPOSE logs --no-color --tail=400 staging_backend 2>&1 || true
-
-          echo '=== db logs ==='
-          $COMPOSE logs --no-color --tail=160 staging_db 2>&1 || true
-
-          echo '=== edge logs ==='
-          $COMPOSE logs --no-color --tail=200 staging_edge 2>&1 || true
-
-          echo '=== backend env sanity (non-secret) ==='
           backend_id=$($COMPOSE ps -aq staging_backend | head -n1)
-          if [ -n "$backend_id" ] && [ "$(docker inspect -f '{{.State.Running}}' "$backend_id" 2>/dev/null)" = 'true' ]; then
-            $COMPOSE exec -T staging_backend sh -lc 'echo DATABASE_HOST=${DATABASE_URL#*@}; echo REDIS_URL=$REDIS_URL; echo ALLOWED_HOSTS=$ALLOWED_HOSTS; echo APP_URL=$APP_URL' || true
-            $COMPOSE exec -T staging_backend curl -v --max-time 10 http://127.0.0.1:8000/health/ || true
+          if [ -n "$backend_id" ]; then
+            docker inspect -f 'backend status={{.State.Status}} restarts={{.RestartCount}} exit={{.State.ExitCode}} ip={{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$backend_id" || true
           fi
+
+          echo '=== backend localhost ==='
+          $COMPOSE exec -T staging_backend curl -fsS http://127.0.0.1:8000/health/ || true
+          echo
+          echo '=== edge to backend ==='
+          $COMPOSE exec -T staging_edge wget -S -O- http://staging_backend:8000/health/ 2>&1 || true
+          echo
+          echo '=== edge localhost route ==='
+          $COMPOSE exec -T staging_edge wget -S -O- http://127.0.0.1/health/ 2>&1 || true
+
+          echo '=== production Caddy to edge ==='
+          cd "$PROD_DIR"
+          docker compose exec -T caddy wget -S -O- http://aplus_staging_edge/health/ 2>&1 || true
+
+          echo '=== origin HTTPS ==='
+          curl -vk --connect-timeout 10 --max-time 20 --resolve staging.app.aplus-solution.de:443:127.0.0.1 https://staging.app.aplus-solution.de/health/ 2>&1 | tail -100 || true
+
+          echo '=== latest backend logs ==='
+          cd "$STAGING_DIR"
+          $COMPOSE logs --no-color --tail=160 staging_backend 2>&1 || true
           exit 0
           REMOTE
+
+      - name: Public staging probe
+        run: |
+          set +e
+          curl -v --connect-timeout 10 --max-time 20 https://staging.app.aplus-solution.de/health/
+          exit 0
 
       - name: Cleanup runner key
         if: always()
