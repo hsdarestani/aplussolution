@@ -1,4 +1,4 @@
-name: Trace staging Docker gateway path
+name: Inspect staging backend state
 
 on:
   push:
@@ -11,11 +11,10 @@ permissions:
   contents: read
 
 jobs:
-  trace:
+  inspect:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      STAGING_DOMAIN: staging.app.aplus-solution.de
       STRATO_HOST: ${{ secrets.STRATO_HOST }}
       STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
     steps:
@@ -28,7 +27,7 @@ jobs:
           printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
           chmod 600 "$HOME/.ssh/strato_ed25519"
 
-      - name: Trace production gateway to staging edge
+      - name: Inspect staging backend containers
         run: |
           set -euo pipefail
           ssh \
@@ -39,39 +38,37 @@ jobs:
             -o ConnectTimeout=20 \
             root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
           set +e
-          PROD_DIR=/opt/aplussolution
-          STAGING_DIR=/opt/aplussolution-staging
-          cd "$PROD_DIR"
-          prod_caddy_id=$(docker compose ps -q caddy)
-          echo "prod_caddy_id=$prod_caddy_id"
-          echo '=== production Caddy networks ==='
-          docker inspect -f '{{json .NetworkSettings.Networks}}' "$prod_caddy_id"
+          cd /opt/aplussolution-staging
+          COMPOSE='docker compose -p aplus_staging -f docker-compose.staging.yml'
 
-          cd "$STAGING_DIR"
-          edge_id=$(docker compose -p aplus_staging -f docker-compose.staging.yml ps -q staging_edge)
-          backend_id=$(docker compose -p aplus_staging -f docker-compose.staging.yml ps -q staging_backend)
-          echo "staging_edge_id=$edge_id"
-          echo "staging_backend_id=$backend_id"
-          echo '=== staging edge networks ==='
-          docker inspect -f '{{json .NetworkSettings.Networks}}' "$edge_id"
-          echo '=== staging backend networks ==='
-          docker inspect -f '{{json .NetworkSettings.Networks}}' "$backend_id"
+          echo '=== compose ps -a ==='
+          $COMPOSE ps -a
 
-          cd "$PROD_DIR"
-          echo '=== DNS from production Caddy ==='
-          docker compose exec -T caddy sh -lc 'getent hosts aplus_staging_edge || nslookup aplus_staging_edge || true'
-          echo '=== direct HTTP from production Caddy to staging edge ==='
-          docker compose exec -T caddy wget -S -O- http://aplus_staging_edge/health/ 2>&1 || true
+          for service in staging_backend staging_db staging_redis staging_celery staging_frontend staging_edge; do
+            echo "=== $service state ==="
+            cid=$($COMPOSE ps -aq "$service" | head -n1)
+            echo "cid=$cid"
+            if [ -n "$cid" ]; then
+              docker inspect -f 'status={{.State.Status}} running={{.State.Running}} restart_count={{.RestartCount}} exit_code={{.State.ExitCode}} error={{.State.Error}} oom_killed={{.State.OOMKilled}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' "$cid" || true
+              docker inspect -f '{{json .NetworkSettings.Networks}}' "$cid" || true
+            fi
+          done
 
-          echo '=== public request ==='
-          curl -vk --connect-timeout 10 --max-time 20 --resolve staging.app.aplus-solution.de:443:127.0.0.1 https://staging.app.aplus-solution.de/health/ 2>&1 | tail -100 || true
+          echo '=== backend logs ==='
+          $COMPOSE logs --no-color --tail=400 staging_backend 2>&1 || true
 
-          echo '=== production Caddy reverse proxy logs ==='
-          docker compose logs --no-color --since=15m caddy 2>&1 | grep -Ei 'aplus_staging_edge|staging\.app\.aplus-solution\.de|dial tcp|connect|502|error' | tail -250 || true
+          echo '=== db logs ==='
+          $COMPOSE logs --no-color --tail=160 staging_db 2>&1 || true
 
-          cd "$STAGING_DIR"
-          echo '=== staging edge logs ==='
-          docker compose -p aplus_staging -f docker-compose.staging.yml logs --no-color --since=15m staging_edge 2>&1 | tail -250 || true
+          echo '=== edge logs ==='
+          $COMPOSE logs --no-color --tail=200 staging_edge 2>&1 || true
+
+          echo '=== backend env sanity (non-secret) ==='
+          backend_id=$($COMPOSE ps -aq staging_backend | head -n1)
+          if [ -n "$backend_id" ] && [ "$(docker inspect -f '{{.State.Running}}' "$backend_id" 2>/dev/null)" = 'true' ]; then
+            $COMPOSE exec -T staging_backend sh -lc 'echo DATABASE_HOST=${DATABASE_URL#*@}; echo REDIS_URL=$REDIS_URL; echo ALLOWED_HOSTS=$ALLOWED_HOSTS; echo APP_URL=$APP_URL' || true
+            $COMPOSE exec -T staging_backend curl -v --max-time 10 http://127.0.0.1:8000/health/ || true
+          fi
           exit 0
           REMOTE
 
