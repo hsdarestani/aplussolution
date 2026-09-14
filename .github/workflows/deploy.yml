@@ -134,6 +134,12 @@ jobs:
           docker compose pull db redis caddy || true
           docker compose up -d --build --remove-orphans
 
+          # Caddyfile is bind-mounted, so a source-only deployment does not recreate
+          # the already-running Caddy container. Validate and reload it explicitly so
+          # newly added hostnames/routes and certificate automation take effect.
+          docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+
           backend_ready=0
           for i in $(seq 1 60); do
             if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
