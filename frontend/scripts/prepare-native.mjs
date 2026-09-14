@@ -4,6 +4,12 @@ import { execFileSync } from 'node:child_process';
 
 const target = process.argv[2] || 'all';
 const cwd = process.cwd();
+const isStaging = String(process.env.APP_ENV || '').toLowerCase() === 'staging';
+const nativeAppId = String(
+  process.env.CAPACITOR_APP_ID ||
+    process.env.IOS_BUNDLE_ID ||
+    (isStaging ? 'de.aplussolution.staging' : 'de.aplussolution.workforce'),
+).trim();
 const requirePush = ['1', 'true', 'yes'].includes(String(process.env.REQUIRE_NATIVE_PUSH || '').toLowerCase());
 
 function installAndroidLauncherArtwork(manifestPath) {
@@ -25,6 +31,24 @@ function installAndroidLauncherArtwork(manifestPath) {
   fs.writeFileSync(manifestPath, xml);
 }
 
+function validateGoogleServices(targetPath) {
+  if (!fs.existsSync(targetPath)) return;
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Invalid Firebase google-services.json: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const packageNames = (parsed.client || [])
+    .map((client) => client?.client_info?.android_client_info?.package_name)
+    .filter(Boolean);
+  if (!packageNames.includes(nativeAppId)) {
+    throw new Error(
+      `Firebase google-services.json does not contain Android package ${nativeAppId}. Found: ${packageNames.join(', ') || 'none'}`,
+    );
+  }
+}
+
 function installGoogleServices() {
   const targetPath = path.join(cwd, 'android', 'app', 'google-services.json');
   const encoded = String(process.env.GOOGLE_SERVICES_JSON_BASE64 || '').trim();
@@ -34,13 +58,22 @@ function installGoogleServices() {
     fs.writeFileSync(targetPath, Buffer.from(encoded, 'base64'));
   } else if (raw) {
     fs.writeFileSync(targetPath, raw);
-  } else if (fs.existsSync(checkedIn)) {
+  } else if (!isStaging && fs.existsSync(checkedIn)) {
     fs.copyFileSync(checkedIn, targetPath);
   }
   if (requirePush && !fs.existsSync(targetPath)) {
-    throw new Error('Native Android push requires GOOGLE_SERVICES_JSON_BASE64, GOOGLE_SERVICES_JSON, or firebase/google-services.json.');
+    throw new Error(
+      isStaging
+        ? 'Native Android staging push requires a staging GOOGLE_SERVICES_JSON_BASE64 or GOOGLE_SERVICES_JSON.'
+        : 'Native Android push requires GOOGLE_SERVICES_JSON_BASE64, GOOGLE_SERVICES_JSON, or firebase/google-services.json.',
+    );
   }
-  if (fs.existsSync(targetPath)) console.log('Firebase google-services.json installed for Android push.');
+  if (fs.existsSync(targetPath)) {
+    validateGoogleServices(targetPath);
+    console.log(`Firebase google-services.json installed for Android package ${nativeAppId}.`);
+  } else if (isStaging) {
+    console.log('Staging Android build has no Firebase config; native push is disabled until staging Firebase credentials are supplied.');
+  }
 }
 
 function installAndroidNotificationBranding(manifestPath) {
@@ -105,7 +138,7 @@ function patchAndroid() {
   installGoogleServices();
   installAndroidLauncherArtwork(manifestPath);
   installAndroidNotificationBranding(manifestPath);
-  console.log('Prepared Android API 36, foreground location, native push permissions and notification branding.');
+  console.log(`Prepared Android ${nativeAppId}, API 36, foreground location, native push permissions and notification branding.`);
 }
 
 function ensurePlistKey(plist, key, value) {
@@ -118,6 +151,10 @@ function ensurePlistBooleanKey(plist, key, value) {
   return plist.replace(/<\/dict>\s*<\/plist>/, `\t<key>${key}</key>\n\t<${value ? 'true' : 'false'}/>\n</dict>\n</plist>`);
 }
 
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function patchIosPush() {
   const appDir = path.join(cwd, 'ios', 'App', 'App');
   const entitlementsPath = path.join(appDir, 'App.entitlements');
@@ -127,10 +164,11 @@ function patchIosPush() {
   if (!fs.existsSync(pbxPath)) throw new Error(`Xcode project not found: ${pbxPath}`);
   let pbx = fs.readFileSync(pbxPath, 'utf8');
   if (!pbx.includes('CODE_SIGN_ENTITLEMENTS = App/App.entitlements;')) {
-    pbx = pbx.replace(/(PRODUCT_BUNDLE_IDENTIFIER = de\.aplussolution\.workforce;)/g, 'CODE_SIGN_ENTITLEMENTS = App/App.entitlements;\n\t\t\t\t$1');
+    const bundlePattern = new RegExp(`(PRODUCT_BUNDLE_IDENTIFIER = ${escapeRegex(nativeAppId)};)`, 'g');
+    pbx = pbx.replace(bundlePattern, 'CODE_SIGN_ENTITLEMENTS = App/App.entitlements;\n\t\t\t\t$1');
   }
   if (!pbx.includes('CODE_SIGN_ENTITLEMENTS = App/App.entitlements;')) {
-    throw new Error('Could not attach App.entitlements to the Xcode target.');
+    throw new Error(`Could not attach App.entitlements to the Xcode target for ${nativeAppId}.`);
   }
   fs.writeFileSync(pbxPath, pbx);
 
@@ -144,7 +182,7 @@ function patchIosPush() {
     delegate = `${delegate.slice(0, marker)}${insertion}${delegate.slice(marker)}`;
   }
   fs.writeFileSync(delegatePath, delegate);
-  console.log('Prepared iOS Push Notifications entitlement and APNs callbacks.');
+  console.log(`Prepared iOS Push Notifications entitlement and APNs callbacks for ${nativeAppId}.`);
 }
 
 function patchIosFilePrivacy() {
@@ -195,7 +233,7 @@ function patchIos() {
   fs.writeFileSync(plistPath, plist);
   patchIosPush();
   patchIosFilePrivacy();
-  console.log('Prepared iOS foreground-location purpose strings, export compliance and native push.');
+  console.log(`Prepared iOS ${nativeAppId}, foreground-location purpose strings, export compliance and native push.`);
 }
 
 if (target === 'android' || target === 'all') patchAndroid();
