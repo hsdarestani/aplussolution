@@ -85,6 +85,12 @@ def _restore_locally_managed_slot_state(instance: Shift, slot: ShiftSlot) -> boo
     if updates:
         updates['updated_at'] = timezone.now()
         Shift.objects.filter(pk=instance.pk).update(**updates)
+
+    # The WIW synchronizer keeps the just-saved ORM object in its dependency
+    # cache. Align that in-memory mirror too, not only the database row.
+    instance.worker_id = expected_worker_id
+    instance.status = expected_status
+    instance.is_open = expected_is_open
     return True
 
 
