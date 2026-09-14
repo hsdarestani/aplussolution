@@ -9,7 +9,9 @@ export APP_ENV=staging
 export CAPACITOR_APP_ID="${CAPACITOR_APP_ID:-$IOS_BUNDLE_ID}"
 export CAPACITOR_APP_NAME="${CAPACITOR_APP_NAME:-A+ Solution Staging}"
 export VITE_APP_ENV=staging
+export VITE_NATIVE_APP_ID="${VITE_NATIVE_APP_ID:-de.aplussolution.staging}"
 export VITE_API_URL="${VITE_API_URL:-https://staging.app.aplus-solution.de/api}"
+export REQUIRE_NATIVE_PUSH="${REQUIRE_NATIVE_PUSH:-1}"
 
 if [[ "$IOS_BUNDLE_ID" != "de.aplussolution.staging" ]]; then
   echo "Refusing staging iOS build: expected IOS_BUNDLE_ID=de.aplussolution.staging, got $IOS_BUNDLE_ID" >&2
@@ -21,6 +23,11 @@ if [[ "$CAPACITOR_APP_ID" != "$IOS_BUNDLE_ID" ]]; then
   exit 1
 fi
 
+if [[ "$VITE_NATIVE_APP_ID" != "$IOS_BUNDLE_ID" ]]; then
+  echo "Refusing staging iOS build with mismatched VITE_NATIVE_APP_ID=$VITE_NATIVE_APP_ID." >&2
+  exit 1
+fi
+
 case "$VITE_API_URL" in
   https://app.aplus-solution.de/api|https://solution.smarbiz.sbs/api)
     echo "Refusing staging build against the production API: $VITE_API_URL" >&2
@@ -28,5 +35,5 @@ case "$VITE_API_URL" in
     ;;
 esac
 
-echo "Building iOS staging app ${IOS_BUNDLE_ID} against ${VITE_API_URL}."
+echo "Building push-ready iOS staging app ${IOS_BUNDLE_ID} against ${VITE_API_URL}."
 bash "$SCRIPT_DIR/build-publisher-ios.sh"
