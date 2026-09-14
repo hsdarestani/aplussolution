@@ -18,6 +18,11 @@ def dispatch_native_push(sender, instance: Notification, created: bool, **kwargs
     if not created:
         return
 
+    # notification_dedup runs first and removes repeated identical shift-update
+    # rows. Never enqueue a native alert for a row that was coalesced away.
+    if getattr(instance, '_aplus_duplicate_shift_update', False):
+        return
+
     # Every family is now configurable in Settings. Disabled types still remain
     # in the in-app history, they simply do not produce an Android/iOS alert.
     if native_push_suppressed(instance):

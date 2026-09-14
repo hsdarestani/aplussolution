@@ -12,6 +12,7 @@ class CoreConfig(AppConfig):
             location_client_consistency,
             notification_copy,
             operational_notifications,
+            notification_dedup,
             portal_models,
             premium_approval_models,
             premium_models,
