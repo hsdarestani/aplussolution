@@ -1,4 +1,4 @@
-name: Bootstrap A+ Solution staging QA
+name: Bootstrap A+ Solution staging QA data
 
 on:
   push:
@@ -28,10 +28,10 @@ jobs:
           printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
           chmod 600 "$HOME/.ssh/strato_ed25519"
 
-      - name: Seed isolated QA worker and prepare access artifact
+      - name: Seed isolated QA data
         run: |
           set -euo pipefail
-          ACCESS_B64="$(ssh -i "$HOME/.ssh/strato_ed25519" \
+          ssh -i "$HOME/.ssh/strato_ed25519" \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
@@ -55,28 +55,40 @@ jobs:
 
           $COMPOSE exec -T staging_backend python manage.py shell <<'PY'
           from datetime import timedelta
-          from pathlib import Path
           from django.conf import settings
           from django.utils import timezone
           from core.models import User, WorkerProfile, ClientCompany, Location, Position, Shift
-          from core.portal_service import create_portal_invitation
 
           assert settings.DATABASES['default']['NAME'] == 'aplussolution_staging'
           assert settings.APP_URL == 'https://staging.app.aplus-solution.de'
           assert settings.WIW_SYNC_ENABLED is False
+          assert settings.WORKER_EMAILS_ENABLED is False
 
           email = 'staging-qa@aplus-solution.de'
-          user, _ = User.objects.get_or_create(email=email, defaults={'username': email})
-          user.username = email
-          user.first_name = 'Staging'
-          user.last_name = 'QA'
-          user.role = User.Role.WORKER
-          user.is_active = True
-          user.is_staff = False
-          user.is_superuser = False
-          user.is_onboarded = False
-          user.set_unusable_password()
-          user.save()
+          user = User.objects.filter(email=email).first()
+          if user is None:
+              user = User(
+                  email=email,
+                  username=email,
+                  first_name='Staging',
+                  last_name='QA',
+                  role=User.Role.WORKER,
+                  is_active=True,
+                  is_staff=False,
+                  is_superuser=False,
+                  is_onboarded=False,
+              )
+              user.set_unusable_password()
+              user.save()
+          else:
+              user.username = email
+              user.first_name = 'Staging'
+              user.last_name = 'QA'
+              user.role = User.Role.WORKER
+              user.is_active = True
+              user.is_staff = False
+              user.is_superuser = False
+              user.save(update_fields=['username','first_name','last_name','role','is_active','is_staff','is_superuser'])
 
           worker, _ = WorkerProfile.objects.get_or_create(
               user=user,
@@ -93,7 +105,7 @@ jobs:
           )
           worker.employee_number = 'STAGING-QA-001'
           worker.active = True
-          worker.save()
+          worker.save(update_fields=['employee_number','active','updated_at'])
 
           client, _ = ClientCompany.objects.get_or_create(
               customer_number='STAGING-QA',
@@ -156,45 +168,16 @@ jobs:
               },
           )
 
-          invitation, activation_url, delivered = create_portal_invitation(worker, created_by=None, lifetime_hours=24)
-
-          assert not user.has_usable_password()
           assert worker.active
           assert assigned.worker_id == worker.id
           assert open_shift.is_open and open_shift.worker_id is None
-
-          note = '\n'.join([
-              'email=' + email,
-              'activation_url=' + activation_url,
-              'expires_at=' + invitation.expires_at.isoformat(),
-              'assigned_shift_id=' + str(assigned.id),
-              'open_shift_id=' + str(open_shift.id),
-          ]) + '\n'
-          Path('/tmp/staging-qa-access.txt').write_text(note, encoding='utf-8')
-          print('staging qa seed ready')
+          print('staging_qa_data=ready')
+          print('staging_qa_email=' + email)
+          print('assigned_shift_id=' + str(assigned.id))
+          print('open_shift_id=' + str(open_shift.id))
           PY
-
-          $COMPOSE exec -T staging_backend test -s /tmp/staging-qa-access.txt
-          $COMPOSE exec -T staging_backend grep -q '^activation_url=https://staging.app.aplus-solution.de/aktivieren?token=' /tmp/staging-qa-access.txt
-          $COMPOSE exec -T staging_backend python -c "import base64; print(base64.b64encode(open('/tmp/staging-qa-access.txt','rb').read()).decode(), end='')"
-          $COMPOSE exec -T staging_backend rm -f /tmp/staging-qa-access.txt
           REMOTE
-          )"
 
-          test -n "$ACCESS_B64"
-          printf '%s' "$ACCESS_B64" | base64 -d > /tmp/staging-qa-access.txt
-          test -s /tmp/staging-qa-access.txt
-          grep -q '^activation_url=https://staging.app.aplus-solution.de/aktivieren?token=' /tmp/staging-qa-access.txt
-          echo 'Staging QA account, invitation and test shifts are ready.'
-
-      - name: Upload one-day QA access artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: staging-qa-access
-          path: /tmp/staging-qa-access.txt
-          retention-days: 1
-          if-no-files-found: error
-
-      - name: Cleanup temporary access material
+      - name: Cleanup runner key
         if: always()
-        run: rm -f "$HOME/.ssh/strato_ed25519" /tmp/staging-qa-access.txt
+        run: rm -f "$HOME/.ssh/strato_ed25519"
