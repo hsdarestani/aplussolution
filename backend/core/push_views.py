@@ -1,3 +1,5 @@
+import os
+
 from django.utils import timezone
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -7,24 +9,37 @@ from .push_models import PushDevice
 from .push_notifications import push_provider_status
 
 
+DEFAULT_NATIVE_APP_ID = 'de.aplussolution.workforce'
+
+
+def expected_native_app_id() -> str:
+    return os.getenv('NATIVE_APP_ID', '').strip() or DEFAULT_NATIVE_APP_ID
+
+
 @api_view(['POST'])
 def register_push_device(request):
     token = str(request.data.get('token') or '').strip()
     platform = str(request.data.get('platform') or '').strip().lower()
-    app_id = str(request.data.get('app_id') or 'de.aplussolution.workforce').strip()
+    expected_app_id = expected_native_app_id()
+    app_id = str(request.data.get('app_id') or expected_app_id).strip()
     device_name = str(request.data.get('device_name') or '').strip()[:200]
 
     if platform not in {PushDevice.Platform.ANDROID, PushDevice.Platform.IOS}:
         return Response({'detail': 'Ungültige Push-Plattform.'}, status=400)
     if len(token) < 16:
         return Response({'detail': 'Ungültiges Push-Token.'}, status=400)
+    if app_id != expected_app_id:
+        return Response(
+            {'detail': f'Dieses Push-Token gehört nicht zu dieser App-Umgebung ({expected_app_id}).'},
+            status=400,
+        )
 
     device, created = PushDevice.objects.update_or_create(
         token=token,
         defaults={
             'user': request.user,
             'platform': platform,
-            'app_id': app_id or 'de.aplussolution.workforce',
+            'app_id': expected_app_id,
             'device_name': device_name,
             'active': True,
             'last_seen_at': timezone.now(),
@@ -35,6 +50,7 @@ def register_push_device(request):
         'id': str(device.id),
         'created': created,
         'platform': device.platform,
+        'app_id': device.app_id,
         'active': device.active,
     }, status=201 if created else 200)
 
@@ -44,7 +60,12 @@ def unregister_push_device(request):
     token = str(request.data.get('token') or '').strip()
     if not token:
         return Response({'detail': 'Push-Token fehlt.'}, status=400)
-    updated = PushDevice.objects.filter(user=request.user, token=token, active=True).update(
+    updated = PushDevice.objects.filter(
+        user=request.user,
+        token=token,
+        app_id=expected_native_app_id(),
+        active=True,
+    ).update(
         active=False,
         last_seen_at=timezone.now(),
     )
@@ -54,9 +75,14 @@ def unregister_push_device(request):
 @api_view(['GET'])
 def push_status(request):
     providers = push_provider_status()
-    devices = PushDevice.objects.filter(user=request.user, active=True)
+    devices = PushDevice.objects.filter(
+        user=request.user,
+        app_id=expected_native_app_id(),
+        active=True,
+    )
     return Response({
         'providers': providers,
+        'app_id': expected_native_app_id(),
         'active_devices': devices.count(),
         'android_devices': devices.filter(platform=PushDevice.Platform.ANDROID).count(),
         'ios_devices': devices.filter(platform=PushDevice.Platform.IOS).count(),
@@ -77,4 +103,5 @@ def push_settings(request):
     return Response({
         'rules': all_push_rule_payloads(),
         'providers': push_provider_status(),
+        'app_id': expected_native_app_id(),
     })
