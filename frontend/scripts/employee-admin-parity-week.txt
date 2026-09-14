@@ -28,27 +28,29 @@
             if (swipeFrame.current) window.cancelAnimationFrame(swipeFrame.current);
             swipeFrame.current = undefined;
             if (!swipe.current || !event.changedTouches.length) return;
+            const target = event.currentTarget;
             const touch = event.changedTouches[0];
             const dx = touch.clientX - swipe.current.x;
             const dy = touch.clientY - swipe.current.y;
             swipe.current = undefined;
             if (Math.abs(dx) > 44 && Math.abs(dx) > Math.abs(dy) * 1.12) {
-              animateEmployeeWeek(dx < 0 ? 7 : -7, event.currentTarget);
+              animateEmployeeWeek(dx < 0 ? 7 : -7, target);
               return;
             }
-            event.currentTarget.classList.remove('is-dragging');
-            event.currentTarget.classList.add('is-settling');
-            event.currentTarget.style.setProperty('--wiw-employee-swipe-x', '0px');
-            window.setTimeout(() => resetEmployeeWeekTrack(event.currentTarget), 180);
+            target.classList.remove('is-dragging');
+            target.classList.add('is-settling');
+            target.style.setProperty('--wiw-employee-swipe-x', '0px');
+            window.setTimeout(() => resetEmployeeWeekTrack(target), 180);
           }}
           onTouchCancel={(event) => {
             if (swipeFrame.current) window.cancelAnimationFrame(swipeFrame.current);
             swipeFrame.current = undefined;
             swipe.current = undefined;
-            event.currentTarget.classList.remove('is-dragging');
-            event.currentTarget.classList.add('is-settling');
-            event.currentTarget.style.setProperty('--wiw-employee-swipe-x', '0px');
-            window.setTimeout(() => resetEmployeeWeekTrack(event.currentTarget), 180);
+            const target = event.currentTarget;
+            target.classList.remove('is-dragging');
+            target.classList.add('is-settling');
+            target.style.setProperty('--wiw-employee-swipe-x', '0px');
+            window.setTimeout(() => resetEmployeeWeekTrack(target), 180);
           }}
         >
           {renderEmployeeMineWeek(addDays(weekStart, -7), true)}
@@ -62,7 +64,6 @@
           return <section className="wiw-day-section wiw-day-visual" id={`wiw-employee-day-${day}`} key={day}>
             <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayShifts.length}</em></header>
             {dayShifts.map((shift, index) => {
-              const openShift = true;
               return <React.Fragment key={String(shift.id)}>
                 {index > 0 && clientKey(dayShifts[index - 1]) !== clientKey(shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}
                 <button type="button" className="wiw-shift-card is-open" style={shiftCardStyle(shift)} onClick={() => setSelected(shift)}>
