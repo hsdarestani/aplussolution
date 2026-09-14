@@ -1,0 +1,81 @@
+{mode === 'mine' ? <div className="wiw-employee-week-swipe-viewport" data-testid="schedule-day-view">
+        <div
+          ref={weekTrackRef}
+          className="wiw-employee-week-swipe-track"
+          onTouchStart={(event) => {
+            const touch = event.touches[0];
+            swipe.current = { x: touch.clientX, y: touch.clientY };
+            swipeTravel.current = 0;
+            event.currentTarget.classList.remove('is-dragging', 'is-settling');
+            event.currentTarget.style.setProperty('--wiw-employee-swipe-x', '0px');
+          }}
+          onTouchMove={(event) => {
+            if (!swipe.current || !event.touches.length) return;
+            const touch = event.touches[0];
+            const dx = touch.clientX - swipe.current.x;
+            const dy = touch.clientY - swipe.current.y;
+            if (Math.abs(dx) < Math.abs(dy) * 1.08) return;
+            swipeTravel.current = dx;
+            const target = event.currentTarget;
+            target.classList.add('is-dragging');
+            if (swipeFrame.current) return;
+            swipeFrame.current = window.requestAnimationFrame(() => {
+              swipeFrame.current = undefined;
+              target.style.setProperty('--wiw-employee-swipe-x', `${swipeTravel.current}px`);
+            });
+          }}
+          onTouchEnd={(event) => {
+            if (swipeFrame.current) window.cancelAnimationFrame(swipeFrame.current);
+            swipeFrame.current = undefined;
+            if (!swipe.current || !event.changedTouches.length) return;
+            const target = event.currentTarget;
+            const touch = event.changedTouches[0];
+            const dx = touch.clientX - swipe.current.x;
+            const dy = touch.clientY - swipe.current.y;
+            swipe.current = undefined;
+            if (Math.abs(dx) > 44 && Math.abs(dx) > Math.abs(dy) * 1.12) {
+              animateEmployeeWeek(dx < 0 ? 7 : -7, target);
+              return;
+            }
+            target.classList.remove('is-dragging');
+            target.classList.add('is-settling');
+            target.style.setProperty('--wiw-employee-swipe-x', '0px');
+            window.setTimeout(() => resetEmployeeWeekTrack(target), 180);
+          }}
+          onTouchCancel={(event) => {
+            if (swipeFrame.current) window.cancelAnimationFrame(swipeFrame.current);
+            swipeFrame.current = undefined;
+            swipe.current = undefined;
+            const target = event.currentTarget;
+            target.classList.remove('is-dragging');
+            target.classList.add('is-settling');
+            target.style.setProperty('--wiw-employee-swipe-x', '0px');
+            window.setTimeout(() => resetEmployeeWeekTrack(target), 180);
+          }}
+        >
+          {renderEmployeeMineWeek(addDays(weekStart, -7), true)}
+          {renderEmployeeMineWeek(weekStart, false)}
+          {renderEmployeeMineWeek(addDays(weekStart, 7), true)}
+        </div>
+      </div> : <div className="wiw-week-scroll" data-testid="schedule-day-view">
+        {visibleDays.map((day) => {
+          const header = formatDayHeader(day);
+          const dayShifts = byDay[day] || [];
+          return <section className="wiw-day-section wiw-day-visual" id={`wiw-employee-day-${day}`} key={day}>
+            <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayShifts.length}</em></header>
+            {dayShifts.map((shift, index) => {
+              return <React.Fragment key={String(shift.id)}>
+                {index > 0 && clientKey(dayShifts[index - 1]) !== clientKey(shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}
+                <button type="button" className="wiw-shift-card is-open" style={shiftCardStyle(shift)} onClick={() => setSelected(shift)}>
+                  <div className="wiw-card-line primary">
+                    <span className="wiw-card-person"><b>OpenShift<span className="wiw-open-alert">!</span></b></span>
+                    <span>{time(shift.starts_at)}–{time(shift.ends_at)}</span>
+                  </div>
+                  <div className="wiw-card-line secondary"><span className="open">{positionShortLabel(shift.position_name)}</span><small>{shift.location_name || 'Einsatzort'}</small></div>
+                </button>
+              </React.Fragment>;
+            })}
+          </section>;
+        })}
+        {!visibleDays.length ? <div className="wiw-day-empty">{busy ? 'OpenShifts werden geladen …' : 'Keine verfügbaren OpenShifts'}</div> : null}
+      </div>}

@@ -2,28 +2,88 @@ import { expect, test } from '@playwright/test';
 
 const shifts = [
   {
-    id: 'sep17',
+    id: 'previous-week',
     client_name: 'Evangelische Akademie',
     location_name: 'Evangelische Akademie',
     position_name: 'Servicekraft',
-    starts_at: '2026-09-17T16:00:00+02:00',
-    ends_at: '2026-09-17T21:00:00+02:00',
+    starts_at: '2026-09-10T09:00:00+02:00',
+    ends_at: '2026-09-10T15:00:00+02:00',
     break_minutes: 0,
     status: 'confirmed',
+    assigned_workers: [{ id: 'prev', name: 'Previous Worker', is_me: false }],
   },
   {
-    id: 'sep20',
+    id: 'peer-sep16',
+    client_name: 'Evangelische Akademie',
+    location_name: 'Evangelische Akademie',
+    position_name: 'Servicekraft',
+    starts_at: '2026-09-16T08:30:00+02:00',
+    ends_at: '2026-09-16T19:00:00+02:00',
+    break_minutes: 0,
+    status: 'confirmed',
+    assigned_workers: [{ id: 'tooba', name: 'Tooba Ahmadi', is_me: false }],
+  },
+  {
+    id: 'own-sep16',
     client_name: 'A+',
     location_name: 'A+',
     position_name: 'Servicekraft',
-    starts_at: '2026-09-20T12:00:00+02:00',
-    ends_at: '2026-09-20T18:00:00+02:00',
+    starts_at: '2026-09-16T15:30:00+02:00',
+    ends_at: '2026-09-16T21:00:00+02:00',
     break_minutes: 0,
     status: 'confirmed',
+    assigned_workers: [{ id: 'arina', name: 'Arina Martynko', is_me: true }],
+  },
+  {
+    id: 'next-week',
+    client_name: 'Evangelische Akademie',
+    location_name: 'Evangelische Akademie',
+    position_name: 'Servicekraft',
+    starts_at: '2026-09-23T10:00:00+02:00',
+    ends_at: '2026-09-23T16:00:00+02:00',
+    break_minutes: 0,
+    status: 'confirmed',
+    assigned_workers: [{ id: 'next', name: 'Next Worker', is_me: false }],
+  },
+  {
+    id: 'historical-2024',
+    client_name: 'Evangelische Akademie',
+    location_name: 'Evangelische Akademie',
+    position_name: 'Servicekraft',
+    starts_at: '2024-09-17T11:00:00+02:00',
+    ends_at: '2024-09-17T21:00:00+02:00',
+    break_minutes: 0,
+    status: 'confirmed',
+    assigned_workers: [{ id: 'tooba', name: 'Tooba Ahmadi', is_me: false }],
   },
 ];
 
-test('employee Dienstplan keeps Berlin weekday, date and time aligned', async ({ page }) => {
+const openShifts = [
+  {
+    id: 'open-sep19',
+    client_name: 'A+',
+    location_name: 'A+',
+    position_name: 'Servicekraft',
+    starts_at: '2026-09-19T11:00:00+02:00',
+    ends_at: '2026-09-19T22:00:00+02:00',
+    break_minutes: 0,
+    status: 'published',
+    assigned_workers: [],
+  },
+  {
+    id: 'open-sep30',
+    client_name: 'Evangelische Akademie',
+    location_name: 'Evangelische Akademie',
+    position_name: 'Servicekraft',
+    starts_at: '2026-09-30T15:00:00+02:00',
+    ends_at: '2026-09-30T19:30:00+02:00',
+    break_minutes: 0,
+    status: 'published',
+    assigned_workers: [],
+  },
+];
+
+test('employee Dienstplan keeps worker logic while matching admin week navigation and OpenShift layout', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 780 });
   await page.clock.setFixedTime(new Date('2026-09-14T12:00:00Z'));
   await page.addInitScript(() => {
@@ -45,10 +105,10 @@ test('employee Dienstplan keeps Berlin weekday, date and time aligned', async ({
         last_name: 'Martynko',
         role: 'worker',
       };
-    } else if (path.startsWith('shifts/mine/')) {
-      body = shifts;
+    } else if (path.startsWith('employee/schedule/')) {
+      body = { service_schedule: true, shifts };
     } else if (path.startsWith('shifts/available/')) {
-      body = [];
+      body = openShifts;
     } else if (path === 'employee/home/') {
       body = { worker: { name: 'Arina Martynko' }, unread_notifications: 0, available_shifts: [] };
     } else if (path === 'operations/') {
@@ -61,15 +121,67 @@ test('employee Dienstplan keeps Berlin weekday, date and time aligned', async ({
   await page.goto('/?view=schedule');
   const schedule = page.getByTestId('wiw-employee-schedule');
   await expect(schedule).toBeVisible();
+  await expect(schedule.getByRole('tab', { name: 'Service Zeitplan' })).toBeVisible();
+  const weekStrip = page.getByTestId('phase8-week-strip');
+  await expect(weekStrip).toBeVisible();
 
-  const days = schedule.locator('.wiw-employee-day');
-  await expect(days).toHaveCount(2);
+  // The worker now gets the same three-pane interaction as admin: the adjacent
+  // weeks are already rendered with real card details behind the swipe gesture.
+  const previews = schedule.locator('.wiw-employee-week-preview');
+  await expect(previews).toHaveCount(2);
+  await expect(previews.nth(0)).toContainText('Previous W.');
+  await expect(previews.nth(0)).toContainText('09:00–15:00');
+  await expect(previews.nth(1)).toContainText('Next W.');
+  await expect(previews.nth(1)).toContainText('10:00–16:00');
 
-  await expect(days.nth(0).locator('header')).toContainText('Do');
-  await expect(days.nth(0).locator('header')).toContainText('17.09.');
-  await expect(days.nth(0).locator('.wiw-employee-shift-card').first()).toContainText('16:00–21:00');
+  const currentWeek = schedule.locator('.wiw-employee-week-current');
+  const days = currentWeek.locator('.wiw-day-section');
+  await expect(days).toHaveCount(7);
+  await expect(days.nth(0).locator('header')).toContainText('Mo');
+  await expect(days.nth(0).locator('header')).toContainText('14.09.2026');
+  await expect(days.nth(2).locator('header')).toContainText('Mi');
+  await expect(days.nth(2).locator('header')).toContainText('16.09.2026');
 
-  await expect(days.nth(1).locator('header')).toContainText('So');
-  await expect(days.nth(1).locator('header')).toContainText('20.09.');
-  await expect(days.nth(1).locator('.wiw-employee-shift-card').first()).toContainText('12:00–18:00');
+  const wednesday = page.locator('#wiw-employee-day-2026-09-16');
+  const beforeTop = await wednesday.evaluate((node) => node.getBoundingClientRect().top);
+  await weekStrip.locator('button').nth(3).click();
+  await page.waitForTimeout(450);
+  const afterTop = await wednesday.evaluate((node) => node.getBoundingClientRect().top);
+  expect(afterTop).toBeLessThan(beforeTop);
+  expect(afterTop).toBeLessThan(220);
+
+  const wednesdayCards = wednesday.locator('.wiw-shift-card.is-filled');
+  await expect(wednesdayCards).toHaveCount(2);
+  await expect(wednesdayCards.filter({ hasText: 'Tooba A.' })).toContainText('08:30–19:00');
+  await expect(wednesdayCards.filter({ hasText: 'Arina M.' })).toContainText('15:30–21:00');
+  await expect(wednesdayCards.first()).toHaveCSS('border-left-style', 'solid');
+
+  // Historical WIW rows may still be returned by the API, but they must never
+  // replace the selected/current or adjacent weeks in the worker calendar.
+  await expect(schedule).not.toContainText('11:00–21:00');
+
+  // Service peer hours are visible but must not inflate the logged-in worker's total.
+  const total = page.getByTestId('phase8-week-total');
+  await expect(total).toContainText('Eigene Gesamtstunden');
+  await expect(total).toContainText('5.5');
+
+  await wednesdayCards.filter({ hasText: 'Tooba A.' }).click();
+  const detail = page.getByTestId('wiw-employee-shift-detail');
+  await expect(detail).toContainText('Tooba A.');
+  await expect(detail.getByRole('button', { name: 'Nur sichtbar · Service Zeitplan' })).toBeDisabled();
+
+  await detail.getByRole('button', { name: 'Zurück' }).click();
+  await schedule.getByRole('tab', { name: 'OpenShifts' }).click();
+
+  // Employee OpenShifts mirror the admin view: no weekly calendar, all
+  // available future dates listed vertically, using the same OpenShift cards.
+  await expect(page.getByTestId('phase8-week-strip')).toHaveCount(0);
+  await expect(page.getByTestId('phase8-week-total')).toHaveCount(0);
+  const openDays = schedule.locator('.wiw-day-section');
+  await expect(openDays).toHaveCount(2);
+  await expect(openDays.nth(0).locator('header')).toContainText('19.09.2026');
+  await expect(openDays.nth(1).locator('header')).toContainText('30.09.2026');
+  await expect(schedule.locator('.wiw-shift-card.is-open')).toHaveCount(2);
+  await expect(schedule.locator('.wiw-shift-card.is-open').first()).toContainText('OpenShift');
+  await expect(schedule.locator('.wiw-shift-card.is-open').first()).toContainText('SK');
 });

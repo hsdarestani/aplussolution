@@ -1,0 +1,77 @@
+  function buildEmployeeWeek(start: string) {
+    const paneDays = Array.from({ length: 7 }, (_, index) => addDays(start, index));
+    const map: Record<string, any[]> = Object.fromEntries(paneDays.map((day) => [day, []]));
+    mine.forEach((shift) => {
+      const day = dateKey(shift.starts_at);
+      if (map[day]) map[day].push(shift);
+    });
+    Object.values(map).forEach((items) => items.sort((left, right) => {
+      const clientOrder = String(left.client_name || '').localeCompare(String(right.client_name || ''), 'de');
+      if (clientOrder) return clientOrder;
+      return new Date(left.starts_at).getTime() - new Date(right.starts_at).getTime();
+    }));
+    return { paneDays, map };
+  }
+
+  function renderEmployeeMineWeek(start: string, preview = false) {
+    const { paneDays, map } = buildEmployeeWeek(start);
+    return <div className={`wiw-employee-week-pane${preview ? ' wiw-employee-week-preview' : ' wiw-employee-week-current'}`} aria-hidden={preview || undefined}>
+      {paneDays.map((day) => {
+        const header = formatDayHeader(day);
+        const dayShifts = map[day] || [];
+        return <section className="wiw-day-section wiw-day-visual" id={preview ? undefined : `wiw-employee-day-${day}`} key={day}>
+          <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayShifts.length}</em></header>
+          {dayShifts.map((shift, index) => {
+            const assigned = firstAssignedWorker(shift);
+            const workerName = assigned?.name ? shortPersonName(assigned.name) : assignedNames(shift);
+            const content = <>
+              <div className="wiw-card-line primary">
+                <span className="wiw-card-person"><WorkerAvatar worker={assigned} /><b>{workerName || worker.name || worker.email || 'Mitarbeiter'}</b></span>
+                <span>{time(shift.starts_at)}–{time(shift.ends_at)}</span>
+              </div>
+              <div className="wiw-card-line secondary"><span>{positionShortLabel(shift.position_name)}</span><small>{shift.location_name || 'Einsatzort'}</small></div>
+            </>;
+            return <React.Fragment key={String(shift.id)}>
+              {index > 0 && clientKey(dayShifts[index - 1]) !== clientKey(shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}
+              {preview
+                ? <div className={`wiw-shift-card is-filled${!isOwnShift(shift) ? ' peer-shift' : ''}`} style={shiftCardStyle(shift)}>{content}</div>
+                : <button type="button" className={`wiw-shift-card is-filled${!isOwnShift(shift) ? ' peer-shift' : ''}`} style={shiftCardStyle(shift)} onClick={() => setSelected(shift)}>{content}</button>}
+            </React.Fragment>;
+          })}
+          {!dayShifts.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
+        </section>;
+      })}
+    </div>;
+  }
+
+  function resetEmployeeWeekTrack(target?: HTMLDivElement | null) {
+    const track = target || weekTrackRef.current;
+    if (!track) return;
+    track.classList.remove('is-dragging', 'is-settling');
+    track.style.setProperty('--wiw-employee-swipe-x', '0px');
+  }
+
+  function animateEmployeeWeek(amount: number, target?: HTMLDivElement | null) {
+    const track = target || weekTrackRef.current;
+    if (!track || track.classList.contains('is-settling')) {
+      if (!track) setAnchor((current) => addDays(current, amount));
+      return;
+    }
+    const width = track.parentElement?.clientWidth || window.innerWidth;
+    track.classList.remove('is-dragging');
+    track.classList.add('is-settling');
+    track.style.setProperty('--wiw-employee-swipe-x', `${amount > 0 ? -width : width}px`);
+    window.setTimeout(() => {
+      setAnchor((current) => addDays(current, amount));
+      window.requestAnimationFrame(() => resetEmployeeWeekTrack());
+    }, 180);
+  }
+
+  function scrollToEmployeeDay(day: string) {
+    setAnchor(day);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        document.getElementById(`wiw-employee-day-${day}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+  }

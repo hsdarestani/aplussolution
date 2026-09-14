@@ -1,22 +1,25 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { IonIcon, IonLabel, IonSegment, IonSegmentButton } from '@ionic/react';
+import { IonIcon } from '@ionic/react';
 import {
   briefcaseOutline,
   calendarOutline,
   chevronBackOutline,
-  chevronForwardOutline,
   colorPaletteOutline,
   locationOutline,
   personOutline,
   timeOutline,
 } from 'ionicons/icons';
 import { api } from './api';
+import { schedulePalette } from './scheduleClientPalette';
+import './wiw-schedule-mobile.css';
 import './wiw-employee-schedule-mobile.css';
 
 const TZ = 'Europe/Berlin';
 const unpack = (value: any): any[] => value?.results || value || [];
 const pad = (value: number) => String(value).padStart(2, '0');
+const normalize = (value: string) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const clientKey = (shift: any) => String(shift?.client || shift?.client_name || 'ohne-kunde');
 
 function berlinToday() {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
@@ -52,12 +55,75 @@ function time(input: string) {
 function dayLabel(key: string) {
   return new Intl.DateTimeFormat('de-DE', { timeZone: 'UTC', weekday: 'short' }).format(keyDate(key));
 }
+function formatDayHeader(key: string) {
+  const weekday = dayLabel(key);
+  const date = new Intl.DateTimeFormat('de-DE', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric' }).format(keyDate(key));
+  return { weekday, date };
+}
 function fullDate(input: string) {
   return new Intl.DateTimeFormat('de-DE', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(input));
 }
 function hours(shift: any) {
   const gross = Math.max(0, (new Date(shift.ends_at).getTime() - new Date(shift.starts_at).getTime()) / 3600000);
   return Math.max(0, gross - Number(shift.break_minutes || 0) / 60);
+}
+function shortPersonName(value: string) {
+  const parts = String(value || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return parts[0] || '';
+  return parts[0] + ' ' + parts.slice(1).map((part) => part.charAt(0) + '.').join(' ');
+}
+function assignedNames(shift: any) {
+  const names = (shift?.assigned_workers || [])
+    .map((assigned: any) => shortPersonName(assigned?.name || ''))
+    .filter(Boolean);
+  return names.join(', ');
+}
+function isOwnShift(shift: any) {
+  return Boolean((shift?.assigned_workers || []).some((assigned: any) => assigned?.is_me));
+}
+function firstAssignedWorker(shift: any) {
+  const assigned = Array.isArray(shift?.assigned_workers) ? shift.assigned_workers[0] : undefined;
+  if (!assigned) return undefined;
+  return {
+    ...assigned,
+    avatar: assigned.avatar || assigned.photo_url || assigned.photo || assigned.image || undefined,
+  };
+}
+function workerInitials(value?: string) {
+  const parts = String(value || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return 'MA';
+  const first = parts[0]?.[0] || '';
+  const last = parts.length > 1 ? parts[parts.length - 1]?.[0] || '' : '';
+  return `${first}${last}`.toLocaleUpperCase('de-DE') || 'MA';
+}
+function WorkerAvatar({ worker }: { worker?: any }) {
+  if (!worker) return null;
+  return <span className="wiw-worker-avatar-shell" aria-hidden="true">
+    <span className="wiw-worker-avatar wiw-worker-avatar-fallback">{workerInitials(worker.name)}</span>
+    {worker.avatar ? <img className="wiw-worker-avatar wiw-worker-avatar-image" src={worker.avatar} alt="" onError={(event) => event.currentTarget.remove()} /> : null}
+  </span>;
+}
+function positionShortLabel(name?: string) {
+  const key = normalize(String(name || ''));
+  if (key.includes('serviceleitung')) return 'SL';
+  if (key.includes('servicekraft') || key.includes('servicekrat')) return 'SK';
+  if (key.includes('frontoffice') || key.includes('rezeption') || key.includes('reception')) return 'FO';
+  if (key.includes('housekeeping') || key.includes('houskeeping') || key.includes('zimmer')) return 'HK';
+  if (key.includes('bar')) return 'Bar';
+  return String(name || 'Schicht');
+}
+function shiftCardStyle(shift: any) {
+  const palette = schedulePalette(shift?.client_name, shift?.position_name, shift?.color_hue);
+  return {
+    '--wiw-client-hue': String(palette.hue),
+    '--wiw-card-accent': palette.accent,
+    '--wiw-card-open-bg': palette.openBackground,
+    '--wiw-card-filled-bg': palette.filledBackground,
+    '--wiw-card-open-text': palette.openText,
+    '--wiw-card-filled-text': palette.filledText,
+    '--wiw-card-open-muted': palette.openMuted,
+    '--wiw-card-filled-muted': palette.filledMuted,
+  } as React.CSSProperties;
 }
 
 function DetailRow({ icon, children }: { icon: string; children: React.ReactNode }) {
@@ -71,8 +137,10 @@ export default function WiwEmployeeScheduleMobile() {
   const [mobile, setMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches);
   const [worker, setWorker] = useState<any>();
   const [mode, setMode] = useState<Mode>('mine');
+  const [serviceSchedule, setServiceSchedule] = useState(false);
   const [mine, setMine] = useState<any[]>([]);
   const [open, setOpen] = useState<any[]>([]);
+  const [anchor, setAnchor] = useState(berlinToday());
   const [selected, setSelected] = useState<any>();
   const [releaseTarget, setReleaseTarget] = useState<any>();
   const [releaseCandidates, setReleaseCandidates] = useState<any[]>([]);
@@ -81,6 +149,7 @@ export default function WiwEmployeeScheduleMobile() {
   const [releaseError, setReleaseError] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const swipe = useRef<{ x: number; y: number } | undefined>(undefined);
 
   useEffect(() => {
     const root = document.getElementById('root');
@@ -112,11 +181,12 @@ export default function WiwEmployeeScheduleMobile() {
     setBusy(true);
     try {
       const [mineData, openData] = await Promise.all([
-        api('shifts/mine/?ordering=starts_at'),
+        api('employee/schedule/?ordering=starts_at'),
         api('shifts/available/?ordering=starts_at'),
       ]);
-      const nextMine = unpack(mineData);
+      const nextMine = Array.isArray(mineData?.shifts) ? mineData.shifts : unpack(mineData);
       const nextOpen = unpack(openData);
+      setServiceSchedule(Boolean(mineData?.service_schedule));
       setMine(nextMine);
       setOpen(nextOpen);
       setMessage('');
@@ -131,12 +201,8 @@ export default function WiwEmployeeScheduleMobile() {
 
   useEffect(() => {
     if (!active || !mobile || !worker) return;
-    let cancelled = false;
     document.body.classList.add('wiw-employee-schedule-active');
 
-    // The legacy ScheduleV2 stays mounted underneath the worker-specific WIW
-    // surface. Remove only its QA hooks while this replacement is active so
-    // accessibility/testing locators resolve to the visible worker planner.
     const legacyHooks = Array.from(document.querySelectorAll<HTMLElement>(
       '.sv2 [data-testid="phase8-week-strip"], .sv2 [data-testid="schedule-day-view"], .sv2 [data-testid="phase8-week-total"]',
     ));
@@ -150,7 +216,6 @@ export default function WiwEmployeeScheduleMobile() {
     void load();
 
     return () => {
-      cancelled = true;
       document.body.classList.remove('wiw-employee-schedule-active');
       legacyHooks[0]?.setAttribute('data-testid', 'phase8-week-strip');
       legacyHooks[1]?.setAttribute('data-testid', 'schedule-day-view');
@@ -159,16 +224,37 @@ export default function WiwEmployeeScheduleMobile() {
     };
   }, [active, mobile, worker?.id]);
 
+  const weekStart = monday(anchor);
+  const days = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
   const rows = mode === 'mine' ? mine : open;
-  const groupedRows = useMemo(() => {
-    const map = new Map<string, any[]>();
-    [...rows].sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime()).forEach((shift) => {
-      const day = dateKey(shift.starts_at);
-      map.set(day, [...(map.get(day) || []), shift]);
-    });
-    return Array.from(map.entries());
-  }, [rows]);
-  const totalHours = useMemo(() => rows.reduce((sum, shift) => sum + hours(shift), 0), [rows]);
+  const visible = useMemo(() => {
+    if (mode === 'open') {
+      const now = Date.now();
+      return rows
+        .filter((shift) => !shift?.ends_at || new Date(shift.ends_at).getTime() >= now)
+        .sort((left, right) => new Date(left.starts_at).getTime() - new Date(right.starts_at).getTime());
+    }
+    return rows.filter((shift) => days.includes(dateKey(shift.starts_at)));
+  }, [rows, days, mode]);
+  const visibleDays = useMemo(() => mode === 'open'
+    ? Array.from(new Set(visible.map((shift) => dateKey(shift.starts_at)))).sort()
+    : days,
+  [mode, visible, days]);
+  const byDay = useMemo(() => {
+    const map: Record<string, any[]> = {};
+    visibleDays.forEach((day) => { map[day] = []; });
+    visible.forEach((shift) => { (map[dateKey(shift.starts_at)] ||= []).push(shift); });
+    Object.values(map).forEach((items) => items.sort((left, right) => {
+      const clientOrder = String(left.client_name || '').localeCompare(String(right.client_name || ''), 'de');
+      if (clientOrder) return clientOrder;
+      return new Date(left.starts_at).getTime() - new Date(right.starts_at).getTime();
+    }));
+    return map;
+  }, [visibleDays, visible]);
+  const weekHours = useMemo(
+    () => visible.filter(isOwnShift).reduce((sum, shift) => sum + hours(shift), 0),
+    [visible],
+  );
 
   async function claim(shift: any) {
     setBusy(true);
@@ -259,12 +345,14 @@ export default function WiwEmployeeScheduleMobile() {
         <DetailRow icon={briefcaseOutline}>{selected.client_name || 'A+'}</DetailRow>
         <DetailRow icon={briefcaseOutline}>{selected.position_name || 'Einsatz'}</DetailRow>
         <DetailRow icon={locationOutline}>{selected.location_name || 'Einsatzort'}</DetailRow>
-        <DetailRow icon={personOutline}>{mode === 'mine' ? (worker.name || worker.email || 'Mitarbeiter') : 'OpenShift'}</DetailRow>
+        <DetailRow icon={personOutline}>{mode === 'mine' ? (assignedNames(selected) || worker.name || worker.email || 'Mitarbeiter') : 'OpenShift'}</DetailRow>
         <DetailRow icon={colorPaletteOutline}>Standardfarbe</DetailRow>
       </div>
       <div className="wiw-employee-detail-actions">
         {mode === 'open' ? (
           <button type="button" className="primary" disabled={busy} onClick={() => void claim(selected)}>{busy ? 'Bitte warten …' : 'Schicht übernehmen'}</button>
+        ) : !isOwnShift(selected) ? (
+          <button type="button" disabled>Nur sichtbar · Service Zeitplan</button>
         ) : selected.my_release_request?.status === 'pending' ? (
           <button type="button" disabled>
             {selected.my_release_request?.requested_worker
@@ -278,27 +366,65 @@ export default function WiwEmployeeScheduleMobile() {
       {message && <div className="wiw-employee-message">{message}</div>}
     </div>
   ) : (
-    <div className="wiw-employee-schedule" data-testid="wiw-employee-schedule">
-      <IonSegment value={mode} className="wiw-employee-tabs" onIonChange={(event) => setMode((event.detail.value as Mode) || 'mine')}>
-        <IonSegmentButton value="mine"><IonLabel>Meine Schichten</IonLabel></IonSegmentButton>
-        <IonSegmentButton value="open"><IonLabel>OpenShifts <b>{open.length}</b></IonLabel></IonSegmentButton>
-      </IonSegment>
-
-      <div className="wiw-employee-week-scroll" data-testid="schedule-day-view" data-layout="list">
-        {groupedRows.map(([day, shifts]) => <section className="wiw-employee-day" key={day}>
-          <header><strong>{dayLabel(day)}</strong><span>{new Intl.DateTimeFormat('de-DE', { timeZone: 'UTC', day: '2-digit', month: '2-digit' }).format(keyDate(day))}</span><em>{shifts.length}</em></header>
-          {shifts.map((shift) => <button type="button" className="wiw-employee-shift-card" key={shift.id} onClick={() => setSelected(shift)}>
-            <div><b>{shift.position_name || 'Einsatz'}</b><span>{time(shift.starts_at)}–{time(shift.ends_at)}</span></div>
-            <p>{mode === 'mine' ? (worker.name || worker.email || 'Mitarbeiter') : 'OpenShift'}</p>
-            <small>{shift.location_name || 'Einsatzort'}</small>
-            {shift.my_release_request?.status === 'pending' && <i>Freigabe angefragt</i>}
-            <IonIcon icon={chevronForwardOutline} />
-          </button>)}
-        </section>)}
-        {!groupedRows.length && <div className="wiw-employee-day-empty">{busy ? 'Schichten werden geladen …' : mode === 'open' ? 'Keine verfügbaren OpenShifts' : 'Keine eigenen Schichten'}</div>}
+    <div className={`wiw-employee-schedule wiw-schedule-mobile wiw-employee-admin-parity ${mode === 'open' ? 'is-open-list' : ''}`} data-testid="wiw-employee-schedule">
+      <div className="wiw-schedule-tools">
+        <div className="wiw-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={mode === 'mine'} className={mode === 'mine' ? 'active' : ''} onClick={() => setMode('mine')}>{serviceSchedule ? 'Service Zeitplan' : 'Meine Schichten'}</button>
+          <button type="button" role="tab" aria-selected={mode === 'open'} className={mode === 'open' ? 'active' : ''} onClick={() => setMode('open')}>OpenShifts</button>
+        </div>
       </div>
 
-      {mode === 'mine' && <div className="wiw-employee-week-total" data-testid="shift-list-total"><span>Gesamtstunden</span><strong>{totalHours.toFixed(1)}</strong></div>}
+      {mode !== 'open' ? <div className="wiw-week-strip" data-testid="phase8-week-strip" style={{ top: 42 }}>
+        <button type="button" aria-label="Vorherige Woche" onClick={() => setAnchor(addDays(anchor, -7))}>‹</button>
+        {days.map((day) => <button type="button" key={day} className={`${day === anchor ? 'active ' : ''}${day === berlinToday() ? 'today' : ''}`} onClick={() => setAnchor(day)}><small>{dayLabel(day).slice(0, 2)}</small><b>{keyDate(day).getUTCDate()}</b></button>)}
+        <button type="button" aria-label="Nächste Woche" onClick={() => setAnchor(addDays(anchor, 7))}>›</button>
+      </div> : null}
+
+      <div
+        className="wiw-week-scroll"
+        data-testid="schedule-day-view"
+        style={mode === 'mine' ? { paddingBottom: 'calc(124px + env(safe-area-inset-bottom))' } : undefined}
+        onTouchStart={(event) => {
+          if (mode === 'open') return;
+          const touch = event.touches[0];
+          swipe.current = { x: touch.clientX, y: touch.clientY };
+        }}
+        onTouchEnd={(event) => {
+          if (mode === 'open' || !swipe.current || !event.changedTouches.length) return;
+          const touch = event.changedTouches[0];
+          const dx = touch.clientX - swipe.current.x;
+          const dy = touch.clientY - swipe.current.y;
+          swipe.current = undefined;
+          if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.2) setAnchor(addDays(anchor, dx < 0 ? 7 : -7));
+        }}
+      >
+        {visibleDays.map((day) => {
+          const header = formatDayHeader(day);
+          const dayShifts = byDay[day] || [];
+          return <section className="wiw-day-section wiw-day-visual" id={`wiw-employee-day-${day}`} key={day}>
+            <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayShifts.length}</em></header>
+            {dayShifts.map((shift, index) => {
+              const assigned = firstAssignedWorker(shift);
+              const workerName = assigned?.name ? shortPersonName(assigned.name) : assignedNames(shift);
+              const openShift = mode === 'open';
+              return <React.Fragment key={String(shift.id)}>
+                {index > 0 && clientKey(dayShifts[index - 1]) !== clientKey(shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}
+                <button type="button" className={`wiw-shift-card ${openShift ? 'is-open' : 'is-filled'}${!openShift && !isOwnShift(shift) ? ' peer-shift' : ''}`} style={shiftCardStyle(shift)} onClick={() => setSelected(shift)}>
+                  <div className="wiw-card-line primary">
+                    <span className="wiw-card-person"><WorkerAvatar worker={openShift ? undefined : assigned} /><b>{openShift ? 'OpenShift' : (workerName || worker.name || worker.email || 'Mitarbeiter')}{openShift ? <span className="wiw-open-alert">!</span> : null}</b></span>
+                    <span>{time(shift.starts_at)}–{time(shift.ends_at)}</span>
+                  </div>
+                  <div className="wiw-card-line secondary"><span className={openShift ? 'open' : ''}>{positionShortLabel(shift.position_name)}</span><small>{shift.location_name || 'Einsatzort'}</small></div>
+                </button>
+              </React.Fragment>;
+            })}
+            {mode !== 'open' && !dayShifts.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
+          </section>;
+        })}
+        {mode === 'open' && !visibleDays.length ? <div className="wiw-day-empty">{busy ? 'OpenShifts werden geladen …' : 'Keine verfügbaren OpenShifts'}</div> : null}
+      </div>
+
+      {mode !== 'open' ? <div className="wiw-week-total" data-testid="phase8-week-total" style={{ position: 'fixed', left: 0, right: 0, bottom: 'calc(58px + env(safe-area-inset-bottom))', zIndex: 120, height: 54, minHeight: 54, padding: '0 18px', margin: 0 }}><span>{serviceSchedule ? 'Eigene Gesamtstunden' : 'Gesamtstunden'}</span><strong>{weekHours.toFixed(1)}</strong></div> : null}
       {message && <div className="wiw-employee-message sticky">{message}</div>}
     </div>
   );
