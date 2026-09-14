@@ -5,7 +5,8 @@
             const touch = event.touches[0];
             swipe.current = { x: touch.clientX, y: touch.clientY };
             swipeTravel.current = 0;
-            event.currentTarget.classList.remove('is-settling');
+            event.currentTarget.classList.remove('is-dragging', 'is-settling');
+            event.currentTarget.style.setProperty('--wiw-swipe-x', '0px');
           }}
           onTouchMove={(event) => {
             if (!swipe.current || !event.touches.length || tab === 'open') return;
@@ -14,8 +15,9 @@
             const dy = touch.clientY - swipe.current.y;
             if (Math.abs(dx) < Math.abs(dy) * 1.08) return;
             swipeTravel.current = dx;
-            if (swipeFrame.current) return;
             const target = event.currentTarget;
+            target.classList.add('is-dragging');
+            if (swipeFrame.current) return;
             swipeFrame.current = window.requestAnimationFrame(() => {
               swipeFrame.current = undefined;
               target.style.setProperty('--wiw-swipe-x', `${swipeTravel.current}px`);
@@ -30,9 +32,10 @@
             const dy = touch.clientY - swipe.current.y;
             swipe.current = undefined;
             const target = event.currentTarget;
+            target.classList.add('is-settling');
+            target.classList.remove('is-dragging');
             if (tab !== 'open' && Math.abs(dx) > 44 && Math.abs(dx) > Math.abs(dy) * 1.12) {
               const width = target.parentElement?.clientWidth || window.innerWidth;
-              target.classList.add('is-settling');
               target.style.setProperty('--wiw-swipe-x', `${dx < 0 ? -width : width}px`);
               window.setTimeout(() => {
                 changeWeek(dx < 0 ? 7 : -7);
@@ -41,7 +44,6 @@
               }, 180);
               return;
             }
-            target.classList.add('is-settling');
             target.style.setProperty('--wiw-swipe-x', '0px');
             window.setTimeout(() => target.classList.remove('is-settling'), 180);
           }}
@@ -50,6 +52,7 @@
             swipeFrame.current = undefined;
             swipe.current = undefined;
             event.currentTarget.classList.add('is-settling');
+            event.currentTarget.classList.remove('is-dragging');
             event.currentTarget.style.setProperty('--wiw-swipe-x', '0px');
             window.setTimeout(() => event.currentTarget.classList.remove('is-settling'), 180);
           }}
@@ -62,7 +65,7 @@
               return <section className="wiw-day-section" id={`wiw-day-${day}`} key={day}>
                 <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}</em></header>
                 {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'} ${recentCopyShiftId && String(card.shift.id) === recentCopyShiftId ? 'is-copy-entering' : ''}`} style={shiftCardStyle(card.shift)} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
-                  <div className="wiw-card-line primary"><span className="wiw-card-person">{card.worker?.avatar ? <img className="wiw-worker-avatar" src={card.worker.avatar} alt="" /> : null}<b>{shortWorkerName(card.worker?.name) || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}{card.isOpen && card.shift.status !== 'draft' ? <span className="wiw-open-alert">!</span> : null}</b></span><span>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</span></div>
+                  <div className="wiw-card-line primary"><span className="wiw-card-person"><WorkerAvatar worker={card.worker} /><b>{shortWorkerName(card.worker?.name) || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}{card.isOpen && card.shift.status !== 'draft' ? <span className="wiw-open-alert">!</span> : null}</b></span><span>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</span></div>
                   <div className="wiw-card-line secondary"><span className={card.isOpen ? 'open' : ''}>{positionShortLabel(card.shift.position_name)}</span><small>{card.shift.location_name || 'Einsatzort'}</small></div>
                 </button></React.Fragment>)}
                 {tab !== 'open' && !dayCards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}

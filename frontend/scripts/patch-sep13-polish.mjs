@@ -21,6 +21,13 @@ patchFile('WiwScheduleMobile.tsx', (source) => {
 
   next = replaceRequired(
     next,
+    "import './wiw-schedule-mobile.css';",
+    "import './wiw-schedule-mobile.css';\nimport './sep13-dienstplan-polish.css';",
+    'Dienstplan polish CSS import',
+  );
+
+  next = replaceRequired(
+    next,
     "  { key: 'night', label: 'Nachtdienst', start: 22 * 60 + 30, end: 24 * 60 + 6 * 60 + 30 },",
     "  { key: 'night', label: 'Nachtdienst', start: 22 * 60 + 45, end: 24 * 60 + 6 * 60 + 46 },",
     'hotel night preset',
@@ -137,4 +144,15 @@ function shortLabel(start: Date, end: Date) { const last = periodLastDay(end); r
     'employee month range',
   );
   return `// SEP13_MONTH_RANGE_POLISH\n${next}`;
+});
+
+patchFile('App.tsx', (source) => {
+  if (source.includes('SEP14_TIME_GLOBAL_SEARCH_REMOVAL')) return source;
+  const next = replaceRequired(
+    source,
+    `<main className="app-main">{isManager(user) && <GlobalSearch onNavigate={navigateTo} />}{content}</main>`,
+    `<main className="app-main">{isManager(user) && view !== 'time' && <GlobalSearch onNavigate={navigateTo} />}{content}</main>`,
+    'Team-Zeiterfassung global search removal',
+  );
+  return `// SEP14_TIME_GLOBAL_SEARCH_REMOVAL\n${next}`;
 });
