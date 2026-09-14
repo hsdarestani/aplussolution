@@ -5,6 +5,12 @@ from rest_framework.response import Response
 from .models import User, WorkerProfile
 
 
+# Management accounts can still have a WorkerProfile because they were imported from
+# the legacy workforce/WIW directory. They must never participate in the public
+# employee ranking even when their account role was left as ``worker`` historically.
+MANAGEMENT_EMPLOYEE_NUMBERS = {'48430803'}  # Ashkan A.
+
+
 @api_view(['GET'])
 def employee_ranking(request):
     """Return only the small, non-sensitive dataset needed by the worker ranking UI.
@@ -19,6 +25,9 @@ def employee_ranking(request):
     workers = (
         WorkerProfile.objects.select_related('user')
         .filter(active=True, user__is_active=True, user__role=User.Role.WORKER)
+        .exclude(user__is_staff=True)
+        .exclude(user__is_superuser=True)
+        .exclude(employee_number__in=MANAGEMENT_EMPLOYEE_NUMBERS)
         .exclude(user__email__iendswith='@sync.invalid')
         .exclude(employee_number__startswith='STORE-REVIEW-')
         .order_by('-ranking_points', 'user__last_name', 'user__first_name', 'employee_number')

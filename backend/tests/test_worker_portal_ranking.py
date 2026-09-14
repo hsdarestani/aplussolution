@@ -63,3 +63,52 @@ def test_manager_profile_is_not_in_public_worker_ranking(auth_worker, manager_us
 
     assert response.status_code == 200
     assert 'MA-MANAGER' not in {row['employee_number'] for row in response.data}
+
+
+@pytest.mark.django_db
+def test_ashkan_management_profile_is_excluded_even_with_legacy_worker_role(auth_worker):
+    ashkan = User.objects.create_user(
+        'ashkan@example.com',
+        'StrongPass123!',
+        first_name='Ashkan',
+        last_name='A',
+        role=User.Role.WORKER,
+    )
+    WorkerProfile.objects.create(
+        user=ashkan,
+        employee_number='48430803',
+        employment_type='vollzeit',
+        active=True,
+        ranking_points=999,
+    )
+
+    response = auth_worker.get('/api/employee/ranking/')
+
+    assert response.status_code == 200
+    employee_numbers = {row['employee_number'] for row in response.data}
+    assert '48430803' not in employee_numbers
+    assert all(row['user_detail']['name'] != 'Ashkan A.' for row in response.data)
+
+
+@pytest.mark.django_db
+def test_staff_account_is_excluded_from_ranking_even_if_role_is_worker(auth_worker):
+    staff_worker = User.objects.create_user(
+        'staff-worker@example.com',
+        'StrongPass123!',
+        first_name='Office',
+        last_name='Manager',
+        role=User.Role.WORKER,
+        is_staff=True,
+    )
+    WorkerProfile.objects.create(
+        user=staff_worker,
+        employee_number='MA-STAFF',
+        employment_type='vollzeit',
+        active=True,
+        ranking_points=999,
+    )
+
+    response = auth_worker.get('/api/employee/ranking/')
+
+    assert response.status_code == 200
+    assert 'MA-STAFF' not in {row['employee_number'] for row in response.data}
