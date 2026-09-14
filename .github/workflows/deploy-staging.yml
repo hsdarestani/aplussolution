@@ -121,6 +121,12 @@ jobs:
           $COMPOSE config >/dev/null
           $COMPOSE up -d --build --remove-orphans
 
+          # The edge Caddyfile is a file bind mount and backend/frontend containers
+          # can receive new addresses after a deploy. Recreate only staging_edge so
+          # it binds the freshly extracted config and resolves the current upstreams.
+          $COMPOSE up -d --force-recreate --no-deps staging_edge
+          $COMPOSE exec -T staging_edge caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
           backend_ready=0
           for i in $(seq 1 60); do
             if $COMPOSE exec -T staging_backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
@@ -144,7 +150,7 @@ jobs:
           $COMPOSE ps
           REMOTE
 
-      - name: Verify public staging through Cloudflare
+      - name: Verify public staging
         run: |
           set -euo pipefail
           url='https://staging.app.aplus-solution.de/health/'
@@ -160,4 +166,4 @@ jobs:
 
       - name: Cleanup runner key
         if: always()
-        run: rm -f "$HOME/.ssh/strato_ed25519"
+        run: rm -f "$HOME/.ssh/strato_ed25519" /tmp/staging-health
