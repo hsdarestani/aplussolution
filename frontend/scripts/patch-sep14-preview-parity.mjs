@@ -12,6 +12,12 @@ function replaceRequired(needle, replacement, label) {
 }
 
 replaceRequired(
+  "import './sep14-week-swipe-stability.css';",
+  "import './sep14-week-swipe-stability.css';\nimport './sep14-preview-parity.css';",
+  'preview parity css import',
+);
+
+replaceRequired(
   'function AdjacentWeekPreview({ weekStart, groupFilter, query }: { weekStart: string; groupFilter: string[]; query: string }) {',
   `function previewShiftCardStyle(shift: any) {
   const palette = schedulePalette(shift?.client_name, shift?.position_name, shift?.color_hue);
