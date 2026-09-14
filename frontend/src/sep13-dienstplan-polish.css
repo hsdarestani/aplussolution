@@ -2,10 +2,23 @@
 .app-launch-splash{z-index:2147483647!important;isolation:isolate!important}
 
 @media(max-width:900px){
-  body.wiw-native-schedule-active .wiw-day-section>header{position:sticky!important;top:135px!important;z-index:6!important;background:#f0f0f0!important;box-shadow:0 1px 0 rgba(15,23,42,.08)}
+  /* The two compact toolbar rows occupy 81px and the week strip another 55px.
+     Keep the active day label directly underneath them while scrolling, exactly
+     like the WIW reference. */
+  body.wiw-native-schedule-active .wiw-day-section>header{
+    position:sticky!important;
+    top:136px!important;
+    z-index:6!important;
+    background:#f0f0f0!important;
+    box-shadow:0 1px 0 rgba(15,23,42,.08);
+  }
   body.wiw-native-schedule-active .wiw-week-total{position:fixed!important;left:0!important;right:0!important;bottom:calc(62px + env(safe-area-inset-bottom))!important;z-index:120!important;height:54px!important;min-height:54px!important;margin:0!important;padding:0 18px!important;font-size:15px!important;box-shadow:0 -3px 12px rgba(15,23,42,.16)}
   body.wiw-native-schedule-active .wiw-week-total strong{font-size:18px!important}
   body.wiw-native-schedule-active .wiw-week-scroll{padding-bottom:calc(132px + env(safe-area-inset-bottom))!important}
+
+  /* Team-Zeiterfassung must never inherit the manager-wide global search. The
+     App patch removes it from the DOM; this is a defensive mobile fallback. */
+  body.wiw-attendance-active .app-main>.global-search{display:none!important}
 
   /* Adjacent weeks are visually identical to active days while remaining outside
      the active .wiw-day-section semantics used for sticky headers/scroll targets. */
@@ -16,17 +29,86 @@
   .wiw-adjacent-day-section>header em{margin-left:auto;font-size:10px;font-style:normal;color:#a0a0a0}
 }
 
-.wiw-card-person{display:flex;align-items:center;gap:8px;min-width:0}
+/* Keep the avatar/name block anchored to the left. Older WIW CSS applies
+   margin-left:auto to every span in the primary row, so these selectors must be
+   deliberately more specific. */
+.wiw-shift-card .wiw-card-line.primary>.wiw-card-person{
+  margin-left:0!important;
+  margin-right:8px!important;
+  flex:1 1 auto;
+  display:flex;
+  align-items:center;
+  gap:9px;
+  min-width:0;
+}
 .wiw-card-person b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.wiw-worker-avatar{width:28px;height:28px;flex:0 0 28px;border-radius:50%;object-fit:cover;background:#dbe4ee;border:1px solid rgba(15,23,42,.09)}
+.wiw-shift-card .wiw-card-line.primary>.wiw-card-person .wiw-open-alert{margin-left:4px!important}
+.wiw-shift-card .wiw-card-line.primary>span:not(.wiw-card-person){margin-left:auto!important;flex:0 0 auto}
 
-.wiw-week-swipe-viewport{width:100%;overflow:hidden}
-.wiw-week-swipe-track{--wiw-swipe-x:0px;width:300%;display:flex;align-items:flex-start;transform:translate3d(calc(-33.333333% + var(--wiw-swipe-x)),0,0);will-change:transform;touch-action:pan-y}
+.wiw-worker-avatar-shell{
+  position:relative;
+  display:block!important;
+  width:32px!important;
+  height:32px!important;
+  min-width:32px!important;
+  flex:0 0 32px!important;
+  margin-left:0!important;
+  border-radius:50%;
+  overflow:hidden;
+  background:#d8dde1;
+}
+.wiw-worker-avatar{
+  position:absolute;
+  inset:0;
+  width:32px!important;
+  height:32px!important;
+  min-width:32px!important;
+  margin:0!important;
+  border-radius:50%;
+  object-fit:cover;
+  object-position:center center;
+  border:1px solid rgba(15,23,42,.10);
+}
+.wiw-shift-card .wiw-card-line.primary .wiw-worker-avatar-fallback{
+  display:grid!important;
+  place-items:center;
+  background:#d8dde1!important;
+  color:#68737d!important;
+  font-size:10px!important;
+  line-height:1!important;
+  font-weight:800!important;
+  letter-spacing:.02em;
+  white-space:nowrap;
+}
+.wiw-worker-avatar-image{z-index:1;background:#d8dde1}
+
+/* Clip neighboring weeks without creating a scroll container. overflow:hidden
+   made the day headers sticky relative to this local element instead of the page,
+   which visually pushed two cards above their own date label. */
+.wiw-week-swipe-viewport{width:100%;overflow:clip;clip-path:inset(0)}
+.wiw-week-swipe-track{
+  --wiw-swipe-x:0px;
+  width:300%;
+  margin-left:-100%;
+  display:flex;
+  align-items:flex-start;
+  transform:none;
+  will-change:auto;
+  touch-action:pan-y;
+}
+.wiw-week-swipe-track.is-dragging,
+.wiw-week-swipe-track.is-settling{transform:translate3d(var(--wiw-swipe-x),0,0);will-change:transform}
+.wiw-week-swipe-track.is-dragging{transition:none}
 .wiw-week-swipe-track.is-settling{transition:transform .18s ease-out}
 .wiw-week-pane{width:33.333333%;flex:0 0 33.333333%;min-width:0}
 .wiw-week-preview{pointer-events:none}
 .wiw-week-preview .wiw-adjacent-day-section>header{position:static!important}
+.wiw-week-swipe-track .wiw-week-scroll{transform:none!important;will-change:auto!important;backface-visibility:visible!important;perspective:none!important}
 .wiw-week-swipe-track .wiw-week-turn-next,.wiw-week-swipe-track .wiw-week-turn-prev{animation:none!important}
+
+@supports not (overflow:clip){
+  .wiw-week-swipe-viewport{overflow:visible;clip-path:inset(0)}
+}
 
 .wiw-pdf-sheet{display:flex;flex-direction:column;overflow:hidden}
 .wiw-pdf-sheet>header{flex:0 0 auto;position:sticky;top:0;z-index:5;background:#fff}
