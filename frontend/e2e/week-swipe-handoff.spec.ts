@@ -101,6 +101,7 @@ test('adjacent week uses the same geometry and card styling before and after han
   await expect(left.locator('.wiw-shift-card').first()).toBeVisible();
 
   const preview = await left.evaluate(element => {
+    const pane = element.getBoundingClientRect();
     const header = element.querySelector('.wiw-day-visual > header') as HTMLElement;
     const card = element.querySelector('.wiw-shift-card') as HTMLElement;
     const heading = element.querySelector('.wiw-day-heading') as HTMLElement;
@@ -110,7 +111,7 @@ test('adjacent week uses the same geometry and card styling before and after han
     return {
       headerHeight: header.getBoundingClientRect().height,
       headerDisplay: h.display,
-      headingX: heading.getBoundingClientRect().x,
+      headingOffsetX: heading.getBoundingClientRect().x - pane.x,
       cardHeight: r.height,
       cardBackground: c.backgroundImage,
       cardBorder: c.borderLeftColor,
@@ -124,6 +125,7 @@ test('adjacent week uses the same geometry and card styling before and after han
 
   const center = schedule.locator('.wiw-week-pane').nth(1);
   const active = await center.evaluate(element => {
+    const pane = element.getBoundingClientRect();
     const header = element.querySelector('.wiw-day-visual > header') as HTMLElement;
     const card = element.querySelector('.wiw-shift-card') as HTMLElement;
     const heading = element.querySelector('.wiw-day-heading') as HTMLElement;
@@ -133,7 +135,7 @@ test('adjacent week uses the same geometry and card styling before and after han
     return {
       headerHeight: header.getBoundingClientRect().height,
       headerDisplay: h.display,
-      headingX: heading.getBoundingClientRect().x,
+      headingOffsetX: heading.getBoundingClientRect().x - pane.x,
       cardHeight: r.height,
       cardBackground: c.backgroundImage,
       cardBorder: c.borderLeftColor,
@@ -142,7 +144,7 @@ test('adjacent week uses the same geometry and card styling before and after han
 
   expect(active.headerHeight).toBe(preview.headerHeight);
   expect(active.headerDisplay).toBe(preview.headerDisplay);
-  expect(Math.abs(active.headingX - preview.headingX)).toBeLessThanOrEqual(1);
+  expect(Math.abs(active.headingOffsetX - preview.headingOffsetX)).toBeLessThanOrEqual(1);
   expect(active.cardHeight).toBe(preview.cardHeight);
   expect(active.cardBackground).toBe(preview.cardBackground);
   expect(active.cardBorder).toBe(preview.cardBorder);
