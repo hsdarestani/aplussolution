@@ -1,0 +1,145 @@
+name: Deploy A+ Solution staging
+
+on:
+  push:
+    branches:
+      - staging
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aplus-staging-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate staging configuration
+        run: |
+          set -euo pipefail
+          grep -q 'staging.app.aplus-solution.de' Caddyfile.staging
+          grep -q 'aplus_staging_edge' docker-compose.staging.yml
+          grep -q 'de.aplussolution.staging' frontend/capacitor.config.ts
+
+      - name: Configure Strato SSH key
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Package staging release
+        run: |
+          set -euo pipefail
+          tar --exclude='.git' --exclude='.env' --exclude='frontend/node_modules' -czf /tmp/aplussolution-staging-release.tgz .
+
+      - name: Upload staging release
+        run: |
+          set -euo pipefail
+          scp -q -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 /tmp/aplussolution-staging-release.tgz root@"$STRATO_HOST":/tmp/aplussolution-staging-release.tgz
+
+      - name: Deploy staging without touching production data
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=12 root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          PROD_DIR=/opt/aplussolution
+          STAGING_DIR=/opt/aplussolution-staging
+          STAGING_ENV="$STAGING_DIR/.env"
+          PROJECT=aplus_staging
+          COMPOSE="docker compose -p $PROJECT -f docker-compose.staging.yml"
+
+          test -d "$PROD_DIR"
+          prod_caddy_id=$(cd "$PROD_DIR" && docker compose ps -q caddy)
+          test -n "$prod_caddy_id"
+          edge_network=$(docker inspect -f '{{range $name, $cfg := .NetworkSettings.Networks}}{{$name}}{{"\n"}}{{end}}' "$prod_caddy_id" | head -n1)
+          test -n "$edge_network"
+          docker network inspect "$edge_network" >/dev/null
+
+          mkdir -p "$STAGING_DIR"
+          if [ ! -f "$STAGING_ENV" ]; then
+            db_password=$(openssl rand -hex 24)
+            django_secret=$(openssl rand -hex 48)
+            {
+              echo 'DEBUG=0'
+              printf 'DJANGO_SECRET_KEY=%s\n' "$django_secret"
+              echo 'ALLOWED_HOSTS=staging.app.aplus-solution.de,localhost,127.0.0.1'
+              echo 'CSRF_TRUSTED_ORIGINS=https://staging.app.aplus-solution.de'
+              echo 'CORS_ALLOWED_ORIGINS=https://staging.app.aplus-solution.de,https://localhost,capacitor://localhost,http://localhost'
+              echo 'NATIVE_APP_CORS_ORIGINS=https://localhost,capacitor://localhost,http://localhost'
+              echo 'APP_URL=https://staging.app.aplus-solution.de'
+              echo 'API_URL=https://staging.app.aplus-solution.de/api'
+              echo 'APP_DOMAIN=staging.app.aplus-solution.de'
+              echo 'POSTGRES_DB=aplussolution_staging'
+              echo 'POSTGRES_USER=aplussolution_staging'
+              printf 'POSTGRES_PASSWORD=%s\n' "$db_password"
+              printf 'DATABASE_URL=postgresql://aplussolution_staging:%s@staging_db:5432/aplussolution_staging\n' "$db_password"
+              echo 'REDIS_URL=redis://staging_redis:6379/0'
+              echo 'WORKER_EMAILS_ENABLED=0'
+              echo 'EMAIL_HOST='
+              echo 'WIW_SYNC_ENABLED=0'
+              echo 'WIW_DEV_KEY='
+              echo 'WIW_EMAIL='
+              echo 'WIW_PASSWORD='
+              echo 'WIW_USER_ID='
+              echo 'WIW_WEBHOOK_SECRET='
+              echo 'FIREBASE_PROJECT_ID='
+              echo 'FIREBASE_CREDENTIALS_JSON='
+              echo 'APNS_TEAM_ID='
+              echo 'APNS_KEY_ID='
+              echo 'APNS_PRIVATE_KEY='
+              echo 'APNS_BUNDLE_ID=de.aplussolution.staging'
+              echo 'APNS_USE_SANDBOX=1'
+              echo 'SAML_ENABLED=0'
+              printf 'EDGE_NETWORK=%s\n' "$edge_network"
+            } > "$STAGING_ENV"
+            chmod 600 "$STAGING_ENV"
+          else
+            tmp_env=$(mktemp)
+            grep -v '^EDGE_NETWORK=' "$STAGING_ENV" > "$tmp_env" || true
+            printf 'EDGE_NETWORK=%s\n' "$edge_network" >> "$tmp_env"
+            mv "$tmp_env" "$STAGING_ENV"
+            chmod 600 "$STAGING_ENV"
+          fi
+
+          find "$STAGING_DIR" -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
+          tar -xzf /tmp/aplussolution-staging-release.tgz -C "$STAGING_DIR"
+          rm -f /tmp/aplussolution-staging-release.tgz
+
+          cd "$STAGING_DIR"
+          $COMPOSE config >/dev/null
+          $COMPOSE up -d --build --remove-orphans
+
+          backend_ready=0
+          for i in $(seq 1 60); do
+            if $COMPOSE exec -T staging_backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
+              backend_ready=1
+              break
+            fi
+            sleep 3
+          done
+          test "$backend_ready" -eq 1
+
+          for service in staging_db staging_redis staging_backend staging_celery staging_frontend staging_edge; do
+            cid=$($COMPOSE ps -q "$service")
+            test -n "$cid"
+            test "$(docker inspect -f '{{.State.Running}}' "$cid")" = 'true'
+          done
+
+          $COMPOSE exec -T staging_backend python manage.py check
+          $COMPOSE exec -T staging_backend python manage.py migrate --check
+          $COMPOSE exec -T staging_edge wget -qO- http://127.0.0.1/health/ >/dev/null
+          $COMPOSE exec -T staging_backend python manage.py shell -c "from django.conf import settings; assert settings.DATABASES['default']['NAME']=='aplussolution_staging'; assert settings.APP_URL=='https://staging.app.aplus-solution.de'; assert settings.WIW_SYNC_ENABLED is False; assert settings.WORKER_EMAILS_ENABLED is False; print('staging isolation ok')"
+          $COMPOSE ps
+          REMOTE
