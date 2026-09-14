@@ -143,3 +143,21 @@ jobs:
           $COMPOSE exec -T staging_backend python manage.py shell -c "from django.conf import settings; assert settings.DATABASES['default']['NAME']=='aplussolution_staging'; assert settings.APP_URL=='https://staging.app.aplus-solution.de'; assert settings.WIW_SYNC_ENABLED is False; assert settings.WORKER_EMAILS_ENABLED is False; print('staging isolation ok')"
           $COMPOSE ps
           REMOTE
+
+      - name: Verify public staging through Cloudflare
+        run: |
+          set -euo pipefail
+          url='https://staging.app.aplus-solution.de/health/'
+          for attempt in $(seq 1 18); do
+            if curl -fsS --connect-timeout 10 --max-time 20 "$url" >/tmp/staging-health; then
+              cat /tmp/staging-health
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Public staging health check failed: $url" >&2
+          exit 1
+
+      - name: Cleanup runner key
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
