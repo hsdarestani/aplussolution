@@ -28,6 +28,10 @@ def _multiline(value: str) -> str:
     return (value or '').replace('\\n', '\n').strip()
 
 
+def native_app_id() -> str:
+    return os.getenv('NATIVE_APP_ID', '').strip() or DEFAULT_BUNDLE_ID
+
+
 def _firebase_credentials() -> dict[str, Any]:
     raw = os.getenv('FIREBASE_CREDENTIALS_JSON', '').strip()
     if not raw:
@@ -50,9 +54,6 @@ def firebase_project_id() -> str:
 
 
 def _apns_values() -> tuple[str, str, str, str, bool]:
-    # APNs auth keys are capability-scoped. Do not reuse Sign in with Apple or
-    # App Store Connect API keys here: they can be syntactically valid .p8 keys
-    # while still being rejected by APNs.
     team_id = os.getenv('APNS_TEAM_ID', '').strip() or os.getenv('APPLE_TEAM_ID', '').strip()
     key_id = os.getenv('APNS_KEY_ID', '').strip()
     private_key = _multiline(os.getenv('APNS_PRIVATE_KEY', ''))
@@ -144,9 +145,6 @@ def _send_android(
                     'sound': ANDROID_NOTIFICATION_SOUND,
                     'channel_id': ANDROID_NOTIFICATION_CHANNEL_ID,
                     'icon': ANDROID_NOTIFICATION_ICON,
-                    # Stable tag is a second line of defence on Android: even if a
-                    # provider/network retry gets through, it replaces the same
-                    # notification instead of creating another visible card.
                     'tag': f'aplus-{notification.id}',
                 },
             },
@@ -211,7 +209,11 @@ def _send_ios(
 def deliver_notification(notification: Notification) -> dict[str, int]:
     result = {'sent': 0, 'failed': 0, 'deactivated': 0, 'skipped': 0}
     enabled, title, body, _rule_key = render_push_notification(notification)
-    devices = PushDevice.objects.filter(user=notification.user, active=True).order_by('-last_seen_at')
+    devices = PushDevice.objects.filter(
+        user=notification.user,
+        app_id=native_app_id(),
+        active=True,
+    ).order_by('-last_seen_at')
     if not enabled:
         result['skipped'] = devices.count()
         return result
@@ -222,9 +224,6 @@ def deliver_notification(notification: Notification) -> dict[str, int]:
             result['skipped'] += 1
             continue
 
-        # Celery uses at-least-once task delivery. Claim this exact
-        # notification/device pair before talking to FCM/APNs so task retries or
-        # concurrent workers cannot show the same push twice on one device.
         delivery, claimed = PushDelivery.objects.get_or_create(
             notification=notification,
             device=device,
@@ -251,9 +250,6 @@ def deliver_notification(notification: Notification) -> dict[str, int]:
                 device.save(update_fields=['last_error', 'updated_at'])
             continue
 
-        # A provider/transport failure must remain retryable. Release the claim;
-        # a later Celery retry can attempt it again. Successful sends keep the
-        # claim permanently and therefore cannot be re-sent.
         delivery.delete()
         result['failed'] += 1
         device.last_error = error[:2000]
