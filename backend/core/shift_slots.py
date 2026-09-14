@@ -63,10 +63,16 @@ def _restore_locally_managed_slot_state(instance: Shift, slot: ShiftSlot) -> boo
 
     For a locally managed card the slot is the source of truth. Repair the legacy
     Shift mirror with a queryset update (so this post-save signal does not recurse)
-    and leave the slot untouched.
+    and leave the slot assignment untouched. If this is the first time a matching
+    local card is being bound to a WIW shift, attach only the external identity to
+    the slot while preserving the native source/worker/status.
     """
     if slot.source in {'wiw', 'migration', 'system'}:
         return False
+
+    if instance.wiw_shift_id and slot.wiw_shift_id != instance.wiw_shift_id:
+        slot.wiw_shift_id = instance.wiw_shift_id
+        slot.save(update_fields=['wiw_shift_id', 'updated_at'])
 
     claimed = slot.status == ShiftSlot.Status.CLAIMED and slot.worker_id is not None
     expected_worker_id = slot.worker_id if claimed else None
