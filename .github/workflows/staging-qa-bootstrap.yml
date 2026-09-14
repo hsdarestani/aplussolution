@@ -53,7 +53,7 @@ jobs:
           done
           test "$ready" -eq 1
 
-          $COMPOSE exec -T staging_backend python manage.py shell <<'PY'
+          $COMPOSE exec -T staging_backend python manage.py shell <<'PY' >/tmp/staging-qa-bootstrap.out
           from datetime import timedelta
           from django.conf import settings
           from django.utils import timezone
@@ -162,15 +162,43 @@ jobs:
           assert assigned.worker_id == worker.id
           assert open_shift.is_open and open_shift.worker_id is None
 
-          print('STAGING_QA_READY=1')
-          print('STAGING_QA_EMAIL=' + email)
-          print('STAGING_QA_ACTIVATION_URL=' + activation_url)
-          print('STAGING_QA_INVITATION_EXPIRES=' + invitation.expires_at.isoformat())
-          print('STAGING_QA_ASSIGNED_SHIFT=' + str(assigned.id))
-          print('STAGING_QA_OPEN_SHIFT=' + str(open_shift.id))
+          print('email=' + email)
+          print('activation_url=' + activation_url)
+          print('expires_at=' + invitation.expires_at.isoformat())
+          print('assigned_shift_id=' + str(assigned.id))
+          print('open_shift_id=' + str(open_shift.id))
           PY
+
+          test -s /tmp/staging-qa-bootstrap.out
+          grep -q '^activation_url=https://staging.app.aplus-solution.de/aktivieren?token=' /tmp/staging-qa-bootstrap.out
+          cp /tmp/staging-qa-bootstrap.out /tmp/staging-qa-access.txt
+          chmod 600 /tmp/staging-qa-access.txt
+          echo 'Staging QA account and test shifts are ready.'
           REMOTE
 
-      - name: Cleanup runner key
+      - name: Fetch one-time QA access note
+        run: |
+          set -euo pipefail
+          scp -q -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            root@"$STRATO_HOST":/tmp/staging-qa-access.txt /tmp/staging-qa-access.txt
+          test -s /tmp/staging-qa-access.txt
+
+      - name: Upload one-day QA access artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-qa-access
+          path: /tmp/staging-qa-access.txt
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Cleanup temporary access material
         if: always()
-        run: rm -f "$HOME/.ssh/strato_ed25519"
+        run: |
+          rm -f "$HOME/.ssh/strato_ed25519" /tmp/staging-qa-access.txt
+          if [ -n "${STRATO_HOST:-}" ]; then
+            true
+          fi
