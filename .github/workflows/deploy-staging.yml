@@ -29,6 +29,8 @@ jobs:
           grep -q 'staging.app.aplus-solution.de' Caddyfile.staging
           grep -q 'aplus_staging_edge' docker-compose.staging.yml
           grep -q 'de.aplussolution.staging' frontend/capacitor.config.ts
+          grep -q 'REQUIRE_NATIVE_PUSH' frontend/scripts/build-publisher-android-staging.sh
+          grep -q 'REQUIRE_NATIVE_PUSH' frontend/scripts/build-publisher-ios-staging.sh
 
       - name: Configure Strato SSH key
         run: |
@@ -57,15 +59,34 @@ jobs:
           PROD_DIR=/opt/aplussolution
           STAGING_DIR=/opt/aplussolution-staging
           STAGING_ENV="$STAGING_DIR/.env"
+          PROD_ENV="$PROD_DIR/.env"
           PROJECT=aplus_staging
           COMPOSE="docker compose -p $PROJECT -f docker-compose.staging.yml"
 
           test -d "$PROD_DIR"
+          test -f "$PROD_ENV"
           prod_caddy_id=$(cd "$PROD_DIR" && docker compose ps -q caddy)
           test -n "$prod_caddy_id"
           edge_network=$(docker inspect -f '{{range $name, $cfg := .NetworkSettings.Networks}}{{$name}}{{"\n"}}{{end}}' "$prod_caddy_id" | head -n1)
           test -n "$edge_network"
           docker network inspect "$edge_network" >/dev/null
+
+          set_env() {
+            key="$1"
+            value="$2"
+            tmp_env=$(mktemp)
+            grep -v "^${key}=" "$STAGING_ENV" > "$tmp_env" || true
+            printf '%s=%s\n' "$key" "$value" >> "$tmp_env"
+            mv "$tmp_env" "$STAGING_ENV"
+          }
+
+          copy_prod_env_key() {
+            key="$1"
+            line=$(grep -m1 "^${key}=" "$PROD_ENV" || true)
+            if [ -n "$line" ]; then
+              set_env "$key" "${line#*=}"
+            fi
+          }
 
           mkdir -p "$STAGING_DIR"
           if [ ! -f "$STAGING_ENV" ]; then
@@ -81,6 +102,7 @@ jobs:
               echo 'APP_URL=https://staging.app.aplus-solution.de'
               echo 'API_URL=https://staging.app.aplus-solution.de/api'
               echo 'APP_DOMAIN=staging.app.aplus-solution.de'
+              echo 'NATIVE_APP_ID=de.aplussolution.staging'
               echo 'POSTGRES_DB=aplussolution_staging'
               echo 'POSTGRES_USER=aplussolution_staging'
               printf 'POSTGRES_PASSWORD=%s\n' "$db_password"
@@ -100,18 +122,31 @@ jobs:
               echo 'APNS_KEY_ID='
               echo 'APNS_PRIVATE_KEY='
               echo 'APNS_BUNDLE_ID=de.aplussolution.staging'
-              echo 'APNS_USE_SANDBOX=1'
+              echo 'APNS_USE_SANDBOX=0'
               echo 'SAML_ENABLED=0'
               printf 'EDGE_NETWORK=%s\n' "$edge_network"
             } > "$STAGING_ENV"
-            chmod 600 "$STAGING_ENV"
-          else
-            tmp_env=$(mktemp)
-            grep -v '^EDGE_NETWORK=' "$STAGING_ENV" > "$tmp_env" || true
-            printf 'EDGE_NETWORK=%s\n' "$edge_network" >> "$tmp_env"
-            mv "$tmp_env" "$STAGING_ENV"
-            chmod 600 "$STAGING_ENV"
           fi
+
+          set_env EDGE_NETWORK "$edge_network"
+          set_env NATIVE_APP_ID 'de.aplussolution.staging'
+          set_env APNS_BUNDLE_ID 'de.aplussolution.staging'
+          # TestFlight/App Store distribution tokens use the production APNs gateway.
+          set_env APNS_USE_SANDBOX '0'
+
+          # Push provider credentials are account/team credentials, not production
+          # application data. Reuse them read-only while keeping the staging app
+          # identity, database, Redis, media and device-token table fully isolated.
+          for key in FIREBASE_PROJECT_ID FIREBASE_CREDENTIALS_JSON APNS_TEAM_ID APNS_KEY_ID APNS_PRIVATE_KEY; do
+            copy_prod_env_key "$key"
+          done
+          if ! grep -q '^APNS_TEAM_ID=.' "$STAGING_ENV"; then
+            apple_team_line=$(grep -m1 '^APPLE_TEAM_ID=' "$PROD_ENV" || true)
+            if [ -n "$apple_team_line" ]; then
+              set_env APNS_TEAM_ID "${apple_team_line#*=}"
+            fi
+          fi
+          chmod 600 "$STAGING_ENV"
 
           find "$STAGING_DIR" -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
           tar -xzf /tmp/aplussolution-staging-release.tgz -C "$STAGING_DIR"
@@ -121,15 +156,9 @@ jobs:
           $COMPOSE config >/dev/null
           $COMPOSE up -d --build --remove-orphans
 
-          # The edge Caddyfile is a file bind mount and backend/frontend containers
-          # can receive new addresses after a deploy. Recreate only staging_edge so
-          # it binds the freshly extracted config and resolves the current upstreams.
           $COMPOSE up -d --force-recreate --no-deps staging_edge
           $COMPOSE exec -T staging_edge caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
-          # Recreating staging_edge can change its address on the shared production
-          # Docker network. Reload the already-running production gateway (no restart)
-          # so reverse_proxy resolves the aplus_staging_edge alias to the new address.
           cd "$PROD_DIR"
           docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
           cd "$STAGING_DIR"
@@ -154,6 +183,7 @@ jobs:
           $COMPOSE exec -T staging_backend python manage.py migrate --check
           $COMPOSE exec -T staging_edge wget -qO- http://127.0.0.1/health/ >/dev/null
           $COMPOSE exec -T staging_backend python manage.py shell -c "from django.conf import settings; assert settings.DATABASES['default']['NAME']=='aplussolution_staging'; assert settings.APP_URL=='https://staging.app.aplus-solution.de'; assert settings.WIW_SYNC_ENABLED is False; assert settings.WORKER_EMAILS_ENABLED is False; print('staging isolation ok')"
+          $COMPOSE exec -T staging_backend python manage.py shell -c "from core.push_notifications import native_app_id,push_provider_status; s=push_provider_status(); print('staging push app_id=%s android=%s ios=%s' % (native_app_id(), s['android'], s['ios'])); assert native_app_id()=='de.aplussolution.staging'; assert s['android']; assert s['ios']"
           $COMPOSE ps
           REMOTE
 
