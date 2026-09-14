@@ -1,0 +1,19 @@
+@media (max-width: 900px) {
+  /* The three-week track is replaced after a completed horizontal gesture.
+     Chrome/WebView can otherwise re-anchor the outer Ionic scroll container to
+     a different child when the neighboring weeks have different heights. */
+  body.wiw-native-schedule-active .wiw-week-swipe-viewport,
+  body.wiw-native-schedule-active .wiw-week-swipe-track,
+  body.wiw-native-schedule-active .wiw-week-pane,
+  body.wiw-native-schedule-active .wiw-day-section,
+  body.wiw-native-schedule-active .wiw-adjacent-day-section {
+    overflow-anchor: none;
+  }
+
+  /* Vertical scrolling remains normal, while JS takes ownership only after a
+     gesture is confidently horizontal. */
+  body.wiw-native-schedule-active .wiw-week-swipe-track {
+    touch-action: pan-y;
+    overscroll-behavior-x: contain;
+  }
+}
