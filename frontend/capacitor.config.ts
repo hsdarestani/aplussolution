@@ -1,9 +1,11 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 import { KeyboardResize } from '@capacitor/keyboard';
 
+const isStaging = process.env.APP_ENV === 'staging';
+
 const config: CapacitorConfig = {
-  appId: 'de.aplussolution.workforce',
-  appName: 'A+ Solution',
+  appId: isStaging ? 'de.aplussolution.staging' : 'de.aplussolution.workforce',
+  appName: isStaging ? 'A+ Solution Staging' : 'A+ Solution',
   webDir: 'dist',
   server: {
     androidScheme: 'https',
