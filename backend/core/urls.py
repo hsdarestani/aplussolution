@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, akten_views, announcement_api, attendance_actions, attendance_views, automation_ai_views, automation_views, availability_admin, avatar_views, client_order_planning, client_portal_views, contract_views, document_catalog_views, document_center_views, global_search_views, integration_views, live_admin_center, live_operations, mobile_schedule, native_operations, oauth_views, one_time_ops, payroll_views, portal_views, push_views, schedule_reports, searchable_views, shift_card_admin, shift_slot_actions, shift_views, store_review_views, time_views, views, wiw_dashboard, worker_portal_views
+from . import admin_center_views, advanced_views, akten_views, announcement_api, attendance_actions, attendance_views, automation_ai_views, automation_views, availability_admin, avatar_views, client_order_planning, client_portal_views, contract_views, document_catalog_views, document_center_views, employee_schedule, global_search_views, integration_views, live_admin_center, live_operations, mobile_schedule, native_operations, oauth_views, one_time_ops, payroll_views, portal_views, push_views, schedule_reports, searchable_views, shift_card_admin, shift_slot_actions, shift_views, store_review_views, time_views, views, wiw_dashboard, worker_portal_views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -41,6 +41,7 @@ urlpatterns = [
     path('auth/activation/complete/', portal_views.activation_complete),
     path('internal/one-time/housekeeping-provision/', one_time_ops.provision_housekeeping_worker),
     path('employee/home/', portal_views.employee_home),
+    path('employee/schedule/', employee_schedule.employee_schedule),
     path('portal/client-dashboard/', client_portal_views.client_dashboard),
     path('portal/message-recipients/', worker_portal_views.message_recipients),
     path('portal/rating-candidates/', client_portal_views.client_rating_candidates),
