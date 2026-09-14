@@ -1,0 +1,55 @@
+name: A+ Solution staging validation
+
+on:
+  push:
+    branches:
+      - staging
+  pull_request:
+    branches:
+      - staging
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  APP_ENV: staging
+  CAPACITOR_APP_ID: de.aplussolution.staging
+  CAPACITOR_APP_NAME: A+ Solution Staging
+  VITE_APP_ENV: staging
+  VITE_API_URL: https://staging.app.aplus-solution.de/api
+
+jobs:
+  validate-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install --no-audit --no-fund --package-lock=false
+
+      - name: Build staging web bundle
+        working-directory: frontend
+        run: npm run build
+
+      - name: Validate staging identity and scripts
+        working-directory: frontend
+        run: |
+          grep -q "de.aplussolution.staging" capacitor.config.ts
+          grep -q "A+ Solution Staging" capacitor.config.ts
+          grep -q "https://staging.app.aplus-solution.de/api" .env.staging.example
+          bash -n scripts/build-publisher-android-staging.sh
+          bash -n scripts/build-publisher-ios-staging.sh
+          node --check scripts/prepare-native.mjs
+
+      - name: Guard against production routing in staging wrappers
+        working-directory: frontend
+        run: |
+          grep -q "Refusing staging build" scripts/build-publisher-android-staging.sh
+          grep -q "Refusing staging build" scripts/build-publisher-ios-staging.sh
+          grep -q "!isStaging && fs.existsSync(checkedIn)" scripts/prepare-native.mjs
