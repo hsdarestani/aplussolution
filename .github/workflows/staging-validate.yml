@@ -1,0 +1,40 @@
+name: A+ Solution staging validation
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  APP_ENV: staging
+
+jobs:
+  validate-staging-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install --no-audit --no-fund --package-lock=false
+
+      - name: Validate staging web build
+        working-directory: frontend
+        env:
+          VITE_APP_ENV: staging
+          VITE_API_URL: https://staging.app.aplus-solution.de/api
+        run: npm run build
+
+      - name: Check Capacitor staging configuration
+        working-directory: frontend
+        run: |
+          grep -q "de.aplussolution.staging" capacitor.config.ts
+          grep -q "A+ Solution Staging" capacitor.config.ts
