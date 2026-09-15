@@ -1,0 +1,84 @@
+@media (max-width: 900px) {
+  /* Keep the customer calendar as one self-contained viewport. The shell reserves
+     64px for the mobile app bar, so keep the calendar header on that exact track
+     instead of letting the old 76px visual override overlap the week strip. */
+  body.client-v3-schedule-active {
+    overflow: hidden !important;
+  }
+
+  body.client-v3-schedule-active .mobile-appbar {
+    height: 64px !important;
+    min-height: 64px !important;
+    padding: 6px 16px !important;
+  }
+
+  body.client-v3-schedule-active .app-main {
+    height: calc(100dvh - 64px - var(--mobile-bottom-nav-height, 64px) - env(safe-area-inset-bottom)) !important;
+    min-height: 0 !important;
+    max-height: calc(100dvh - 64px - var(--mobile-bottom-nav-height, 64px) - env(safe-area-inset-bottom)) !important;
+    overflow: hidden !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-schedule.wiw-schedule-mobile {
+    position: relative !important;
+    inset: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* Week navigation must never scroll under the navy header. */
+  body.client-v3-schedule-active .client-v3-week-strip.wiw-week-strip {
+    position: relative !important;
+    top: auto !important;
+    flex: 0 0 55px !important;
+    width: 100% !important;
+    height: 55px !important;
+    min-height: 55px !important;
+    overflow: hidden !important;
+    z-index: 4 !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-week-strip.wiw-week-strip > button {
+    height: 55px !important;
+    align-content: center !important;
+    overflow: hidden !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-week-strip.wiw-week-strip small {
+    line-height: 1.05 !important;
+  }
+
+  /* The list is the only scrolling surface. This prevents partially clipped cards
+     from appearing directly below the app header. */
+  body.client-v3-schedule-active .client-v3-week-scroll.wiw-week-scroll {
+    position: relative !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain !important;
+    -webkit-overflow-scrolling: touch !important;
+    touch-action: pan-y !important;
+    padding: 0 !important;
+  }
+
+  /* Keep total hours in normal layout flow instead of overlaying rows. */
+  body.client-v3-schedule-active .client-v3-week-total.wiw-week-total {
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    flex: 0 0 48px !important;
+    width: 100% !important;
+    min-height: 48px !important;
+    height: 48px !important;
+    z-index: 5 !important;
+  }
+}

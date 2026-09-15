@@ -37,6 +37,16 @@ async function json(route: Route, body: unknown, status = 200) {
 
 async function mockClient(page: Page, state: { ratingPost?: any }) {
   const shift = todayShift();
+  const scheduleShifts = [shift, ...Array.from({ length: 11 }, (_, index) => ({
+    ...shift,
+    id: `shift-client-scroll-${index}`,
+    assigned_workers: [{
+      id: `worker-scroll-${index}`,
+      slot_id: `slot-scroll-${index}`,
+      name: `Mitarbeiter ${index + 1}`,
+      is_me: false,
+    }],
+  }))];
   await page.addInitScript(() => {
     localStorage.setItem('access', 'client-visual-token');
     localStorage.setItem('refresh', 'client-visual-refresh');
@@ -47,7 +57,7 @@ async function mockClient(page: Page, state: { ratingPost?: any }) {
     const method = route.request().method();
     if (path === 'auth/me/') return json(route, client);
     if (path === 'portal/client-dashboard/') return json(route, { role: 'client', active_orders: 1, upcoming_shifts: 1, contracts_to_sign: 0 });
-    if (path.startsWith('shifts/')) return json(route, [shift]);
+    if (path.startsWith('shifts/')) return json(route, scheduleShifts);
     if (path.startsWith('orders/')) return json(route, []);
     if (path.startsWith('contracts/')) return json(route, []);
     if (path.startsWith('documents/')) return json(route, []);
@@ -68,7 +78,7 @@ async function mockClient(page: Page, state: { ratingPost?: any }) {
 test.describe('client portal visual parity', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('calendar matches workforce rows and has no client status tabs', async ({ page }) => {
+  test('calendar matches workforce rows and keeps chrome stable while only the list scrolls', async ({ page }) => {
     const state: { ratingPost?: any } = {};
     await mockClient(page, state);
     await page.goto('/');
@@ -78,13 +88,16 @@ test.describe('client portal visual parity', () => {
     await tabs.getByRole('button', { name: 'Kalender' }).click();
 
     const calendar = page.getByTestId('client-v3-schedule');
+    const weekStrip = calendar.getByTestId('phase8-week-strip');
+    const dayView = calendar.getByTestId('schedule-day-view');
+    const weekTotal = calendar.getByTestId('phase8-week-total');
     await expect(calendar).toBeVisible();
     await expect(calendar.getByRole('tablist', { name: 'Einsatzfilter' })).toBeHidden();
-    await expect(calendar.getByTestId('phase8-week-strip')).toBeVisible();
-    await expect(calendar.getByTestId('schedule-day-view')).toHaveAttribute('data-layout', 'list');
+    await expect(weekStrip).toBeVisible();
+    await expect(dayView).toHaveAttribute('data-layout', 'list');
     await expect(calendar.getByText('Francesco T.')).toBeVisible();
-    await expect(calendar.getByText('Servicekraft')).toBeVisible();
-    await expect(calendar.getByText('Evangelische Akademie')).toBeVisible();
+    await expect(calendar.getByText('Servicekraft').first()).toBeVisible();
+    await expect(calendar.getByText('Evangelische Akademie').first()).toBeVisible();
     await expect(calendar.getByText('Gesamtstunden')).toBeVisible();
 
     const card = calendar.locator('.client-v3-shift-card').first();
@@ -94,9 +107,29 @@ test.describe('client portal visual parity', () => {
     const accent = await card.evaluate((element) => getComputedStyle(element, '::before').backgroundColor);
     expect(accent).not.toBe('rgba(0, 0, 0, 0)');
 
-    const weekTop = await calendar.getByTestId('phase8-week-strip').evaluate((element) => getComputedStyle(element).top);
-    expect(weekTop).toBe('0px');
+    await expect(calendar).toHaveCSS('display', 'flex');
+    await expect(calendar).toHaveCSS('overflow-y', 'hidden');
+    await expect(weekStrip).toHaveCSS('position', 'relative');
+    await expect(dayView).toHaveCSS('overflow-y', 'auto');
+    await expect(weekTotal).toHaveCSS('position', 'relative');
 
+    const header = page.locator('.mobile-appbar');
+    const headerBox = await header.boundingBox();
+    const weekBefore = await weekStrip.boundingBox();
+    const totalBefore = await weekTotal.boundingBox();
+    expect(headerBox).toBeTruthy();
+    expect(weekBefore).toBeTruthy();
+    expect(totalBefore).toBeTruthy();
+    expect(weekBefore!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height - 1);
+
+    await dayView.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    await expect.poll(() => dayView.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    const weekAfter = await weekStrip.boundingBox();
+    const totalAfter = await weekTotal.boundingBox();
+    expect(Math.abs(weekAfter!.y - weekBefore!.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(totalAfter!.y - totalBefore!.y)).toBeLessThanOrEqual(1);
+
+    await dayView.evaluate((element) => { element.scrollTop = 0; });
     await card.click();
     await expect(page.getByTestId('client-v3-shift-detail')).toBeVisible();
     await expect(page.getByText('Einsatzdetails')).toBeVisible();
