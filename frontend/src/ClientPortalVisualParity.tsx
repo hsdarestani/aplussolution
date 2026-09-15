@@ -55,33 +55,48 @@ export default function ClientPortalVisualParity() {
     };
   }, [mobile, user, view]);
 
-  // Keep the same stable QA/accessibility hooks as the employee/admin Dienstplan.
-  // The legacy client schedule stays mounted underneath the custom view, so its
-  // duplicate hooks are temporarily retired while the unified client calendar is active.
+  // Keep the same stable schedule hooks as employee/admin while the legacy client
+  // schedule remains mounted underneath. Loading data can replace parts of either
+  // tree, so keep the hook hand-off synchronized for the lifetime of this view.
   useEffect(() => {
     if (!user || !mobile || view !== 'schedule') return;
 
-    const legacyHooks = Array.from(document.querySelectorAll<HTMLElement>(
-      '.sv2 [data-testid="phase8-week-strip"], .sv2 [data-testid="schedule-day-view"], .sv2 [data-testid="phase8-week-total"]',
-    ));
-    const previous = legacyHooks.map((element) => element.getAttribute('data-testid'));
-    legacyHooks.forEach((element) => element.removeAttribute('data-testid'));
+    const root = document.getElementById('root');
+    const retired = new Map<HTMLElement, string>();
+    const legacySelector = '.sv2 [data-testid="phase8-week-strip"], .sv2 [data-testid="schedule-day-view"], .sv2 [data-testid="phase8-week-total"]';
 
-    const weekStrip = document.querySelector<HTMLElement>('.client-v3-week-strip');
-    const dayView = document.querySelector<HTMLElement>('.client-v3-week-scroll');
-    const weekTotal = document.querySelector<HTMLElement>('.client-v3-week-total');
-    weekStrip?.setAttribute('data-testid', 'phase8-week-strip');
-    dayView?.setAttribute('data-testid', 'schedule-day-view');
-    dayView?.setAttribute('data-layout', 'list');
-    weekTotal?.setAttribute('data-testid', 'phase8-week-total');
+    const applyHooks = () => {
+      document.querySelectorAll<HTMLElement>(legacySelector).forEach((element) => {
+        const testId = element.getAttribute('data-testid');
+        if (!testId) return;
+        retired.set(element, testId);
+        element.removeAttribute('data-testid');
+      });
+
+      const weekStrip = document.querySelector<HTMLElement>('.client-v3-week-strip');
+      const dayView = document.querySelector<HTMLElement>('.client-v3-week-scroll');
+      const weekTotal = document.querySelector<HTMLElement>('.client-v3-week-total');
+      weekStrip?.setAttribute('data-testid', 'phase8-week-strip');
+      dayView?.setAttribute('data-testid', 'schedule-day-view');
+      dayView?.setAttribute('data-layout', 'list');
+      weekTotal?.setAttribute('data-testid', 'phase8-week-total');
+    };
+
+    applyHooks();
+    const observer = new MutationObserver(applyHooks);
+    if (root) observer.observe(root, { subtree: true, childList: true });
 
     return () => {
+      observer.disconnect();
+      const weekStrip = document.querySelector<HTMLElement>('.client-v3-week-strip');
+      const dayView = document.querySelector<HTMLElement>('.client-v3-week-scroll');
+      const weekTotal = document.querySelector<HTMLElement>('.client-v3-week-total');
       weekStrip?.setAttribute('data-testid', 'client-v3-week-strip');
       dayView?.setAttribute('data-testid', 'client-v3-schedule-days');
       dayView?.removeAttribute('data-layout');
       weekTotal?.removeAttribute('data-testid');
-      legacyHooks.forEach((element, index) => {
-        if (previous[index]) element.setAttribute('data-testid', previous[index] as string);
+      retired.forEach((testId, element) => {
+        if (element.isConnected) element.setAttribute('data-testid', testId);
       });
     };
   }, [mobile, user, view]);
