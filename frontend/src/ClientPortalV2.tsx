@@ -38,16 +38,16 @@ const labels: Record<string, string> = {
 };
 
 const primary = [
-  ['dashboard', 'Start', homeOutline],
-  ['schedule', 'Einsätze', calendarOutline],
-  ['orders', 'Aufträge', briefcaseOutline],
-  ['documents', 'Dokumente', folderOpenOutline],
+  ['dashboard', 'Dashboard', homeOutline],
+  ['schedule', 'Kalender', calendarOutline],
+  ['ratings', 'Bewerten', starOutline],
 ] as const;
 
 const more = [
+  ['orders', 'Aufträge', briefcaseOutline, 'Personalbedarf und Aufträge verwalten'],
+  ['documents', 'Dokumente', folderOpenOutline, 'Unterlagen öffnen und hochladen'],
   ['contracts', 'Verträge & Signatur', documentTextOutline, 'Verträge ansehen und offene Signaturen erledigen'],
   ['operations', 'Servicecenter', shieldCheckmarkOutline, 'Status, Hinweise und offene Servicepunkte'],
-  ['ratings', 'Mitarbeiter bewerten', starOutline, 'Abgeschlossene Einsätze bewerten'],
   ['messages', 'Mitteilungen', megaphoneOutline, 'Nachrichten der A+ Disposition'],
   ['profile', 'Profil & Sicherheit', personCircleOutline, 'Kontaktdaten, Passwort und Datenschutz'],
 ] as const;
@@ -253,8 +253,8 @@ export default function ClientPortalV2() {
 
   return <>
     {view === 'dashboard' && host ? createPortal(<ClientHome user={user} navigate={navigate}/>, host) : null}
-    <nav className="client-v2-tabbar" aria-label="Kundenportal Navigation" data-testid="client-v2-tabbar">
-      {primary.map(([key, label, icon]) => <button type="button" key={key} className={view === key && !moreOpen ? 'active' : ''} onClick={() => navigate(key)} aria-current={view === key ? 'page' : undefined}><IonIcon icon={icon}/><span>{label}</span></button>)}
+    <nav className="client-v2-tabbar" aria-label="Kundenportal Navigation" data-testid="client-v2-tabbar" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
+      {primary.map(([key, label, icon]) => <button type="button" key={key} className={view === key && !moreOpen ? 'active' : ''} onClick={() => navigate(key)} aria-current={view === key ? 'page' : undefined} aria-label={key === 'ratings' ? 'Mitarbeiter bewerten' : label}><IonIcon icon={icon}/><span>{label}</span></button>)}
       <button type="button" className={moreOpen || !primary.some(([key]) => key === view) ? 'active' : ''} onClick={() => setMoreOpen(true)} aria-label="Weitere Bereiche öffnen"><IonIcon icon={appsOutline}/><span>Mehr</span></button>
     </nav>
     {moreOpen && <ClientMore user={user} view={view} close={() => setMoreOpen(false)} navigate={navigate}/>} 
