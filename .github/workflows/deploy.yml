@@ -170,18 +170,8 @@ jobs:
           docker compose exec -T backend python manage.py migrate --check
           curl -fsS --max-time 15 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/
 
-          # A deployment restarts the Celery worker, so any surviving coordination
-          # key belongs to a task that can no longer be running. Remove it from the
-          # shared Redis broker before queuing the fresh repair passes.
-          docker compose exec -T backend python manage.py shell -c "from core.tasks import _redis_client, WIW_RECONCILIATION_LOCK_KEY; _redis_client().delete(WIW_RECONCILIATION_LOCK_KEY)" || true
-
-          # Do not wait for the potentially long WIW history scan inside deploy.
-          # Queue both repair layers so the freshly deployed code immediately
-          # backfills all API-visible past/future shifts and then proves full
-          # supported-resource parity. Both tasks are idempotent and self-locking.
-          docker compose exec -T backend celery -A config call core.tasks.reconcile_when_i_work_schedule || true
-          docker compose exec -T backend celery -A config call core.tasks.reconcile_when_i_work_full || true
-
+          # WIW migration is complete. Deployment must not enqueue or invoke any
+          # WIW synchronization/reconciliation work; local A+ data is authoritative.
           docker compose ps
           docker image prune -f >/dev/null 2>&1 || true
           REMOTE
