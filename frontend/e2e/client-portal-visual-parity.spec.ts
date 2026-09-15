@@ -110,20 +110,24 @@ test.describe('client portal visual parity', () => {
     await expect(calendar.getByText('Evangelische Akademie').first()).toBeVisible();
     await expect(calendar.getByText('Gesamtstunden')).toBeVisible();
 
-    const firstDay = calendar.locator('.wiw-day-section:has(.wiw-shift-card)').first();
-    const firstDayHeader = firstDay.locator('> header');
-    const firstCard = firstDay.locator('.wiw-shift-card').first();
-    await expect(firstDayHeader).toBeVisible();
+    const firstVisibleDay = calendar.locator('.wiw-day-section').first();
+    const firstVisibleHeader = firstVisibleDay.locator('> header');
+    const firstPopulatedDay = calendar.locator('.wiw-day-section:has(.wiw-shift-card)').first();
+    const firstPopulatedHeader = firstPopulatedDay.locator('> header');
+    const firstCard = firstPopulatedDay.locator('.wiw-shift-card').first();
+    await expect(firstVisibleHeader).toBeVisible();
+    await expect(firstPopulatedHeader).toBeVisible();
     await expect(firstCard).toBeVisible();
     await expect(firstCard).not.toHaveClass(/client-v3-shift-card/);
 
     const weekBox = await weekStrip.boundingBox();
-    const headerBox = await firstDayHeader.boundingBox();
+    const firstVisibleHeaderBox = await firstVisibleHeader.boundingBox();
+    const populatedHeaderBox = await firstPopulatedHeader.boundingBox();
     const cardBox = await firstCard.boundingBox();
-    expect(weekBox && headerBox && cardBox).toBeTruthy();
-    expect(headerBox!.y).toBeGreaterThanOrEqual(weekBox!.y + weekBox!.height - 1);
-    expect(headerBox!.y - (weekBox!.y + weekBox!.height)).toBeLessThanOrEqual(20);
-    expect(cardBox!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height - 1);
+    expect(weekBox && firstVisibleHeaderBox && populatedHeaderBox && cardBox).toBeTruthy();
+    expect(firstVisibleHeaderBox!.y).toBeGreaterThanOrEqual(weekBox!.y + weekBox!.height - 1);
+    expect(firstVisibleHeaderBox!.y - (weekBox!.y + weekBox!.height)).toBeLessThanOrEqual(20);
+    expect(cardBox!.y).toBeGreaterThanOrEqual(populatedHeaderBox!.y + populatedHeaderBox!.height - 1);
 
     const totalBox = await weekTotal.boundingBox();
     const navBox = await tabs.boundingBox();
