@@ -1,14 +1,21 @@
 @media (max-width: 900px) {
-  /* Keep the customer calendar as one self-contained viewport. The app header and
-     bottom navigation stay outside; only the shift list itself scrolls. */
+  /* Keep the customer calendar as one self-contained viewport. The shell reserves
+     64px for the mobile app bar, so keep the calendar header on that exact track
+     instead of letting the old 76px visual override overlap the week strip. */
   body.client-v3-schedule-active {
     overflow: hidden !important;
   }
 
+  body.client-v3-schedule-active .mobile-appbar {
+    height: 64px !important;
+    min-height: 64px !important;
+    padding: 6px 16px !important;
+  }
+
   body.client-v3-schedule-active .app-main {
-    height: calc(100dvh - 76px - var(--mobile-bottom-nav-height, 64px) - env(safe-area-inset-bottom)) !important;
+    height: calc(100dvh - 64px - var(--mobile-bottom-nav-height, 64px) - env(safe-area-inset-bottom)) !important;
     min-height: 0 !important;
-    max-height: calc(100dvh - 76px - var(--mobile-bottom-nav-height, 64px) - env(safe-area-inset-bottom)) !important;
+    max-height: calc(100dvh - 64px - var(--mobile-bottom-nav-height, 64px) - env(safe-area-inset-bottom)) !important;
     overflow: hidden !important;
   }
 
