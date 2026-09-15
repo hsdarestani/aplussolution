@@ -54,6 +54,7 @@ const mineShift = {
   id: 'shift-mine-1',
   filled_count: 4,
   open_count: 0,
+  assigned_workers: [{ id: worker.id, name: worker.name, is_me: true }],
 };
 
 async function fulfill(route: Route, body: unknown, status = 200) {
@@ -100,6 +101,7 @@ async function mockApi(page: Page, user: typeof worker | typeof admin | typeof c
       });
     }
 
+    if (path.startsWith('employee/schedule/')) return fulfill(route, { service_schedule: false, shifts: [mineShift] });
     if (path.startsWith('shifts/available/')) return fulfill(route, [availableShift]);
     if (path.startsWith('shifts/mine/')) return fulfill(route, [mineShift]);
 
@@ -193,7 +195,7 @@ test.describe('Phase 6 mobile QA', () => {
     const dayView = workerSchedule.getByTestId('schedule-day-view');
     await expect(dayView).toBeVisible();
     await expect(workerSchedule.locator('.wiw-employee-week-current')).toBeVisible();
-    await expect(dayView.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
+    await expect(dayView.getByRole('button', { name: /Servicekraft/ }).first()).toBeVisible();
     await expect(dayView.getByText('Frankfurt Innenstadt', { exact: true }).first()).toBeVisible();
     await expect(dayView).not.toContainText('Main Suites Frankfurt');
     await expectNoHorizontalPageOverflow(page);
