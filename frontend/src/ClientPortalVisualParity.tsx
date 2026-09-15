@@ -6,6 +6,7 @@ import ClientScheduleWorkforceMobile from './ClientScheduleWorkforceMobile';
 import './client-portal-visual-parity.css';
 import './client-portal-brand-preserve.css';
 import './client-portal-modal-fix.css';
+import './client-workforce-schedule.css';
 
 export default function ClientPortalVisualParity() {
   const [user, setUser] = useState<User | null>(null);
