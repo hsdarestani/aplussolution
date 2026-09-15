@@ -1,0 +1,7 @@
+@media(max-width:900px){
+  body:has(.client-v3-rating-sheet) .client-v2-tabbar{
+    visibility:hidden!important;
+    pointer-events:none!important;
+    opacity:0!important;
+  }
+}
