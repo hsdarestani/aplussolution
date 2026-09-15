@@ -12,4 +12,12 @@
   body.wiw-employee-schedule-active [data-testid="client-v3-schedule"] > .wiw-week-strip {
     top: 0 !important;
   }
+
+  /* ScheduleMobileEnhancer is global to ?view=schedule and is meant for the
+     manager/admin SV2 surface. Its date/filter actions do not operate on the
+     read-only client workforce adapter and must not float over the client header. */
+  body.client-portal-v2-active.wiw-employee-schedule-active .schedule-mobile-actions,
+  body.client-portal-v2-active.wiw-employee-schedule-active .schedule-mobile-backdrop {
+    display: none !important;
+  }
 }
