@@ -281,14 +281,19 @@ test.describe('Phase 6 mobile QA', () => {
     await mockApi(page, client, seenPaths);
     await page.goto('/');
 
-    await expect(page.getByRole('heading', { name: 'Guten Tag, Lara' })).toBeVisible();
-    await expect(page.getByText('Personal genau dann, wenn du es brauchst.')).toBeVisible();
-    await expect(page.getByText('Aktive Aufträge')).toBeVisible();
-    await expect(page.getByText('Zu unterzeichnen')).toBeVisible();
-    await expect(page.locator('.mobile-tabbar button')).toHaveCount(3);
+    const clientHome = page.getByTestId('client-portal-v2-home');
+    await expect(clientHome).toBeVisible();
+    await expect(clientHome.getByRole('heading', { name: 'Guten Tag, Lara' })).toBeVisible();
+    await expect(clientHome.getByRole('heading', { name: 'Der nächste Einsatz ist vorbereitet.' })).toBeVisible();
+    await expect(clientHome.getByText('Aktive Aufträge')).toBeVisible();
+    await expect(clientHome.getByText('Zu unterzeichnen')).toBeVisible();
+
+    const clientTabs = page.getByTestId('client-v2-tabbar');
+    await expect(clientTabs).toBeVisible();
+    await expect(clientTabs.getByRole('button')).toHaveCount(5);
     await expectNoHorizontalPageOverflow(page);
 
-    await page.locator('.mobile-tabbar button').filter({ hasText: 'Dienstplan' }).click();
+    await clientTabs.getByRole('button', { name: 'Einsätze' }).click();
     await expect(page.getByTestId('phase8-week-strip')).toBeVisible();
     await expect(page.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
     await expect(page.locator('ion-segment')).toHaveCount(0);
@@ -298,15 +303,16 @@ test.describe('Phase 6 mobile QA', () => {
     expect(seenPaths).not.toContain('clients/');
     expect(seenPaths).not.toContain('locations/');
     expect(seenPaths).not.toContain('positions/');
-    expect(seenPaths).not.toContain('orders/');
+    expect(seenPaths.some((path) => path.startsWith('admin/'))).toBe(false);
 
-    await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
-    const moreMenu = page.getByTestId('wiw-more-screen');
+    await clientTabs.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
+    const moreMenu = page.getByTestId('client-v2-more');
     await expect(moreMenu).toBeVisible();
-    await expect(moreMenu.getByRole('button', { name: 'Servicecenter', exact: true })).toBeVisible();
-    await expect(moreMenu.getByRole('button', { name: 'Aufträge', exact: true })).toBeVisible();
-    await expect(moreMenu.getByRole('button', { name: 'Verträge & Signatur', exact: true })).toBeVisible();
-    await expect(moreMenu.getByRole('button', { name: 'Mitarbeiter bewerten', exact: true })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: /Servicecenter/ })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: /Verträge & Signatur/ })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: /Mitarbeiter bewerten/ })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: /Mitteilungen/ })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: /Profil & Sicherheit/ })).toBeVisible();
   });
 });
 
