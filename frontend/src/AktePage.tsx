@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { IonBadge, IonButton, IonIcon, IonInput, IonSelect, IonSelectOption, IonTextarea, IonToggle } from '@ionic/react';
+import { IonAlert, IonBadge, IonButton, IonIcon, IonInput, IonSelect, IonSelectOption, IonTextarea, IonToggle } from '@ionic/react';
 import { briefcaseOutline, calendarOutline, documentTextOutline, folderOpenOutline, peopleOutline, receiptOutline } from 'ionicons/icons';
 import { api, User } from './api';
 import { BUSINESS_TIME_ZONE } from './berlinLocale';
@@ -19,6 +19,11 @@ type AkteData = {
   shifts?: any[];
   orders?: any[];
   locations?: any[];
+};
+
+type ClientPasswordResetResult = {
+  email: string;
+  temporary_password: string;
 };
 
 const statusLabel: Record<string, string> = {
@@ -58,6 +63,9 @@ export default function AktePage({ user }: { user: User }) {
   const [profile, setProfile] = useState<any>({});
   const [master, setMaster] = useState<any>({});
   const [clients,setClients]=useState<any[]>([]);
+  const [confirmPasswordReset, setConfirmPasswordReset] = useState(false);
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [passwordResetResult, setPasswordResetResult] = useState<ClientPasswordResetResult>();
 
   const load = async () => {
     if (!id) { setMessage('Keine Akte ausgewählt.'); setLoading(false); return; }
@@ -102,6 +110,25 @@ export default function AktePage({ user }: { user: User }) {
     finally { setSaving(false); }
   }
 
+  async function resetClientPassword() {
+    if (user.role !== 'admin' || kind !== 'client' || !id) return;
+    setResettingPassword(true);
+    setMessage('');
+    try {
+      const contactId = data?.profile?.contacts_detail?.[0]?.id;
+      const result = await api<ClientPasswordResetResult>(`clients/${id}/reset-password/`, {
+        method: 'POST',
+        body: JSON.stringify(contactId ? { contact_id: contactId } : {}),
+      });
+      setPasswordResetResult(result);
+      setMessage('Kundenpasswort wurde zurückgesetzt. Bitte das temporäre Passwort sicher übermitteln.');
+    } catch (error: any) {
+      setMessage(error?.message || 'Kundenpasswort konnte nicht zurückgesetzt werden.');
+    } finally {
+      setResettingPassword(false);
+    }
+  }
+
   const summary = useMemo(() => Object.entries(data?.summary || {}), [data]);
   const back = () => {
     const url = new URL(window.location.href); url.searchParams.set('view', 'people'); url.searchParams.set('people_kind', kind === 'client' ? 'clients' : 'workers'); url.searchParams.delete('akte_kind'); url.searchParams.delete('akte_id');
@@ -112,7 +139,7 @@ export default function AktePage({ user }: { user: User }) {
   if (!data) return <div className="akte-page"><button className="akte-back" onClick={back}>← Zurück</button><div className="akte-message">{message || 'Akte nicht gefunden.'}</div></div>;
 
   return <div className="akte-page" data-testid="akte-page">
-    <div className="akte-toolbar"><button className="akte-back" onClick={back}>← Personal & Kunden</button><div className="akte-actions">{manager(user) && (editing ? <><IonButton fill="outline" onClick={() => { setEditing(false); void load(); }}>Abbrechen</IonButton><IonButton disabled={saving} onClick={() => void save()}>{saving ? 'Speichert …' : 'Änderungen speichern'}</IonButton></> : <IonButton onClick={() => setEditing(true)}>Profil bearbeiten</IonButton>)}</div></div>
+    <div className="akte-toolbar"><button className="akte-back" onClick={back}>← Personal & Kunden</button><div className="akte-actions">{manager(user) && (editing ? <><IonButton fill="outline" onClick={() => { setEditing(false); void load(); }}>Abbrechen</IonButton><IonButton disabled={saving} onClick={() => void save()}>{saving ? 'Speichert …' : 'Änderungen speichern'}</IonButton></> : <>{user.role === 'admin' && kind === 'client' && <IonButton fill="outline" color="warning" disabled={resettingPassword} onClick={() => setConfirmPasswordReset(true)}>{resettingPassword ? 'Wird zurückgesetzt …' : 'Passwort zurücksetzen'}</IonButton>}<IonButton onClick={() => setEditing(true)}>Profil bearbeiten</IonButton></>)}</div></div>
     <header className="akte-hero">
       <div className={`akte-avatar ${data.kind}`}><IonIcon icon={data.kind === 'worker' ? peopleOutline : briefcaseOutline} /></div>
       <div className="akte-hero-copy"><small>DIGITALE AKTE · {data.kind === 'worker' ? 'MITARBEITER' : 'KUNDE'}</small><h1>{data.title}</h1><p>{data.number || 'Ohne Nummer'}{data.kind === 'worker' && data.profile?.user_detail?.email ? ` · ${data.profile.user_detail.email}` : ''}</p></div>
@@ -183,5 +210,31 @@ export default function AktePage({ user }: { user: User }) {
     {data.kind === 'client' && <div className="akte-columns"><section className="akte-section"><div className="akte-section-head"><h2><IonIcon icon={briefcaseOutline}/> Aufträge</h2></div>{(data.orders||[]).map(row=><div className="akte-row" key={row.id}><div><b>{row.title}</b><span>{statusLabel[row.status] || row.status} · {formatDate(row.starts_at)}</span></div></div>)}{!data.orders?.length&&<div className="akte-empty">Noch keine Aufträge.</div>}</section><section className="akte-section"><div className="akte-section-head"><h2>Einsatzorte</h2></div>{(data.locations||[]).map(row=><div className="akte-row" key={row.id}><div><b>{row.name}</b><span>{row.address}</span></div></div>)}{!data.locations?.length&&<div className="akte-empty">Noch keine Einsatzorte.</div>}</section></div>}
 
     <section className="akte-section"><div className="akte-section-head"><div><h2><IonIcon icon={calendarOutline}/> Einsätze</h2><p>Die zuletzt geplanten Einsätze dieser Akte.</p></div></div><div className="akte-shift-grid">{(data.shifts||[]).map(row=><div className="akte-shift" key={row.id}><strong>{row.position_name || 'Einsatz'}</strong><span>{formatDate(row.starts_at)} – {formatDate(row.ends_at)}</span><small>{row.location_name || 'Ohne Einsatzort'}{row.client_name?` · ${row.client_name}`:''}</small><IonBadge>{statusLabel[row.status] || row.status}</IonBadge></div>)}{!data.shifts?.length&&<div className="akte-empty">Noch keine Einsätze.</div>}</div></section>
+
+    <IonAlert
+      isOpen={confirmPasswordReset}
+      onDidDismiss={() => setConfirmPasswordReset(false)}
+      header="Kundenpasswort zurücksetzen?"
+      message="Das bisherige Passwort funktioniert danach sofort nicht mehr. Das neue temporäre Passwort wird einmalig angezeigt."
+      buttons={[
+        { text: 'Abbrechen', role: 'cancel' },
+        { text: 'Zurücksetzen', role: 'destructive', handler: () => { setConfirmPasswordReset(false); void resetClientPassword(); } },
+      ]}
+    />
+    <IonAlert
+      isOpen={!!passwordResetResult}
+      onDidDismiss={() => setPasswordResetResult(undefined)}
+      header="Neues temporäres Passwort"
+      message={passwordResetResult ? `E-Mail: ${passwordResetResult.email}\nPasswort: ${passwordResetResult.temporary_password}` : ''}
+      buttons={[
+        {
+          text: 'Kopieren',
+          handler: () => {
+            if (passwordResetResult) void navigator.clipboard?.writeText(`${passwordResetResult.email}\n${passwordResetResult.temporary_password}`);
+          },
+        },
+        { text: 'Schließen', role: 'cancel' },
+      ]}
+    />
   </div>;
 }
