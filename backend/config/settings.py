@@ -46,9 +46,6 @@ CELERY_BEAT_SCHEDULE={
     'client-contract-generation-hourly':{'task':'core.tasks.generate_due_client_contracts','schedule':3600},
     'working-time-sync-daily':{'task':'core.tasks.sync_working_time_current_year','schedule':86400},
     'working-time-backup-weekly':{'task':'core.tasks.backup_working_time_current_year','schedule':604800},
-    'wiw-readonly-sync-5min':{'task':'core.tasks.sync_when_i_work','schedule':300,'args':['incremental']},
-    'wiw-schedule-reconcile-6h':{'task':'core.tasks.reconcile_when_i_work_schedule','schedule':21600},
-    'wiw-full-reconcile-daily':{'task':'core.tasks.reconcile_when_i_work_full','schedule':86400},
 }
 WORKER_EMAILS_ENABLED=os.getenv('WORKER_EMAILS_ENABLED','0')=='1'
 EMAIL_BACKEND='core.email_backend.WorkerAwareSMTPEmailBackend' if os.getenv('EMAIL_HOST') else 'django.core.mail.backends.console.EmailBackend'
@@ -58,7 +55,8 @@ GOOGLE_OAUTH_CLIENT_ID=os.getenv('GOOGLE_OAUTH_CLIENT_ID',''); GOOGLE_OAUTH_CLIE
 APPLE_SERVICE_ID=os.getenv('APPLE_SERVICE_ID',''); APPLE_TEAM_ID=os.getenv('APPLE_TEAM_ID',''); APPLE_KEY_ID=os.getenv('APPLE_KEY_ID',''); APPLE_PRIVATE_KEY=os.getenv('APPLE_PRIVATE_KEY','').replace('\\n','\n'); APPLE_PRIVATE_KEY_PATH=os.getenv('APPLE_PRIVATE_KEY_PATH',''); APPLE_OAUTH_REDIRECT_URI=os.getenv('APPLE_OAUTH_REDIRECT_URI','')
 COMPANY_NAME=os.getenv('COMPANY_NAME','A+ Solution GmbH'); COMPANY_ADDRESS=os.getenv('COMPANY_ADDRESS',''); AUEG_LICENSE_AUTHORITY=os.getenv('AUEG_LICENSE_AUTHORITY',''); AUEG_LICENSE_DATE=os.getenv('AUEG_LICENSE_DATE','')
 
-# During the migration window WIW is a read-only upstream feed. A+ never writes back.
+# WIW migration is finished. Existing imported data stays in the A+ database,
+# but WIW must never become an active upstream again or overwrite local edits.
 OPENAI_API_KEY=os.getenv('OPENAI_API_KEY',os.getenv('WIW_OPENAI_KEY',''))
 OPENAI_MODEL=os.getenv('OPENAI_MODEL',os.getenv('WIW_OPENAI_MODEL','gpt-4o-mini'))
 OPENAI_HTTP_TIMEOUT=int(os.getenv('OPENAI_HTTP_TIMEOUT','30'))
@@ -70,8 +68,10 @@ WIW_WEBHOOK_SECRET=os.getenv('WIW_WEBHOOK_SECRET','')
 WIW_OPENAI_KEY=OPENAI_API_KEY
 WIW_HTTP_TIMEOUT=int(os.getenv('WIW_HTTP_TIMEOUT',str(OPENAI_HTTP_TIMEOUT)))
 WIW_TOKEN_CACHE_SECONDS=int(os.getenv('WIW_TOKEN_CACHE_SECONDS','3300'))
-WIW_SYNC_ENABLED=os.getenv('WIW_SYNC_ENABLED','0')=='1'
-WIW_READ_ONLY=os.getenv('WIW_READ_ONLY','1')=='1'
+# Deliberately hard-disabled instead of environment-controlled. Production may
+# still contain a historical WIW_SYNC_ENABLED=1 value; it must no longer win.
+WIW_SYNC_ENABLED=False
+WIW_READ_ONLY=True
 LIBREOFFICE_BINARY=os.getenv('LIBREOFFICE_BINARY','libreoffice')
 COMPANY_BUSINESS_NUMBER=os.getenv('COMPANY_BUSINESS_NUMBER','')
 
