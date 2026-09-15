@@ -78,7 +78,7 @@ async function mockClient(page: Page, state: { ratingPost?: any }) {
 test.describe('client portal visual parity', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('calendar matches workforce rows and keeps chrome stable while only the list scrolls', async ({ page }) => {
+  test('calendar reuses the workforce schedule structure without client filters or viewport overrides', async ({ page }) => {
     const state: { ratingPost?: any } = {};
     await mockClient(page, state);
     await page.goto('/');
@@ -92,45 +92,45 @@ test.describe('client portal visual parity', () => {
     const dayView = calendar.getByTestId('schedule-day-view');
     const weekTotal = calendar.getByTestId('phase8-week-total');
     await expect(calendar).toBeVisible();
-    await expect(calendar.getByRole('tablist', { name: 'Einsatzfilter' })).toBeHidden();
-    await expect(weekStrip).toBeVisible();
+    await expect(calendar).toHaveClass(/wiw-employee-schedule/);
+    await expect(calendar).toHaveClass(/wiw-schedule-mobile/);
+    await expect(calendar).toHaveClass(/wiw-employee-admin-parity/);
+    await expect(calendar).not.toHaveClass(/client-v3-schedule/);
+    await expect(calendar.getByRole('tablist')).toHaveCount(0);
+    await expect(weekStrip).toHaveClass(/wiw-week-strip/);
+    await expect(weekStrip).toHaveCSS('position', 'sticky');
+    await expect(weekStrip).toHaveCSS('top', '0px');
+    await expect(dayView).toHaveClass(/wiw-week-scroll/);
     await expect(dayView).toHaveAttribute('data-layout', 'list');
+    await expect(weekTotal).toHaveClass(/wiw-week-total/);
+    await expect(weekTotal).toHaveCSS('position', 'fixed');
+
     await expect(calendar.getByText('Francesco T.')).toBeVisible();
-    await expect(calendar.getByText('Servicekraft').first()).toBeVisible();
+    await expect(calendar.getByText('SK').first()).toBeVisible();
     await expect(calendar.getByText('Evangelische Akademie').first()).toBeVisible();
     await expect(calendar.getByText('Gesamtstunden')).toBeVisible();
 
-    const card = calendar.locator('.client-v3-shift-card').first();
-    await expect(card).toHaveClass(/wiw-shift-card/);
-    await expect(card).toHaveCSS('background-color', 'rgb(255, 255, 255)');
-    await expect(card).toHaveCSS('border-left-style', 'none');
-    const accent = await card.evaluate((element) => getComputedStyle(element, '::before').backgroundColor);
-    expect(accent).not.toBe('rgba(0, 0, 0, 0)');
+    const firstDay = calendar.locator('.wiw-day-section').first();
+    const firstDayHeader = firstDay.locator('> header');
+    const firstCard = firstDay.locator('.wiw-shift-card').first();
+    await expect(firstDayHeader).toBeVisible();
+    await expect(firstCard).toBeVisible();
+    await expect(firstCard).not.toHaveClass(/client-v3-shift-card/);
 
-    await expect(calendar).toHaveCSS('display', 'flex');
-    await expect(calendar).toHaveCSS('overflow-y', 'hidden');
-    await expect(weekStrip).toHaveCSS('position', 'relative');
-    await expect(dayView).toHaveCSS('overflow-y', 'auto');
-    await expect(weekTotal).toHaveCSS('position', 'relative');
+    const weekBox = await weekStrip.boundingBox();
+    const headerBox = await firstDayHeader.boundingBox();
+    const cardBox = await firstCard.boundingBox();
+    expect(weekBox && headerBox && cardBox).toBeTruthy();
+    expect(headerBox!.y).toBeGreaterThanOrEqual(weekBox!.y + weekBox!.height - 1);
+    expect(headerBox!.y - (weekBox!.y + weekBox!.height)).toBeLessThanOrEqual(20);
+    expect(cardBox!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height - 1);
 
-    const header = page.locator('.mobile-appbar');
-    const headerBox = await header.boundingBox();
-    const weekBefore = await weekStrip.boundingBox();
-    const totalBefore = await weekTotal.boundingBox();
-    expect(headerBox).toBeTruthy();
-    expect(weekBefore).toBeTruthy();
-    expect(totalBefore).toBeTruthy();
-    expect(weekBefore!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height - 1);
+    const totalBox = await weekTotal.boundingBox();
+    const navBox = await tabs.boundingBox();
+    expect(totalBox && navBox).toBeTruthy();
+    expect(Math.abs((totalBox!.y + totalBox!.height) - navBox!.y)).toBeLessThanOrEqual(3);
 
-    await dayView.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-    await expect.poll(() => dayView.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-    const weekAfter = await weekStrip.boundingBox();
-    const totalAfter = await weekTotal.boundingBox();
-    expect(Math.abs(weekAfter!.y - weekBefore!.y)).toBeLessThanOrEqual(1);
-    expect(Math.abs(totalAfter!.y - totalBefore!.y)).toBeLessThanOrEqual(1);
-
-    await dayView.evaluate((element) => { element.scrollTop = 0; });
-    await card.click();
+    await firstCard.click();
     await expect(page.getByTestId('client-v3-shift-detail')).toBeVisible();
     await expect(page.getByText('Einsatzdetails')).toBeVisible();
 
