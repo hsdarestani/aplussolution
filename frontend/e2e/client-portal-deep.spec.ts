@@ -161,22 +161,30 @@ test('client rating uses only completed assigned candidate and submits the bound
 test.describe('client mobile shell', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('client can reach secondary portal areas from Mehr without horizontal overflow', async ({ page }) => {
+  test('client keeps four bottom actions and reaches secondary areas from Mehr', async ({ page }) => {
     await mockClientApi(page);
     await page.goto('/');
 
     const tabs = page.getByTestId('client-v2-tabbar');
     await expect(tabs).toBeVisible();
-    await expect(tabs.getByRole('button', { name: 'Dokumente' })).toBeVisible();
-    await tabs.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
+    await expect(tabs.getByRole('button')).toHaveCount(4);
+    await expect(tabs.getByRole('button', { name: 'Dashboard' })).toBeVisible();
+    await expect(tabs.getByRole('button', { name: 'Kalender' })).toBeVisible();
+    await expect(tabs.getByRole('button', { name: 'Mitarbeiter bewerten' })).toBeVisible();
 
+    await tabs.getByRole('button', { name: 'Mitarbeiter bewerten' }).click();
+    await expect(page.getByRole('heading', { name: 'Mitarbeiter bewerten' })).toBeVisible();
+
+    await tabs.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
     const more = page.getByTestId('client-v2-more');
     await expect(more).toBeVisible();
+    await expect(more.getByRole('button', { name: /Aufträge/ })).toBeVisible();
+    await expect(more.getByRole('button', { name: /Dokumente/ })).toBeVisible();
     await expect(more.getByRole('button', { name: /Verträge & Signatur/ })).toBeVisible();
     await expect(more.getByRole('button', { name: /Servicecenter/ })).toBeVisible();
-    await expect(more.getByRole('button', { name: /Mitarbeiter bewerten/ })).toBeVisible();
     await expect(more.getByRole('button', { name: /Mitteilungen/ })).toBeVisible();
     await expect(more.getByRole('button', { name: /Profil & Sicherheit/ })).toBeVisible();
+    await expect(more.getByRole('button', { name: /Mitarbeiter bewerten/ })).toHaveCount(0);
     await expect(more.getByText('Meine Stunden')).toHaveCount(0);
 
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
