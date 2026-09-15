@@ -1,0 +1,16 @@
+@media(max-width:900px){
+  body.client-portal-v2-active .mobile-appbar{grid-template-columns:90px minmax(0,1fr) 44px!important}
+  body.client-portal-v2-active .mobile-brand{
+    width:86px!important;
+    height:48px!important;
+    flex:0 0 86px!important;
+    padding:0!important;
+    border:0!important;
+    background-color:transparent!important;
+    background-image:url('/5.png')!important;
+    background-repeat:no-repeat!important;
+    background-size:contain!important;
+    background-position:left center!important;
+  }
+  body.client-portal-v2-active .mobile-brand>*{opacity:0!important}
+}
