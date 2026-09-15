@@ -16,6 +16,7 @@ import './phase8-wiw-mobile.css';
 import './wiw-mobile-light.css';
 import './schedule-month-compact.css';
 import App from './App';
+import ClientPortalV2 from './ClientPortalV2';
 import StoreComplianceLinks from './StoreComplianceLinks';
 import StoreLegalPage, { legalPageFromPath } from './StoreLegalPages';
 import FriendlyDateTimePicker from './FriendlyDateTimePicker';
@@ -83,6 +84,7 @@ function renderApp() {
         <>
           <AppLaunchSplash />
           <App />
+          <ClientPortalV2 />
           <HeaderQuickAccess />
           <ScheduleMobileEnhancer />
           <ScheduleEntryFilterEnhancer />
