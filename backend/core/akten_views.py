@@ -1,3 +1,5 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
 from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
@@ -151,19 +153,54 @@ def client_akte(request, pk):
             if 'customer_number' in payload and ClientCompany.objects.exclude(pk=client.pk).filter(customer_number=payload['customer_number']).exists():
                 return Response({'detail': 'Diese Kundennummer ist bereits vergeben.'}, status=400)
             client.save()
-            contact = client.contacts.order_by('date_joined').first()
-            if contact:
+
+            contact = client.contacts.filter(role=User.Role.CLIENT).order_by('date_joined', 'id').first()
+            contact_fields_supplied = any(
+                key in payload for key in {'contact_first_name', 'contact_last_name', 'contact_email', 'contact_phone'}
+            )
+            email = str(payload.get('contact_email') or '').strip().lower() if 'contact_email' in payload else ''
+
+            if not contact and contact_fields_supplied:
+                if not email:
+                    return Response({'detail': 'Für einen neuen Kundenkontakt ist eine Kontakt-E-Mail erforderlich.'}, status=400)
+                try:
+                    validate_email(email)
+                except DjangoValidationError:
+                    return Response({'detail': 'Bitte eine gültige Kontakt-E-Mail angeben.'}, status=400)
+                if User.objects.filter(email__iexact=email).exists():
+                    return Response({'detail': 'Diese Kontakt-E-Mail ist bereits vergeben.'}, status=400)
+                contact = User.objects.create_user(
+                    email=email,
+                    password=None,
+                    first_name=str(payload.get('contact_first_name') or '').strip(),
+                    last_name=str(payload.get('contact_last_name') or '').strip(),
+                    phone=str(payload.get('contact_phone') or '').strip(),
+                    role=User.Role.CLIENT,
+                    is_onboarded=True,
+                    is_active=True,
+                )
+                client.contacts.add(contact)
+            elif contact:
                 mapping = {'contact_first_name': 'first_name', 'contact_last_name': 'last_name', 'contact_email': 'email', 'contact_phone': 'phone'}
                 for incoming, field in mapping.items():
                     if incoming in payload:
                         setattr(contact, field, payload[incoming])
                 if 'contact_email' in payload:
-                    email = str(payload['contact_email'] or '').strip().lower()
-                    if email and User.objects.exclude(pk=contact.pk).filter(email=email).exists():
+                    if not email:
+                        return Response({'detail': 'Kontakt-E-Mail darf nicht leer sein.'}, status=400)
+                    try:
+                        validate_email(email)
+                    except DjangoValidationError:
+                        return Response({'detail': 'Bitte eine gültige Kontakt-E-Mail angeben.'}, status=400)
+                    if User.objects.exclude(pk=contact.pk).filter(email__iexact=email).exists():
                         return Response({'detail': 'Diese Kontakt-E-Mail ist bereits vergeben.'}, status=400)
                     contact.email = email
                     contact.username = email
                 contact.save()
-            audit(request, 'client_akte.updated', client, {'fields': sorted(payload.keys())})
+
+            audit(request, 'client_akte.updated', client, {
+                'fields': sorted(payload.keys()),
+                'contact_created': bool(contact and contact_fields_supplied and client.contacts.count() == 1),
+            })
         client.refresh_from_db()
     return Response(_client_payload(client, request, own_client=own_client))
