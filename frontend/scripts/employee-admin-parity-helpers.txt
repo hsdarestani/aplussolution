@@ -24,6 +24,7 @@
           {dayShifts.map((shift, index) => {
             const assigned = firstAssignedWorker(shift);
             const workerName = assigned?.name ? shortPersonName(assigned.name) : assignedNames(shift);
+            const fullWorkerName = assigned?.name || assignedNames(shift) || worker.name || worker.email || 'Mitarbeiter';
             const content = <>
               <div className="wiw-card-line primary">
                 <span className="wiw-card-person"><WorkerAvatar worker={assigned} /><b>{workerName || worker.name || worker.email || 'Mitarbeiter'}</b></span>
@@ -35,7 +36,7 @@
               {index > 0 && clientKey(dayShifts[index - 1]) !== clientKey(shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}
               {preview
                 ? <div className={`wiw-shift-card is-filled${!isOwnShift(shift) ? ' peer-shift' : ''}`} style={shiftCardStyle(shift)}>{content}</div>
-                : <button type="button" className={`wiw-shift-card is-filled${!isOwnShift(shift) ? ' peer-shift' : ''}`} style={shiftCardStyle(shift)} onClick={() => setSelected(shift)}>{content}</button>}
+                : <button type="button" aria-label={`${fullWorkerName} ${shift.position_name || 'Einsatz'} ${shift.location_name || 'Einsatzort'}`} className={`wiw-shift-card is-filled${!isOwnShift(shift) ? ' peer-shift' : ''}`} style={shiftCardStyle(shift)} onClick={() => setSelected(shift)}>{content}</button>}
             </React.Fragment>;
           })}
           {!dayShifts.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}

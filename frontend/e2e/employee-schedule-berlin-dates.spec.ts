@@ -122,11 +122,9 @@ test('employee Dienstplan keeps worker logic while matching admin week navigatio
   const schedule = page.getByTestId('wiw-employee-schedule');
   await expect(schedule).toBeVisible();
   await expect(schedule.getByRole('tab', { name: 'Service Zeitplan' })).toBeVisible();
-  const weekStrip = page.getByTestId('phase8-week-strip');
+  const weekStrip = schedule.getByTestId('phase8-week-strip');
   await expect(weekStrip).toBeVisible();
 
-  // The worker now gets the same three-pane interaction as admin: the adjacent
-  // weeks are already rendered with real card details behind the swipe gesture.
   const previews = schedule.locator('.wiw-employee-week-preview');
   await expect(previews).toHaveCount(2);
   await expect(previews.nth(0)).toContainText('Previous W.');
@@ -154,14 +152,11 @@ test('employee Dienstplan keeps worker logic while matching admin week navigatio
   await expect(wednesdayCards).toHaveCount(2);
   await expect(wednesdayCards.filter({ hasText: 'Tooba A.' })).toContainText('08:30–19:00');
   await expect(wednesdayCards.filter({ hasText: 'Arina M.' })).toContainText('15:30–21:00');
-  await expect(wednesdayCards.first()).toHaveCSS('border-left-style', 'solid');
+  await expect(wednesdayCards.first()).toHaveAttribute('style', /--wiw-card-accent/);
 
-  // Historical WIW rows may still be returned by the API, but they must never
-  // replace the selected/current or adjacent weeks in the worker calendar.
   await expect(schedule).not.toContainText('11:00–21:00');
 
-  // Service peer hours are visible but must not inflate the logged-in worker's total.
-  const total = page.getByTestId('phase8-week-total');
+  const total = schedule.getByTestId('phase8-week-total');
   await expect(total).toContainText('Eigene Gesamtstunden');
   await expect(total).toContainText('5.5');
 
@@ -173,10 +168,8 @@ test('employee Dienstplan keeps worker logic while matching admin week navigatio
   await detail.getByRole('button', { name: 'Zurück' }).click();
   await schedule.getByRole('tab', { name: 'OpenShifts' }).click();
 
-  // Employee OpenShifts mirror the admin view: no weekly calendar, all
-  // available future dates listed vertically, using the same OpenShift cards.
-  await expect(page.getByTestId('phase8-week-strip')).toHaveCount(0);
-  await expect(page.getByTestId('phase8-week-total')).toHaveCount(0);
+  await expect(schedule.getByTestId('phase8-week-strip')).toHaveCount(0);
+  await expect(schedule.getByTestId('phase8-week-total')).toHaveCount(0);
   const openDays = schedule.locator('.wiw-day-section');
   await expect(openDays).toHaveCount(2);
   await expect(openDays.nth(0).locator('header')).toContainText('19.09.2026');

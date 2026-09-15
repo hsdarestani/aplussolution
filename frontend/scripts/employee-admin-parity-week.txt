@@ -66,7 +66,7 @@
             {dayShifts.map((shift, index) => {
               return <React.Fragment key={String(shift.id)}>
                 {index > 0 && clientKey(dayShifts[index - 1]) !== clientKey(shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}
-                <button type="button" className="wiw-shift-card is-open" style={shiftCardStyle(shift)} onClick={() => setSelected(shift)}>
+                <button type="button" aria-label={`OpenShift ${shift.position_name || 'Einsatz'} ${shift.location_name || 'Einsatzort'}`} className="wiw-shift-card is-open" style={shiftCardStyle(shift)} onClick={() => setSelected(shift)}>
                   <div className="wiw-card-line primary">
                     <span className="wiw-card-person"><b>OpenShift<span className="wiw-open-alert">!</span></b></span>
                     <span>{time(shift.starts_at)}–{time(shift.ends_at)}</span>

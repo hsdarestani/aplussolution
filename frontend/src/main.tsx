@@ -30,6 +30,7 @@ import ScheduleEntryFilterEnhancer from './ScheduleEntryFilterEnhancer';
 import SchedulePdfLocationFilter from './SchedulePdfLocationFilter';
 import WiwScheduleMobile from './WiwScheduleMobile';
 import WiwEmployeeScheduleMobile from './WiwEmployeeScheduleMobile';
+import ClientPortalVisualParity from './ClientPortalVisualParity';
 import WiwShiftFormUxEnhancer from './WiwShiftFormUxEnhancer';
 import WiwShiftKeyboardGuard from './WiwShiftKeyboardGuard';
 import WiwWorkerPickerEligibilityEnhancer from './WiwWorkerPickerEligibilityEnhancer';
@@ -85,6 +86,7 @@ function renderApp() {
           <AppLaunchSplash />
           <App />
           <ClientPortalV2 />
+          <ClientPortalVisualParity />
           <HeaderQuickAccess />
           <ScheduleMobileEnhancer />
           <ScheduleEntryFilterEnhancer />

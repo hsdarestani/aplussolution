@@ -54,6 +54,7 @@ const mineShift = {
   id: 'shift-mine-1',
   filled_count: 4,
   open_count: 0,
+  assigned_workers: [{ id: worker.id, name: worker.name, is_me: true }],
 };
 
 async function fulfill(route: Route, body: unknown, status = 200) {
@@ -100,6 +101,7 @@ async function mockApi(page: Page, user: typeof worker | typeof admin | typeof c
       });
     }
 
+    if (path.startsWith('employee/schedule/')) return fulfill(route, { service_schedule: false, shifts: [mineShift] });
     if (path.startsWith('shifts/available/')) return fulfill(route, [availableShift]);
     if (path.startsWith('shifts/mine/')) return fulfill(route, [mineShift]);
 
@@ -191,13 +193,14 @@ test.describe('Phase 6 mobile QA', () => {
     const workerSchedule = page.getByTestId('wiw-employee-schedule');
     await expect(workerSchedule).toBeVisible();
     const dayView = workerSchedule.getByTestId('schedule-day-view');
-    await expect(dayView).toHaveAttribute('data-layout', 'list');
-    await expect(dayView.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
+    await expect(dayView).toBeVisible();
+    await expect(workerSchedule.locator('.wiw-employee-week-current')).toBeVisible();
+    await expect(dayView.getByRole('button', { name: /Servicekraft/ }).first()).toBeVisible();
     await expect(dayView.getByText('Frankfurt Innenstadt', { exact: true }).first()).toBeVisible();
     await expect(dayView).not.toContainText('Main Suites Frankfurt');
     await expectNoHorizontalPageOverflow(page);
 
-    await workerSchedule.locator('ion-segment-button[value="mine"]').click();
+    await workerSchedule.getByRole('tab', { name: /Meine Schichten|Service Zeitplan/ }).click();
     await dayView.getByRole('button', { name: /Servicekraft/ }).first().click();
     await expect(page.getByRole('button', { name: 'Freigeben' })).toBeVisible();
     await page.getByRole('button', { name: 'Freigeben' }).click();
@@ -227,11 +230,13 @@ test.describe('Phase 6 mobile QA', () => {
     await page.goto('/?view=schedule');
 
     const workerSchedule = page.getByTestId('wiw-employee-schedule');
-    await expect(workerSchedule.getByTestId('schedule-day-view')).toHaveAttribute('data-layout', 'list');
+    await expect(workerSchedule.getByTestId('schedule-day-view')).toBeVisible();
+    await expect(workerSchedule.locator('.wiw-employee-week-current')).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
 
     await page.reload();
-    await expect(workerSchedule.getByTestId('schedule-day-view')).toHaveAttribute('data-layout', 'list');
+    await expect(workerSchedule.getByTestId('schedule-day-view')).toBeVisible();
+    await expect(workerSchedule.locator('.wiw-employee-week-current')).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
 
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeiterfassung' }).click();
@@ -239,7 +244,8 @@ test.describe('Phase 6 mobile QA', () => {
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('time');
 
     await page.goBack();
-    await expect(workerSchedule.getByTestId('schedule-day-view')).toHaveAttribute('data-layout', 'list');
+    await expect(workerSchedule.getByTestId('schedule-day-view')).toBeVisible();
+    await expect(workerSchedule.locator('.wiw-employee-week-current')).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBe('schedule');
 
     await page.goForward();
