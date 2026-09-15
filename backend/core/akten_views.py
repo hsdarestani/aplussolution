@@ -155,12 +155,12 @@ def client_akte(request, pk):
             client.save()
 
             contact = client.contacts.filter(role=User.Role.CLIENT).order_by('date_joined', 'id').first()
-            contact_fields_supplied = any(
-                key in payload for key in {'contact_first_name', 'contact_last_name', 'contact_email', 'contact_phone'}
-            )
+            contact_keys = {'contact_first_name', 'contact_last_name', 'contact_email', 'contact_phone'}
+            has_contact_values = any(str(payload.get(key) or '').strip() for key in contact_keys)
             email = str(payload.get('contact_email') or '').strip().lower() if 'contact_email' in payload else ''
+            contact_created = False
 
-            if not contact and contact_fields_supplied:
+            if not contact and has_contact_values:
                 if not email:
                     return Response({'detail': 'Für einen neuen Kundenkontakt ist eine Kontakt-E-Mail erforderlich.'}, status=400)
                 try:
@@ -180,6 +180,7 @@ def client_akte(request, pk):
                     is_active=True,
                 )
                 client.contacts.add(contact)
+                contact_created = True
             elif contact:
                 mapping = {'contact_first_name': 'first_name', 'contact_last_name': 'last_name', 'contact_email': 'email', 'contact_phone': 'phone'}
                 for incoming, field in mapping.items():
@@ -200,7 +201,7 @@ def client_akte(request, pk):
 
             audit(request, 'client_akte.updated', client, {
                 'fields': sorted(payload.keys()),
-                'contact_created': bool(contact and contact_fields_supplied and client.contacts.count() == 1),
+                'contact_created': contact_created,
             })
         client.refresh_from_db()
     return Response(_client_payload(client, request, own_client=own_client))
