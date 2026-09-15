@@ -4,6 +4,7 @@ import { api, User } from './api';
 import { ClientRatingsMobile, ClientScheduleMobile } from './ClientPortalMobileViews';
 import './client-portal-visual-parity.css';
 import './client-portal-brand-preserve.css';
+import './client-portal-modal-fix.css';
 
 export default function ClientPortalVisualParity() {
   const [user, setUser] = useState<User | null>(null);
