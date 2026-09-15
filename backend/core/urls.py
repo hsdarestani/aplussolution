@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, akten_views, announcement_api, attendance_actions, attendance_views, automation_ai_views, automation_views, availability_admin, avatar_views, client_order_planning, client_portal_views, contract_views, document_catalog_views, document_center_views, employee_schedule, global_search_views, integration_views, live_admin_center, live_operations, mobile_schedule, native_operations, oauth_views, one_time_ops, payroll_views, portal_views, push_views, schedule_reports, searchable_views, shift_card_admin, shift_slot_actions, shift_views, store_review_views, time_views, views, wiw_dashboard, worker_portal_views
+from . import admin_center_views, advanced_views, akten_views, announcement_api, attendance_actions, attendance_views, automation_ai_views, automation_views, availability_admin, avatar_views, client_admin_views, client_order_planning, client_portal_views, contract_views, document_catalog_views, document_center_views, employee_schedule, global_search_views, integration_views, live_admin_center, live_operations, mobile_schedule, native_operations, oauth_views, one_time_ops, payroll_views, portal_views, push_views, schedule_reports, searchable_views, shift_card_admin, shift_slot_actions, shift_views, store_review_views, time_views, views, wiw_dashboard, worker_portal_views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -73,6 +73,7 @@ urlpatterns = [
     path('workers/<uuid:pk>/akte/', akten_views.worker_akte),
     path('workers/bulk-invite/', portal_views.bulk_invite_workers),
     path('clients/<uuid:pk>/akte/', akten_views.client_akte),
+    path('clients/<uuid:pk>/reset-password/', client_admin_views.reset_client_password),
     path('orders/<uuid:pk>/confirm-and-plan/', client_order_planning.confirm_and_plan_order),
     path('setup/demo/', views.setup_demo),
     path('dashboard/', views.dashboard),
