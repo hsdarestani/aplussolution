@@ -133,7 +133,7 @@ function ClientHome({ user, navigate }: { user: User; navigate: (view: string) =
     <section className="client-v2-hero">
       <div>
         <small>A+ SOLUTION</small>
-        <h2>{nextShift ? 'Der nächste Einsatz ist vorbereitet.' : 'Personal genau dann, wenn es gebraucht wird.'}</h2>
+        <h2>{nextShift ? 'Der nächste Einsatz ist vorbereitet.' : 'Personal genau dann, wenn du es brauchst.'}</h2>
         <p>{nextShift ? `${nextShift.position_name || 'Einsatz'} · ${dateTime(nextShift.starts_at)} · ${nextShift.location_name || 'Einsatzort'}` : 'Neue Personalaufträge senden, Planung verfolgen und Dokumente sicher abrufen.'}</p>
       </div>
       <button type="button" onClick={() => navigate(nextShift ? 'schedule' : 'orders')}>
