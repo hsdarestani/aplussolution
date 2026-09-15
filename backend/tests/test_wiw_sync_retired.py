@@ -40,3 +40,14 @@ def test_sync_wiw_management_command_is_unconditional_noop_after_cutover():
 
     synchronizer.assert_not_called()
     assert 'dauerhaft deaktiviert' in output.getvalue()
+
+
+def test_production_deploy_never_queues_wiw_work_after_cutover():
+    workflow = (ROOT / '.github' / 'workflows' / 'deploy.yml').read_text(encoding='utf-8')
+    forbidden = (
+        'core.tasks.sync_when_i_work',
+        'core.tasks.reconcile_when_i_work_schedule',
+        'core.tasks.reconcile_when_i_work_full',
+        'WIW_RECONCILIATION_LOCK_KEY',
+    )
+    assert all(token not in workflow for token in forbidden)
