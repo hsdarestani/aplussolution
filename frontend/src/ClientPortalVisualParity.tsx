@@ -5,6 +5,7 @@ import { ClientRatingsMobile, ClientScheduleMobile } from './ClientPortalMobileV
 import './client-portal-visual-parity.css';
 import './client-portal-brand-preserve.css';
 import './client-portal-modal-fix.css';
+import './client-portal-schedule-exact-parity.css';
 
 export default function ClientPortalVisualParity() {
   const [user, setUser] = useState<User | null>(null);
