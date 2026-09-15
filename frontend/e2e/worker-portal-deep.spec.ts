@@ -97,11 +97,22 @@ async function mockWorkerApi(page: Page): Promise<MockState> {
       available_shifts: state.claimed ? [] : [baseShift],
     });
 
+    if (path.startsWith('employee/schedule/')) return json(route, {
+      service_schedule: false,
+      shifts: state.claimed ? [{
+        ...baseShift,
+        open_count: 0,
+        filled_count: 2,
+        assigned_workers: [{ id: worker.id, name: worker.name, is_me: true }],
+        my_release_request: state.releaseRequested ? { id: 'release-1', status: 'pending' } : null,
+      }] : [],
+    });
     if (path.startsWith('shifts/available/')) return json(route, state.claimed ? [] : [baseShift]);
     if (path.startsWith('shifts/mine/')) return json(route, state.claimed ? [{
       ...baseShift,
       open_count: 0,
       filled_count: 2,
+      assigned_workers: [{ id: worker.id, name: worker.name, is_me: true }],
       my_release_request: state.releaseRequested ? { id: 'release-1', status: 'pending' } : null,
     }] : []);
     if (path === `shifts/${baseShift.id}/claim/` && method === 'POST') {
