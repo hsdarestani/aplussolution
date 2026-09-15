@@ -79,7 +79,8 @@ test.describe('client portal visual parity', () => {
 
     const calendar = page.getByTestId('client-v3-schedule');
     await expect(calendar).toBeVisible();
-    await expect(calendar.getByTestId('client-v3-week-strip')).toBeVisible();
+    await expect(calendar.getByTestId('phase8-week-strip')).toBeVisible();
+    await expect(calendar.getByTestId('schedule-day-view')).toHaveAttribute('data-layout', 'list');
     await expect(calendar.getByText('Francesco T.')).toBeVisible();
     await expect(calendar.getByText('Servicekraft')).toBeVisible();
     await expect(calendar.getByText('Evangelische Akademie')).toBeVisible();
@@ -107,10 +108,11 @@ test.describe('client portal visual parity', () => {
     await expect(ratings.getByText('Noch keine Bewertungen')).toBeVisible();
     await ratings.getByRole('button', { name: /Neue Bewertung/ }).click();
 
-    await page.getByLabel('Einsatz').selectOption('shift-client-visual');
-    await page.getByLabel('Mitarbeiter').selectOption('worker-francesco');
-    await page.getByRole('radio', { name: '4 Sterne' }).first().click();
-    await page.getByRole('button', { name: 'Bewertung speichern' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Einsatz bewerten' });
+    await dialog.getByLabel('Einsatz', { exact: true }).selectOption('shift-client-visual');
+    await dialog.getByLabel('Mitarbeiter', { exact: true }).selectOption('worker-francesco');
+    await dialog.getByRole('radio', { name: '4 Sterne' }).first().click();
+    await dialog.getByRole('button', { name: 'Bewertung speichern' }).click();
 
     await expect.poll(() => state.ratingPost).toBeTruthy();
     expect(state.ratingPost.shift).toBe('shift-client-visual');
