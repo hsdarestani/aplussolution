@@ -1,0 +1,8 @@
+@media (max-width: 900px) {
+  /* Client uses the real workforce schedule structure but intentionally has no
+     Meine Schichten/OpenShifts row. Keep the shared week strip directly below
+     the common app header while every other schedule rule stays workforce-owned. */
+  body.wiw-employee-schedule-active [data-testid="client-v3-schedule"] > .wiw-week-strip {
+    top: 0 !important;
+  }
+}
