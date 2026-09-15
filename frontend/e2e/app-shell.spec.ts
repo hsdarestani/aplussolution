@@ -290,10 +290,13 @@ test.describe('Phase 6 mobile QA', () => {
 
     const clientTabs = page.getByTestId('client-v2-tabbar');
     await expect(clientTabs).toBeVisible();
-    await expect(clientTabs.getByRole('button')).toHaveCount(5);
+    await expect(clientTabs.getByRole('button')).toHaveCount(4);
+    await expect(clientTabs.getByRole('button', { name: 'Dashboard' })).toBeVisible();
+    await expect(clientTabs.getByRole('button', { name: 'Kalender' })).toBeVisible();
+    await expect(clientTabs.getByRole('button', { name: 'Mitarbeiter bewerten' })).toBeVisible();
     await expectNoHorizontalPageOverflow(page);
 
-    await clientTabs.getByRole('button', { name: 'Einsätze' }).click();
+    await clientTabs.getByRole('button', { name: 'Kalender' }).click();
     await expect(page.getByTestId('phase8-week-strip')).toBeVisible();
     await expect(page.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
     await expect(page.locator('ion-segment')).toHaveCount(0);
@@ -305,14 +308,19 @@ test.describe('Phase 6 mobile QA', () => {
     expect(seenPaths).not.toContain('positions/');
     expect(seenPaths.some((path) => path.startsWith('admin/'))).toBe(false);
 
+    await clientTabs.getByRole('button', { name: 'Mitarbeiter bewerten' }).click();
+    await expect(page.getByRole('heading', { name: 'Mitarbeiter bewerten' })).toBeVisible();
+
     await clientTabs.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
     const moreMenu = page.getByTestId('client-v2-more');
     await expect(moreMenu).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: /Aufträge/ })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: /Dokumente/ })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: /Servicecenter/ })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: /Verträge & Signatur/ })).toBeVisible();
-    await expect(moreMenu.getByRole('button', { name: /Mitarbeiter bewerten/ })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: /Mitteilungen/ })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: /Profil & Sicherheit/ })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: /Mitarbeiter bewerten/ })).toHaveCount(0);
   });
 });
 
