@@ -80,7 +80,9 @@ def ensure_worker_can_claim(worker: WorkerProfile, shift: Shift) -> None:
     if legacy_overlap:
         raise ValidationError('Du hast in diesem Zeitraum bereits eine Schicht.')
 
-    issues = violations(worker, shift)
+    # Explicit product decision: do not block manual OpenShift pickup or
+    # admin-approved transfers based on the daily-hours cap.
+    issues = [issue for issue in violations(worker, shift) if issue != 'max_hours_per_day']
     if not issues:
         return
     messages = {
@@ -90,7 +92,6 @@ def ensure_worker_can_claim(worker: WorkerProfile, shift: Shift) -> None:
         'overlap': 'Du hast in diesem Zeitraum bereits eine Schicht.',
         'multiple_shifts_per_day': 'Mehrere Schichten am selben Tag sind nicht erlaubt.',
         'minimum_rest': 'Der vorgeschriebene Ruheabstand zwischen Schichten wird unterschritten.',
-        'max_hours_per_day': 'Die maximal erlaubten Tagesstunden würden überschritten.',
         'max_hours_per_week': 'Die maximal erlaubten Wochenstunden würden überschritten.',
         'max_days_per_week': 'Die maximal erlaubten Arbeitstage pro Woche würden überschritten.',
         'max_days_in_row': 'Die maximal erlaubten aufeinanderfolgenden Arbeitstage würden überschritten.',
