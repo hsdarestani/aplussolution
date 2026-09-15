@@ -1,0 +1,29 @@
+@media (max-width: 900px) {
+  /* The client calendar now uses the real workforce schedule. Neutralize the
+     generic customer page gutters only while Kalender is active so the schedule
+     remains full-bleed like Admin/Mitarbeiter. */
+  body.wiw-employee-schedule-active.client-portal-v2-active .app-main {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  /* Client intentionally has no Meine Schichten/OpenShifts row, so the shared
+     week strip starts directly below the common app header. */
+  body.wiw-employee-schedule-active [data-testid="client-v3-schedule"] > .wiw-week-strip {
+    top: 0 !important;
+  }
+
+  /* The customer navigation is 64px high while the employee nav is 58px.
+     Keep the shared total bar immediately above the actual customer tab bar. */
+  body.client-portal-v2-active.wiw-employee-schedule-active [data-testid="client-v3-schedule"] > .wiw-week-total {
+    bottom: calc(64px + env(safe-area-inset-bottom)) !important;
+  }
+
+  /* ScheduleMobileEnhancer is global to ?view=schedule and is meant for the
+     manager/admin SV2 surface. Its date/filter actions do not operate on the
+     read-only client workforce adapter and must not float over the client header. */
+  body.client-portal-v2-active.wiw-employee-schedule-active .schedule-mobile-actions,
+  body.client-portal-v2-active.wiw-employee-schedule-active .schedule-mobile-backdrop {
+    display: none !important;
+  }
+}

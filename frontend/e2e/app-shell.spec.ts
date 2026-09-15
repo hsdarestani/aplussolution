@@ -303,8 +303,9 @@ test.describe('Phase 6 mobile QA', () => {
     await expectNoHorizontalPageOverflow(page);
 
     await clientTabs.getByRole('button', { name: 'Kalender' }).click();
-    await expect(page.getByTestId('phase8-week-strip')).toBeVisible();
-    await expect(page.getByText('Servicekraft', { exact: true }).first()).toBeVisible();
+    const clientSchedule = page.getByTestId('client-v3-schedule');
+    await expect(clientSchedule.getByTestId('phase8-week-strip')).toBeVisible();
+    await expect(clientSchedule.getByText('SK', { exact: true }).first()).toBeVisible();
     await expect(page.locator('ion-segment')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Personalbedarf/i })).toHaveCount(0);
     await expectNoHorizontalPageOverflow(page);

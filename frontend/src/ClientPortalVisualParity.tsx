@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api, User } from './api';
-import { ClientRatingsMobile, ClientScheduleMobile } from './ClientPortalMobileViews';
+import { ClientRatingsMobile } from './ClientPortalMobileViews';
+import ClientScheduleWorkforceMobile from './ClientScheduleWorkforceMobile';
 import './client-portal-visual-parity.css';
 import './client-portal-brand-preserve.css';
 import './client-portal-modal-fix.css';
-import './client-portal-schedule-exact-parity.css';
-import './client-portal-schedule-scroll-layout.css';
+import './client-workforce-schedule.css';
 
 export default function ClientPortalVisualParity() {
   const [user, setUser] = useState<User | null>(null);
@@ -46,66 +46,47 @@ export default function ClientPortalVisualParity() {
   }, [user]);
 
   useEffect(() => {
-    const custom = Boolean(user && mobile && (view === 'schedule' || view === 'ratings'));
-    document.body.classList.toggle('client-v3-custom-view', custom);
-    document.body.classList.toggle('client-v3-schedule-active', custom && view === 'schedule');
-    document.body.classList.toggle('client-v3-ratings-active', custom && view === 'ratings');
-    if (custom && view === 'schedule') document.body.classList.add('wiw-native-schedule-active');
-    else document.body.classList.remove('wiw-native-schedule-active');
+    const schedule = Boolean(user && mobile && view === 'schedule');
+    const ratings = Boolean(user && mobile && view === 'ratings');
+
+    // Calendar deliberately uses the exact same body/layout state as the proven
+    // Mitarbeiter calendar. The old client custom viewport is only kept for the
+    // ratings screen, where it is still required.
+    document.body.classList.toggle('wiw-employee-schedule-active', schedule);
+    document.body.classList.toggle('client-v3-custom-view', ratings);
+    document.body.classList.toggle('client-v3-ratings-active', ratings);
+    document.body.classList.remove('client-v3-schedule-active', 'wiw-native-schedule-active');
+
     return () => {
-      document.body.classList.remove('client-v3-custom-view', 'client-v3-schedule-active', 'client-v3-ratings-active');
-      if (user?.role === 'client') document.body.classList.remove('wiw-native-schedule-active');
+      document.body.classList.remove(
+        'client-v3-custom-view',
+        'client-v3-ratings-active',
+        'client-v3-schedule-active',
+        'wiw-native-schedule-active',
+        'wiw-employee-schedule-active',
+      );
     };
   }, [mobile, user, view]);
 
-  // Keep the same stable schedule hooks as employee/admin while the legacy client
-  // schedule remains mounted underneath. Loading data can replace parts of either
-  // tree, so keep the hook hand-off synchronized for the lifetime of this view.
+  // The legacy client schedule remains mounted underneath App. Retire only its
+  // QA hooks while this workforce calendar is active so the visible schedule owns
+  // the same stable selectors as Admin/Mitarbeiter.
   useEffect(() => {
     if (!user || !mobile || view !== 'schedule') return;
-
-    const root = document.getElementById('root');
-    const retired = new Map<HTMLElement, string>();
-    const legacySelector = '.sv2 [data-testid="phase8-week-strip"], .sv2 [data-testid="schedule-day-view"], .sv2 [data-testid="phase8-week-total"]';
-
-    const applyHooks = () => {
-      document.querySelectorAll<HTMLElement>(legacySelector).forEach((element) => {
-        const testId = element.getAttribute('data-testid');
-        if (!testId) return;
-        retired.set(element, testId);
-        element.removeAttribute('data-testid');
-      });
-
-      const weekStrip = document.querySelector<HTMLElement>('.client-v3-week-strip');
-      const dayView = document.querySelector<HTMLElement>('.client-v3-week-scroll');
-      const weekTotal = document.querySelector<HTMLElement>('.client-v3-week-total');
-      weekStrip?.setAttribute('data-testid', 'phase8-week-strip');
-      dayView?.setAttribute('data-testid', 'schedule-day-view');
-      dayView?.setAttribute('data-layout', 'list');
-      weekTotal?.setAttribute('data-testid', 'phase8-week-total');
-    };
-
-    applyHooks();
-    const observer = new MutationObserver(applyHooks);
-    if (root) observer.observe(root, { subtree: true, childList: true });
-
+    const legacy = Array.from(document.querySelectorAll<HTMLElement>(
+      '.sv2 [data-testid="phase8-week-strip"], .sv2 [data-testid="schedule-day-view"], .sv2 [data-testid="phase8-week-total"]',
+    ));
+    const retired = legacy.map((element) => ({ element, testId: element.getAttribute('data-testid') }));
+    legacy.forEach((element) => element.removeAttribute('data-testid'));
     return () => {
-      observer.disconnect();
-      const weekStrip = document.querySelector<HTMLElement>('.client-v3-week-strip');
-      const dayView = document.querySelector<HTMLElement>('.client-v3-week-scroll');
-      const weekTotal = document.querySelector<HTMLElement>('.client-v3-week-total');
-      weekStrip?.setAttribute('data-testid', 'client-v3-week-strip');
-      dayView?.setAttribute('data-testid', 'client-v3-schedule-days');
-      dayView?.removeAttribute('data-layout');
-      weekTotal?.removeAttribute('data-testid');
-      retired.forEach((testId, element) => {
-        if (element.isConnected) element.setAttribute('data-testid', testId);
+      retired.forEach(({ element, testId }) => {
+        if (element.isConnected && testId) element.setAttribute('data-testid', testId);
       });
     };
   }, [mobile, user, view]);
 
   if (!user || !mobile || !host) return null;
-  if (view === 'schedule') return createPortal(<ClientScheduleMobile />, host);
+  if (view === 'schedule') return createPortal(<ClientScheduleWorkforceMobile />, host);
   if (view === 'ratings') return createPortal(<ClientRatingsMobile />, host);
   return null;
 }
