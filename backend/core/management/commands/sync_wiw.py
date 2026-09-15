@@ -1,26 +1,21 @@
-from django.conf import settings
-from django.core.management.base import BaseCommand, CommandError
-
-from core.wiw_schedule_sync import WhenIWorkSynchronizer
+from django.core.management.base import BaseCommand
 
 
 class Command(BaseCommand):
-    help = 'Historischer WIW-Import (seit Cutover deaktiviert).'
+    help = 'Historischer WIW-Import (seit Cutover dauerhaft deaktiviert).'
 
     def add_arguments(self, parser):
+        # Keep the legacy flag accepted so old operational commands fail safe
+        # instead of surprising automation with an unknown argument error.
         parser.add_argument('--full', action='store_true')
 
     def handle(self, *args, **options):
-        if not settings.WIW_SYNC_ENABLED:
-            self.stdout.write(
-                self.style.WARNING(
-                    'WIW-Synchronisierung ist dauerhaft deaktiviert. '
-                    'Vorhandene importierte Daten bleiben unverändert in A+ erhalten.'
-                )
+        # WIW -> A+ migration is complete. This command deliberately performs
+        # no network access and no database writes, even if a stale environment
+        # or test fixture still exposes an old WIW_SYNC_ENABLED value.
+        self.stdout.write(
+            self.style.WARNING(
+                'WIW-Synchronisierung ist dauerhaft deaktiviert. '
+                'Vorhandene importierte Daten bleiben unverändert in A+ erhalten.'
             )
-            return
-        try:
-            run = WhenIWorkSynchronizer().sync('full' if options['full'] else 'incremental')
-        except Exception as exc:
-            raise CommandError(str(exc)) from exc
-        self.stdout.write(self.style.SUCCESS(f'{run.status}: {run.counts}'))
+        )

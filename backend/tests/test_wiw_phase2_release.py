@@ -11,37 +11,37 @@ def test_phase2_production_script_has_valid_bash_syntax():
     assert result.returncode == 0, result.stderr
 
 
-def test_phase2_production_script_uses_single_process_maintenance_mode_and_restores_services():
+def test_phase2_production_script_is_a_safe_noop_after_cutover():
     script = (ROOT / 'scripts' / 'production_wiw_phase2_resync.sh').read_text(encoding='utf-8')
-    assert 'docker compose stop backend celery celery-beat' in script
-    assert 'trap resume_app_services EXIT' in script
-    assert 'docker compose up -d backend celery celery-beat' in script
-    assert 'docker compose run --rm --no-deps -T backend python manage.py reconcile_wiw_history --compact' in script
-    assert 'docker compose exec -T backend python manage.py reconcile_wiw_history --compact' not in script
-    assert 'WIW Phase 2 preflight OK' not in script
+    assert 'WIW reconciliation is retired' in script
+    assert 'exit 0' in script
+    assert 'reconcile_wiw_history' not in script
+    assert 'pg_dump' not in script
+    assert 'docker compose stop' not in script
+    assert 'docker compose run' not in script
 
 
-def test_phase2_stops_live_backend_before_any_temporary_django_process():
+def test_phase2_retired_script_never_touches_existing_data_or_services():
     script = (ROOT / 'scripts' / 'production_wiw_phase2_resync.sh').read_text(encoding='utf-8')
-    stop_index = script.index('docker compose stop backend celery celery-beat')
-    first_run_index = script.index('docker compose run --rm --no-deps -T backend python manage.py')
-    backup_index = script.index('pg_dump')
-    reconciliation_index = script.index('python manage.py reconcile_wiw_history --compact')
-    assert stop_index < first_run_index < backup_index < reconciliation_index
-    assert 'docker compose exec -T backend python manage.py shell' not in script
+    forbidden_writes = (
+        'manage.py migrate',
+        'manage.py shell',
+        'docker compose exec',
+        'docker compose up',
+        'docker compose down',
+        'docker compose restart',
+        'DELETE FROM',
+        'TRUNCATE',
+    )
+    assert all(token not in script for token in forbidden_writes)
+    assert 'existing A+ data is preserved unchanged' in script
 
 
-def test_phase2_completion_marker_is_written_only_after_public_health_check():
-    script = (ROOT / 'scripts' / 'production_wiw_phase2_resync.sh').read_text(encoding='utf-8')
-    health_index = script.index('https://solution.smarbiz.sbs/health/')
-    marker_index = script.index('cat > "$DONE_MARKER"')
-    assert health_index < marker_index
-
-
-def test_phase2_workflow_runs_only_after_successful_main_deploy():
+def test_phase2_workflow_is_manual_tombstone_only():
     workflow = (ROOT / '.github' / 'workflows' / 'wiw-phase2.yml').read_text(encoding='utf-8')
-    assert 'workflow_run:' in workflow
-    assert 'Validate and deploy production' in workflow
-    assert "workflow_run.conclusion == 'success'" in workflow
-    assert "workflow_run.head_branch == 'main'" in workflow
-    assert 'production_wiw_phase2_resync.sh' in workflow
+    assert 'workflow_dispatch:' in workflow
+    assert 'workflow_run:' not in workflow
+    assert 'push:' not in workflow
+    assert 'schedule:' not in workflow
+    assert 'production_wiw_phase2_resync.sh' not in workflow
+    assert 'synchronization has been retired' in workflow
