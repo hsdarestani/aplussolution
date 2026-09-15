@@ -267,13 +267,13 @@ test.describe('Worker portal deep regression QA', () => {
     await page.goto('/?view=schedule');
 
     const workerSchedule = page.getByTestId('wiw-employee-schedule');
-    await workerSchedule.locator('ion-segment-button[value="open"]').click();
-    await page.getByTestId('schedule-day-view').getByRole('button', { name: /Servicekraft/ }).click();
+    await workerSchedule.getByRole('tab', { name: 'OpenShifts' }).click();
+    await workerSchedule.getByTestId('schedule-day-view').getByRole('button', { name: /Servicekraft/ }).click();
     await page.getByRole('button', { name: 'Schicht übernehmen' }).click();
     await expect.poll(() => state.claimed).toBe(true);
 
-    await workerSchedule.locator('ion-segment-button[value="mine"]').click();
-    await page.getByTestId('schedule-day-view').getByRole('button', { name: /Servicekraft/ }).click();
+    await workerSchedule.getByRole('tab', { name: /Meine Schichten|Service Zeitplan/ }).click();
+    await workerSchedule.getByTestId('schedule-day-view').getByRole('button', { name: /Servicekraft/ }).click();
     await page.getByRole('button', { name: 'Freigeben' }).click();
     const releaseSheet = page.getByRole('dialog', { name: 'Schicht freigeben' });
     await expect(releaseSheet).toBeVisible();
