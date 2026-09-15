@@ -98,7 +98,9 @@ test('client portal keeps servicecenter, orders, documents and Mitteilungen scop
   await page.goto('/');
 
   await expect(page.getByText('QA Claudia Kunde').first()).toBeVisible();
-  await expect(page.getByText('Zu unterzeichnen')).toBeVisible();
+  const clientHome = page.getByTestId('client-portal-v2-home');
+  await expect(clientHome).toBeVisible();
+  await expect(clientHome.getByText('Zu unterzeichnen')).toBeVisible();
 
   await openDesktopNav(page, 'Servicecenter');
   await expect(page.getByRole('heading', { name: 'Servicecenter' })).toBeVisible();
@@ -163,12 +165,19 @@ test.describe('client mobile shell', () => {
     await mockClientApi(page);
     await page.goto('/');
 
-    await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
-    const more = page.getByTestId('wiw-more-screen');
+    const tabs = page.getByTestId('client-v2-tabbar');
+    await expect(tabs).toBeVisible();
+    await expect(tabs.getByRole('button', { name: 'Dokumente' })).toBeVisible();
+    await tabs.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
+
+    const more = page.getByTestId('client-v2-more');
     await expect(more).toBeVisible();
     await expect(more.getByRole('button', { name: /Verträge & Signatur/ })).toBeVisible();
-    await expect(more.getByRole('button', { name: /Dokumente/ })).toBeVisible();
+    await expect(more.getByRole('button', { name: /Servicecenter/ })).toBeVisible();
     await expect(more.getByRole('button', { name: /Mitarbeiter bewerten/ })).toBeVisible();
+    await expect(more.getByRole('button', { name: /Mitteilungen/ })).toBeVisible();
+    await expect(more.getByRole('button', { name: /Profil & Sicherheit/ })).toBeVisible();
+    await expect(more.getByText('Meine Stunden')).toHaveCount(0);
 
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(1);
