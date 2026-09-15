@@ -1,0 +1,230 @@
+@media (max-width: 900px) {
+  /* Clients do not need Alle / Besetzt / Offen. Their calendar always shows
+     every non-cancelled shift scoped to their own account. */
+  body.client-v3-schedule-active .client-v3-schedule-tabs {
+    display: none !important;
+  }
+
+  /* The week strip now starts directly below the common navy app header. */
+  body.client-v3-schedule-active .client-v3-week-strip.wiw-week-strip {
+    top: 0 !important;
+    height: 55px !important;
+    background: #fff !important;
+    border-bottom: 1px solid #d8dadd !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-week-strip.wiw-week-strip > button {
+    color: #6d747a !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-week-strip.wiw-week-strip small {
+    color: #8a9096 !important;
+    font-size: 9px !important;
+    font-weight: 600 !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-week-strip.wiw-week-strip b {
+    width: 27px !important;
+    height: 27px !important;
+    font-size: 12px !important;
+    font-weight: 650 !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-week-strip.wiw-week-strip button.active b {
+    background: #17364a !important;
+    color: #fff !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-week-strip.wiw-week-strip button.today b {
+    box-shadow: inset 0 0 0 2px #6bad50 !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-week-scroll {
+    padding-bottom: 0 !important;
+    background: #f0f1f2 !important;
+  }
+
+  /* Same day separators / typography as Admin and Mitarbeiter Dienstplan. */
+  body.client-v3-schedule-active .client-v3-schedule .wiw-day-section {
+    scroll-margin-top: 55px !important;
+    background: #fff !important;
+    border-bottom: 7px solid #eceeef !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-schedule .wiw-day-section > header {
+    height: 35px !important;
+    padding: 0 12px !important;
+    background: #ededed !important;
+    border-bottom: 1px solid #d8dadd !important;
+    color: #60676d !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-schedule .wiw-day-heading {
+    display: flex !important;
+    align-items: center !important;
+    gap: 7px !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-schedule .wiw-day-heading strong {
+    color: #3e464c !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-schedule .wiw-day-heading span,
+  body.client-v3-schedule-active .client-v3-schedule .wiw-day-section > header em {
+    color: #8c9399 !important;
+    font-size: 10px !important;
+  }
+
+  /* Exact workforce-style row: white surface + short colored accent, never the
+     old solid yellow customer card. */
+  body.client-v3-schedule-active .client-v3-shift-card.wiw-shift-card,
+  body.client-v3-schedule-active .client-v3-shift-card.wiw-shift-card.is-filled,
+  body.client-v3-schedule-active .client-v3-shift-card.wiw-shift-card.is-open {
+    position: relative !important;
+    min-height: 70px !important;
+    padding: 9px 12px 9px 20px !important;
+    gap: 4px !important;
+    border: 0 !important;
+    border-bottom: 1px solid #dfe2e5 !important;
+    border-left: 0 !important;
+    border-radius: 0 !important;
+    background: #fff !important;
+    background-image: none !important;
+    box-shadow: none !important;
+    color: #17364a !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-shift-card.wiw-shift-card::before {
+    content: "";
+    position: absolute;
+    left: 7px;
+    top: 12px;
+    bottom: 12px;
+    width: 4px;
+    border-radius: 999px;
+    background: var(--wiw-card-accent, #f2a71b);
+  }
+
+  body.client-v3-schedule-active .client-v3-shift-card .wiw-card-line {
+    min-width: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-shift-card .wiw-card-line.primary {
+    min-height: 30px !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-shift-card .wiw-card-person {
+    min-width: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-shift-card .wiw-card-person b {
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    color: #17364a !important;
+    font-size: 14px !important;
+    font-weight: 750 !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-shift-card .wiw-card-line.primary > span:last-child {
+    margin-left: auto !important;
+    white-space: nowrap !important;
+    color: #17364a !important;
+    font-size: 14px !important;
+    font-weight: 750 !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-shift-card .wiw-card-line.secondary {
+    padding-left: 38px !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-shift-card .wiw-card-line.secondary > span,
+  body.client-v3-schedule-active .client-v3-shift-card .wiw-card-line.secondary > span.open {
+    max-width: 45% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    color: #536979 !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-shift-card .wiw-card-line.secondary small {
+    margin-left: auto !important;
+    max-width: 58% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    color: #536979 !important;
+    font-size: 10px !important;
+    font-weight: 500 !important;
+  }
+
+  /* Avatar dimensions and borders match the workforce rows. */
+  body.client-v3-schedule-active .client-v3-schedule .wiw-worker-avatar-shell {
+    position: relative !important;
+    display: block !important;
+    flex: 0 0 28px !important;
+    width: 28px !important;
+    height: 28px !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-schedule .wiw-worker-avatar {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 28px !important;
+    height: 28px !important;
+    display: grid !important;
+    place-items: center !important;
+    border: 1px solid #d4dadd !important;
+    border-radius: 50% !important;
+    background: #eef2f4 !important;
+    color: #17364a !important;
+    object-fit: cover !important;
+    font-size: 9px !important;
+    font-weight: 800 !important;
+    box-shadow: none !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-schedule .wiw-worker-avatar-image {
+    background: #fff !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-schedule .wiw-day-empty {
+    height: 43px !important;
+    background: #fff !important;
+    color: #9ba1a6 !important;
+    font-size: 11px !important;
+  }
+
+  /* Same dark total-hours bar as Admin / Mitarbeiter; the customer bottom nav
+     remains directly below it. */
+  body.client-v3-schedule-active .client-v3-week-total.wiw-week-total {
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: calc(64px + env(safe-area-inset-bottom)) !important;
+    z-index: 590 !important;
+    height: 48px !important;
+    padding: 0 16px !important;
+    background: #5b5b5b !important;
+    color: #fff !important;
+    box-shadow: none !important;
+    font-size: 12px !important;
+  }
+
+  body.client-v3-schedule-active .client-v3-week-total strong {
+    color: #fff !important;
+    font-size: 14px !important;
+    font-weight: 750 !important;
+  }
+}

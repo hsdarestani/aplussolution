@@ -68,7 +68,7 @@ async function mockClient(page: Page, state: { ratingPost?: any }) {
 test.describe('client portal visual parity', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('calendar uses the same week/day/card visual system as workforce schedules', async ({ page }) => {
+  test('calendar matches workforce rows and has no client status tabs', async ({ page }) => {
     const state: { ratingPost?: any } = {};
     await mockClient(page, state);
     await page.goto('/');
@@ -79,6 +79,7 @@ test.describe('client portal visual parity', () => {
 
     const calendar = page.getByTestId('client-v3-schedule');
     await expect(calendar).toBeVisible();
+    await expect(calendar.getByRole('tablist', { name: 'Einsatzfilter' })).toBeHidden();
     await expect(calendar.getByTestId('phase8-week-strip')).toBeVisible();
     await expect(calendar.getByTestId('schedule-day-view')).toHaveAttribute('data-layout', 'list');
     await expect(calendar.getByText('Francesco T.')).toBeVisible();
@@ -88,6 +89,14 @@ test.describe('client portal visual parity', () => {
 
     const card = calendar.locator('.client-v3-shift-card').first();
     await expect(card).toHaveClass(/wiw-shift-card/);
+    await expect(card).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+    await expect(card).toHaveCSS('border-left-style', 'none');
+    const accent = await card.evaluate((element) => getComputedStyle(element, '::before').backgroundColor);
+    expect(accent).not.toBe('rgba(0, 0, 0, 0)');
+
+    const weekTop = await calendar.getByTestId('phase8-week-strip').evaluate((element) => getComputedStyle(element).top);
+    expect(weekTop).toBe('0px');
+
     await card.click();
     await expect(page.getByTestId('client-v3-shift-detail')).toBeVisible();
     await expect(page.getByText('Einsatzdetails')).toBeVisible();
