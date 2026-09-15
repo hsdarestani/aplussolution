@@ -45,14 +45,17 @@ export default function ClientPortalVisualParity() {
   }, [user]);
 
   useEffect(() => {
-    const custom = Boolean(user && mobile && (view === 'schedule' || view === 'ratings'));
-    const schedule = Boolean(custom && view === 'schedule');
-    document.body.classList.toggle('client-v3-custom-view', custom);
-    document.body.classList.toggle('client-v3-ratings-active', custom && view === 'ratings');
-    // Reuse the exact body state used by the working employee schedule. Do not
-    // activate the old client/admin schedule viewport overrides here.
+    const schedule = Boolean(user && mobile && view === 'schedule');
+    const ratings = Boolean(user && mobile && view === 'ratings');
+
+    // Calendar deliberately uses the exact same body/layout state as the proven
+    // Mitarbeiter calendar. The old client custom viewport is only kept for the
+    // ratings screen, where it is still required.
     document.body.classList.toggle('wiw-employee-schedule-active', schedule);
+    document.body.classList.toggle('client-v3-custom-view', ratings);
+    document.body.classList.toggle('client-v3-ratings-active', ratings);
     document.body.classList.remove('client-v3-schedule-active', 'wiw-native-schedule-active');
+
     return () => {
       document.body.classList.remove(
         'client-v3-custom-view',
