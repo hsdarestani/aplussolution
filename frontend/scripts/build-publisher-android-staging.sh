@@ -28,5 +28,32 @@ case "$VITE_API_URL" in
     ;;
 esac
 
+# The Firebase project/API key is already checked into the production client config.
+# For staging, derive a single staging client at build time so no new secret is added
+# to Git history while still using the exact Firebase app that belongs to
+# de.aplussolution.staging.
+if [[ -z "${GOOGLE_SERVICES_JSON_BASE64:-}" && -z "${GOOGLE_SERVICES_JSON:-}" ]]; then
+  FIREBASE_SOURCE="$SCRIPT_DIR/../firebase/google-services.json"
+  if [[ ! -f "$FIREBASE_SOURCE" ]]; then
+    echo "Missing Firebase source config: $FIREBASE_SOURCE" >&2
+    exit 1
+  fi
+  export GOOGLE_SERVICES_JSON="$(node - "$FIREBASE_SOURCE" <<'NODE'
+const fs = require('fs');
+const source = process.argv[2];
+const config = JSON.parse(fs.readFileSync(source, 'utf8'));
+const template = (config.client || []).find(
+  (client) => client?.client_info?.android_client_info?.package_name === 'de.aplussolution.workforce',
+) || (config.client || [])[0];
+if (!template) throw new Error('Firebase source config has no Android client.');
+const stagingClient = JSON.parse(JSON.stringify(template));
+stagingClient.client_info.mobilesdk_app_id = '1:556347591130:android:aa39dc4d676c8c33b918e3';
+stagingClient.client_info.android_client_info.package_name = 'de.aplussolution.staging';
+config.client = [stagingClient];
+process.stdout.write(JSON.stringify(config));
+NODE
+)"
+fi
+
 echo "Building push-ready Android staging app ${CAPACITOR_APP_ID} against ${VITE_API_URL}."
 bash "$SCRIPT_DIR/build-publisher-android.sh"
