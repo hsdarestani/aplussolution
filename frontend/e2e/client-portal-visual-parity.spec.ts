@@ -110,7 +110,7 @@ test.describe('client portal visual parity', () => {
     await expect(calendar.getByText('Evangelische Akademie').first()).toBeVisible();
     await expect(calendar.getByText('Gesamtstunden')).toBeVisible();
 
-    const firstDay = calendar.locator('.wiw-day-section').first();
+    const firstDay = calendar.locator('.wiw-day-section').filter({ has: calendar.locator('.wiw-shift-card') }).first();
     const firstDayHeader = firstDay.locator('> header');
     const firstCard = firstDay.locator('.wiw-shift-card').first();
     await expect(firstDayHeader).toBeVisible();
