@@ -66,30 +66,33 @@ test('client gets a dedicated A+ dashboard with scoped live actions', async ({ p
 test.describe('client v2 mobile navigation', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('keeps five customer-first destinations and a clean More screen', async ({ page }) => {
+  test('keeps exactly four customer destinations and a clean More screen', async ({ page }) => {
     await mockClient(page);
     await page.goto('/');
 
     const tabs = page.getByTestId('client-v2-tabbar');
     await expect(tabs).toBeVisible();
-    await expect(tabs.getByRole('button', { name: 'Start' })).toBeVisible();
-    await expect(tabs.getByRole('button', { name: 'Einsätze' })).toBeVisible();
-    await expect(tabs.getByRole('button', { name: 'Aufträge' })).toBeVisible();
-    await expect(tabs.getByRole('button', { name: 'Dokumente' })).toBeVisible();
+    await expect(tabs.getByRole('button')).toHaveCount(4);
+    await expect(tabs.getByRole('button', { name: 'Dashboard' })).toBeVisible();
+    await expect(tabs.getByRole('button', { name: 'Kalender' })).toBeVisible();
+    await expect(tabs.getByRole('button', { name: 'Mitarbeiter bewerten' })).toBeVisible();
     await expect(tabs.getByRole('button', { name: 'Weitere Bereiche öffnen' })).toBeVisible();
+    await expect(tabs.getByRole('button', { name: 'Aufträge' })).toHaveCount(0);
+    await expect(tabs.getByRole('button', { name: 'Dokumente' })).toHaveCount(0);
 
-    await tabs.getByRole('button', { name: 'Aufträge' }).click();
-    await expect(page.getByRole('heading', { name: 'Aufträge' })).toBeVisible();
-    await expect(page.getByText('Abendveranstaltung')).toBeVisible();
+    await tabs.getByRole('button', { name: 'Mitarbeiter bewerten' }).click();
+    await expect(page.getByRole('heading', { name: 'Mitarbeiter bewerten' })).toBeVisible();
 
     await tabs.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
     const more = page.getByTestId('client-v2-more');
     await expect(more).toBeVisible();
-    await expect(more.getByText('Verträge & Signatur')).toBeVisible();
-    await expect(more.getByText('Servicecenter')).toBeVisible();
-    await expect(more.getByText('Mitarbeiter bewerten')).toBeVisible();
-    await expect(more.getByText('Mitteilungen')).toBeVisible();
-    await expect(more.getByText('Profil & Sicherheit')).toBeVisible();
+    await expect(more.getByRole('button', { name: /Aufträge/ })).toBeVisible();
+    await expect(more.getByRole('button', { name: /Dokumente/ })).toBeVisible();
+    await expect(more.getByRole('button', { name: /Verträge & Signatur/ })).toBeVisible();
+    await expect(more.getByRole('button', { name: /Servicecenter/ })).toBeVisible();
+    await expect(more.getByRole('button', { name: /Mitteilungen/ })).toBeVisible();
+    await expect(more.getByRole('button', { name: /Profil & Sicherheit/ })).toBeVisible();
+    await expect(more.getByRole('button', { name: /Mitarbeiter bewerten/ })).toHaveCount(0);
     await expect(more.getByText('Meine Stunden')).toHaveCount(0);
 
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
