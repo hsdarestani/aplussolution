@@ -87,6 +87,17 @@
   .wiw-week-preview .wiw-shift-card{
     cursor:default!important;
   }
+  .wiw-shift-card .wiw-worker-avatar-fallback{
+    display:grid!important;
+    place-items:center!important;
+    background:#d8dde1!important;
+    color:#68737d!important;
+    font-size:10px!important;
+    line-height:1!important;
+    font-weight:800!important;
+    letter-spacing:.02em;
+    white-space:nowrap;
+  }
 }
 
 @media(max-width:380px){
