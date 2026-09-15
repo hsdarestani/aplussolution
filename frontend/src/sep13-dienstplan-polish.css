@@ -132,3 +132,152 @@
   .wiw-pdf-sheet>footer{padding-bottom:max(12px,env(safe-area-inset-bottom))!important}
   .admin-schedule-sheet.ai{padding-bottom:env(safe-area-inset-bottom)}
 }
+
+/* 2026-09-15 Admin Dienstplan card hierarchy: photo centered vertically,
+   identity stacked beside it, time/location stacked on the right. */
+@media(max-width:900px){
+  body.wiw-native-schedule-active .wiw-day-section>header,
+  .wiw-adjacent-day-section>header{
+    min-height:40px!important;
+    height:40px!important;
+    padding:0 12px!important;
+  }
+  .wiw-day-header-spacer{display:none!important}
+  .wiw-day-heading{min-width:0;display:flex;align-items:baseline;gap:7px}
+  body.wiw-native-schedule-active .wiw-day-heading>strong,
+  .wiw-adjacent-day-section .wiw-day-heading>strong{
+    font-size:14px!important;
+    line-height:1!important;
+    font-weight:750!important;
+    color:#555f69!important;
+  }
+  body.wiw-native-schedule-active .wiw-day-heading>span,
+  .wiw-adjacent-day-section .wiw-day-heading>span{
+    font-size:13px!important;
+    line-height:1!important;
+    font-weight:650!important;
+    color:#6b7280!important;
+  }
+  .wiw-day-summary{margin-left:auto;display:flex;align-items:center;gap:6px;flex:0 0 auto}
+  body.wiw-native-schedule-active .wiw-day-summary>em,
+  .wiw-adjacent-day-section .wiw-day-summary>em{
+    margin:0!important;
+    min-width:24px;
+    height:24px;
+    padding:0 6px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:999px;
+    background:#fff;
+    border:1px solid #d7dce1;
+    color:#667085!important;
+    font-size:11px!important;
+    font-weight:800!important;
+    font-style:normal;
+  }
+  body.wiw-native-schedule-active .wiw-day-summary>span,
+  .wiw-adjacent-day-section .wiw-day-summary>span{
+    margin:0!important;
+    padding:4px 8px;
+    border-radius:999px;
+    background:#dfe4e8;
+    color:#4b5563!important;
+    white-space:nowrap;
+    font-size:10.5px!important;
+    line-height:1!important;
+    font-weight:800!important;
+  }
+
+  .wiw-shift-card .wiw-card-main{
+    min-width:0;
+    min-height:42px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .wiw-shift-card .wiw-card-main>.wiw-card-person{
+    min-width:0;
+    flex:1 1 auto;
+    margin:0!important;
+    display:flex!important;
+    align-items:center!important;
+    gap:10px;
+  }
+  .wiw-shift-card .wiw-card-identity{
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    gap:2px;
+  }
+  .wiw-shift-card .wiw-card-identity>b{
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    color:#222b33!important;
+    font-size:14px!important;
+    line-height:1.18!important;
+    font-weight:750!important;
+  }
+  .wiw-shift-card .wiw-card-identity>small{
+    margin:0!important;
+    color:#667085!important;
+    font-size:10.5px!important;
+    line-height:1.15!important;
+    font-weight:800!important;
+    letter-spacing:.02em;
+  }
+  .wiw-shift-card .wiw-card-meta{
+    min-width:100px;
+    max-width:46%;
+    margin-left:auto!important;
+    flex:0 0 auto;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    align-items:flex-end;
+    gap:3px;
+    text-align:right;
+  }
+  .wiw-shift-card .wiw-card-meta>b{
+    color:#2f3740!important;
+    white-space:nowrap;
+    font-size:13px!important;
+    line-height:1.15!important;
+    font-weight:750!important;
+  }
+  .wiw-shift-card .wiw-card-meta>small{
+    max-width:100%;
+    margin:0!important;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    color:#7b8490!important;
+    font-size:9.5px!important;
+    line-height:1.15!important;
+  }
+  .wiw-shift-card .wiw-worker-avatar-shell{
+    align-self:center!important;
+    width:36px!important;
+    height:36px!important;
+    min-width:36px!important;
+    flex:0 0 36px!important;
+  }
+  .wiw-shift-card .wiw-worker-avatar{
+    width:36px!important;
+    height:36px!important;
+    min-width:36px!important;
+  }
+  .wiw-shift-card .wiw-card-identity .wiw-open-alert{margin-left:4px!important}
+}
+
+@media(max-width:380px){
+  .wiw-shift-card .wiw-card-meta{min-width:86px;max-width:42%}
+  .wiw-shift-card .wiw-card-identity>b{font-size:13px!important}
+  body.wiw-native-schedule-active .wiw-day-heading>span,
+  .wiw-adjacent-day-section .wiw-day-heading>span{font-size:12px!important}
+  body.wiw-native-schedule-active .wiw-day-summary>span,
+  .wiw-adjacent-day-section .wiw-day-summary>span{padding:4px 6px;font-size:10px!important}
+}
