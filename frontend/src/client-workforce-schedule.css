@@ -13,6 +13,12 @@
     top: 0 !important;
   }
 
+  /* The customer navigation is 64px high while the employee nav is 58px.
+     Keep the shared total bar immediately above the actual customer tab bar. */
+  body.client-portal-v2-active.wiw-employee-schedule-active [data-testid="client-v3-schedule"] > .wiw-week-total {
+    bottom: calc(64px + env(safe-area-inset-bottom)) !important;
+  }
+
   /* ScheduleMobileEnhancer is global to ?view=schedule and is meant for the
      manager/admin SV2 surface. Its date/filter actions do not operate on the
      read-only client workforce adapter and must not float over the client header. */
