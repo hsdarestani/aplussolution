@@ -58,7 +58,7 @@ test('client gets a dedicated A+ dashboard with scoped live actions', async ({ p
   await expect(home.getByText('Aktive Aufträge')).toBeVisible();
   await expect(home.getByText('Kommende Einsätze')).toBeVisible();
   await expect(home.getByText('Zu unterzeichnen')).toBeVisible();
-  await expect(home.getByText('Servicekraft')).toBeVisible();
+  await expect(home.getByText('Servicekraft').first()).toBeVisible();
   await expect(home.getByText('Einsatzinformation')).toBeVisible();
   await expect(home.getByText(/Fremd|Andere GmbH/i)).toHaveCount(0);
 });
