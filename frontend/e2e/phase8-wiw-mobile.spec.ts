@@ -40,8 +40,9 @@ test('Phase 8 attendance spans the complete imported history without removing cl
 
 test('Phase 8 worker scheduler exposes dedicated shift lists and approved release requests', async()=>{
   const schedule=read('src/WiwEmployeeScheduleMobile.tsx');
-  expect(schedule).toContain('data-layout="list"');
-  expect(schedule).not.toContain('className="wiw-employee-week-strip"');
+  expect(schedule).toContain('data-testid="schedule-day-view"');
+  expect(schedule).toContain('wiw-employee-week-swipe-viewport');
+  expect(schedule).toContain('data-testid="phase8-week-strip"');
   expect(schedule).toContain('Gesamtstunden');
   expect(schedule).toContain('Meine Schichten');
   expect(schedule).toContain('OpenShifts');
