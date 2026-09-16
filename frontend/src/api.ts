@@ -124,6 +124,7 @@ export async function clockLocationRequired(shiftId?: string | null): Promise<bo
   if (!shiftId) return false;
   try {
     const shift: any = await api(`shifts/${shiftId}/`);
+    if (typeof shift?.geofence_required === 'boolean') return shift.geofence_required;
     if (!shift?.location) return false;
     const location: any = await api(`locations/${shift.location}/`);
     return location?.latitude != null && location?.longitude != null;
