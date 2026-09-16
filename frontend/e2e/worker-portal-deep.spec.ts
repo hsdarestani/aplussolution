@@ -38,6 +38,7 @@ type MockState = {
   activeClock: boolean;
   correctionPending: boolean;
   contractSigned: boolean;
+  geofenceConfigured: boolean;
   availabilities: any[];
   notificationsRead: boolean;
   requests: Array<{ path: string; method: string; body: string | null }>;
@@ -50,6 +51,7 @@ async function mockWorkerApi(page: Page): Promise<MockState> {
     activeClock: false,
     correctionPending: false,
     contractSigned: false,
+    geofenceConfigured: true,
     availabilities: [],
     notificationsRead: false,
     requests: [],
@@ -115,6 +117,10 @@ async function mockWorkerApi(page: Page): Promise<MockState> {
       assigned_workers: [{ id: worker.id, name: worker.name, is_me: true }],
       my_release_request: state.releaseRequested ? { id: 'release-1', status: 'pending' } : null,
     }] : []);
+    if (path === `shifts/${baseShift.id}/`) return json(route, {
+      ...baseShift,
+      geofence_required: state.geofenceConfigured,
+    });
     if (path === `shifts/${baseShift.id}/claim/` && method === 'POST') {
       state.claimed = true;
       return json(route, { detail: 'Schicht übernommen.' });
@@ -125,7 +131,7 @@ async function mockWorkerApi(page: Page): Promise<MockState> {
     }
 
     if (path === 'attendance/home/') return json(route, {
-      active_entry: state.activeClock ? { id: 'entry-active', shift_title: 'Servicekraft', clock_in: iso(-15) } : null,
+      active_entry: state.activeClock ? { id: 'entry-active', shift: baseShift.id, shift_title: 'Servicekraft', clock_in: iso(-15) } : null,
       eligible_shift: state.activeClock ? null : baseShift,
       month_worked_minutes: 2330,
       pending_corrections: state.correctionPending ? 1 : 0,
@@ -299,7 +305,7 @@ test.describe('Worker portal deep regression QA', () => {
     expect(forbiddenManagerFanout(state)).toEqual([]);
   });
 
-  test('clock in/out asks for location and correction uses real worker states', async ({ page }) => {
+  test('clock in/out asks for location when a geofence is configured and correction uses real worker states', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const state = await mockWorkerApi(page);
     await page.goto('/');
@@ -321,6 +327,30 @@ test.describe('Worker portal deep regression QA', () => {
     await page.getByRole('button', { name: 'Anfrage senden' }).click();
     await expect.poll(() => state.correctionPending).toBe(true);
     await expect(page.getByText('Korrektur offen')).toBeVisible();
+    expect(forbiddenManagerFanout(state)).toEqual([]);
+  });
+
+  test('clock in/out skips device location when the Einsatzort has no GPS geofence', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const state = await mockWorkerApi(page);
+    state.geofenceConfigured = false;
+    await page.goto('/');
+
+    await page.getByTestId('phase8-mobile-dashboard').getByRole('button', { name: 'Einstempeln' }).click();
+    await expect.poll(() => state.activeClock).toBe(true);
+    await expect(page.getByRole('heading', { name: 'Für die Zeiterfassung ist eine Berechtigung zur Standortbestimmung erforderlich' })).toHaveCount(0);
+    const clockIn = state.requests.find((request) => request.path === 'time-entries/clock_in/' && request.method === 'POST');
+    expect(clockIn).toBeTruthy();
+    expect(JSON.parse(clockIn?.body || '{}')).not.toHaveProperty('lat');
+    expect(JSON.parse(clockIn?.body || '{}')).not.toHaveProperty('lng');
+
+    await page.getByRole('button', { name: 'Ausstempeln' }).click();
+    await expect.poll(() => state.activeClock).toBe(false);
+    await expect(page.getByRole('heading', { name: 'Für die Zeiterfassung ist eine Berechtigung zur Standortbestimmung erforderlich' })).toHaveCount(0);
+    const clockOut = state.requests.find((request) => request.path === 'time-entries/clock_out/' && request.method === 'POST');
+    expect(clockOut).toBeTruthy();
+    expect(JSON.parse(clockOut?.body || '{}')).not.toHaveProperty('lat');
+    expect(JSON.parse(clockOut?.body || '{}')).not.toHaveProperty('lng');
     expect(forbiddenManagerFanout(state)).toEqual([]);
   });
 
