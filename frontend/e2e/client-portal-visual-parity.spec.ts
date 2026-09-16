@@ -142,11 +142,19 @@ test.describe('client portal visual parity', () => {
     expect(firstVisibleHeaderBox!.y).toBeGreaterThanOrEqual(weekBox!.y + weekBox!.height - 1);
     expect(cardBox!.y).toBeGreaterThanOrEqual(populatedHeaderBox!.y + populatedHeaderBox!.height - 1);
 
-    const headerTextBefore = await firstVisibleHeader.textContent();
-    await dayView.evaluate((element) => { element.scrollTop = Math.min(80, element.scrollHeight - element.clientHeight); element.dispatchEvent(new Event('scroll')); });
-    await expect(firstVisibleHeader).toBeVisible();
-    await expect(firstVisibleHeader).toHaveText(headerTextBefore || '');
-    const scrolledHeaderBox = await firstVisibleHeader.boundingBox();
+    const populatedHeaderText = await firstPopulatedHeader.textContent();
+    await firstPopulatedDay.evaluate((section) => {
+      const scroller = section.closest('[data-testid="schedule-day-view"]') as HTMLElement | null;
+      if (!scroller) return;
+      scroller.scrollTop = Math.min(
+        (section as HTMLElement).offsetTop + 48,
+        Math.max(0, scroller.scrollHeight - scroller.clientHeight),
+      );
+      scroller.dispatchEvent(new Event('scroll'));
+    });
+    await expect(firstPopulatedHeader).toBeVisible();
+    await expect(firstPopulatedHeader).toHaveText(populatedHeaderText || '');
+    const scrolledHeaderBox = await firstPopulatedHeader.boundingBox();
     const scrollBox = await dayView.boundingBox();
     expect(scrolledHeaderBox && scrollBox).toBeTruthy();
     expect(Math.abs(scrolledHeaderBox!.y - scrollBox!.y)).toBeLessThanOrEqual(2);
