@@ -136,7 +136,7 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
             if not parsed:
                 return Response({'detail': 'Die angepasste Check-out-Zeit ist ungültig.'}, status=400)
             if parsed <= entry.clock_in:
-                return Response({'detail': 'Check-out muss nach Check-in liegen.'}, status=400)
+                return Response({'detail': 'Check-out muss nach dem Check-in liegen.'}, status=400)
             entry.clock_out = parsed
             changed = True
         elif subtract_minutes not in (None, ''):
