@@ -41,16 +41,18 @@ def normalized_groups(value) -> list[str]:
 
 
 def shift_visible_to_worker(shift, worker) -> bool:
-    """Apply optional per-worker OpenShift client and Zeitplan visibility.
+    """Apply per-worker OpenShift client and Zeitplan visibility.
 
-    Empty worker preferences deliberately mean unrestricted for backward compatibility.
-    Empty shift groups mean the shift is visible to every allowed worker.
+    A shift with an explicit Zeitplan group is visible only to workers who are
+    explicitly assigned to at least one matching group. This keeps OpenShift
+    notification fan-out aligned with the worker picker. Shifts without a group
+    remain visible to every otherwise-allowed worker for backward compatibility.
     """
     allowed_clients = {str(value) for value in (worker.open_shift_client_ids or []) if value}
     if allowed_clients and str(shift.client_id) not in allowed_clients:
         return False
     worker_groups = set(normalized_groups(worker.schedule_groups))
     shift_groups = set(normalized_groups(shift.schedule_groups))
-    if worker_groups and shift_groups and not worker_groups.intersection(shift_groups):
+    if shift_groups and not worker_groups.intersection(shift_groups):
         return False
     return True
