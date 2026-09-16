@@ -13,7 +13,7 @@ test('Phase 8 bottom navigation keeps Mitteilungen inside Mehr', async()=>{
   expect(app).not.toContain("['dashboard', 'schedule', 'time', 'messages']");
 });
 
-test('Phase 8 worker dashboard follows the WIW employee hierarchy and GPS clock flow', async()=>{
+test('Phase 8 worker dashboard follows the WIW employee hierarchy and conditional GPS clock flow', async()=>{
   const home=read('src/EmployeeHome.tsx');
   for(const label of ['Anfragen','Schichtanfragen','OpenShift-Anfragen','Mein Zeitplan','Meine Schichten','OpenShifts verfügbar','Zeiterfassung','Wichtige bevorstehende Daten','Einstempeln','Ausstempeln']){
     expect(home).toContain(label);
@@ -21,7 +21,9 @@ test('Phase 8 worker dashboard follows the WIW employee hierarchy and GPS clock 
   expect(home).toContain('Für die Zeiterfassung ist eine Berechtigung zur Standortbestimmung erforderlich');
   expect(home).toContain('Standortdienste aktivieren');
   expect(home).toContain("navigator.geolocation.getCurrentPosition");
-  expect(home).toContain("api(`time-entries/clock_${clockIntent}/`");
+  expect(home).toContain('clockLocationRequired');
+  expect(home).toContain('payload.skip_location = true');
+  expect(home).toContain("api(`time-entries/clock_${intent}/`");
 });
 
 test('Phase 8 attendance spans the complete imported history without removing clock mode', async()=>{
