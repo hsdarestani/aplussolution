@@ -37,6 +37,13 @@ const legacyRows = `  const rows = mode === 'mine' ? mine : open;`;
 const scopedRows = `  const rows = mode === 'mine' ? (ownOnly ? mine.filter(isOwnShift) : mine) : open;`;
 scheduleNext = patchOnce(scheduleNext, legacyRows, scopedRows, 'employee schedule own-only rows');
 
+// The current mobile week is rendered by the admin-parity helper, not by the
+// legacy `rows`/`visible` list above. Filter that renderer too; otherwise both
+// tabs look identical even though the state changes correctly.
+const legacyWeekIteration = `    mine.forEach((shift) => {`;
+const scopedWeekIteration = `    (ownOnly ? mine.filter(isOwnShift) : mine).forEach((shift) => {`;
+scheduleNext = patchOnce(scheduleNext, legacyWeekIteration, scopedWeekIteration, 'employee rendered week own-only scope');
+
 const legacyMineTab = `          <button type="button" role="tab" aria-selected={mode === 'mine'} className={mode === 'mine' ? 'active' : ''} onClick={() => setMode('mine')}>{serviceSchedule ? 'Service Zeitplan' : 'Meine Schichten'}</button>`;
 const scopedMineTabs = `          {serviceSchedule ? <>\n            <button type="button" role="tab" aria-selected={mode === 'mine' && ownOnly} className={mode === 'mine' && ownOnly ? 'active' : ''} onClick={() => { setMode('mine'); setOwnOnly(true); }}>Meine Schichten</button>\n            <button type="button" role="tab" aria-selected={mode === 'mine' && !ownOnly} className={mode === 'mine' && !ownOnly ? 'active' : ''} onClick={() => { setMode('mine'); setOwnOnly(false); }}>Service Zeitplan</button>\n          </> : <button type="button" role="tab" aria-selected={mode === 'mine'} className={mode === 'mine' ? 'active' : ''} onClick={() => { setMode('mine'); setOwnOnly(true); }}>Meine Schichten</button>}`;
 scheduleNext = patchOnce(scheduleNext, legacyMineTab, scopedMineTabs, 'employee schedule tabs');
