@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { setupIonicReact } from '@ionic/react';
 import '@ionic/react/css/core.css';
@@ -71,6 +71,44 @@ installLocationPicker();
 installMobileAppearance();
 setupIonicReact({ mode: 'md' });
 
+/*
+ * Client portal enhancers historically inspected localStorage only once when the
+ * application mounted. On a fresh login they therefore mounted before the access
+ * token existed and stayed dormant until the browser was manually refreshed.
+ * Keep them keyed to the current auth session so a token created/removed in this
+ * tab remounts the enhancers without reloading the page.
+ */
+function ClientPortalMount() {
+  const [generation, setGeneration] = useState(0);
+  const tokenRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    tokenRef.current = localStorage.getItem('access');
+    const syncSession = () => {
+      const nextToken = localStorage.getItem('access');
+      if (nextToken === tokenRef.current) return;
+      tokenRef.current = nextToken;
+      setGeneration((value) => value + 1);
+    };
+
+    const timer = window.setInterval(syncSession, 180);
+    window.addEventListener('storage', syncSession);
+    window.addEventListener('focus', syncSession);
+    window.addEventListener('pageshow', syncSession);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('storage', syncSession);
+      window.removeEventListener('focus', syncSession);
+      window.removeEventListener('pageshow', syncSession);
+    };
+  }, []);
+
+  return <React.Fragment key={generation}>
+    <ClientPortalV2 />
+    <ClientPortalVisualParity />
+  </React.Fragment>;
+}
+
 function renderApp() {
   const splashPreview = isSplashPreviewMode();
   const legalPage = legalPageFromPath(window.location.pathname);
@@ -85,8 +123,7 @@ function renderApp() {
         <>
           <AppLaunchSplash />
           <App />
-          <ClientPortalV2 />
-          <ClientPortalVisualParity />
+          <ClientPortalMount />
           <HeaderQuickAccess />
           <ScheduleMobileEnhancer />
           <ScheduleEntryFilterEnhancer />

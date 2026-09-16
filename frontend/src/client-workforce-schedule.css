@@ -1,22 +1,103 @@
 @media (max-width: 900px) {
-  /* The client calendar now uses the real workforce schedule. Neutralize the
-     generic customer page gutters only while Kalender is active so the schedule
-     remains full-bleed like Admin/Mitarbeiter. */
-  body.wiw-employee-schedule-active.client-portal-v2-active .app-main {
-    padding-left: 0 !important;
-    padding-right: 0 !important;
+  /* The client calendar is a single app-like viewport: common app bar, week
+     navigation, one vertically scrolling day list, total bar, then customer nav. */
+  body.client-portal-v2-active.wiw-employee-schedule-active {
+    overflow: hidden !important;
   }
 
-  /* Client intentionally has no Meine Schichten/OpenShifts row, so the shared
-     week strip starts directly below the common app header. */
-  body.wiw-employee-schedule-active [data-testid="client-v3-schedule"] > .wiw-week-strip {
+  /* The generic mobile shell reserves 64px. Client visual styling previously
+     raised the minimum app-bar height to 76px, which made the first 12px of the
+     week strip sit underneath the navy header. Keep the calendar shell on the
+     same 64px track used by Admin/Mitarbeiter. */
+  body.client-portal-v2-active.wiw-employee-schedule-active .mobile-appbar {
+    height: calc(64px + env(safe-area-inset-top)) !important;
+    min-height: calc(64px + env(safe-area-inset-top)) !important;
+    padding: env(safe-area-inset-top) 16px 0 !important;
+  }
+
+  body.client-portal-v2-active.wiw-employee-schedule-active .app-main {
+    height: calc(100dvh - 64px - var(--mobile-bottom-nav-height, 64px) - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    min-height: 0 !important;
+    max-height: calc(100dvh - 64px - var(--mobile-bottom-nav-height, 64px) - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
+  body.client-portal-v2-active.wiw-employee-schedule-active [data-testid="client-v3-schedule"].wiw-schedule-mobile {
+    position: relative !important;
+    inset: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    background: #f0f1f2 !important;
+  }
+
+  /* Client intentionally has no Meine Schichten/OpenShifts row. Week navigation
+     is therefore the first calendar row and never slides under the navy header. */
+  body.client-portal-v2-active.wiw-employee-schedule-active [data-testid="client-v3-schedule"] > .wiw-week-strip {
+    position: relative !important;
+    top: auto !important;
+    flex: 0 0 55px !important;
+    width: 100% !important;
+    height: 55px !important;
+    min-height: 55px !important;
+    overflow: hidden !important;
+    z-index: 8 !important;
+    background: #fff !important;
+  }
+
+  body.client-portal-v2-active.wiw-employee-schedule-active [data-testid="client-v3-schedule"] > .wiw-week-strip > button {
+    height: 55px !important;
+    align-content: center !important;
+    overflow: hidden !important;
+  }
+
+  /* Only the day list scrolls. This gives gray day headers a stable sticky
+     containing block and keeps week navigation visible at all times. */
+  body.client-portal-v2-active.wiw-employee-schedule-active [data-testid="client-v3-schedule"] > .wiw-week-scroll {
+    position: relative !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain !important;
+    -webkit-overflow-scrolling: touch !important;
+    touch-action: pan-y !important;
+    padding: 0 !important;
+    background: #f0f1f2 !important;
+  }
+
+  body.client-portal-v2-active.wiw-employee-schedule-active [data-testid="client-v3-schedule"] .wiw-day-section {
+    scroll-margin-top: 0 !important;
+  }
+
+  body.client-portal-v2-active.wiw-employee-schedule-active [data-testid="client-v3-schedule"] .wiw-day-section > header {
+    position: sticky !important;
     top: 0 !important;
+    z-index: 7 !important;
+    box-shadow: 0 1px 0 rgba(0, 0, 0, .04) !important;
   }
 
-  /* The customer navigation is 64px high while the employee nav is 58px.
-     Keep the shared total bar immediately above the actual customer tab bar. */
+  /* Keep total hours in layout flow immediately above the real 4-item customer
+     navigation instead of covering the final schedule rows. */
   body.client-portal-v2-active.wiw-employee-schedule-active [data-testid="client-v3-schedule"] > .wiw-week-total {
-    bottom: calc(64px + env(safe-area-inset-bottom)) !important;
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    flex: 0 0 48px !important;
+    width: 100% !important;
+    min-height: 48px !important;
+    height: 48px !important;
+    padding: 0 16px !important;
+    margin: 0 !important;
+    z-index: 9 !important;
   }
 
   /* ScheduleMobileEnhancer is global to ?view=schedule and is meant for the

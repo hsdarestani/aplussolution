@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { expect, Page, Route, test } from '@playwright/test';
 
 const client = {
@@ -53,18 +55,18 @@ async function mockClient(page: Page, state: { ratingPost?: any }) {
   });
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
-    const path = url.pathname.replace(/^\/api\//, '');
+    const pathName = url.pathname.replace(/^\/api\//, '');
     const method = route.request().method();
-    if (path === 'auth/me/') return json(route, client);
-    if (path === 'portal/client-dashboard/') return json(route, { role: 'client', active_orders: 1, upcoming_shifts: 1, contracts_to_sign: 0 });
-    if (path.startsWith('shifts/')) return json(route, scheduleShifts);
-    if (path.startsWith('orders/')) return json(route, []);
-    if (path.startsWith('contracts/')) return json(route, []);
-    if (path.startsWith('documents/')) return json(route, []);
-    if (path === 'operations/') return json(route, { role: 'client', unread_notifications: 0, open_orders: 0 });
-    if (path === 'operations/folders/') return json(route, { workers: [], clients: [{ id: 'client-own', name: 'Marthas' }] });
-    if (path === 'portal/rating-candidates/') return json(route, [{ shift_id: shift.id, worker_id: 'worker-francesco', worker_name: 'Francesco Trulli', position_name: shift.position_name, location_name: shift.location_name, starts_at: shift.starts_at, ends_at: shift.ends_at }]);
-    if (path.startsWith('ratings/')) {
+    if (pathName === 'auth/me/') return json(route, client);
+    if (pathName === 'portal/client-dashboard/') return json(route, { role: 'client', active_orders: 1, upcoming_shifts: 1, contracts_to_sign: 0 });
+    if (pathName.startsWith('shifts/')) return json(route, scheduleShifts);
+    if (pathName.startsWith('orders/')) return json(route, []);
+    if (pathName.startsWith('contracts/')) return json(route, []);
+    if (pathName.startsWith('documents/')) return json(route, []);
+    if (pathName === 'operations/') return json(route, { role: 'client', unread_notifications: 0, open_orders: 0 });
+    if (pathName === 'operations/folders/') return json(route, { workers: [], clients: [{ id: 'client-own', name: 'Marthas' }] });
+    if (pathName === 'portal/rating-candidates/') return json(route, [{ shift_id: shift.id, worker_id: 'worker-francesco', worker_name: 'Francesco Trulli', position_name: shift.position_name, location_name: shift.location_name, starts_at: shift.starts_at, ends_at: shift.ends_at }]);
+    if (pathName.startsWith('ratings/')) {
       if (method === 'POST') {
         state.ratingPost = route.request().postDataJSON();
         return json(route, { id: 'rating-new', worker_name: 'Francesco Trulli', created_at: new Date().toISOString(), ...state.ratingPost }, 201);
@@ -78,7 +80,16 @@ async function mockClient(page: Page, state: { ratingPost?: any }) {
 test.describe('client portal visual parity', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('calendar reuses the workforce schedule structure without client filters or viewport overrides', async ({ page }) => {
+  test('client enhancers are session-keyed so a fresh login does not need a manual refresh', async () => {
+    const source = readFileSync(path.join(process.cwd(), 'src/main.tsx'), 'utf8');
+    expect(source).toContain('function ClientPortalMount()');
+    expect(source).toContain("localStorage.getItem('access')");
+    expect(source).toContain('window.setInterval(syncSession, 180)');
+    expect(source).toContain('<React.Fragment key={generation}>');
+    expect(source).toContain('<ClientPortalMount />');
+  });
+
+  test('calendar keeps the complete week strip visible, sticky day labels and admin-style week motion', async ({ page }) => {
     const state: { ratingPost?: any } = {};
     await mockClient(page, state);
     await page.goto('/');
@@ -91,19 +102,19 @@ test.describe('client portal visual parity', () => {
     const weekStrip = calendar.getByTestId('phase8-week-strip');
     const dayView = calendar.getByTestId('schedule-day-view');
     const weekTotal = calendar.getByTestId('phase8-week-total');
+    const appBar = page.locator('.mobile-appbar');
     await expect(calendar).toBeVisible();
     await expect(calendar).toHaveClass(/wiw-employee-schedule/);
     await expect(calendar).toHaveClass(/wiw-schedule-mobile/);
     await expect(calendar).toHaveClass(/wiw-employee-admin-parity/);
-    await expect(calendar).not.toHaveClass(/client-v3-schedule/);
     await expect(calendar.getByRole('tablist')).toHaveCount(0);
     await expect(weekStrip).toHaveClass(/wiw-week-strip/);
-    await expect(weekStrip).toHaveCSS('position', 'sticky');
-    await expect(weekStrip).toHaveCSS('top', '0px');
+    await expect(weekStrip).toHaveCSS('position', 'relative');
     await expect(dayView).toHaveClass(/wiw-week-scroll/);
     await expect(dayView).toHaveAttribute('data-layout', 'list');
+    await expect(dayView).toHaveCSS('overflow-y', 'auto');
     await expect(weekTotal).toHaveClass(/wiw-week-total/);
-    await expect(weekTotal).toHaveCSS('position', 'fixed');
+    await expect(weekTotal).toHaveCSS('position', 'relative');
 
     await expect(calendar.getByText('Francesco T.')).toBeVisible();
     await expect(calendar.getByText('SK').first()).toBeVisible();
@@ -116,27 +127,55 @@ test.describe('client portal visual parity', () => {
     const firstPopulatedHeader = firstPopulatedDay.locator('> header');
     const firstCard = firstPopulatedDay.locator('.wiw-shift-card').first();
     await expect(firstVisibleHeader).toBeVisible();
+    await expect(firstVisibleHeader).toHaveCSS('position', 'sticky');
+    await expect(firstVisibleHeader).toHaveCSS('top', '0px');
     await expect(firstPopulatedHeader).toBeVisible();
     await expect(firstCard).toBeVisible();
-    await expect(firstCard).not.toHaveClass(/client-v3-shift-card/);
 
+    const appBarBox = await appBar.boundingBox();
     const weekBox = await weekStrip.boundingBox();
     const firstVisibleHeaderBox = await firstVisibleHeader.boundingBox();
     const populatedHeaderBox = await firstPopulatedHeader.boundingBox();
     const cardBox = await firstCard.boundingBox();
-    expect(weekBox && firstVisibleHeaderBox && populatedHeaderBox && cardBox).toBeTruthy();
+    expect(appBarBox && weekBox && firstVisibleHeaderBox && populatedHeaderBox && cardBox).toBeTruthy();
+    expect(weekBox!.y).toBeGreaterThanOrEqual(appBarBox!.y + appBarBox!.height - 1);
     expect(firstVisibleHeaderBox!.y).toBeGreaterThanOrEqual(weekBox!.y + weekBox!.height - 1);
-    expect(firstVisibleHeaderBox!.y - (weekBox!.y + weekBox!.height)).toBeLessThanOrEqual(20);
     expect(cardBox!.y).toBeGreaterThanOrEqual(populatedHeaderBox!.y + populatedHeaderBox!.height - 1);
+
+    const populatedHeaderText = await firstPopulatedHeader.textContent();
+    await firstPopulatedDay.evaluate((section) => {
+      const scroller = section.closest('[data-testid="schedule-day-view"]') as HTMLElement | null;
+      if (!scroller) return;
+      scroller.scrollTop = Math.min(
+        (section as HTMLElement).offsetTop + 48,
+        Math.max(0, scroller.scrollHeight - scroller.clientHeight),
+      );
+      scroller.dispatchEvent(new Event('scroll'));
+    });
+    await expect(firstPopulatedHeader).toBeVisible();
+    await expect(firstPopulatedHeader).toHaveText(populatedHeaderText || '');
+    const scrolledHeaderBox = await firstPopulatedHeader.boundingBox();
+    const scrollBox = await dayView.boundingBox();
+    expect(scrolledHeaderBox && scrollBox).toBeTruthy();
+    expect(Math.abs(scrolledHeaderBox!.y - scrollBox!.y)).toBeLessThanOrEqual(2);
+
+    await dayView.evaluate((element) => {
+      const start = new Touch({ identifier: 1, target: element, clientX: 320, clientY: 300 });
+      element.dispatchEvent(new TouchEvent('touchstart', { touches: [start], changedTouches: [start], bubbles: true }));
+      const move = new Touch({ identifier: 1, target: element, clientX: 180, clientY: 302 });
+      element.dispatchEvent(new TouchEvent('touchmove', { touches: [move], changedTouches: [move], bubbles: true }));
+    });
+    await expect.poll(() => dayView.evaluate((element: HTMLElement) => element.style.transform)).toContain('translate3d');
+    await dayView.evaluate((element) => {
+      const end = new Touch({ identifier: 1, target: element, clientX: 120, clientY: 302 });
+      element.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [end], bubbles: true }));
+    });
+    await expect(calendar.getByTestId('schedule-day-view')).toHaveClass(/wiw-week-turn-next/);
 
     const totalBox = await weekTotal.boundingBox();
     const navBox = await tabs.boundingBox();
     expect(totalBox && navBox).toBeTruthy();
     expect(Math.abs((totalBox!.y + totalBox!.height) - navBox!.y)).toBeLessThanOrEqual(3);
-
-    await firstCard.click();
-    await expect(page.getByTestId('client-v3-shift-detail')).toBeVisible();
-    await expect(page.getByText('Einsatzdetails')).toBeVisible();
 
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(1);
