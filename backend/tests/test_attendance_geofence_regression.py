@@ -4,6 +4,7 @@ import pytest
 from django.utils import timezone
 
 from core.models import TimeEntry
+from core.shift_api import ShiftApiSerializer
 
 
 def _put_shift_in_clock_window(shift):
@@ -11,6 +12,22 @@ def _put_shift_in_clock_window(shift):
     shift.starts_at = now - timedelta(minutes=5)
     shift.ends_at = now + timedelta(hours=4)
     shift.save(update_fields=['starts_at', 'ends_at', 'updated_at'])
+
+
+@pytest.mark.django_db
+def test_shift_api_marks_configured_geofence_as_required(shift):
+    payload = ShiftApiSerializer(shift).data
+    assert payload['geofence_required'] is True
+
+
+@pytest.mark.django_db
+def test_shift_api_marks_empty_geofence_as_not_required(shift):
+    shift.location.latitude = None
+    shift.location.longitude = None
+    shift.location.save(update_fields=['latitude', 'longitude', 'updated_at'])
+
+    payload = ShiftApiSerializer(shift).data
+    assert payload['geofence_required'] is False
 
 
 @pytest.mark.django_db
