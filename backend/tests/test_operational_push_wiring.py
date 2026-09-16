@@ -107,6 +107,47 @@ def test_open_shift_zero_worker_fanout_still_confirms_to_admin(admin_user, worke
 
 
 @pytest.mark.django_db
+def test_open_shift_group_notifies_only_explicit_matching_workers(
+    admin_user,
+    worker_user,
+    second_worker,
+    company,
+    location,
+    push_position,
+):
+    housekeeping_worker = worker_user.worker_profile
+    housekeeping_worker.schedule_groups = ['housekeeping']
+    housekeeping_worker.save(update_fields=['schedule_groups', 'updated_at'])
+
+    # This worker intentionally has no Zeitplan group. Previously an empty group
+    # was treated as unrestricted and incorrectly received Housekeeping pushes.
+    second_worker.schedule_groups = []
+    second_worker.save(update_fields=['schedule_groups', 'updated_at'])
+
+    shift = _future_shift(company, location, push_position, status=Shift.Status.PUBLISHED)
+    shift.schedule_groups = ['housekeeping']
+    shift.save(update_fields=['schedule_groups', 'updated_at'])
+    ShiftSlot.objects.create(shift=shift)
+
+    created = notify_open_shift_available(shift, 'housekeeping-regression')
+
+    assert created == 1
+    assert Notification.objects.filter(
+        user=worker_user,
+        kind__startswith='open-shift-housekeeping-regression-',
+    ).count() == 1
+    assert not Notification.objects.filter(
+        user=second_worker.user,
+        kind__startswith='open-shift-housekeeping-regression-',
+    ).exists()
+    summary = Notification.objects.get(
+        user=admin_user,
+        kind__startswith='admin-open-shift-summary-housekeeping-regression-',
+    )
+    assert 'Benachrichtigung für 1 Mitarbeiter ausgelöst' in summary.body
+
+
+@pytest.mark.django_db
 def test_direct_worker_claim_notifies_admin_once(
     auth_worker,
     admin_user,
