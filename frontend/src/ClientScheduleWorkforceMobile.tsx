@@ -148,7 +148,11 @@ export default function ClientScheduleWorkforceMobile() {
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<ClientCard>();
+  const [weekDirection, setWeekDirection] = useState<'next' | 'prev' | ''>('');
   const swipe = useRef<{ x: number; y: number } | undefined>(undefined);
+  const swipeTravel = useRef(0);
+  const swipeFrame = useRef<number | undefined>(undefined);
+  const directionTimer = useRef<number | undefined>(undefined);
 
   const load = async () => {
     setBusy(true);
@@ -163,6 +167,10 @@ export default function ClientScheduleWorkforceMobile() {
     }
   };
   useEffect(() => { void load(); }, []);
+  useEffect(() => () => {
+    if (swipeFrame.current) window.cancelAnimationFrame(swipeFrame.current);
+    if (directionTimer.current) window.clearTimeout(directionTimer.current);
+  }, []);
 
   const weekStart = monday(anchor);
   const days = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
@@ -181,6 +189,13 @@ export default function ClientScheduleWorkforceMobile() {
     return map;
   }, [days, visible]);
   const totalHours = useMemo(() => visible.reduce((sum, card) => sum + hours(card.shift), 0), [visible]);
+
+  function changeWeek(delta: number) {
+    if (directionTimer.current) window.clearTimeout(directionTimer.current);
+    setWeekDirection(delta > 0 ? 'next' : 'prev');
+    setAnchor((current) => addDays(current, delta));
+    directionTimer.current = window.setTimeout(() => setWeekDirection(''), 430);
+  }
 
   if (selected) {
     const workerName = selected.worker?.name || (selected.isOpen ? 'OpenShift' : 'Noch nicht zugewiesen');
@@ -201,31 +216,62 @@ export default function ClientScheduleWorkforceMobile() {
   }
 
   return <div className="client-v2-custom-screen wiw-employee-schedule wiw-schedule-mobile wiw-employee-admin-parity" data-testid="client-v3-schedule">
-    <div className="wiw-week-strip" data-testid="phase8-week-strip" style={{ top: 0 }}>
-      <button type="button" aria-label="Vorherige Woche" onClick={() => setAnchor(addDays(anchor, -7))}>‹</button>
+    <div className="wiw-week-strip" data-testid="phase8-week-strip">
+      <button type="button" aria-label="Vorherige Woche" onClick={() => changeWeek(-7)}>‹</button>
       {days.map((day) => <button type="button" key={day} className={`${day === anchor ? 'active ' : ''}${day === berlinToday() ? 'today' : ''}`} onClick={() => setAnchor(day)}><small>{dayLabel(day).slice(0, 2)}</small><b>{keyDate(day).getUTCDate()}</b></button>)}
-      <button type="button" aria-label="Nächste Woche" onClick={() => setAnchor(addDays(anchor, 7))}>›</button>
+      <button type="button" aria-label="Nächste Woche" onClick={() => changeWeek(7)}>›</button>
     </div>
 
     {error ? <div className="wiw-employee-message"><b>{error}</b> <button type="button" onClick={() => void load()}>Erneut versuchen</button></div> : null}
     {busy && !rows.length ? <div className="wiw-day-empty"><IonSpinner /> Einsätze werden geladen …</div> : null}
 
     {!busy || rows.length ? <div
-      className="wiw-week-scroll"
+      key={weekStart}
+      className={`wiw-week-scroll ${weekDirection ? `wiw-week-turn-${weekDirection}` : ''}`}
       data-testid="schedule-day-view"
       data-layout="list"
       style={{ paddingBottom: 'calc(124px + env(safe-area-inset-bottom))' }}
       onTouchStart={(event) => {
         const point = event.touches[0];
         swipe.current = { x: point.clientX, y: point.clientY };
+        swipeTravel.current = 0;
+        event.currentTarget.classList.add('is-swipe-dragging');
+      }}
+      onTouchMove={(event) => {
+        if (!swipe.current || !event.touches.length) return;
+        const point = event.touches[0];
+        const dx = point.clientX - swipe.current.x;
+        const dy = point.clientY - swipe.current.y;
+        if (Math.abs(dx) < Math.abs(dy) * 1.08) return;
+        swipeTravel.current = Math.max(-105, Math.min(105, dx * .5));
+        if (swipeFrame.current) return;
+        const target = event.currentTarget;
+        swipeFrame.current = window.requestAnimationFrame(() => {
+          swipeFrame.current = undefined;
+          target.style.transform = `translate3d(${swipeTravel.current}px,0,0)`;
+          target.style.opacity = String(Math.max(.72, 1 - Math.abs(swipeTravel.current) / 430));
+        });
       }}
       onTouchEnd={(event) => {
+        if (swipeFrame.current) window.cancelAnimationFrame(swipeFrame.current);
+        swipeFrame.current = undefined;
+        event.currentTarget.classList.remove('is-swipe-dragging');
+        event.currentTarget.style.transform = '';
+        event.currentTarget.style.opacity = '';
         if (!swipe.current || !event.changedTouches.length) return;
         const point = event.changedTouches[0];
         const dx = point.clientX - swipe.current.x;
         const dy = point.clientY - swipe.current.y;
         swipe.current = undefined;
-        if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.2) setAnchor(addDays(anchor, dx < 0 ? 7 : -7));
+        if (Math.abs(dx) > 44 && Math.abs(dx) > Math.abs(dy) * 1.12) changeWeek(dx < 0 ? 7 : -7);
+      }}
+      onTouchCancel={(event) => {
+        if (swipeFrame.current) window.cancelAnimationFrame(swipeFrame.current);
+        swipeFrame.current = undefined;
+        swipe.current = undefined;
+        event.currentTarget.classList.remove('is-swipe-dragging');
+        event.currentTarget.style.transform = '';
+        event.currentTarget.style.opacity = '';
       }}
     >
       {days.map((day) => {
