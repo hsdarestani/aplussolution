@@ -121,7 +121,7 @@ def test_admin_cannot_assign_synthetic_migration_worker(
 
 
 @pytest.mark.django_db
-def test_clock_in_rejects_shift_without_configured_geofence(
+def test_clock_in_and_out_allow_shift_without_configured_geofence(
     auth_worker, worker_user, company, position
 ):
     location = Location.objects.create(
@@ -143,11 +143,23 @@ def test_clock_in_rejects_shift_without_configured_geofence(
         status=Shift.Status.CONFIRMED,
     )
 
-    response = auth_worker.post(
+    clocked_in = auth_worker.post(
         '/api/time-entries/clock_in/',
-        {'shift': str(shift.id), 'lat': 50.11, 'lng': 8.68},
+        {'shift': str(shift.id)},
         format='json',
     )
-    assert response.status_code == 400
-    assert 'GPS-Position' in response.data['detail']
-    assert not TimeEntry.objects.filter(worker=worker_user.worker_profile).exists()
+    assert clocked_in.status_code == 201, clocked_in.data
+
+    entry = TimeEntry.objects.get(worker=worker_user.worker_profile)
+    assert entry.clock_in_lat is None
+    assert entry.clock_in_lng is None
+
+    clocked_out = auth_worker.post('/api/time-entries/clock_out/', {}, format='json')
+    assert clocked_out.status_code == 200, clocked_out.data
+    assert clocked_out.data['review_required'] is False
+
+    entry.refresh_from_db()
+    assert entry.clock_out is not None
+    assert entry.clock_out_lat is None
+    assert entry.clock_out_lng is None
+    assert entry.approved is True
