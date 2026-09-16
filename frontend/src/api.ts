@@ -120,6 +120,32 @@ async function parseError(response: Response) {
   return message;
 }
 
+export async function clockLocationRequired(shiftId?: string | null): Promise<boolean> {
+  if (!shiftId) return false;
+  try {
+    const shift: any = await api(`shifts/${shiftId}/`);
+    if (!shift?.location) return false;
+    const location: any = await api(`locations/${shift.location}/`);
+    return location?.latitude != null && location?.longitude != null;
+  } catch {
+    // If configuration cannot be read, fail closed: the backend remains the
+    // authoritative geofence check and will reject missing coordinates when a
+    // geofence is actually configured.
+    return true;
+  }
+}
+
+async function clockShiftId(normalizedPath: string, payload: any): Promise<string | undefined> {
+  if (payload?.shift) return String(payload.shift);
+  try {
+    const attendance: any = await api('attendance/home/');
+    if (normalizedPath === 'time-entries/clock_in/') return attendance?.eligible_shift?.id;
+    return attendance?.active_entry?.shift;
+  } catch {
+    return undefined;
+  }
+}
+
 async function prepareOptions(normalizedPath: string, options: RequestInit): Promise<RequestInit> {
   const method = String(options.method || 'GET').toUpperCase();
   if (method !== 'POST' || typeof options.body !== 'string') return options;
@@ -131,7 +157,18 @@ async function prepareOptions(normalizedPath: string, options: RequestInit): Pro
     } catch {
       payload = {};
     }
-    if (payload.lat == null || payload.lng == null) {
+
+    const explicitlySkipLocation = payload.skip_location === true;
+    delete payload.skip_location;
+    const shiftId = await clockShiftId(normalizedPath, payload);
+    const locationRequired = explicitlySkipLocation ? false : await clockLocationRequired(shiftId);
+
+    if (!locationRequired) {
+      // No GPS coordinates on the Einsatzort means no geofence exists. Do not
+      // ask the device for its position and do not store incidental coordinates.
+      delete payload.lat;
+      delete payload.lng;
+    } else if (payload.lat == null || payload.lng == null) {
       const coords = await reliableCoordinates();
       payload.lat = coords.lat;
       payload.lng = coords.lng;
