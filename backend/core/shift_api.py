@@ -10,11 +10,15 @@ class ShiftApiSerializer(serializers.ModelSerializer):
     location_name = serializers.CharField(source='location.name', read_only=True)
     position_name = serializers.CharField(source='position.name', read_only=True)
     order_title = serializers.CharField(source='order.title', read_only=True)
+    geofence_required = serializers.SerializerMethodField()
     open_count = serializers.SerializerMethodField()
     filled_count = serializers.SerializerMethodField()
     assigned_workers = serializers.SerializerMethodField()
     slot_cards = serializers.SerializerMethodField()
     my_release_request = serializers.SerializerMethodField()
+
+    def get_geofence_required(self, obj):
+        return obj.location.latitude is not None and obj.location.longitude is not None
 
     def _worker_payload(self, slot, include_avatar=False):
         request = self.context.get('request')
@@ -176,7 +180,7 @@ class ShiftApiSerializer(serializers.ModelSerializer):
     class Meta:
         model = Shift
         fields = [
-            'id', 'order', 'order_title', 'client', 'client_name', 'location', 'location_name',
+            'id', 'order', 'order_title', 'client', 'client_name', 'location', 'location_name', 'geofence_required',
             'position', 'position_name', 'starts_at', 'ends_at', 'break_minutes', 'status', 'notes',
             'required_count', 'confirmation_required', 'schedule_groups', 'color_hue', 'open_count', 'filled_count',
             'assigned_workers', 'slot_cards', 'my_release_request',
