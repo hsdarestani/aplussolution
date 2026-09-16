@@ -54,10 +54,9 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
 
         if not shift:
             return Response({'detail': 'Aktuell gibt es keine passende bestätigte Schicht zum Einstempeln.'}, status=400)
-        if shift.location.latitude is None or shift.location.longitude is None:
-            return Response({
-                'detail': 'Für diesen Einsatzort ist noch keine GPS-Position hinterlegt. Bitte in Personal & Kunden → Einsatzorte den Standort per Karte oder „Mein Standort“ festlegen.'
-            }, status=400)
+        # A location without configured GPS coordinates has no geofence. In that
+        # case geofence_error() returns None and attendance is allowed without
+        # requiring the employee's device location.
         error = geofence_error(shift, request.data.get('lat'), request.data.get('lng'))
         if error:
             return Response({'detail': error}, status=400)
@@ -137,7 +136,7 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
             if not parsed:
                 return Response({'detail': 'Die angepasste Check-out-Zeit ist ungültig.'}, status=400)
             if parsed <= entry.clock_in:
-                return Response({'detail': 'Check-out muss nach dem Check-in liegen.'}, status=400)
+                return Response({'detail': 'Check-out muss nach Check-in liegen.'}, status=400)
             entry.clock_out = parsed
             changed = True
         elif subtract_minutes not in (None, ''):
