@@ -9,7 +9,7 @@ import {
   IonTextarea,
   IonToast,
 } from '@ionic/react';
-import { api, User } from './api';
+import { api, clockLocationRequired, User } from './api';
 import Phase8MobileAttendance from './Phase8MobileAttendance';
 import './attendance-v3.css';
 
@@ -130,11 +130,16 @@ export default function AttendanceV3({ user }: { user: User }) {
   async function clock(kind: 'in' | 'out') {
     setBusy(true);
     try {
-      const position = await currentPosition();
-      const payload: any = {
-        lat: position?.coords.latitude,
-        lng: position?.coords.longitude,
-      };
+      const shiftId = kind === 'in' ? data?.eligible_shift?.id : data?.active_entry?.shift;
+      const requireLocation = await clockLocationRequired(shiftId);
+      const payload: any = {};
+      if (requireLocation) {
+        const position = await currentPosition();
+        payload.lat = position?.coords.latitude;
+        payload.lng = position?.coords.longitude;
+      } else {
+        payload.skip_location = true;
+      }
       if (kind === 'in' && data?.eligible_shift?.id) payload.shift = data.eligible_shift.id;
       await api(`time-entries/clock_${kind}/`, { method: 'POST', body: JSON.stringify(payload) });
       setToast(kind === 'in' ? 'Arbeitszeit läuft.' : 'Arbeitszeit wurde beendet.');

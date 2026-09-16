@@ -9,7 +9,7 @@ import {
   peopleOutline,
   stopwatchOutline,
 } from 'ionicons/icons';
-import { api, User } from './api';
+import { api, clockLocationRequired, User } from './api';
 import './employee-portal.css';
 import './wiw-employee-home-mobile.css';
 
@@ -59,20 +59,43 @@ export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:a
 
   useEffect(()=>{void load();},[]);
 
-  async function clock() {
-    if (!clockIntent) return;
+  async function clock(intent: 'in'|'out', requireLocation: boolean) {
     setClockBusy(true);
     setNotice('');
     try {
-      const position = await currentPosition();
-      const payload:any = { lat: position.coords.latitude, lng: position.coords.longitude };
-      if (clockIntent === 'in' && attendance?.eligible_shift?.id) payload.shift = attendance.eligible_shift.id;
-      const result:any = await api(`time-entries/clock_${clockIntent}/`, { method: 'POST', body: JSON.stringify(payload) });
-      setNotice(clockIntent === 'in'
+      const payload:any = {};
+      if (requireLocation) {
+        const position = await currentPosition();
+        payload.lat = position.coords.latitude;
+        payload.lng = position.coords.longitude;
+      } else {
+        payload.skip_location = true;
+      }
+      if (intent === 'in' && attendance?.eligible_shift?.id) payload.shift = attendance.eligible_shift.id;
+      const result:any = await api(`time-entries/clock_${intent}/`, { method: 'POST', body: JSON.stringify(payload) });
+      setNotice(intent === 'in'
         ? 'Du bist eingestempelt.'
         : result?.review_required ? 'Ausgestempelt. Der Standort wird von der Administration geprüft.' : 'Du bist ausgestempelt.');
       setClockIntent('');
       await load();
+    } catch (e:any) {
+      setNotice(e.message || 'Zeiterfassung konnte nicht gestartet werden.');
+    } finally {
+      setClockBusy(false);
+    }
+  }
+
+  async function beginClock(intent: 'in'|'out') {
+    setClockBusy(true);
+    setNotice('');
+    try {
+      const shiftId = intent === 'in' ? attendance?.eligible_shift?.id : attendance?.active_entry?.shift;
+      const requireLocation = await clockLocationRequired(shiftId);
+      if (requireLocation) {
+        setClockIntent(intent);
+        return;
+      }
+      await clock(intent, false);
     } catch (e:any) {
       setNotice(e.message || 'Zeiterfassung konnte nicht gestartet werden.');
     } finally {
@@ -116,7 +139,7 @@ export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:a
             <small>{active ? `Seit ${time(active.clock_in)}` : canClockIn ? `${attendance.eligible_shift.position_name || 'Einsatz'} · ${attendance.eligible_shift.location_name}` : 'Einstempeln ist rund um eine bestätigte Schicht möglich.'}</small>
           </div>
         </div>
-        <button type="button" className={active ? 'clock-out' : ''} disabled={clockBusy || (!active && !canClockIn)} onClick={()=>setClockIntent(active?'out':'in')}>
+        <button type="button" className={active ? 'clock-out' : ''} disabled={clockBusy || (!active && !canClockIn)} onClick={()=>void beginClock(active?'out':'in')}>
           {active ? 'Ausstempeln' : 'Einstempeln'}
         </button>
       </div>
@@ -165,7 +188,7 @@ export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:a
         <h2>Für die Zeiterfassung ist eine Berechtigung zur Standortbestimmung erforderlich</h2>
         <p>Aktiviere die Standortdienste, damit A+ weiß, wo du deine Arbeitszeit {clockIntent==='in'?'beginnst':'beendest'}.</p>
         {notice&&<div className="wiw-location-error">{notice}</div>}
-        <button type="button" className="activate" disabled={clockBusy} onClick={()=>void clock()}>{clockBusy?'Standort wird bestimmt …':'Standortdienste aktivieren'}</button>
+        <button type="button" className="activate" disabled={clockBusy} onClick={()=>void clock(clockIntent, true)}>{clockBusy?'Standort wird bestimmt …':'Standortdienste aktivieren'}</button>
         <button type="button" className="cancel" disabled={clockBusy} onClick={()=>{setClockIntent('');setNotice('');}}>Abbrechen</button>
       </div>
     </div>}
