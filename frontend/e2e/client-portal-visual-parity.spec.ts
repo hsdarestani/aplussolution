@@ -159,10 +159,17 @@ test.describe('client portal visual parity', () => {
     expect(scrolledHeaderBox && scrollBox).toBeTruthy();
     expect(Math.abs(scrolledHeaderBox!.y - scrollBox!.y)).toBeLessThanOrEqual(2);
 
-    await dayView.dispatchEvent('touchstart', { touches: [{ clientX: 320, clientY: 300 }] });
-    await dayView.dispatchEvent('touchmove', { touches: [{ clientX: 180, clientY: 302 }] });
+    await dayView.evaluate((element) => {
+      const start = new Touch({ identifier: 1, target: element, clientX: 320, clientY: 300 });
+      element.dispatchEvent(new TouchEvent('touchstart', { touches: [start], changedTouches: [start], bubbles: true }));
+      const move = new Touch({ identifier: 1, target: element, clientX: 180, clientY: 302 });
+      element.dispatchEvent(new TouchEvent('touchmove', { touches: [move], changedTouches: [move], bubbles: true }));
+    });
     await expect.poll(() => dayView.evaluate((element: HTMLElement) => element.style.transform)).toContain('translate3d');
-    await dayView.dispatchEvent('touchend', { changedTouches: [{ clientX: 120, clientY: 302 }] });
+    await dayView.evaluate((element) => {
+      const end = new Touch({ identifier: 1, target: element, clientX: 120, clientY: 302 });
+      element.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [end], bubbles: true }));
+    });
     await expect(calendar.getByTestId('schedule-day-view')).toHaveClass(/wiw-week-turn-next/);
 
     const totalBox = await weekTotal.boundingBox();
