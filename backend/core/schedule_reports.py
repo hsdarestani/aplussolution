@@ -155,7 +155,7 @@ def _report_rows(filters):
             'location': shift.location.name,
             'groups': ', '.join(GROUP_LABELS.get(group, group) for group in groups),
             'worker_labels': worker_labels,
-            'pause_minutes': int(shift.break_minutes or 0),
+            'notes': str(shift.notes or '').strip(),
         })
     return result
 
@@ -181,8 +181,10 @@ def _cell_html(entries, *, show_client: bool, show_group: bool) -> str:
             lines.append(escape(entry['location']))
         if show_group and entry['groups']:
             lines.append(f'<font color="#667085">{escape(entry["groups"])}</font>')
-        if entry['pause_minutes']:
-            lines.append(f'<font color="#98A2B3">Pause {entry["pause_minutes"]} Min</font>')
+        note = str(entry.get('notes') or '').strip()
+        if note:
+            note_html = escape(note).replace('\r\n', '\n').replace('\r', '\n').replace('\n', '<br/>')
+            lines.append(f'<font color="#475467">{note_html}</font>')
         blocks.append('<br/>'.join(lines))
     return '<br/><br/>'.join(blocks)
 
