@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 from typing import Any
 
@@ -15,6 +16,7 @@ from .native_cutover import approve_order
 from .operational_notifications import notify_worker_shift_event
 from .permissions import IsAdminOrManager
 from .services import audit
+from .shift_rules import schedule_groups_for_position_name
 from .shift_slots import ShiftSlot
 
 
@@ -268,6 +270,28 @@ def _selected_client_id(parsed: dict[str, Any]) -> str:
     return next(iter(ids))
 
 
+def _approval_payload_with_assignment_markers(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Protect named AI assignments from transient OpenShift fan-out.
+
+    Native order creation publishes the shift before the semantic assignment step
+    claims its slot. The existing OpenShift notifier recognises an ``Übernommen
+    von NAME`` line as a direct assignment and suppresses broad employee fan-out.
+    Add that line only to the internal approval copy; the real note is restored
+    immediately afterwards and is the only text the user ever keeps on the shift.
+    """
+    approval = deepcopy(parsed)
+    for row in approval.get('shifts') or []:
+        if not str(row.get('assignment_worker_id') or '').strip():
+            continue
+        worker_name = str(row.get('assignment_worker_name') or '').strip()
+        if not worker_name:
+            continue
+        genuine_note = str(row.get('notes') or '').strip()
+        marker = f'Übernommen von {worker_name}'
+        row['notes'] = f'{genuine_note}\n{marker}'.strip()
+    return approval
+
+
 def _assign_workers(result: dict[str, Any], reviewed_rows: list[dict[str, Any]]) -> int:
     package_id = result.get('package_id')
     if not package_id:
@@ -283,15 +307,31 @@ def _assign_workers(result: dict[str, Any], reviewed_rows: list[dict[str, Any]])
         for reviewed, created in zip(reviewed_rows, created_rows):
             worker_id = str(reviewed.get('assignment_worker_id') or '').strip()
             shift_id = str(created.get('local_shift_id') or created.get('shift_id') or '').strip()
-            if not worker_id or not shift_id:
+            if not shift_id:
+                continue
+            shift = Shift.objects.filter(pk=shift_id).select_related('position').prefetch_related('slots').first()
+            if not shift:
+                continue
+
+            # Keep only the note the admin/user actually supplied. Internal order
+            # IDs, implementation markers and "Managed by A+ Workforce" belong in
+            # package/order metadata, never in the visible shift note.
+            genuine_note = str(reviewed.get('notes') or '').strip()
+            shift.notes = genuine_note
+            if not shift.schedule_groups:
+                shift.schedule_groups = schedule_groups_for_position_name(shift.position.name)
+            shift.save(update_fields=['notes', 'schedule_groups', 'updated_at'])
+            created['notes'] = genuine_note
+            created['schedule_groups'] = list(shift.schedule_groups or [])
+
+            if not worker_id:
                 continue
             worker = (
                 WorkerProfile.objects.filter(pk=worker_id, active=True, user__is_active=True)
                 .select_related('user')
                 .first()
             )
-            shift = Shift.objects.filter(pk=shift_id).prefetch_related('slots').first()
-            if not worker or not shift:
+            if not worker:
                 continue
 
             slot = shift.slots.filter(
@@ -324,9 +364,10 @@ def _assign_workers(result: dict[str, Any], reviewed_rows: list[dict[str, Any]])
             notify_worker_shift_event(worker.user, shift, 'Schicht zugewiesen', 'ai-semantic-assignment')
             assigned += 1
 
-        if assigned:
-            package.payload = payload
-            package.save(update_fields=['payload', 'updated_at'])
+        # Notes / Zeitplan metadata are updated for every AI-created shift, even
+        # when it remains an OpenShift, so always persist the package payload.
+        package.payload = payload
+        package.save(update_fields=['payload', 'updated_at'])
     return assigned
 
 
@@ -367,7 +408,8 @@ def order_approve(request):
         parsed = _clean_ai_payload(incoming)
         parsed = _canonicalize_ids(parsed, strict=True)
         client_id = _selected_client_id(parsed)
-        result = approve_order(parsed, raw_text, actor=request.user, client_id=client_id)
+        approval_payload = _approval_payload_with_assignment_markers(parsed)
+        result = approve_order(approval_payload, raw_text, actor=request.user, client_id=client_id)
         assigned_count = _assign_workers(result, parsed['shifts'])
         result['assigned_count'] = assigned_count
         result['created_open_count'] = max(0, int(result.get('created_count') or 0) - assigned_count)
