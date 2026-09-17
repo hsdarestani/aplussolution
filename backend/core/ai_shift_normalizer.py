@@ -198,10 +198,11 @@ def normalize_order_request(raw_text: str, parsed: dict[str, Any] | None = None)
     global_assignment = _global_assignment(raw_text)
 
     explicit_shift = bool(date_value and start_time and end_time)
-    # Collapse repeated LLM rows only for an explicit "N identical shifts"
-    # instruction. Never collapse a detailed roster merely because the text also
-    # mentions one date/time or an aggregate total.
-    if explicit_shift and count_value is not None and total_count is None and len(existing) <= 1:
+    # Legacy helper behavior: an explicit "N identical shifts" command is one
+    # descriptor with count=N even when an LLM duplicated the row N times. The
+    # production AI scheduler no longer depends on this parser, but preserving
+    # this contract keeps old imports/tests deterministic and isolated.
+    if explicit_shift and count_value is not None and total_count is None:
         base = dict(existing[0]) if existing and isinstance(existing[0], dict) else {}
         rows = [base]
     else:
