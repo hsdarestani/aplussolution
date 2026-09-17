@@ -1,4 +1,5 @@
 from django.db import migrations, transaction
+from django.utils import timezone
 
 
 TARGET_EMPLOYEE_NUMBER = '53560424'
@@ -28,6 +29,7 @@ def repair_musa_time_entry_ownership(apps, schema_editor):
     """
     User = apps.get_model('core', 'User')
     WorkerProfile = apps.get_model('core', 'WorkerProfile')
+    Shift = apps.get_model('core', 'Shift')
     TimeEntry = apps.get_model('core', 'TimeEntry')
     ShiftSlot = apps.get_model('core', 'ShiftSlot')
     AuditLog = apps.get_model('core', 'AuditLog')
@@ -123,6 +125,25 @@ def repair_musa_time_entry_ownership(apps, schema_editor):
                         'other_claimed_worker_ids': [str(item) for item in other_claimed],
                     })
 
+        # Diagnostic only: after ownership repair, compare Musa's assigned shifts
+        # with his actual attendance rows. This never synthesizes hours from a
+        # schedule; it simply records exactly which assignments have no TimeEntry.
+        assigned_shift_ids = set(
+            ShiftSlot.objects.filter(worker=target, status='claimed').values_list('shift_id', flat=True)
+        )
+        assigned_shift_ids.update(
+            Shift.objects.filter(worker=target).values_list('pk', flat=True)
+        )
+        attendance_shift_ids = set(
+            TimeEntry.objects.filter(worker=target, shift_id__isnull=False).values_list('shift_id', flat=True)
+        )
+        shifts_without_time = sorted(assigned_shift_ids - attendance_shift_ids, key=str)
+        ended_without_time = list(
+            Shift.objects.filter(pk__in=shifts_without_time, ends_at__lte=timezone.now())
+            .order_by('-ends_at')
+            .values_list('pk', flat=True)
+        )
+
         AuditLog.objects.create(
             action='repair_musa_time_entry_ownership',
             object_type='WorkerProfile',
@@ -135,6 +156,12 @@ def repair_musa_time_entry_ownership(apps, schema_editor):
                 'ambiguous': ambiguous[:250],
                 'unresolved_shared_shift_count': len(unresolved_shared_shift),
                 'unresolved_shared_shift': unresolved_shared_shift[:250],
+                'assigned_shift_count': len(assigned_shift_ids),
+                'attendance_shift_count': len(attendance_shift_ids & assigned_shift_ids),
+                'shifts_without_time_count': len(shifts_without_time),
+                'shifts_without_time': [str(item) for item in shifts_without_time[:250]],
+                'ended_shifts_without_time_count': len(ended_without_time),
+                'ended_shifts_without_time': [str(item) for item in ended_without_time[:250]],
                 'policy': 'positive_identity_evidence_only',
             },
         )
@@ -142,7 +169,8 @@ def repair_musa_time_entry_ownership(apps, schema_editor):
     print(
         'Musa ownership repair complete: '
         f'checked={checked}, repaired={len(repaired)}, ambiguous={len(ambiguous)}, '
-        f'unresolved_shared_shift={len(unresolved_shared_shift)}'
+        f'unresolved_shared_shift={len(unresolved_shared_shift)}, assigned_shifts={len(assigned_shift_ids)}, '
+        f'shifts_without_time={len(shifts_without_time)}, ended_without_time={len(ended_without_time)}'
     )
 
 
