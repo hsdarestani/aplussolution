@@ -1,4 +1,5 @@
 import pytest
+from django.utils import timezone
 
 from core.models import Notification, Shift, User, WorkerProfile
 from core.shift_slots import ShiftSlot
@@ -112,3 +113,46 @@ def test_ai_order_assigns_named_workers_without_open_shift_fanout(auth_admin, co
     assert Notification.objects.filter(user=simret_user, title='Deine Schicht wurde aktualisiert').count() == 1
     assert Notification.objects.filter(user=marie_user, title='Deine Schicht wurde aktualisiert').count() == 1
     assert not Notification.objects.filter(user=simret_shadow_user).exists()
+
+
+@pytest.mark.django_db
+def test_ai_admin_review_can_edit_and_delete_rows(auth_admin, company, location):
+    raw_text = 'Es sind insgesamt 2 Schichten.'
+    reviewed = {
+        'admin_reviewed': True,
+        'expected_shift_count': 1,
+        'shift_count_mismatch': False,
+        'shifts': [
+            {
+                'date': '2026-10-05',
+                'start_time': '12:30',
+                'end_time': '18:15',
+                'count': 1,
+                'role': 'Serviceleitung',
+                'site_text': company.name,
+                'location_text': location.name,
+                'site_address': company.address,
+                'notes': 'Admin korrigiert',
+            },
+        ],
+    }
+
+    response = auth_admin.post(
+        '/api/automation/orders/approve/',
+        {'raw_text': raw_text, 'parsed': reviewed, 'admin_reviewed': True},
+        format='json',
+    )
+
+    assert response.status_code == 200, response.data
+    assert response.data['created_count'] == 1
+    shifts = list(Shift.objects.filter(order__client=company))
+    assert len(shifts) == 1
+    shift = shifts[0]
+    local_start = timezone.localtime(shift.starts_at)
+    local_end = timezone.localtime(shift.ends_at)
+    assert local_start.date().isoformat() == '2026-10-05'
+    assert local_start.strftime('%H:%M') == '12:30'
+    assert local_end.strftime('%H:%M') == '18:15'
+    assert shift.position.name == 'Serviceleitung'
+    assert shift.location_id == location.id
+    assert 'Admin korrigiert' in shift.notes
