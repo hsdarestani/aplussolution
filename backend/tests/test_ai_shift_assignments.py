@@ -1,7 +1,7 @@
 import pytest
 from django.utils import timezone
 
-from core.models import Location, Position, Shift, User, WorkerProfile
+from core.models import Location, Notification, Position, Shift, User, WorkerProfile
 from core.shift_slots import ShiftSlot
 
 
@@ -98,6 +98,10 @@ def test_semantic_ai_approval_assigns_explicit_directory_workers(auth_admin, com
     assert all(not shift.is_open for shift in shifts)
     assert all(shift.location_id == location.id for shift in shifts)
     assert all(shift.position_id == front_office.id for shift in shifts)
+    assert all(shift.notes == '' for shift in shifts)
+    assert not Notification.objects.filter(kind__startswith='open-shift-').exists()
+    assert Notification.objects.filter(user=simret_user, kind__startswith='shift-event-ai-semantic-assignment-').count() == 1
+    assert Notification.objects.filter(user=marie_user, kind__startswith='shift-event-ai-semantic-assignment-').count() == 1
 
 
 @pytest.mark.django_db
@@ -141,7 +145,9 @@ def test_semantic_ai_admin_review_keeps_exact_directory_entities(auth_admin, com
     assert local_end.strftime('%H:%M') == '18:15'
     assert shift.position_id == serviceleitung.id
     assert shift.location_id == location.id
-    assert 'Admin korrigiert' in shift.notes
+    assert shift.notes == 'Admin korrigiert'
+    assert 'Auftrag:' not in shift.notes
+    assert 'Managed by A+ Workforce' not in shift.notes
 
 
 @pytest.mark.django_db
@@ -284,8 +290,66 @@ def test_semantic_ai_maps_any_language_to_live_hotel_directory(
     assert len(shifts) == 3
     assert all(item.location_id == location.id for item in shifts)
     assert all(item.position_id == front_office_position.id for item in shifts)
+    assert all(item.schedule_groups == ['front_office'] for item in shifts)
+    assert all(item.notes == 'AI-Test 3 Schichten' for item in shifts)
+    assert not Notification.objects.filter(kind__startswith='open-shift-').exists()
     assert all(
         ShiftSlot.objects.filter(shift=item, worker=reviewer, status=ShiftSlot.Status.CLAIMED).exists()
         for item in shifts
     )
     assert not Location.objects.filter(client=company, name='Front Office im Hotel Spenerhaus').exists()
+
+
+@pytest.mark.django_db
+def test_semantic_ai_open_front_office_notifies_only_front_office_zeitplan(
+    auth_admin,
+    company,
+    location,
+    worker_user,
+    second_worker,
+):
+    front_office = Position.objects.create(name='Front Office')
+    front_worker = worker_user.worker_profile
+    front_worker.schedule_groups = ['front_office']
+    front_worker.save(update_fields=['schedule_groups', 'updated_at'])
+    second_worker.schedule_groups = ['housekeeping']
+    second_worker.save(update_fields=['schedule_groups', 'updated_at'])
+
+    reviewed = {
+        'contract_no': '',
+        'shifts': [{
+            'date': '2028-11-01',
+            'start_time': '08:00',
+            'end_time': '16:00',
+            'count': 1,
+            'client_id': str(company.id),
+            'site_text': company.name,
+            'location_id': str(location.id),
+            'location_text': location.name,
+            'position_id': str(front_office.id),
+            'role': 'Front Office',
+            'assignment_worker_id': '',
+            'assignment_worker_name': '',
+            'site_address': company.address,
+            'notes': 'Nur echte Notiz',
+        }],
+    }
+
+    response = auth_admin.post(
+        '/api/automation/orders/approve/',
+        {'raw_text': 'free wording for one open front office shift', 'parsed': reviewed},
+        format='json',
+    )
+
+    assert response.status_code == 200, response.data
+    shift = Shift.objects.get(order__client=company)
+    assert shift.schedule_groups == ['front_office']
+    assert shift.notes == 'Nur echte Notiz'
+    assert Notification.objects.filter(
+        user=worker_user,
+        kind__startswith='open-shift-ai-order-',
+    ).count() == 1
+    assert not Notification.objects.filter(
+        user=second_worker.user,
+        kind__startswith='open-shift-ai-order-',
+    ).exists()
