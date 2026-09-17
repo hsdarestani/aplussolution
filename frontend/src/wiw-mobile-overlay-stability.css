@@ -1,8 +1,5 @@
 @media (max-width: 900px) {
-  /* Every schedule overlay must stay inside the physical viewport. The previous
-     PDF sheet could grow wider/taller than the available mobile viewport and its
-     flex scroll child had no min-height:0, so iOS/Android could show clipped,
-     non-scrollable content. */
+  /* Every schedule overlay must stay inside the physical viewport. */
   .wiw-sheet-backdrop,
   .wiw-enhancer-backdrop,
   .wiw-calendar-backdrop {
@@ -27,7 +24,6 @@
     margin-right: 0 !important;
   }
 
-  /* Choice sheets: header stays visible and only the list scrolls. */
   .wiw-choice-sheet {
     display: flex !important;
     flex-direction: column !important;
@@ -35,10 +31,7 @@
     overflow: hidden !important;
   }
 
-  .wiw-choice-sheet > header {
-    flex: 0 0 auto !important;
-  }
-
+  .wiw-choice-sheet > header { flex: 0 0 auto !important; }
   .wiw-choice-sheet > div {
     flex: 1 1 auto !important;
     min-height: 0 !important;
@@ -49,18 +42,16 @@
     overscroll-behavior-y: contain;
     touch-action: pan-y;
   }
-
   .wiw-choice-sheet > div > button,
-  .wiw-choice-sheet > header button {
-    touch-action: manipulation;
-  }
+  .wiw-choice-sheet > header button { touch-action: manipulation; }
+  .wiw-choice-sheet > div > button[data-wiw-eligibility='legacy-current'] { opacity: .58; }
 
-  .wiw-choice-sheet > div > button[data-wiw-eligibility='legacy-current'] {
-    opacity: .58;
-  }
-
-  /* PDF export: make the inner content the scroll owner. */
+  /* PDF is a real full-screen sheet. Keep its header and action footer visible,
+     and let only the filters in the middle scroll. */
   .wiw-pdf-backdrop {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 41000 !important;
     align-items: flex-end !important;
     padding: 0 !important;
   }
@@ -68,21 +59,39 @@
   .wiw-pdf-sheet {
     display: flex !important;
     flex-direction: column !important;
-    max-height: calc(100dvh - max(env(safe-area-inset-top), 8px)) !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
     overflow: hidden !important;
+    border-radius: 0 !important;
+    background: #fff !important;
   }
 
   .wiw-pdf-sheet > header,
   .wiw-pdf-sheet > footer {
+    position: relative !important;
+    z-index: 3 !important;
     flex: 0 0 auto !important;
     min-width: 0 !important;
     box-sizing: border-box !important;
+    background: #fff !important;
   }
 
-  .wiw-pdf-sheet > header > div {
-    min-width: 0 !important;
+  .wiw-pdf-sheet > header { padding-top: max(8px, env(safe-area-inset-top)) !important; }
+  .wiw-pdf-sheet > footer {
+    display: flex !important;
+    gap: 10px !important;
+    min-height: calc(66px + env(safe-area-inset-bottom)) !important;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom)) !important;
+    border-top: 1px solid #ddd !important;
+  }
+  .wiw-pdf-sheet > footer button {
+    display: block !important;
+    flex: 1 1 0 !important;
+    min-height: 44px !important;
+    visibility: visible !important;
   }
 
+  .wiw-pdf-sheet > header > div { min-width: 0 !important; }
   .wiw-pdf-scroll {
     flex: 1 1 auto !important;
     min-height: 0 !important;
@@ -91,6 +100,7 @@
     box-sizing: border-box !important;
     overflow-x: hidden !important;
     overflow-y: auto !important;
+    padding-bottom: 18px !important;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-y: contain;
     touch-action: pan-y;
@@ -105,13 +115,11 @@
     max-width: 100% !important;
     box-sizing: border-box !important;
   }
-
   .wiw-pdf-dates label > button {
     width: 100% !important;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-
   .wiw-pdf-chip-grid button {
     max-width: 100% !important;
     white-space: normal !important;
@@ -131,23 +139,17 @@
     touch-action: pan-y;
   }
 
-  /* Mobile web and Capacitor intentionally use the same compact Dienstplan.
-     ScheduleV2 still exists in React for desktop, but when the compact schedule
-     is active it must disappear completely from mobile layout and hit-testing.
-     The compact schedule itself stays in normal document flow so IonContent owns
-     vertical scrolling and there is never a second hidden layer stealing touch. */
+  /* The old web scheduler is removed from layout while the compact scheduler is
+     active. Do not create contain/isolation stacking contexts here: fixed bars,
+     full-screen forms and PDF sheets must be relative to the viewport. */
   body.wiw-native-schedule-active .app-main {
     position: relative !important;
     min-height: calc(100dvh - 126px) !important;
     overflow: visible !important;
-    isolation: isolate !important;
+    isolation: auto !important;
     overscroll-behavior-y: auto;
   }
-
-  body.wiw-native-schedule-active .app-main > :not(.wiw-schedule-mobile) {
-    display: none !important;
-  }
-
+  body.wiw-native-schedule-active .app-main > :not(.wiw-schedule-mobile) { display: none !important; }
   body.wiw-native-schedule-active .app-main > .wiw-schedule-mobile {
     display: block !important;
     position: relative !important;
@@ -156,14 +158,18 @@
     min-height: calc(100dvh - 126px) !important;
     visibility: visible !important;
     pointer-events: auto !important;
-    isolation: isolate;
-    contain: layout paint style;
+    isolation: auto !important;
+    contain: none !important;
     overscroll-behavior-y: auto;
     touch-action: pan-y;
   }
 
-  /* Match the compact app UI on mobile web: one floating create action only.
-     Keep it above the persistent Gesamtstunden bar instead of inside it. */
+  /* Full-screen form/PDF must sit above the app shell and bottom navigation. */
+  body.wiw-native-schedule-active .app-main > .wiw-schedule-mobile:has(.wiw-shift-form-screen),
+  body.wiw-native-schedule-active .app-main > .wiw-schedule-mobile:has(.wiw-pdf-backdrop) {
+    z-index: 40000 !important;
+  }
+
   body.wiw-native-schedule-active .wiw-create-fab {
     display: grid !important;
     position: fixed !important;
@@ -185,18 +191,18 @@
     cursor: pointer;
     touch-action: manipulation;
   }
+
+  /* Never show the schedule FAB on top of create/edit/PDF UI. */
+  body.wiw-native-schedule-active .wiw-schedule-mobile:has(.wiw-shift-form-screen) .wiw-create-fab,
+  body.wiw-native-schedule-active .wiw-schedule-mobile:has(.wiw-pdf-backdrop) .wiw-create-fab,
+  body.wiw-native-schedule-active:has(.wiw-shift-form-screen) .sv2-wiw-fab,
+  body.wiw-native-schedule-active:has(.wiw-pdf-backdrop) .sv2-wiw-fab {
+    display: none !important;
+  }
 }
 
 @media (max-width: 360px) {
-  .wiw-pdf-dates {
-    grid-template-columns: minmax(0, 1fr) !important;
-  }
-
-  .wiw-pdf-sheet > header {
-    gap: 8px !important;
-  }
-
-  .wiw-pdf-sheet > header b {
-    font-size: 15px !important;
-  }
+  .wiw-pdf-dates { grid-template-columns: minmax(0, 1fr) !important; }
+  .wiw-pdf-sheet > header { gap: 8px !important; }
+  .wiw-pdf-sheet > header b { font-size: 15px !important; }
 }
