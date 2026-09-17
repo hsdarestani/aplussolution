@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, akten_views, announcement_api, attendance_actions, attendance_views, automation_ai_views, automation_views, availability_admin, avatar_views, client_admin_views, client_order_planning, client_portal_views, contract_views, document_catalog_views, document_center_views, employee_schedule, global_search_views, integration_views, live_admin_center, live_operations, mobile_schedule, native_operations, oauth_views, one_time_ops, payroll_views, portal_views, push_views, schedule_reports, searchable_views, semantic_ai_views, shift_card_admin, shift_slot_actions, shift_views, store_review_views, time_views, views, wiw_dashboard, worker_portal_views
+from . import admin_center_views, advanced_views, akten_views, announcement_api, attendance_actions, attendance_views, automation_ai_views, automation_views, availability_admin, avatar_views, client_admin_views, client_order_planning, client_portal_auth, client_portal_views, contract_views, document_catalog_views, document_center_views, employee_schedule, global_search_views, integration_views, live_admin_center, live_operations, mobile_schedule, native_operations, oauth_views, one_time_ops, payroll_views, portal_views, push_views, schedule_reports, searchable_views, semantic_ai_views, shift_card_admin, shift_slot_actions, shift_views, store_review_views, time_views, views, wiw_dashboard, worker_portal_views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -28,7 +28,7 @@ for prefix, view in [
 router.register('notifications', views.NotificationViewSet, basename='notification')
 
 urlpatterns = [
-    path('auth/login/', views.login),
+    path('auth/login/', client_portal_auth.login),
     path('auth/store-review/sync/', store_review_views.sync_store_review_credential),
     path('auth/refresh/', TokenRefreshView.as_view()),
     path('auth/me/', views.me),
@@ -42,7 +42,16 @@ urlpatterns = [
     path('internal/one-time/housekeeping-provision/', one_time_ops.provision_housekeeping_worker),
     path('employee/home/', portal_views.employee_home),
     path('employee/schedule/', employee_schedule.employee_schedule),
+    path('portal/client-access/', client_portal_views.client_access),
     path('portal/client-dashboard/', client_portal_views.client_dashboard),
+    path('portal/client-shifts/', client_portal_views.client_shifts),
+    path('portal/client-order-metadata/', client_portal_views.client_order_metadata),
+    path('portal/client-documents/', client_portal_views.client_documents),
+    path('portal/shift-change-requests/', client_portal_views.client_shift_change_requests),
+    path('portal/admin/client-requests/', client_portal_views.admin_client_requests),
+    path('portal/admin/client-requests/<uuid:pk>/decision/', client_portal_views.admin_client_request_decision),
+    path('portal/admin/shift-change-requests/', client_portal_views.admin_shift_change_requests),
+    path('portal/admin/shift-change-requests/<uuid:pk>/decision/', client_portal_views.admin_shift_change_request_decision),
     path('portal/message-recipients/', worker_portal_views.message_recipients),
     path('portal/rating-candidates/', client_portal_views.client_rating_candidates),
     path('employee/ranking/', worker_portal_views.employee_ranking),
