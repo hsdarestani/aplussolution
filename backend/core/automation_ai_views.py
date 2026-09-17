@@ -174,17 +174,22 @@ def _prepare_named_assignments(
         note_name = _assignment_from_note(notes)
         explicit_worker_id = str(item.get('assignment_worker_id') or '').strip()
         explicit_worker_name = str(item.get('assignment_worker_name') or '').strip()
+        assignment_worker_override = bool(item.get('assignment_worker_override'))
 
         worker = _worker_by_id(explicit_worker_id)
         name = explicit_worker_name or note_name
         if not worker:
-            if not name:
+            if not name and not assignment_worker_override:
                 name = night_name if _is_night_shift(item) else other_name
             if name:
                 worker = _worker_by_name(name)
         if not worker:
             if name:
                 raise ValueError(f'Der Mitarbeiter „{name}“ wurde nicht eindeutig gefunden. Bitte Namen prüfen.')
+            if assignment_worker_override:
+                item['assignment_worker_id'] = ''
+                item['assignment_worker_name'] = ''
+                item['notes'] = _clean_assignment_note(notes)
             continue
 
         canonical_name = _worker_label(worker)
@@ -309,13 +314,27 @@ def order_parse(request):
 @permission_classes([IsAdminOrManager])
 def order_approve(request):
     raw_text = str(request.data.get('raw_text') or '').strip()
-    parsed = normalize_order_request(raw_text, request.data.get('parsed') or {})
+    incoming = request.data.get('parsed') or {}
+    admin_reviewed = bool(request.data.get('admin_reviewed') or (incoming.get('admin_reviewed') if isinstance(incoming, dict) else False))
+    parsed = normalize_order_request(raw_text, incoming)
+
+    if admin_reviewed:
+        # Once an admin has edited/deleted rows in the confirmation screen, the
+        # reviewed rows become authoritative. Do not resurrect deleted rows from
+        # the raw order text or reject the deliberate row count change.
+        parsed['admin_reviewed'] = True
+        parsed['expected_shift_count'] = len(parsed.get('shifts') or [])
+        parsed['shift_count_mismatch'] = False
+
     if not parsed.get('shifts'):
+        if admin_reviewed:
+            return Response({'detail': 'Mindestens eine geprüfte Schicht muss zur Erstellung übrig bleiben.'}, status=400)
         fallback = deterministic_order_request(raw_text)
         if fallback:
             parsed = normalize_order_request(raw_text, fallback)
     try:
-        _validate_roster_count(parsed)
+        if not admin_reviewed:
+            _validate_roster_count(parsed)
         parsed, workers_by_id = _prepare_named_assignments(parsed, raw_text, embed_assignment_note=True)
         result = approve_order(
             parsed,
