@@ -2,10 +2,9 @@
 set -e
 
 python manage.py migrate --noinput
-# Keep the business-owned A+ customer/location directory canonical before any
-# worker/web process starts consuming WIW data. The command is idempotent and
-# preserves all historical WIW ids as aliases on the canonical locations.
-python manage.py normalize_wiw_directory
+# WIW synchronization is disabled. Do not normalize/rename the business-owned
+# customer directory on every deploy: customer edits made in A+ must remain the
+# source of truth across restarts and releases.
 python manage.py collectstatic --noinput
 python manage.py bootstrap
 # Bootstrap refreshes the standard document catalog, so apply measured signature
