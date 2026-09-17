@@ -132,6 +132,32 @@
     overscroll-behavior-y: contain;
     touch-action: pan-y;
   }
+
+  /* The native Dienstplan is a portal rendered into .app-main. The legacy web
+     schedule used to remain alive underneath it, so on slower phones parts of
+     both layers (for example a second Gesamtstunden bar) could become visible
+     and both layers could compete for scroll/touch events. While native schedule
+     mode is active, make the portal the only interactive/painted app-main child. */
+  body.wiw-native-schedule-active .app-main {
+    position: relative !important;
+    overflow: hidden !important;
+    isolation: isolate !important;
+    overscroll-behavior: contain;
+  }
+
+  body.wiw-native-schedule-active .app-main > :not(.wiw-schedule-mobile) {
+    visibility: hidden !important;
+    pointer-events: none !important;
+  }
+
+  body.wiw-native-schedule-active .app-main > .wiw-schedule-mobile {
+    visibility: visible !important;
+    pointer-events: auto !important;
+    isolation: isolate;
+    contain: layout paint style;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+  }
 }
 
 @media (max-width: 360px) {
