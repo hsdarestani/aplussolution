@@ -126,6 +126,7 @@ def normalize_order_request(raw_text: str, parsed: dict[str, Any] | None = None)
         return source
 
     normalized = []
+    complete_detailed_roster = total_count is not None and len(rows) == total_count
     for row in rows:
         # For a detailed multi-row roster, the row-specific date/time/role/site
         # from the AI parser wins. Global values are only overlays for the simple
@@ -137,7 +138,11 @@ def normalize_order_request(raw_text: str, parsed: dict[str, Any] | None = None)
             row['start_time'] = start_time
         if end_time and not detailed_roster:
             row['end_time'] = end_time
-        if count_value is not None and not detailed_roster:
+        if complete_detailed_roster:
+            # "insgesamt N Schichten" means N individually reviewable shift rows,
+            # not N employees on each of those rows.
+            row['count'] = 1
+        elif count_value is not None and not detailed_roster:
             row['count'] = count_value
         else:
             row['count'] = max(1, int(row.get('count') or 1))
