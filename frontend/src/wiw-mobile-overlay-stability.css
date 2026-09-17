@@ -133,16 +133,15 @@
     touch-action: pan-y;
   }
 
-  /* The native Dienstplan is a portal rendered into .app-main. The legacy web
-     schedule used to remain alive underneath it, so on slower phones parts of
-     both layers (for example a second Gesamtstunden bar) could become visible
-     and both layers could compete for scroll/touch events. While native schedule
-     mode is active, make the portal the only interactive/painted app-main child. */
+  /* The native Dienstplan is a portal rendered into .app-main. Keep the legacy
+     layer non-interactive while the native portal is active, but never make the
+     shared app-main itself a scroll trap. IonContent owns vertical scrolling on
+     the web and overflow:hidden here froze only the Dienstplan view. */
   body.wiw-native-schedule-active .app-main {
     position: relative !important;
-    overflow: hidden !important;
+    overflow: visible !important;
     isolation: isolate !important;
-    overscroll-behavior: contain;
+    overscroll-behavior-y: auto;
   }
 
   body.wiw-native-schedule-active .app-main > :not(.wiw-schedule-mobile) {
@@ -155,7 +154,7 @@
     pointer-events: auto !important;
     isolation: isolate;
     contain: layout paint style;
-    overscroll-behavior: contain;
+    overscroll-behavior-y: auto;
     touch-action: pan-y;
   }
 }
