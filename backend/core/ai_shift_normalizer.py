@@ -13,6 +13,13 @@ ROLE_PATTERNS = (
     (r'\bbar(?:kraft|kräfte|kraefte)?\b', 'Bar'),
 )
 
+INLINE_ASSIGNMENT_LINE_RE = re.compile(
+    r'^\s*(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})\b'
+    r'(?=[^\n]*\b(?:dienst|schicht)\b)[^\n]*?\s[-–—]\s*'
+    r'([A-Za-zÄÖÜäöüßÀ-ÿ][A-Za-zÄÖÜäöüßÀ-ÿ\'’ .-]{1,79})\s*$',
+    flags=re.I | re.M,
+)
+
 
 def _first(pattern: str, text: str, flags=re.I | re.M):
     match = re.search(pattern, text or '', flags=flags)
@@ -89,6 +96,35 @@ def _note(text: str) -> str:
     return match.group(1).strip() if match else ''
 
 
+def _assignment_key(value: str) -> str:
+    return re.sub(r'[^a-z0-9äöüß]+', ' ', str(value or '').casefold()).strip()
+
+
+def _inline_assignments(text: str) -> dict[str, str]:
+    """Extract per-date assignments written as e.g. ``24.10.2026 Nachtdienst - Solomon``.
+
+    The model sometimes places the trailing employee name into ``notes`` instead
+    of returning it as an assignment. Treat the explicit roster syntax as the
+    authoritative source, but only when a date has one unambiguous name.
+    """
+    by_date: dict[str, list[str]] = {}
+    for day, month, year, raw_name in INLINE_ASSIGNMENT_LINE_RE.findall(text or ''):
+        name = raw_name.strip(' -–—')
+        if not name:
+            continue
+        date_key = f'{int(year):04d}-{int(month):02d}-{int(day):02d}'
+        by_date.setdefault(date_key, []).append(name)
+
+    result: dict[str, str] = {}
+    for date_key, names in by_date.items():
+        unique: dict[str, str] = {}
+        for name in names:
+            unique.setdefault(_assignment_key(name), name)
+        if len(unique) == 1:
+            result[date_key] = next(iter(unique.values()))
+    return result
+
+
 def normalize_order_request(raw_text: str, parsed: dict[str, Any] | None = None) -> dict[str, Any]:
     """Overlay explicit German instructions on top of the LLM result.
 
@@ -107,6 +143,7 @@ def normalize_order_request(raw_text: str, parsed: dict[str, Any] | None = None)
     role_value = _role(raw_text)
     site_value, location_value = _site_and_location(raw_text)
     note_value = _note(raw_text)
+    inline_assignments = _inline_assignments(raw_text)
 
     explicit_shift = bool(date_value and start_time and end_time)
     # Collapse repeated LLM rows only for an explicit "N identical shifts"
@@ -163,6 +200,22 @@ def normalize_order_request(raw_text: str, parsed: dict[str, Any] | None = None)
         else:
             row['notes'] = str(row.get('notes') or note_value or '').strip()
         row['site_address'] = str(row.get('site_address') or '').strip()
+
+        # Explicit ``date + Dienst - Mitarbeiter`` roster lines must win over an
+        # LLM that incorrectly copied the employee name into the note field.
+        assignment_name = inline_assignments.get(str(row.get('date') or '').strip())
+        if assignment_name:
+            row['assignment_worker_name'] = assignment_name
+            worker_key = _assignment_key(assignment_name)
+            note_key = _assignment_key(row.get('notes') or '')
+            if note_key in {
+                worker_key,
+                f'mitarbeiter {worker_key}',
+                f'worker {worker_key}',
+                f'zugewiesen {worker_key}',
+            }:
+                row['notes'] = ''
+
         normalized.append(row)
 
     source['shifts'] = normalized
