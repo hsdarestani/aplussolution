@@ -121,12 +121,27 @@ const formatGermanDate = (value: string) => {
     `<label>Auftragstext<textarea ref={aiTextareaRef} autoFocus onFocus={() => window.setTimeout(() => aiTextareaRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 80)} value={orderText}`,
     'AI textarea keyboard guard',
   );
-  next = replaceRequired(
-    next,
-    `{parsed ? <div className="admin-ai-preview"><b>{parsed.shifts?.length || 0} Schicht(en) erkannt</b>{parsed.shifts?.map((item: any, index: number) => <span key={index}>{item.date} · {item.start_time}–{item.end_time} · {item.count}× {item.role} · {item.site_text}</span>)}</div> : null}`,
-    `{parsed ? <div className="admin-ai-preview"><b>{(parsed.shifts || []).reduce((sum: number, item: any) => sum + Number(item.count || 1), 0)} Schicht(en) erkannt</b>{parsed.shifts?.map((item: any, index: number) => <span key={index}>{formatGermanDate(item.date)} · {item.start_time}–{item.end_time} · {item.count}× {item.role} · {item.site_text}{item.location_text ? \` · \${item.location_text}\` : ''}{item.notes ? \` · Notiz: \${item.notes}\` : ''}</span>)}</div> : null}`,
-    'AI preview',
-  );
+
+  const legacyPreview = `{parsed ? <div className="admin-ai-preview"><b>{parsed.shifts?.length || 0} Schicht(en) erkannt</b>{parsed.shifts?.map((item: any, index: number) => <span key={index}>{item.date} · {item.start_time}–{item.end_time} · {item.count}× {item.role} · {item.site_text}</span>)}</div> : null}`;
+  if (next.includes(legacyPreview)) {
+    next = next.replace(
+      legacyPreview,
+      `{parsed ? <div className="admin-ai-preview"><b>{(parsed.shifts || []).reduce((sum: number, item: any) => sum + Number(item.count || 1), 0)} Schicht(en) erkannt</b>{parsed.shifts?.map((item: any, index: number) => <span key={index}>{formatGermanDate(item.date)} · {item.start_time}–{item.end_time} · {item.count}× {item.role} · {item.site_text}{item.location_text ? \` · \${item.location_text}\` : ''}{item.notes ? \` · Notiz: \${item.notes}\` : ''}</span>)}</div> : null}`,
+    );
+  } else if (next.includes('className="admin-ai-preview-head"')) {
+    // Newer builds have an editable AI review table. Keep that richer UI and
+    // only apply the SEP13 formatting/count improvements instead of replacing it.
+    next = next.replace(
+      `<div className="admin-ai-preview-head"><b>{parsed.shifts?.length || 0} Schicht(en) erkannt</b>`,
+      `<div className="admin-ai-preview-head"><b>{(parsed.shifts || []).reduce((sum: number, item: any) => sum + Number(item.count || 1), 0)} Schicht(en) erkannt</b>`,
+    );
+    next = next.replace(
+      `<b>{item.date} · {item.start_time}–{item.end_time}</b>`,
+      `<b>{formatGermanDate(item.date)} · {item.start_time}–{item.end_time}</b>`,
+    );
+  } else {
+    throw new Error('SEP13 patch marker changed: AI preview');
+  }
 
   return `// SEP13_AI_POLISH\n${next}`;
 });
