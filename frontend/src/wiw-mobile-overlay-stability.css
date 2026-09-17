@@ -59,8 +59,7 @@
     opacity: .58;
   }
 
-  /* PDF export: make the inner content the scroll owner. This fixes the form
-     shown clipped in the supplied phone screenshot. */
+  /* PDF export: make the inner content the scroll owner. */
   .wiw-pdf-backdrop {
     align-items: flex-end !important;
     padding: 0 !important;
@@ -120,7 +119,6 @@
     touch-action: manipulation;
   }
 
-  /* Other bottom sheets opened from the shift form get the same safe bounds. */
   .wiw-date-sheet,
   .wiw-calendar-sheet,
   .wiw-enhancer-sheet,
@@ -133,29 +131,58 @@
     touch-action: pan-y;
   }
 
-  /* The native Dienstplan is a portal rendered into .app-main. Keep the legacy
-     layer non-interactive while the native portal is active, but never make the
-     shared app-main itself a scroll trap. IonContent owns vertical scrolling on
-     the web and overflow:hidden here froze only the Dienstplan view. */
+  /* Mobile web and Capacitor intentionally use the same compact Dienstplan.
+     ScheduleV2 still exists in React for desktop, but when the compact schedule
+     is active it must disappear completely from mobile layout and hit-testing.
+     The compact schedule itself stays in normal document flow so IonContent owns
+     vertical scrolling and there is never a second hidden layer stealing touch. */
   body.wiw-native-schedule-active .app-main {
     position: relative !important;
+    min-height: calc(100dvh - 126px) !important;
     overflow: visible !important;
     isolation: isolate !important;
     overscroll-behavior-y: auto;
   }
 
   body.wiw-native-schedule-active .app-main > :not(.wiw-schedule-mobile) {
-    visibility: hidden !important;
-    pointer-events: none !important;
+    display: none !important;
   }
 
   body.wiw-native-schedule-active .app-main > .wiw-schedule-mobile {
+    display: block !important;
+    position: relative !important;
+    inset: auto !important;
+    width: 100% !important;
+    min-height: calc(100dvh - 126px) !important;
     visibility: visible !important;
     pointer-events: auto !important;
     isolation: isolate;
     contain: layout paint style;
     overscroll-behavior-y: auto;
     touch-action: pan-y;
+  }
+
+  /* Match the compact app UI on mobile web: one floating create action only. */
+  body.wiw-native-schedule-active .wiw-create-fab {
+    display: grid !important;
+    position: fixed !important;
+    right: 12px !important;
+    bottom: calc(78px + env(safe-area-inset-bottom)) !important;
+    z-index: 120 !important;
+    width: 52px !important;
+    height: 52px !important;
+    padding: 0 !important;
+    place-items: center;
+    border: 0 !important;
+    border-radius: 50% !important;
+    background: #073b57 !important;
+    color: #fff !important;
+    box-shadow: 0 4px 13px rgba(0,0,0,.28) !important;
+    font-size: 28px !important;
+    font-weight: 300 !important;
+    line-height: 1 !important;
+    cursor: pointer;
+    touch-action: manipulation;
   }
 }
 
