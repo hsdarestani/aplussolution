@@ -101,17 +101,29 @@ def _assignment_key(value: str) -> str:
     return re.sub(r'[^a-z0-9äöüß]+', ' ', str(value or '').casefold()).strip()
 
 
+def _is_role_label(value: str) -> bool:
+    """Return True only when a trailing dash value is a position, not a person.
+
+    Roster lines such as ``20.10.2028 Frühdienst ... – Front Office`` use the dash
+    for the position. Older single-shift examples also use the same dash for an
+    employee name. Do not treat canonical position names as employees.
+    """
+    detected = _role(value)
+    return bool(detected and _assignment_key(detected) == _assignment_key(value))
+
+
 def _inline_assignments(text: str) -> dict[str, str]:
     """Extract per-date assignments written as e.g. ``24.10.2026 Nachtdienst - Solomon``.
 
     The model sometimes places the trailing employee name into ``notes`` instead
     of returning it as an assignment. Treat the explicit roster syntax as the
-    authoritative source, but only when a date has one unambiguous name.
+    authoritative source, but only when a date has one unambiguous name. A
+    trailing canonical position such as ``- Front Office`` is not an employee.
     """
     by_date: dict[str, list[str]] = {}
     for day, month, year, raw_name in INLINE_ASSIGNMENT_LINE_RE.findall(text or ''):
         name = raw_name.strip(' -–—')
-        if not name:
+        if not name or _is_role_label(name):
             continue
         date_key = f'{int(year):04d}-{int(month):02d}-{int(day):02d}'
         by_date.setdefault(date_key, []).append(name)
@@ -124,6 +136,44 @@ def _inline_assignments(text: str) -> dict[str, str]:
         if len(unique) == 1:
             result[date_key] = next(iter(unique.values()))
     return result
+
+
+def _global_assignment(text: str) -> str:
+    """Find one employee explicitly assigned to all shifts in the request."""
+    match = re.search(
+        r'\balle(?:\s+[A-Za-zÄÖÜäöüßÀ-ÿ0-9]+)?\s+schichten\b'
+        r'[^.\n]*?\b(?:werden\s+)?von\s+([^\n,.;]+?)\s+(?:übernommen|uebernommen)\b',
+        text or '',
+        flags=re.I,
+    )
+    return match.group(1).strip() if match else ''
+
+
+def _dated_shift_rows(text: str) -> list[dict[str, Any]]:
+    """Parse multiple explicit dated shift lines without relying on the LLM."""
+    rows: list[dict[str, Any]] = []
+    site_value, location_value = _site_and_location(text)
+    note_value = _note(text)
+    for raw_line in str(text or '').splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        date_value = _date(line)
+        start_time, end_time = _times(line)
+        if not (date_value and start_time and end_time):
+            continue
+        rows.append({
+            'role': _role(line) or 'Servicekraft',
+            'date': date_value,
+            'start_time': start_time,
+            'end_time': end_time,
+            'count': 1,
+            'location_text': location_value,
+            'site_text': site_value,
+            'site_address': '',
+            'notes': note_value,
+        })
+    return rows
 
 
 def normalize_order_request(raw_text: str, parsed: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -145,16 +195,20 @@ def normalize_order_request(raw_text: str, parsed: dict[str, Any] | None = None)
     site_value, location_value = _site_and_location(raw_text)
     note_value = _note(raw_text)
     inline_assignments = _inline_assignments(raw_text)
+    global_assignment = _global_assignment(raw_text)
 
     explicit_shift = bool(date_value and start_time and end_time)
     # Collapse repeated LLM rows only for an explicit "N identical shifts"
     # instruction. Never collapse a detailed roster merely because the text also
     # mentions one date/time or an aggregate total.
-    if explicit_shift and count_value is not None and total_count is None:
+    if explicit_shift and count_value is not None and total_count is None and len(existing) <= 1:
         base = dict(existing[0]) if existing and isinstance(existing[0], dict) else {}
         rows = [base]
     else:
         rows = [dict(item) for item in existing if isinstance(item, dict)]
+
+    if not rows:
+        rows = _dated_shift_rows(raw_text)
 
     if not rows:
         source['shifts'] = []
@@ -202,9 +256,10 @@ def normalize_order_request(raw_text: str, parsed: dict[str, Any] | None = None)
             row['notes'] = str(row.get('notes') or note_value or '').strip()
         row['site_address'] = str(row.get('site_address') or '').strip()
 
-        # Explicit ``date + Dienst - Mitarbeiter`` roster lines must win over an
-        # LLM that incorrectly copied the employee name into the note field.
-        assignment_name = inline_assignments.get(str(row.get('date') or '').strip())
+        # Per-date employee syntax wins. If no per-date employee is given, an
+        # explicit "Alle ... Schichten ... von NAME übernommen" sentence applies
+        # to every row. Position labels after a dash are intentionally ignored.
+        assignment_name = inline_assignments.get(str(row.get('date') or '').strip()) or global_assignment
         if assignment_name:
             row['assignment_worker_name'] = assignment_name
             worker_key = _assignment_key(assignment_name)
@@ -234,6 +289,10 @@ def deterministic_order_request(raw_text: str) -> dict[str, Any] | None:
 
     This is also the safe fallback when the external AI parser is unavailable.
     """
+    rows = _dated_shift_rows(raw_text)
+    if rows:
+        return {'contract_no': '', 'shifts': rows}
+
     date_value = _date(raw_text)
     start_time, end_time = _times(raw_text)
     if not (date_value and start_time and end_time):
