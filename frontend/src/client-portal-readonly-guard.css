@@ -11,4 +11,15 @@
     opacity: .45 !important;
     cursor: default !important;
   }
+
+  /* Full-screen client forms own the viewport. The persistent client tabbar used
+     to sit over the modal footer and intercept taps on "Anfrage senden" and
+     "Bewertung speichern" after the keyboard/scroll moved the footer downward. */
+  body.client-portal-modal-open .client-v2-tabbar,
+  body.client-portal-modal-open .client-v2-more {
+    opacity: 0 !important;
+    pointer-events: none !important;
+    visibility: hidden !important;
+    z-index: 0 !important;
+  }
 }
