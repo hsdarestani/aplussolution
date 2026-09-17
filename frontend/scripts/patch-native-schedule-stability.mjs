@@ -31,5 +31,16 @@ if (source.includes(oldOpenShiftRow)) {
   throw new Error('Native schedule OpenShift edit row marker not found');
 }
 
+// Show the day's total scheduled staff-hours next to the shift-card count in the
+// grey day header. The calculation mirrors Gesamtstunden and deducts breaks.
+const oldDayHeader = '<header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}</em></header>';
+const newDayHeader = '<header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}<small> · {dayCards.reduce((sum, card) => { const gross = Math.max(0, (new Date(card.shift.ends_at).getTime() - new Date(card.shift.starts_at).getTime()) / 3600000); return sum + Math.max(0, gross - Number(card.shift.break_minutes || 0) / 60); }, 0).toFixed(1)} Std.</small></em></header>';
+if (source.includes(oldDayHeader)) {
+  source = source.replace(oldDayHeader, newDayHeader);
+  changed = true;
+} else if (!source.includes('dayCards.reduce((sum, card)')) {
+  throw new Error('Native schedule day header marker not found');
+}
+
 if (changed) fs.writeFileSync(schedulePath, source);
 console.log(changed ? 'Applied native schedule stability patch.' : 'Native schedule stability patch already applied.');
