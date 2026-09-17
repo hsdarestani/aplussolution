@@ -18,6 +18,7 @@ import { api, logout, User } from './api';
 import { ClientDocumentsMobile, type ClientAccess } from './ClientPortalMobileV4';
 import './client-portal-v2.css';
 import './client-portal-v4.css';
+import './client-portal-readonly-guard.css';
 
 const TZ = 'Europe/Berlin';
 const unpack = (value: any): any[] => value?.results || value || [];
@@ -185,7 +186,7 @@ export default function ClientPortalV2() {
     <nav className="client-v2-tabbar" aria-label="Kundenportal Navigation" data-testid="client-v2-tabbar" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
       {primary.map(([key, label, icon]) => {
         const locked = access.read_only && key === 'ratings';
-        return <button type="button" key={key} disabled={locked} className={`${view === key && !moreOpen ? 'active ' : ''}${locked ? 'is-locked' : ''}`} onClick={() => navigate(key)} aria-current={view === key ? 'page' : undefined}><IonIcon icon={locked ? lockClosedOutline : icon}/><span>{label}</span></button>;
+        return <button type="button" key={key} disabled={locked} className={`${view === key && !moreOpen ? 'active ' : ''}${locked ? 'is-locked' : ''}`} onClick={() => navigate(key)} aria-current={view === key ? 'page' : undefined} aria-label={key === 'ratings' ? 'Mitarbeiter bewerten' : label}><IonIcon icon={locked ? lockClosedOutline : icon}/><span>{label}</span></button>;
       })}
       <button type="button" className={moreOpen || !primary.some(([key]) => key === view) ? 'active' : ''} onClick={() => setMoreOpen(true)} aria-label="Weitere Bereiche öffnen"><IonIcon icon={appsOutline}/><span>Mehr</span></button>
     </nav>
