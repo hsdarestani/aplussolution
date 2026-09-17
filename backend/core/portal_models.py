@@ -39,7 +39,7 @@ class ClientPortalAccess(TimestampedModel):
     class Meta:
         app_label = 'core'
         ordering = ['client__name', 'user__first_name', 'user__last_name']
-        indexes = [models.Index(fields=['client', 'read_only'])]
+        indexes = [models.Index(fields=['client', 'read_only'], name='client_access_scope_idx')]
 
     def __str__(self):
         return self.label or self.user.get_full_name() or self.user.email
@@ -79,8 +79,8 @@ class ClientShiftChangeRequest(TimestampedModel):
         app_label = 'core'
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['status', 'created_at']),
-            models.Index(fields=['shift', 'status']),
+            models.Index(fields=['status', 'created_at'], name='client_req_status_idx'),
+            models.Index(fields=['shift', 'status'], name='client_req_shift_idx'),
         ]
 
 
