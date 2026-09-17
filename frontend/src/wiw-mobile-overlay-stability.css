@@ -162,12 +162,13 @@
     touch-action: pan-y;
   }
 
-  /* Match the compact app UI on mobile web: one floating create action only. */
+  /* Match the compact app UI on mobile web: one floating create action only.
+     Keep it above the persistent Gesamtstunden bar instead of inside it. */
   body.wiw-native-schedule-active .wiw-create-fab {
     display: grid !important;
     position: fixed !important;
-    right: 12px !important;
-    bottom: calc(78px + env(safe-area-inset-bottom)) !important;
+    right: 16px !important;
+    bottom: calc(132px + env(safe-area-inset-bottom)) !important;
     z-index: 120 !important;
     width: 52px !important;
     height: 52px !important;
