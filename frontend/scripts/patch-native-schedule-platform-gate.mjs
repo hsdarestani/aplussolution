@@ -10,36 +10,31 @@ let appSource = fs.readFileSync(appPath, 'utf8');
 let changed = false;
 let appChanged = false;
 
-// The compact Dienstplan is the native Capacitor UI. Rendering it in a normal
-// browser purely because the viewport is <= 900px caused the legacy web calendar
-// and native portal to fight for the same .app-main tree. That could hide the web
-// "+" action, duplicate layers and leave touch/scroll handlers in a frozen state.
-// Keep the two products explicit: browser => web calendar, Capacitor => native UI.
-const functionMarker = 'export default function WiwScheduleMobile() {\n';
+// The compact Dienstplan is intentionally shared by mobile web and Capacitor.
+// The old native-only gate accidentally sent mobile browsers back to ScheduleV2.
+// Keep the <=900px compact view on both platforms; isolation from the legacy
+// schedule is handled in CSS so only one schedule layer can paint or receive input.
 const nativeMarker = '  const nativePlatform = Capacitor.isNativePlatform();\n';
-if (!source.includes(nativeMarker)) {
-  if (!source.includes(functionMarker)) throw new Error('WiwScheduleMobile function marker not found');
-  source = source.replace(functionMarker, `${functionMarker}${nativeMarker}`);
+if (source.includes(nativeMarker)) {
+  source = source.replace(nativeMarker, '');
   changed = true;
 }
 
-const replacements = [
-  ['    if (!active || !mobile) return;', '    if (!nativePlatform || !active || !mobile) return;'],
-  ['    if (!active || !mobile || !manager) return;', '    if (!nativePlatform || !active || !mobile || !manager) return;'],
-  ['  if (!active || !mobile || !manager) return null;', '  if (!nativePlatform || !active || !mobile || !manager) return null;'],
+const guardReplacements = [
+  ['if (!nativePlatform || !active || !mobile || manager) return;', 'if (!active || !mobile || manager) return;'],
+  ['if (!nativePlatform || !active || !mobile) return;', 'if (!active || !mobile) return;'],
+  ['if (!nativePlatform || !active || !mobile || !manager) return;', 'if (!active || !mobile || !manager) return;'],
+  ['if (!nativePlatform || !active || !mobile || !manager) return null;', 'if (!active || !mobile || !manager) return null;'],
 ];
-
-for (const [before, after] of replacements) {
+for (const [before, after] of guardReplacements) {
   if (source.includes(before)) {
     source = source.split(before).join(after);
     changed = true;
   }
 }
 
-// Expose the already-known authenticated role on the shell. This avoids a second
-// auth/me request deciding whether the native admin calendar exists. On a slow or
-// briefly-offline phone that extra request used to fail and the native layer would
-// disappear, leaving the legacy web calendar inside the app.
+// Expose the already authenticated role on the shell. This avoids an extra
+// auth/me request deciding whether the compact admin calendar is allowed to mount.
 const oldAppShell = '<IonApp className="mobile-first-app-shell-v1" data-view={mobileMenuOpen ? \'more\' : view}>';
 const newAppShell = '<IonApp className="mobile-first-app-shell-v1" data-view={mobileMenuOpen ? \'more\' : view} data-role={user.role}>';
 if (appSource.includes(oldAppShell)) {
@@ -55,20 +50,22 @@ if (source.includes(oldActiveSync)) {
   source = source.replace(oldActiveSync, newActiveSync);
   changed = true;
 } else if (!source.includes("const role = shell?.dataset.role || '';")) {
-  throw new Error('Native schedule shell observer marker not found');
+  throw new Error('Compact schedule shell observer marker not found');
 }
 
-// Keep auth/me only as a fallback for older shells. Once App has exposed a known
-// admin/manager role, do not let a transient network call turn the native UI off.
-const oldAuthGuard = '    if (!nativePlatform || !active || !mobile) return;';
-const newAuthGuard = '    if (!nativePlatform || !active || !mobile || manager) return;';
-if (source.includes(oldAuthGuard)) {
-  source = source.replace(oldAuthGuard, newAuthGuard);
+// auth/me is only a fallback for older shells that do not expose a role yet.
+const authGuard = '    if (!active || !mobile) return;';
+const resilientAuthGuard = '    if (!active || !mobile || manager) return;';
+if (source.includes(authGuard)) {
+  source = source.replace(authGuard, resilientAuthGuard);
   changed = true;
 }
 
-if (!source.includes('if (!nativePlatform || !active || !mobile || !manager) return null;')) {
-  throw new Error('Native schedule platform gate was not applied to render guard');
+if (source.includes('nativePlatform ||')) {
+  throw new Error('Native-only schedule guard is still present');
+}
+if (!source.includes('if (!active || !mobile || !manager) return null;')) {
+  throw new Error('Shared mobile schedule render guard is missing');
 }
 if (!appSource.includes('data-role={user.role}')) {
   throw new Error('Authenticated role is not exposed on app shell');
@@ -76,4 +73,4 @@ if (!appSource.includes('data-role={user.role}')) {
 
 if (changed) fs.writeFileSync(schedulePath, source);
 if (appChanged) fs.writeFileSync(appPath, appSource);
-console.log(changed || appChanged ? 'Applied native-only schedule platform gate and resilient role activation.' : 'Native schedule platform gate already applied.');
+console.log(changed || appChanged ? 'Applied shared mobile schedule activation with resilient role detection.' : 'Shared mobile schedule activation already applied.');
