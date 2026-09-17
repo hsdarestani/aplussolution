@@ -7,6 +7,7 @@ const BERLIN = 'Europe/Berlin';
 const unpack = (value: any): any[] => value?.results || value || [];
 
 type Card = { key: string; shift: any; slot?: any; worker?: any; open: boolean };
+type AiDirectory = { clients: any[]; locations: any[]; workers: any[]; positions: any[] };
 
 function formatWindow(shift: any) {
   const start = new Date(shift.starts_at);
@@ -44,6 +45,8 @@ export default function AdminScheduleTools() {
   const [orderText, setOrderText] = useState('');
   const [parsed, setParsed] = useState<any>();
   const [editingAiIndex, setEditingAiIndex] = useState<number | null>(null);
+  const [aiDirectory, setAiDirectory] = useState<AiDirectory>({ clients: [], locations: [], workers: [], positions: [] });
+  const [aiDirectoryBusy, setAiDirectoryBusy] = useState(false);
   const [shifts, setShifts] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -95,6 +98,26 @@ export default function AdminScheduleTools() {
     observer.observe(document.body, { subtree: true, childList: true });
     return () => observer.disconnect();
   }, [active, manager, mobile]);
+
+  useEffect(() => {
+    if (!aiOpen || !manager) return;
+    let cancelled = false;
+    setAiDirectoryBusy(true);
+    api('automation/orders/metadata/').then((result: any) => {
+      if (cancelled) return;
+      setAiDirectory({
+        clients: Array.isArray(result?.clients) ? result.clients : [],
+        locations: Array.isArray(result?.locations) ? result.locations : [],
+        workers: Array.isArray(result?.workers) ? result.workers : [],
+        positions: Array.isArray(result?.positions) ? result.positions : [],
+      });
+    }).catch((error: any) => {
+      if (!cancelled) setMessage(error.message || 'Kunden, Standorte und Mitarbeiter konnten nicht geladen werden.');
+    }).finally(() => {
+      if (!cancelled) setAiDirectoryBusy(false);
+    });
+    return () => { cancelled = true; };
+  }, [aiOpen, manager]);
 
   // Keep the main mobile screen visually identical to WIW: one floating + button.
   // Intercept that native-looking FAB and offer our extra Manual/AI choices in a
@@ -189,6 +212,56 @@ export default function AdminScheduleTools() {
     });
   };
 
+  const updateAiClient = (index: number, clientId: string) => {
+    setParsed((current: any) => {
+      if (!current || !Array.isArray(current.shifts)) return current;
+      const rows = [...current.shifts];
+      const selected = aiDirectory.clients.find((item: any) => String(item.id) === String(clientId));
+      const locations = aiDirectory.locations.filter((item: any) => String(item.client_id) === String(clientId));
+      const currentLocation = locations.find((item: any) => String(item.id) === String(rows[index]?.location_id || ''));
+      const nextLocation = currentLocation || (locations.length === 1 ? locations[0] : undefined);
+      rows[index] = {
+        ...rows[index],
+        client_id: selected ? String(selected.id) : '',
+        site_text: selected?.name || '',
+        site_address: nextLocation?.address || selected?.address || '',
+        location_id: nextLocation ? String(nextLocation.id) : '',
+        location_text: nextLocation?.name || '',
+      };
+      return markAdminReviewed({ ...current, shifts: rows });
+    });
+  };
+
+  const updateAiLocation = (index: number, locationId: string) => {
+    setParsed((current: any) => {
+      if (!current || !Array.isArray(current.shifts)) return current;
+      const rows = [...current.shifts];
+      const selected = aiDirectory.locations.find((item: any) => String(item.id) === String(locationId));
+      rows[index] = {
+        ...rows[index],
+        location_id: selected ? String(selected.id) : '',
+        location_text: selected?.name || '',
+        site_address: selected?.address || rows[index]?.site_address || '',
+      };
+      return markAdminReviewed({ ...current, shifts: rows });
+    });
+  };
+
+  const updateAiWorker = (index: number, workerId: string) => {
+    setParsed((current: any) => {
+      if (!current || !Array.isArray(current.shifts)) return current;
+      const rows = [...current.shifts];
+      const selected = aiDirectory.workers.find((item: any) => String(item.id) === String(workerId));
+      rows[index] = {
+        ...rows[index],
+        assignment_worker_id: selected ? String(selected.id) : '',
+        assignment_worker_name: selected?.name || '',
+        assignment_worker_override: true,
+      };
+      return markAdminReviewed({ ...current, shifts: rows });
+    });
+  };
+
   const removeParsedShift = (index: number) => {
     setParsed((current: any) => {
       if (!current || !Array.isArray(current.shifts)) return current;
@@ -221,6 +294,12 @@ export default function AdminScheduleTools() {
     if (!parsed) return void parseOrder();
     if (!Array.isArray(parsed.shifts) || parsed.shifts.length === 0) {
       setMessage('Mindestens eine Schicht muss zur Erstellung übrig bleiben.');
+      return;
+    }
+    const unresolvedIndex = parsed.shifts.findIndex((item: any) => !item.client_id || !item.location_id);
+    if (unresolvedIndex >= 0) {
+      setEditingAiIndex(unresolvedIndex);
+      setMessage('Bitte für jede Schicht einen bestehenden Kunden und Standort auswählen.');
       return;
     }
     setBusy(true);
@@ -284,9 +363,10 @@ export default function AdminScheduleTools() {
           <header><div><small>AI · PERSONALPLANUNG</small><h2>Schichten mit AI erstellen</h2></div><button type="button" onClick={() => setAiOpen(false)}>Fertig</button></header>
           <label>Auftragstext<textarea autoFocus value={orderText} onChange={(event) => { setOrderText(event.target.value); setParsed(undefined); setEditingAiIndex(null); }} placeholder="Kundenanfrage hier einfügen …" /></label>
           {parsed ? <div className="admin-ai-preview">
-            <div className="admin-ai-preview-head"><b>{parsed.shifts?.length || 0} Schicht(en) erkannt</b><small>Vor dem Erstellen kannst du jede Zeile bearbeiten oder entfernen.</small></div>
+            <div className="admin-ai-preview-head"><b>{parsed.shifts?.length || 0} Schicht(en) erkannt</b><small>{aiDirectoryBusy ? 'Stammdaten werden geladen …' : 'Kunde, Standort und Mitarbeiter kommen direkt aus den A+ Stammdaten und können vor dem Erstellen geändert werden.'}</small></div>
             {(parsed.shifts || []).map((item: any, index: number) => {
               const editing = editingAiIndex === index;
+              const locationChoices = aiDirectory.locations.filter((location: any) => String(location.client_id) === String(item.client_id || ''));
               return <article className={`admin-ai-row${editing ? ' editing' : ''}`} key={`${item.date || 'row'}-${index}`}>
                 <div className="admin-ai-row-head"><strong>Schicht {index + 1}</strong>{item.assignment_worker_name ? <em>{item.assignment_worker_name}</em> : <em>OpenShift</em>}</div>
                 {editing ? <div className="admin-ai-edit-grid">
@@ -295,9 +375,9 @@ export default function AdminScheduleTools() {
                   <label>Bis<input type="time" value={item.end_time || ''} onChange={(event) => updateParsedShift(index, 'end_time', event.target.value)} /></label>
                   <label>Anzahl<input type="number" min="1" value={item.count || 1} onChange={(event) => updateParsedShift(index, 'count', Math.max(1, Number(event.target.value) || 1))} /></label>
                   <label className="wide">Position<input type="text" value={item.role || ''} onChange={(event) => updateParsedShift(index, 'role', event.target.value)} /></label>
-                  <label className="wide">Kunde<input type="text" value={item.site_text || ''} onChange={(event) => updateParsedShift(index, 'site_text', event.target.value)} /></label>
-                  <label className="wide">Standort<input type="text" value={item.location_text || ''} onChange={(event) => updateParsedShift(index, 'location_text', event.target.value)} /></label>
-                  <label className="wide">Mitarbeiter<input type="text" value={item.assignment_worker_name || ''} placeholder="Leer = OpenShift" onChange={(event) => updateParsedShift(index, 'assignment_worker_name', event.target.value)} /></label>
+                  <label className="wide">Kunde<select value={item.client_id || ''} disabled={aiDirectoryBusy} onChange={(event) => updateAiClient(index, event.target.value)}><option value="">Bitte Kunde auswählen</option>{aiDirectory.clients.map((client: any) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>
+                  <label className="wide">Standort<select value={item.location_id || ''} disabled={aiDirectoryBusy || !item.client_id} onChange={(event) => updateAiLocation(index, event.target.value)}><option value="">Bitte Standort auswählen</option>{locationChoices.map((location: any) => <option key={location.id} value={location.id}>{location.name}{location.address ? ` · ${location.address}` : ''}</option>)}</select></label>
+                  <label className="wide">Mitarbeiter<select value={item.assignment_worker_id || ''} disabled={aiDirectoryBusy} onChange={(event) => updateAiWorker(index, event.target.value)}><option value="">OpenShift · kein Mitarbeiter</option>{aiDirectory.workers.map((worker: any) => <option key={worker.id} value={worker.id}>{worker.name}{worker.employee_number ? ` · ${worker.employee_number}` : ''}</option>)}</select></label>
                   <label className="wide">Notiz<textarea value={item.notes || ''} onChange={(event) => updateParsedShift(index, 'notes', event.target.value)} /></label>
                 </div> : <div className="admin-ai-row-summary">
                   <b>{item.date} · {item.start_time}–{item.end_time}</b>
@@ -312,7 +392,7 @@ export default function AdminScheduleTools() {
             })}
             {!parsed.shifts?.length ? <div className="admin-ai-empty">Alle erkannten Schichten wurden entfernt.</div> : null}
           </div> : null}
-          <div className="admin-schedule-sheet-actions"><button type="button" onClick={() => setAiOpen(false)}>Abbrechen</button><button type="button" className="primary" disabled={busy || Boolean(parsed && !parsed.shifts?.length)} onClick={() => void (parsed ? approveOrder() : parseOrder())}>{busy ? '…' : parsed ? 'Geprüfte Schichten erstellen' : 'Mit AI analysieren'}</button></div>
+          <div className="admin-schedule-sheet-actions"><button type="button" onClick={() => setAiOpen(false)}>Abbrechen</button><button type="button" className="primary" disabled={busy || aiDirectoryBusy || Boolean(parsed && !parsed.shifts?.length)} onClick={() => void (parsed ? approveOrder() : parseOrder())}>{busy ? '…' : parsed ? 'Geprüfte Schichten erstellen' : 'Mit AI analysieren'}</button></div>
           {message ? <button type="button" className="admin-schedule-message" onClick={() => setMessage('')}>{message}</button> : null}
         </section>
       </div>, document.body) : null}
