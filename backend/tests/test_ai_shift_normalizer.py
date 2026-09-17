@@ -81,6 +81,55 @@ Es sind insgesamt 3 Schichten."""
         self.assertEqual([row['date'] for row in normalized['shifts']], ['2026-10-03', '2026-10-04', '2026-10-05'])
         self.assertEqual([row['count'] for row in normalized['shifts']], [1, 1, 1])
 
+    def test_inline_employee_suffix_becomes_assignment_not_note(self):
+        text = """24.10.2026 Nachtdienst - Solomon
+31.10.2026 Nachtdienst - Solomon
+01.11.2026 Spätdienst
+
+Alle Schichten sind für Front Office im Hotel Spenerhaus."""
+        llm_result = {
+            'shifts': [
+                {
+                    'date': '2026-10-24',
+                    'start_time': '22:30',
+                    'end_time': '06:30',
+                    'count': 1,
+                    'role': 'Front Office',
+                    'site_text': 'Hotel Spenerhaus',
+                    'location_text': 'Hotel Spenerhaus',
+                    'notes': 'Solomon',
+                },
+                {
+                    'date': '2026-10-31',
+                    'start_time': '22:30',
+                    'end_time': '06:30',
+                    'count': 1,
+                    'role': 'Front Office',
+                    'site_text': 'Hotel Spenerhaus',
+                    'location_text': 'Hotel Spenerhaus',
+                    'notes': 'Solomon',
+                },
+                {
+                    'date': '2026-11-01',
+                    'start_time': '14:45',
+                    'end_time': '22:45',
+                    'count': 1,
+                    'role': 'Front Office',
+                    'site_text': 'Hotel Spenerhaus',
+                    'location_text': 'Hotel Spenerhaus',
+                    'notes': '',
+                },
+            ]
+        }
+
+        normalized = normalize_order_request(text, llm_result)
+
+        self.assertEqual(normalized['shifts'][0]['assignment_worker_name'], 'Solomon')
+        self.assertEqual(normalized['shifts'][1]['assignment_worker_name'], 'Solomon')
+        self.assertEqual(normalized['shifts'][0]['notes'], '')
+        self.assertEqual(normalized['shifts'][1]['notes'], '')
+        self.assertNotIn('assignment_worker_name', normalized['shifts'][2])
+
     def test_total_roster_count_rejects_collapsed_ai_result(self):
         text = 'Es sind insgesamt 15 Schichten.'
         llm_result = {
