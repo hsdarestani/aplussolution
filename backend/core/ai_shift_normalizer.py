@@ -196,20 +196,20 @@ def normalize_order_request(raw_text: str, parsed: dict[str, Any] | None = None)
     note_value = _note(raw_text)
     inline_assignments = _inline_assignments(raw_text)
     global_assignment = _global_assignment(raw_text)
+    explicit_rows = _dated_shift_rows(raw_text)
 
     explicit_shift = bool(date_value and start_time and end_time)
-    # Legacy helper behavior: an explicit "N identical shifts" command is one
-    # descriptor with count=N even when an LLM duplicated the row N times. The
-    # production AI scheduler no longer depends on this parser, but preserving
-    # this contract keeps old imports/tests deterministic and isolated.
-    if explicit_shift and count_value is not None and total_count is None:
+    # Collapse only a genuinely single date/time request such as "5 identical
+    # shifts on 10.10". If the text itself contains multiple dated roster rows,
+    # the leading "3 Schichten" is a row total and every row must be preserved.
+    if explicit_shift and count_value is not None and total_count is None and len(explicit_rows) <= 1:
         base = dict(existing[0]) if existing and isinstance(existing[0], dict) else {}
         rows = [base]
     else:
         rows = [dict(item) for item in existing if isinstance(item, dict)]
 
     if not rows:
-        rows = _dated_shift_rows(raw_text)
+        rows = explicit_rows
 
     if not rows:
         source['shifts'] = []
