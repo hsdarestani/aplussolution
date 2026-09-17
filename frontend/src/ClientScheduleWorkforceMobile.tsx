@@ -4,6 +4,8 @@ import {
   briefcaseOutline,
   calendarOutline,
   chevronBackOutline,
+  closeCircleOutline,
+  documentTextOutline,
   locationOutline,
   personOutline,
   timeOutline,
@@ -52,6 +54,21 @@ function time(input?: string) {
 }
 function fullDate(input?: string) {
   return input ? new Intl.DateTimeFormat('de-DE', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(input)) : '–';
+}
+function dateTime(input?: string) {
+  return input ? new Intl.DateTimeFormat('de-DE', { timeZone: TZ, day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(input)) : '–';
+}
+function inputDateTime(value?: string) {
+  if (!value) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ,
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(value));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value || '';
+  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}`;
+}
+function toIso(value?: string) {
+  return value ? new Date(value).toISOString() : '';
 }
 function dayLabel(key: string) {
   return new Intl.DateTimeFormat('de-DE', { timeZone: 'UTC', weekday: 'short' }).format(keyDate(key));
@@ -135,19 +152,41 @@ function shiftCardStyle(shift: any) {
     '--wiw-card-filled-muted': palette.filledMuted,
   } as React.CSSProperties;
 }
+function focusIntoView(event: React.FocusEvent<HTMLElement>) {
+  const target = event.target as HTMLElement;
+  window.setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 260);
+}
 
 type ClientCard = { key: string; shift: any; slot: any; worker?: any; isOpen: boolean };
+type RequestModal = '' | 'change' | 'cancel';
 
 function DetailRow({ icon, children }: { icon: string; children: React.ReactNode }) {
   return <div className="wiw-employee-detail-row"><IonIcon icon={icon} /><span>{children}</span></div>;
 }
 
-export default function ClientScheduleWorkforceMobile() {
+function RequestModalScreen({ title, close, children, footer }: { title: string; close: () => void; children: React.ReactNode; footer: React.ReactNode }) {
+  useEffect(() => {
+    document.body.classList.add('client-portal-modal-open');
+    return () => document.body.classList.remove('client-portal-modal-open');
+  }, []);
+  return <div className="client-v4-modal" role="dialog" aria-modal="true" onFocusCapture={focusIntoView}>
+    <header><button type="button" onClick={close} aria-label="Schließen"><IonIcon icon={chevronBackOutline} /></button><strong>{title}</strong><span /></header>
+    <div className="client-v4-modal-scroll">{children}</div>
+    <div className="client-v4-modal-footer">{footer}</div>
+  </div>;
+}
+
+export default function ClientScheduleWorkforceMobile({ readOnly = false }: { readOnly?: boolean }) {
   const [rows, setRows] = useState<any[]>([]);
+  const [requests, setRequests] = useState<any[]>([]);
   const [anchor, setAnchor] = useState(berlinToday());
   const [busy, setBusy] = useState(true);
+  const [requestBusy, setRequestBusy] = useState(false);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
   const [selected, setSelected] = useState<ClientCard>();
+  const [modal, setModal] = useState<RequestModal>('');
+  const [form, setForm] = useState<any>({ starts_at: '', ends_at: '', note: '' });
   const [weekDirection, setWeekDirection] = useState<'next' | 'prev' | ''>('');
   const swipe = useRef<{ x: number; y: number } | undefined>(undefined);
   const swipeTravel = useRef(0);
@@ -166,7 +205,19 @@ export default function ClientScheduleWorkforceMobile() {
       setBusy(false);
     }
   };
-  useEffect(() => { void load(); }, []);
+  const loadRequests = async () => {
+    if (readOnly) {
+      setRequests([]);
+      return;
+    }
+    try {
+      const result = await api('portal/shift-change-requests/');
+      setRequests(unpack(result));
+    } catch {
+      // The schedule itself must remain usable if request history is temporarily unavailable.
+    }
+  };
+  useEffect(() => { void load(); void loadRequests(); }, [readOnly]);
   useEffect(() => () => {
     if (swipeFrame.current) window.cancelAnimationFrame(swipeFrame.current);
     if (directionTimer.current) window.clearTimeout(directionTimer.current);
@@ -189,6 +240,8 @@ export default function ClientScheduleWorkforceMobile() {
     return map;
   }, [days, visible]);
   const totalHours = useMemo(() => visible.reduce((sum, card) => sum + hours(card.shift), 0), [visible]);
+  const selectedRequests = useMemo(() => selected ? requests.filter((item) => String(item.shift_id) === String(selected.shift.id)) : [], [requests, selected]);
+  const pendingRequest = selectedRequests.find((item) => item.status === 'pending');
 
   function changeWeek(delta: number) {
     if (directionTimer.current) window.clearTimeout(directionTimer.current);
@@ -197,11 +250,43 @@ export default function ClientScheduleWorkforceMobile() {
     directionTimer.current = window.setTimeout(() => setWeekDirection(''), 430);
   }
 
+  function openRequest(type: RequestModal) {
+    if (!selected || !type || readOnly || pendingRequest) return;
+    setMessage('');
+    setForm({
+      starts_at: inputDateTime(selected.shift.starts_at),
+      ends_at: inputDateTime(selected.shift.ends_at),
+      note: '',
+    });
+    setModal(type);
+  }
+
+  async function submitRequest(type: 'change' | 'cancel') {
+    if (!selected || requestBusy) return;
+    setRequestBusy(true);
+    setMessage('');
+    try {
+      const payload: any = { shift: selected.shift.id, request_type: type, note: String(form.note || '').trim() };
+      if (type === 'change') {
+        payload.starts_at = toIso(form.starts_at);
+        payload.ends_at = toIso(form.ends_at);
+      }
+      await api('portal/shift-change-requests/', { method: 'POST', body: JSON.stringify(payload) });
+      setModal('');
+      setMessage(type === 'cancel' ? 'Stornierungsanfrage wurde an die Disposition gesendet.' : 'Änderungsanfrage wurde an die Disposition gesendet.');
+      await loadRequests();
+    } catch (reason: any) {
+      setMessage(reason?.message || 'Anfrage konnte nicht gesendet werden.');
+    } finally {
+      setRequestBusy(false);
+    }
+  }
+
   if (selected) {
     const workerName = selected.worker?.name || (selected.isOpen ? 'OpenShift' : 'Noch nicht zugewiesen');
     return <div className="client-v2-custom-screen wiw-employee-shift-detail" data-testid="client-v3-shift-detail">
       <header className="wiw-employee-detail-topbar">
-        <button type="button" aria-label="Zurück" onClick={() => setSelected(undefined)}><IonIcon icon={chevronBackOutline} /></button>
+        <button type="button" aria-label="Zurück" onClick={() => { setSelected(undefined); setModal(''); setMessage(''); }}><IonIcon icon={chevronBackOutline} /></button>
         <strong>Einsatzdetails</strong>
         <span />
       </header>
@@ -211,7 +296,39 @@ export default function ClientScheduleWorkforceMobile() {
         <DetailRow icon={briefcaseOutline}>{selected.shift.position_name || 'Einsatz'}</DetailRow>
         <DetailRow icon={locationOutline}>{selected.shift.location_name || 'Einsatzort'}</DetailRow>
         <DetailRow icon={personOutline}>{workerName}</DetailRow>
+        <DetailRow icon={documentTextOutline}>{selected.shift.notes || 'Keine Notiz hinterlegt.'}</DetailRow>
       </div>
+
+      {message ? <div className="client-v4-message" style={{ margin: '10px 14px' }}>{message}</div> : null}
+      {!readOnly && pendingRequest ? <div className="client-v4-lock-card" style={{ margin: '10px 14px' }}>
+        <IonIcon icon={timeOutline} />
+        <div><b>{pendingRequest.request_type === 'cancel' ? 'Stornierung angefragt' : 'Änderung angefragt'}</b><small>Eingereicht {dateTime(pendingRequest.created_at)} · wartet auf Freigabe</small></div>
+      </div> : null}
+
+      {!readOnly && !pendingRequest ? <div className="client-v4-shift-actions" style={{ margin: '10px 14px 18px' }}>
+        <button type="button" onClick={() => openRequest('change')}><IonIcon icon={timeOutline} /><span><b>Zeit / Datum ändern</b><small>Anfrage an die Disposition</small></span></button>
+        <button type="button" className="danger" onClick={() => openRequest('cancel')}><IonIcon icon={closeCircleOutline} /><span><b>Stornierung anfragen</b><small>Wird erst nach Freigabe wirksam</small></span></button>
+      </div> : null}
+
+      {!readOnly && selectedRequests.some((item) => item.status !== 'pending') ? <details className="client-v4-lock-card" style={{ margin: '10px 14px 18px', display: 'block' }}>
+        <summary style={{ fontWeight: 800, cursor: 'pointer' }}>Anfrageverlauf</summary>
+        {selectedRequests.filter((item) => item.status !== 'pending').slice(0, 10).map((item) => <div key={item.id} style={{ paddingTop: 8 }}>
+          <b>{item.request_type === 'cancel' ? 'Stornierung' : 'Zeitänderung'} · {item.status === 'approved' ? 'genehmigt' : 'abgelehnt'}</b>
+          <small style={{ display: 'block' }}>Angefragt {dateTime(item.created_at)}{item.decided_at ? ` · entschieden ${dateTime(item.decided_at)}` : ''}</small>
+        </div>)}
+      </details> : null}
+
+      {modal === 'change' ? <RequestModalScreen title="Schichtänderung anfragen" close={() => setModal('')} footer={<button className="client-v4-save" disabled={requestBusy} type="button" onClick={() => void submitRequest('change')}>{requestBusy ? 'Wird gesendet …' : 'Änderung senden'}</button>}>
+        <div className="client-v4-form">
+          <label><span>Neuer Beginn</span><input type="datetime-local" value={form.starts_at || ''} onChange={(event) => setForm({ ...form, starts_at: event.target.value })} /></label>
+          <label><span>Neues Ende</span><input type="datetime-local" value={form.ends_at || ''} onChange={(event) => setForm({ ...form, ends_at: event.target.value })} /></label>
+          <label><span>Notiz an die Disposition</span><textarea rows={6} value={form.note || ''} onChange={(event) => setForm({ ...form, note: event.target.value })} /></label>
+          {message ? <div className="client-v4-message">{message}</div> : null}
+        </div>
+      </RequestModalScreen> : null}
+      {modal === 'cancel' ? <RequestModalScreen title="Stornierung anfragen" close={() => setModal('')} footer={<button className="client-v4-save danger" disabled={requestBusy} type="button" onClick={() => void submitRequest('cancel')}>{requestBusy ? 'Wird gesendet …' : 'Stornierung senden'}</button>}>
+        <div className="client-v4-confirm"><IonIcon icon={closeCircleOutline} /><h2>Diese Schicht stornieren?</h2><p>Die Schicht wird erst geändert, wenn die Disposition die Anfrage genehmigt.</p><label><span>Grund / Notiz</span><textarea rows={6} value={form.note || ''} onChange={(event) => setForm({ ...form, note: event.target.value })} /></label>{message ? <div className="client-v4-message">{message}</div> : null}</div>
+      </RequestModalScreen> : null}
     </div>;
   }
 
@@ -281,7 +398,7 @@ export default function ClientScheduleWorkforceMobile() {
           <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}</em></header>
           {dayCards.map((card) => {
             const workerName = card.worker?.name ? shortPersonName(card.worker.name) : (card.isOpen ? 'OpenShift' : 'Noch nicht zugewiesen');
-            return <button type="button" key={card.key} className={`wiw-shift-card ${card.isOpen ? 'is-open' : 'is-filled'}`} style={shiftCardStyle(card.shift)} onClick={() => setSelected(card)}>
+            return <button type="button" key={card.key} className={`wiw-shift-card ${card.isOpen ? 'is-open' : 'is-filled'}`} style={shiftCardStyle(card.shift)} onClick={() => { setMessage(''); setSelected(card); }}>
               <div className="wiw-card-line primary">
                 <span className="wiw-card-person"><WorkerAvatar worker={card.worker} /><b>{workerName}{card.isOpen ? <span className="wiw-open-alert">!</span> : null}</b></span>
                 <span>{time(card.shift.starts_at)}–{time(card.shift.ends_at)}</span>
