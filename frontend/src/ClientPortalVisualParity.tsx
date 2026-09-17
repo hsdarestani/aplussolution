@@ -1,15 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api, User } from './api';
-import { ClientRatingsMobile } from './ClientPortalMobileViews';
-import ClientScheduleWorkforceMobile from './ClientScheduleWorkforceMobile';
+import {
+  ClientDocumentsMobile,
+  ClientOrdersMobile,
+  ClientRatingsMobileV4,
+  ClientScheduleMobileV4,
+  RestrictedClientGate,
+  type ClientAccess,
+} from './ClientPortalMobileV4';
 import './client-portal-visual-parity.css';
 import './client-portal-brand-preserve.css';
 import './client-portal-modal-fix.css';
-import './client-workforce-schedule.css';
+import './client-portal-v4.css';
 
 export default function ClientPortalVisualParity() {
   const [user, setUser] = useState<User | null>(null);
+  const [access, setAccess] = useState<ClientAccess | null>(null);
   const [view, setView] = useState('dashboard');
   const [mobile, setMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches);
   const [host, setHost] = useState<HTMLElement | null>(null);
@@ -17,8 +24,11 @@ export default function ClientPortalVisualParity() {
   useEffect(() => {
     let cancelled = false;
     if (!localStorage.getItem('access')) return;
-    void api('auth/me/').then((current: User) => {
-      if (!cancelled && current?.role === 'client') setUser(current);
+    void Promise.all([api('auth/me/'), api('portal/client-access/')]).then(([current, portalAccess]: any[]) => {
+      if (!cancelled && current?.role === 'client') {
+        setUser(current);
+        setAccess(portalAccess);
+      }
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, []);
@@ -46,47 +56,21 @@ export default function ClientPortalVisualParity() {
   }, [user]);
 
   useEffect(() => {
-    const schedule = Boolean(user && mobile && view === 'schedule');
-    const ratings = Boolean(user && mobile && view === 'ratings');
+    const customViews = new Set(['schedule', 'ratings', 'orders', 'documents']);
+    const restrictedOverlay = Boolean(access?.read_only && view !== 'dashboard' && view !== 'schedule');
+    const active = Boolean(user && mobile && (customViews.has(view) || restrictedOverlay));
+    document.body.classList.toggle('client-v3-custom-view', active);
+    document.body.classList.toggle('client-v3-ratings-active', active && view === 'ratings');
+    document.body.classList.toggle('client-v3-schedule-active', active && view === 'schedule');
+    document.body.classList.remove('wiw-native-schedule-active', 'wiw-employee-schedule-active');
+    return () => document.body.classList.remove('client-v3-custom-view', 'client-v3-ratings-active', 'client-v3-schedule-active');
+  }, [mobile, user, access?.read_only, view]);
 
-    // Calendar deliberately uses the exact same body/layout state as the proven
-    // Mitarbeiter calendar. The old client custom viewport is only kept for the
-    // ratings screen, where it is still required.
-    document.body.classList.toggle('wiw-employee-schedule-active', schedule);
-    document.body.classList.toggle('client-v3-custom-view', ratings);
-    document.body.classList.toggle('client-v3-ratings-active', ratings);
-    document.body.classList.remove('client-v3-schedule-active', 'wiw-native-schedule-active');
-
-    return () => {
-      document.body.classList.remove(
-        'client-v3-custom-view',
-        'client-v3-ratings-active',
-        'client-v3-schedule-active',
-        'wiw-native-schedule-active',
-        'wiw-employee-schedule-active',
-      );
-    };
-  }, [mobile, user, view]);
-
-  // The legacy client schedule remains mounted underneath App. Retire only its
-  // QA hooks while this workforce calendar is active so the visible schedule owns
-  // the same stable selectors as Admin/Mitarbeiter.
-  useEffect(() => {
-    if (!user || !mobile || view !== 'schedule') return;
-    const legacy = Array.from(document.querySelectorAll<HTMLElement>(
-      '.sv2 [data-testid="phase8-week-strip"], .sv2 [data-testid="schedule-day-view"], .sv2 [data-testid="phase8-week-total"]',
-    ));
-    const retired = legacy.map((element) => ({ element, testId: element.getAttribute('data-testid') }));
-    legacy.forEach((element) => element.removeAttribute('data-testid'));
-    return () => {
-      retired.forEach(({ element, testId }) => {
-        if (element.isConnected && testId) element.setAttribute('data-testid', testId);
-      });
-    };
-  }, [mobile, user, view]);
-
-  if (!user || !mobile || !host) return null;
-  if (view === 'schedule') return createPortal(<ClientScheduleWorkforceMobile />, host);
-  if (view === 'ratings') return createPortal(<ClientRatingsMobile />, host);
+  if (!user || !access || !mobile || !host) return null;
+  if (view === 'schedule') return createPortal(<ClientScheduleMobileV4 access={access} />, host);
+  if (access.read_only && view !== 'dashboard') return createPortal(<RestrictedClientGate access={access} />, host);
+  if (view === 'ratings') return createPortal(<ClientRatingsMobileV4 access={access} />, host);
+  if (view === 'orders') return createPortal(<ClientOrdersMobile access={access} />, host);
+  if (view === 'documents') return createPortal(<ClientDocumentsMobile access={access} />, host);
   return null;
 }

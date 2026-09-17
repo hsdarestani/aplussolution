@@ -56,6 +56,13 @@
     padding: 0 !important;
   }
 
+  /* ScheduleDatePicker is rendered as a sibling immediately before the PDF
+     backdrop. Give it the higher layer while a PDF date field is open so the
+     scroll surface cannot intercept taps on calendar days. */
+  body.wiw-native-schedule-active:has(.wiw-pdf-backdrop) .wiw-calendar-backdrop {
+    z-index: 43000 !important;
+  }
+
   .wiw-pdf-sheet {
     display: flex !important;
     flex-direction: column !important;

@@ -71,46 +71,28 @@ def recover_musa_time_entries(apps, schema_editor):
             candidate_workers.append(worker)
     candidate_ids = [worker.pk for worker in candidate_workers]
 
-    entry_ids = set()
     identity_entry_ids = set()
-    shift_entry_ids = set()
 
-    # Recover rows from any remaining duplicate worker that still carries Musa's
-    # name/email/WIW payload, even when the duplicate was active or had a normal
-    # email address and therefore escaped the earlier narrow migrations.
+    # Recover rows only from worker identities that positively identify as Musa.
+    # A shared Shift/ShiftSlot is intentionally NOT identity evidence: one shift can
+    # contain several employees, each with their own TimeEntry.
     if candidate_ids:
         identity_entry_ids.update(
             TimeEntry.objects.filter(worker_id__in=candidate_ids).values_list('pk', flat=True)
         )
 
     # Imported WIW time rows preserve the original WIW user id in wiw_payload.
-    # That is stronger evidence than a local display name, and lets us recover a
-    # row even if its historical WorkerProfile was created with a wrong/blank name.
+    # This is direct identity evidence and is safe even when the old local profile
+    # itself was damaged or already retired.
     if target_wiw_ids:
         for entry in TimeEntry.objects.exclude(worker=target).only('pk', 'wiw_payload'):
             if _user_id_from_payload(entry.wiw_payload) in target_wiw_ids:
                 identity_entry_ids.add(entry.pk)
 
-    # A time row attached to a shift that now belongs to Musa also belongs to his
-    # attendance history. This covers records whose old WorkerProfile identity was
-    # too damaged to recognize from names or WIW metadata.
-    shift_entry_ids.update(
-        TimeEntry.objects.exclude(worker=target).filter(shift__worker=target).values_list('pk', flat=True)
-    )
-    shift_entry_ids.update(
-        TimeEntry.objects.exclude(worker=target).filter(
-            shift__slots__worker=target,
-            shift__slots__status='claimed',
-        ).values_list('pk', flat=True).distinct()
-    )
-
-    entry_ids.update(identity_entry_ids)
-    entry_ids.update(shift_entry_ids)
-
     moved_entries = 0
     with transaction.atomic():
-        if entry_ids:
-            moved_entries = TimeEntry.objects.filter(pk__in=entry_ids).exclude(worker=target).update(worker=target)
+        if identity_entry_ids:
+            moved_entries = TimeEntry.objects.filter(pk__in=identity_entry_ids).exclude(worker=target).update(worker=target)
 
         # Corrections and monthly working-time/payroll records on positively
         # identified duplicate profiles should follow the same canonical account.
@@ -157,18 +139,17 @@ def recover_musa_time_entries(apps, schema_editor):
             metadata={
                 'candidate_workers': len(candidate_ids),
                 'identity_entry_matches': len(identity_entry_ids),
-                'shift_entry_matches': len(shift_entry_ids),
                 'moved_time_entries': moved_entries,
                 'target_time_entries_after': total_after,
                 'target_closed_time_entries_after': closed_after,
+                'identity_policy': 'duplicate_musa_profile_or_matching_wiw_user_id_only',
             },
         )
 
     print(
         'Musa time recovery complete: '
         f'candidate_workers={len(candidate_ids)}, identity_matches={len(identity_entry_ids)}, '
-        f'shift_matches={len(shift_entry_ids)}, moved={moved_entries}, '
-        f'closed_after={closed_after}, total_after={total_after}'
+        f'moved={moved_entries}, closed_after={closed_after}, total_after={total_after}'
     )
 
 

@@ -47,6 +47,8 @@ const availableShift = {
   required_count: 4,
   filled_count: 2,
   open_count: 2,
+  notes: 'Abendservice',
+  assigned_workers: [],
 };
 
 const mineShift = {
@@ -79,6 +81,22 @@ async function mockApi(page: Page, user: typeof worker | typeof admin | typeof c
     seenPaths?.push(path);
 
     if (path === 'auth/me/') return fulfill(route, user);
+    if (path === 'portal/client-access/' && user.role === 'client') {
+      return fulfill(route, {
+        client_id: 'client-main-suites',
+        client_name: 'Main Suites Frankfurt',
+        account_name: user.name,
+        first_name: user.first_name,
+        read_only: false,
+        location_scope_id: null,
+        location_scope_name: '',
+        capabilities: {},
+      });
+    }
+    if (path === 'portal/client-shifts/' && user.role === 'client') return fulfill(route, [availableShift]);
+    if (path === 'portal/client-documents/' && user.role === 'client') return fulfill(route, []);
+    if (path === 'portal/client-order-metadata/' && user.role === 'client') return fulfill(route, { locations: [], positions: [] });
+    if (path === 'portal/rating-candidates/' && user.role === 'client') return fulfill(route, []);
 
     if (path === 'dashboard/') {
       return fulfill(route, user.role === 'client' ? {
@@ -281,7 +299,7 @@ test.describe('Phase 6 mobile QA', () => {
     await expect(moreMenu.getByRole('button', { name: 'Anfragen, Berichte & Verwaltung', exact: true })).toBeVisible();
   });
 
-  test('client sees a client-scoped schedule without manager controls or manager API fan-out', async ({ page }) => {
+  test('client sees the simplified client-scoped schedule without manager API fan-out', async ({ page }) => {
     const seenPaths: string[] = [];
     await page.setViewportSize({ width: 390, height: 844 });
     await mockApi(page, client, seenPaths);
@@ -290,24 +308,24 @@ test.describe('Phase 6 mobile QA', () => {
     const clientHome = page.getByTestId('client-portal-v2-home');
     await expect(clientHome).toBeVisible();
     await expect(clientHome.getByRole('heading', { name: 'Guten Tag, Lara' })).toBeVisible();
-    await expect(clientHome.getByRole('heading', { name: 'Der nächste Einsatz ist vorbereitet.' })).toBeVisible();
-    await expect(clientHome.getByText('Aktive Aufträge')).toBeVisible();
-    await expect(clientHome.getByText('Zu unterzeichnen')).toBeVisible();
+    await expect(clientHome.getByRole('heading', { name: 'Personal genau dann, wenn du es brauchst.' })).toBeVisible();
+    await expect(clientHome.getByText('Aktive Aufträge')).toHaveCount(0);
+    await expect(clientHome.getByText('Zu unterzeichnen')).toHaveCount(0);
 
     const clientTabs = page.getByTestId('client-v2-tabbar');
     await expect(clientTabs).toBeVisible();
     await expect(clientTabs.getByRole('button')).toHaveCount(4);
     await expect(clientTabs.getByRole('button', { name: 'Dashboard' })).toBeVisible();
     await expect(clientTabs.getByRole('button', { name: 'Kalender' })).toBeVisible();
-    await expect(clientTabs.getByRole('button', { name: 'Mitarbeiter bewerten' })).toBeVisible();
+    await expect(clientTabs.getByRole('button', { name: 'Bewerten' })).toBeVisible();
     await expectNoHorizontalPageOverflow(page);
 
     await clientTabs.getByRole('button', { name: 'Kalender' }).click();
-    const clientSchedule = page.getByTestId('client-v3-schedule');
-    await expect(clientSchedule.getByTestId('phase8-week-strip')).toBeVisible();
-    await expect(clientSchedule.getByText('SK', { exact: true }).first()).toBeVisible();
+    const clientSchedule = page.locator('.client-v4-schedule');
+    await expect(clientSchedule).toBeVisible();
+    await expect(clientSchedule.locator('.client-v4-weekbar')).toBeVisible();
+    await expect(clientSchedule.getByRole('button', { name: /Frankfurt Innenstadt.*Abendservice/ })).toBeVisible();
     await expect(page.locator('ion-segment')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /Personalbedarf/i })).toHaveCount(0);
     await expectNoHorizontalPageOverflow(page);
 
     expect(seenPaths).not.toContain('clients/');
@@ -315,19 +333,18 @@ test.describe('Phase 6 mobile QA', () => {
     expect(seenPaths).not.toContain('positions/');
     expect(seenPaths.some((path) => path.startsWith('admin/'))).toBe(false);
 
-    await clientTabs.getByRole('button', { name: 'Mitarbeiter bewerten' }).click();
-    await expect(page.getByRole('heading', { name: 'Mitarbeiter bewerten' })).toBeVisible();
+    await clientTabs.getByRole('button', { name: 'Bewerten' }).click();
+    await expect(page.getByRole('heading', { name: 'Einsatz auswählen' })).toBeVisible();
 
     await clientTabs.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
     const moreMenu = page.getByTestId('client-v2-more');
     await expect(moreMenu).toBeVisible();
-    await expect(moreMenu.getByRole('button', { name: /Aufträge/ })).toBeVisible();
+    await expect(moreMenu.getByRole('button', { name: /Personal anfragen/ })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: /Dokumente/ })).toBeVisible();
-    await expect(moreMenu.getByRole('button', { name: /Servicecenter/ })).toBeVisible();
-    await expect(moreMenu.getByRole('button', { name: /Verträge & Signatur/ })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: /Mitteilungen/ })).toBeVisible();
     await expect(moreMenu.getByRole('button', { name: /Profil & Sicherheit/ })).toBeVisible();
-    await expect(moreMenu.getByRole('button', { name: /Mitarbeiter bewerten/ })).toHaveCount(0);
+    await expect(moreMenu.getByRole('button', { name: /Servicecenter/ })).toHaveCount(0);
+    await expect(moreMenu.getByRole('button', { name: /Verträge/ })).toHaveCount(0);
   });
 });
 

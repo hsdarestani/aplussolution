@@ -168,6 +168,9 @@ jobs:
 
           docker compose exec -T backend python manage.py check
           docker compose exec -T backend python manage.py migrate --check
+          # Print only aggregate counts from the Musa ownership repair. Never
+          # expose employee/shift IDs or other production data in public CI logs.
+          docker compose exec -T backend python manage.py shell -c "from core.models import AuditLog; r=AuditLog.objects.filter(action='repair_musa_time_entry_ownership').order_by('-created_at').first(); m=(r.metadata if r else {}); print('MUSA_REPAIR_COUNTS repaired=%s ambiguous=%s assigned_shifts=%s attendance_shifts=%s shifts_without_time=%s ended_without_time=%s' % (m.get('repaired_count','n/a'), m.get('ambiguous_count','n/a'), m.get('assigned_shift_count','n/a'), m.get('attendance_shift_count','n/a'), m.get('shifts_without_time_count','n/a'), m.get('ended_shifts_without_time_count','n/a')))"
           curl -fsS --max-time 15 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/
 
           # WIW migration is complete. Deployment must not enqueue or invoke any

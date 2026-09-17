@@ -37,6 +37,7 @@ import WiwWorkerPickerEligibilityEnhancer from './WiwWorkerPickerEligibilityEnha
 import ShiftReleaseApprovalPanel from './ShiftReleaseApprovalPanel';
 import AdminScheduleTools from './AdminScheduleTools';
 import AdminAvailabilityManager from './AdminAvailabilityManager';
+import AdminClientRequestPanel from './AdminClientRequestPanel';
 import CheckoutReviewEnhancer from './CheckoutReviewEnhancer';
 import DesktopAttendanceHistoryEnhancer from './DesktopAttendanceHistoryEnhancer';
 import MobileAttendanceClarityEnhancer from './MobileAttendanceClarityEnhancer';
@@ -136,6 +137,7 @@ function renderApp() {
           <ShiftReleaseApprovalPanel />
           <AdminScheduleTools />
           <AdminAvailabilityManager />
+          <AdminClientRequestPanel />
           <CheckoutReviewEnhancer />
           <DesktopAttendanceHistoryEnhancer />
           <MobileAttendanceClarityEnhancer />

@@ -7,9 +7,11 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from .models import ClientOrder, Position, Shift
+from .operational_notifications import notify_open_shift_available
 from .permissions import IsAdminOrManager
 from .serializers import ShiftSerializer
 from .services import audit
+from .shift_service import ensure_slots, refresh_shift_state
 
 
 def _normalize(value):
@@ -25,8 +27,6 @@ def _position_from_structured_value(value):
     if not text:
         return None
 
-    # Position IDs are UUIDs. Do not ask PostgreSQL to cast arbitrary client text
-    # such as "Servicekräfte" to UUID; invalid casts can surface as a 500.
     try:
         position_id = UUID(text)
     except (TypeError, ValueError, AttributeError):
@@ -86,12 +86,9 @@ def _infer_position(order, explicit=None):
 
 
 def plan_client_order(order_id, request, explicit_position=None):
-    """Confirm one client order and create its multi-slot OpenShift exactly once."""
+    """Confirm one client order and publish its multi-slot OpenShift exactly once."""
+    created = False
     with transaction.atomic():
-        # Lock only the ClientOrder row. Joining nullable relations here makes
-        # PostgreSQL reject SELECT ... FOR UPDATE with
-        # "FOR UPDATE cannot be applied to the nullable side of an outer join".
-        # Client/location are loaded lazily below after the order row is locked.
         order = ClientOrder.objects.select_for_update().filter(pk=order_id).first()
         if not order:
             raise ValueError('Auftrag wurde nicht gefunden.')
@@ -101,43 +98,52 @@ def plan_client_order(order_id, request, explicit_position=None):
             if order.status != ClientOrder.Status.CONFIRMED:
                 order.status = ClientOrder.Status.CONFIRMED
                 order.save(update_fields=['status', 'updated_at'])
-            return order, existing, False
+            shift = existing
+        else:
+            if not order.location_id:
+                raise ValueError('Bitte zuerst einen Einsatzort im Auftrag hinterlegen.')
+            if order.location.client_id not in (None, order.client_id):
+                raise ValueError('Der Einsatzort gehört nicht zu diesem Kunden.')
+            if not order.starts_at or not order.ends_at or order.ends_at <= order.starts_at:
+                raise ValueError('Beginn und Ende des Auftrags sind ungültig.')
 
-        if not order.location_id:
-            raise ValueError('Bitte zuerst einen Einsatzort im Auftrag hinterlegen.')
-        if order.location.client_id not in (None, order.client_id):
-            raise ValueError('Der Einsatzort gehört nicht zu diesem Kunden.')
-        if not order.starts_at or not order.ends_at or order.ends_at <= order.starts_at:
-            raise ValueError('Beginn und Ende des Auftrags sind ungültig.')
+            position = _infer_position(order, explicit_position)
+            if not position:
+                raise ValueError('Die Funktion/Position konnte nicht eindeutig erkannt werden.')
 
-        position = _infer_position(order, explicit_position)
-        if not position:
-            raise ValueError('Die Funktion/Position konnte nicht eindeutig erkannt werden.')
+            shift = Shift.objects.create(
+                order=order,
+                client=order.client,
+                location=order.location,
+                position=position,
+                starts_at=order.starts_at,
+                ends_at=order.ends_at,
+                break_minutes=0,
+                status=Shift.Status.PUBLISHED,
+                is_open=True,
+                notes=order.description,
+                required_count=max(1, int(order.requested_staff or 1)),
+                published_at=timezone.now(),
+            )
+            ensure_slots(shift)
+            refresh_shift_state(shift)
+            order.status = ClientOrder.Status.CONFIRMED
+            if not order.functions:
+                order.functions = [str(position.id)]
+            order.save(update_fields=['status', 'functions', 'updated_at'])
+            audit(request, 'order.confirmed_and_planned', order, {
+                'shift_id': str(shift.id),
+                'position_id': str(position.id),
+                'required_count': shift.required_count,
+            })
+            created = True
 
-        shift = Shift.objects.create(
-            order=order,
-            client=order.client,
-            location=order.location,
-            position=position,
-            starts_at=order.starts_at,
-            ends_at=order.ends_at,
-            break_minutes=0,
-            status=Shift.Status.PUBLISHED,
-            is_open=True,
-            notes=order.description,
-            required_count=max(1, int(order.requested_staff or 1)),
-            published_at=timezone.now(),
-        )
-        order.status = ClientOrder.Status.CONFIRMED
-        if not order.functions:
-            order.functions = [str(position.id)]
-        order.save(update_fields=['status', 'functions', 'updated_at'])
-        audit(request, 'order.confirmed_and_planned', order, {
-            'shift_id': str(shift.id),
-            'position_id': str(position.id),
-            'required_count': shift.required_count,
-        })
-        return order, shift, True
+    if created:
+        # This fans out to matching employees and creates the dedicated admin
+        # summary notification. The demand remains an OpenShift; no worker is
+        # assigned by the customer or approval action.
+        notify_open_shift_available(shift, 'client-order-approved')
+    return order, shift, created
 
 
 @api_view(['POST'])
