@@ -9,18 +9,25 @@ from .models import Shift, ShiftImportPackage, WorkerProfile
 from .native_cutover import approve_order
 from .native_workforce import package_shifts
 from .operational_notifications import notify_worker_shift_event
-from .order_automation import extract_request_id, fallback_request_id, parse_order_text, similarity
+from .order_automation import extract_request_id, fallback_request_id, normalize_name, parse_order_text, similarity
 from .permissions import IsAdminOrManager
 from .services import audit
 from .shift_slots import ShiftSlot
 
 
 _ASSIGNMENT_LINE_RE = re.compile(r'^\s*(?:übernommen|uebernommen)\s+von\s+([^\n,.;]+?)\s*$', re.I | re.M)
+_PLACEHOLDER_EMPLOYEE_PREFIXES = ('LOCAL-', 'WIW-', 'AUTO-', 'TEMP-', 'MIG-')
 
 
 def _assignment_from_note(notes: str) -> str:
     match = _ASSIGNMENT_LINE_RE.search(str(notes or ''))
     return match.group(1).strip() if match else ''
+
+
+def _clean_assignment_note(notes: str) -> str:
+    cleaned = _ASSIGNMENT_LINE_RE.sub('', str(notes or ''))
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+    return cleaned.strip()
 
 
 def _assignment_rules(raw_text: str) -> tuple[str, str]:
@@ -52,19 +59,93 @@ def _is_night_shift(item: dict) -> bool:
     return end <= start or (start >= 20 * 60 and end <= 9 * 60)
 
 
+def _worker_label(worker: WorkerProfile) -> str:
+    return worker.user.get_full_name() or worker.user.email or worker.employee_number
+
+
+def _placeholder_email(email: str) -> bool:
+    value = str(email or '').strip().lower()
+    return not value or value.endswith('.invalid') or value.endswith('@example.com')
+
+
+def _placeholder_employee_number(value: str) -> bool:
+    number = str(value or '').strip().upper()
+    return not number or number.startswith(_PLACEHOLDER_EMPLOYEE_PREFIXES)
+
+
+def _worker_quality_score(worker: WorkerProfile, wanted: str, match_score: float) -> float:
+    """Prefer the real/login worker when duplicate directory rows share a name.
+
+    Duplicate WIW/local placeholders can have exactly the same display name as the
+    employee account that is actually used in the app. Name similarity therefore
+    cannot be the only deciding factor. Prefer operational identities: real email,
+    completed onboarding, real employee number, an active push device and existing
+    claimed-shift history. A near-identical real account can beat an exact shadow
+    row, but only after candidates have already passed the name-similarity gate.
+    """
+    email = str(worker.user.email or '').strip()
+    employee_number = str(worker.employee_number or '').strip()
+    exact = normalize_name(wanted) == normalize_name(_worker_label(worker))
+    has_push = any(bool(getattr(device, 'active', False)) for device in worker.user.push_devices.all())
+    claimed_history = worker.shift_slots.filter(
+        status=ShiftSlot.Status.CLAIMED,
+        worker__isnull=False,
+    ).count()
+
+    score = match_score * 100.0
+    score += 3.0 if exact else 0.0
+    score += 35.0 if not _placeholder_email(email) else 0.0
+    score += 18.0 if bool(worker.user.is_onboarded) else 0.0
+    score += 12.0 if not _placeholder_employee_number(employee_number) else 0.0
+    score += 6.0 if employee_number.isdigit() else 0.0
+    score += 8.0 if has_push else 0.0
+    score += min(12.0, claimed_history * 0.5)
+    score += 4.0 if bool(worker.wiw_user_id) else 0.0
+    return score
+
+
 def _worker_by_name(name: str) -> WorkerProfile | None:
     wanted = str(name or '').strip()
     if not wanted:
         return None
-    best = None
-    best_score = 0.72
-    for worker in WorkerProfile.objects.filter(active=True, user__is_active=True).select_related('user'):
-        label = worker.user.get_full_name() or worker.user.email or worker.employee_number
-        score = similarity(wanted, label)
-        if score >= best_score:
-            best = worker
-            best_score = score
-    return best
+
+    candidates: list[tuple[WorkerProfile, float]] = []
+    workers = (
+        WorkerProfile.objects.filter(active=True, user__is_active=True)
+        .select_related('user')
+        .prefetch_related('user__push_devices')
+    )
+    for worker in workers:
+        score = similarity(wanted, _worker_label(worker))
+        if score >= 0.72:
+            candidates.append((worker, score))
+    if not candidates:
+        return None
+
+    # Keep only identities close to the strongest name match, then use account
+    # quality to pick the canonical/real worker among duplicate or typo variants.
+    best_name_score = max(score for _, score in candidates)
+    finalists = [item for item in candidates if item[1] >= max(0.72, best_name_score - 0.12)]
+    ranked = sorted(
+        finalists,
+        key=lambda item: (
+            _worker_quality_score(item[0], wanted, item[1]),
+            -item[0].created_at.timestamp() if item[0].created_at else 0.0,
+            str(item[0].id),
+        ),
+        reverse=True,
+    )
+    return ranked[0][0]
+
+
+def _worker_by_id(worker_id: str) -> WorkerProfile | None:
+    if not worker_id:
+        return None
+    return (
+        WorkerProfile.objects.filter(pk=worker_id, active=True, user__is_active=True)
+        .select_related('user')
+        .first()
+    )
 
 
 def _validate_roster_count(parsed: dict) -> None:
@@ -79,28 +160,45 @@ def _validate_roster_count(parsed: dict) -> None:
     )
 
 
-def _prepare_named_assignments(parsed: dict, raw_text: str) -> tuple[dict, dict[str, WorkerProfile]]:
+def _prepare_named_assignments(
+    parsed: dict,
+    raw_text: str,
+    *,
+    embed_assignment_note: bool = False,
+) -> tuple[dict, dict[str, WorkerProfile]]:
     night_name, other_name = _assignment_rules(raw_text)
     workers_by_id: dict[str, WorkerProfile] = {}
 
     for item in parsed.get('shifts') or []:
         notes = str(item.get('notes') or '').strip()
-        name = _assignment_from_note(notes)
-        if not name:
-            name = night_name if _is_night_shift(item) else other_name
-        if not name:
+        note_name = _assignment_from_note(notes)
+        explicit_worker_id = str(item.get('assignment_worker_id') or '').strip()
+        explicit_worker_name = str(item.get('assignment_worker_name') or '').strip()
+
+        worker = _worker_by_id(explicit_worker_id)
+        name = explicit_worker_name or note_name
+        if not worker:
+            if not name:
+                name = night_name if _is_night_shift(item) else other_name
+            if name:
+                worker = _worker_by_name(name)
+        if not worker:
+            if name:
+                raise ValueError(f'Der Mitarbeiter „{name}“ wurde nicht eindeutig gefunden. Bitte Namen prüfen.')
             continue
 
-        worker = _worker_by_name(name)
-        if not worker:
-            raise ValueError(f'Der Mitarbeiter „{name}“ wurde nicht eindeutig gefunden. Bitte Namen prüfen.')
+        canonical_name = _worker_label(worker)
         workers_by_id[str(worker.id)] = worker
+        item['assignment_worker_id'] = str(worker.id)
+        item['assignment_worker_name'] = canonical_name
 
-        # Keep a human-readable assignment line until the shift is created. The
-        # notification layer recognizes this line and therefore does not fan an
-        # intended direct assignment out as an OpenShift to every employee.
-        if not _assignment_from_note(notes):
-            notes = (notes + f'\nÜbernommen von {worker.user.get_full_name() or name}').strip()
+        # The parsed preview must never misuse the employee name as a public note.
+        # During approval only, keep a short temporary line because the existing
+        # OpenShift notification guard and post-create assignment step use it. The
+        # line is removed again immediately after the real WorkerProfile is claimed.
+        notes = _clean_assignment_note(notes)
+        if embed_assignment_note:
+            notes = (notes + f'\nÜbernommen von {canonical_name}').strip()
         item['notes'] = notes
 
     return parsed, workers_by_id
@@ -138,7 +236,7 @@ def _apply_named_assignments(result: dict, workers_by_id: dict[str, WorkerProfil
         slot.save(update_fields=['worker', 'status', 'source', 'claimed_at', 'confirmation_status', 'updated_at'])
 
         remaining_open = shift.slots.filter(status=ShiftSlot.Status.OPEN, worker__isnull=True).exists()
-        cleaned_notes = _ASSIGNMENT_LINE_RE.sub('', str(shift.notes or '')).strip()
+        cleaned_notes = _clean_assignment_note(shift.notes)
         updates = {
             'notes': cleaned_notes,
             'status': Shift.Status.PUBLISHED if remaining_open else Shift.Status.CONFIRMED,
@@ -156,9 +254,11 @@ def _apply_named_assignments(result: dict, workers_by_id: dict[str, WorkerProfil
 
         payload_row = payload_by_id.get(str(shift.id))
         if payload_row is not None:
-            payload_row['notes'] = _ASSIGNMENT_LINE_RE.sub('', str(payload_row.get('notes') or '')).strip()
+            payload_row['notes'] = _clean_assignment_note(str(payload_row.get('notes') or ''))
             payload_row['worker_id'] = str(worker.id)
-            payload_row['worker_name'] = worker.user.get_full_name() or worker.user.email
+            payload_row['worker_name'] = canonical_name = _worker_label(worker)
+            payload_row['assignment_worker_id'] = str(worker.id)
+            payload_row['assignment_worker_name'] = canonical_name
 
         notify_worker_shift_event(worker.user, shift, 'Schicht zugewiesen', 'ai-assignment')
         assigned += 1
@@ -191,7 +291,7 @@ def order_parse(request):
         return Response({'detail': 'Im Text wurde keine vollständige Schicht erkannt.'}, status=400)
     try:
         _validate_roster_count(result)
-        result, _ = _prepare_named_assignments(result, raw_text)
+        result, _ = _prepare_named_assignments(result, raw_text, embed_assignment_note=False)
     except ValueError as exc:
         return Response({'detail': str(exc)}, status=400)
 
@@ -216,7 +316,7 @@ def order_approve(request):
             parsed = normalize_order_request(raw_text, fallback)
     try:
         _validate_roster_count(parsed)
-        parsed, workers_by_id = _prepare_named_assignments(parsed, raw_text)
+        parsed, workers_by_id = _prepare_named_assignments(parsed, raw_text, embed_assignment_note=True)
         result = approve_order(
             parsed,
             raw_text,
