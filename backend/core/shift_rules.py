@@ -40,19 +40,39 @@ def normalized_groups(value) -> list[str]:
     return result
 
 
+def schedule_groups_for_position_name(value) -> list[str]:
+    """Map an existing A+ position to its Zeitplan group.
+
+    This is directory/system metadata logic, not parsing of the user's AI prompt.
+    It is used as a safe fallback for older/native-created shifts that do not yet
+    persist ``schedule_groups`` themselves.
+    """
+    name = str(value or '').strip().casefold().replace('-', ' ')
+    compact = ' '.join(name.split())
+    if any(token in compact for token in ('front office', 'rezeption', 'reception')):
+        return ['front_office']
+    if 'housekeeping' in compact or 'house keeping' in compact:
+        return ['housekeeping']
+    if any(token in compact for token in ('service', 'bar')):
+        return ['service']
+    return []
+
+
 def shift_visible_to_worker(shift, worker) -> bool:
     """Apply per-worker OpenShift client and Zeitplan visibility.
 
     A shift with an explicit Zeitplan group is visible only to workers who are
-    explicitly assigned to at least one matching group. This keeps OpenShift
-    notification fan-out aligned with the worker picker. Shifts without a group
-    remain visible to every otherwise-allowed worker for backward compatibility.
+    explicitly assigned to at least one matching group. If an older/native-created
+    shift has no persisted group, infer it from the already-resolved Position so a
+    Front Office OpenShift cannot fan out to every employee.
     """
     allowed_clients = {str(value) for value in (worker.open_shift_client_ids or []) if value}
     if allowed_clients and str(shift.client_id) not in allowed_clients:
         return False
     worker_groups = set(normalized_groups(worker.schedule_groups))
     shift_groups = set(normalized_groups(shift.schedule_groups))
+    if not shift_groups:
+        shift_groups = set(schedule_groups_for_position_name(getattr(getattr(shift, 'position', None), 'name', '')))
     if shift_groups and not worker_groups.intersection(shift_groups):
         return False
     return True
