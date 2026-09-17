@@ -1,0 +1,14 @@
+@media (max-width: 900px) {
+  /* The scoped Evangelische-Akademie account is schedule-only. The backend
+     already hard-blocks every other API; remove shell shortcuts that would lead
+     to non-schedule screens as well so the UI mirrors that permission exactly. */
+  body.client-portal-read-only .header-quick-access {
+    display: none !important;
+  }
+
+  body.client-portal-read-only .mobile-avatar {
+    pointer-events: none !important;
+    opacity: .45 !important;
+    cursor: default !important;
+  }
+}
