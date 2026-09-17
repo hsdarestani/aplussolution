@@ -12,6 +12,17 @@
     margin-bottom: 18px;
   }
 
+  /* Do not establish a containing block around the compact schedule. `contain`
+     made position:fixed descendants behave like content-footer elements, so the
+     Gesamtstunden bar and + button only appeared after scrolling to the end. */
+  body.wiw-native-schedule-active .app-main,
+  body.wiw-native-schedule-active .app-main > .wiw-schedule-mobile {
+    contain: none !important;
+    transform: none !important;
+    filter: none !important;
+    perspective: none !important;
+  }
+
   /* Gesamtstunden is a persistent control, not part of the scrolling week.
      Keep it visible directly above the fixed mobile navigation on web and native. */
   body.wiw-native-schedule-active .wiw-week-total {
@@ -19,10 +30,18 @@
     left: 0 !important;
     right: 0 !important;
     bottom: calc(62px + env(safe-area-inset-bottom)) !important;
-    z-index: 115 !important;
+    z-index: 2147482000 !important;
     width: 100% !important;
     min-height: 39px !important;
     box-sizing: border-box !important;
     margin: 0 !important;
+  }
+
+  /* Keep the create action visible at every scroll position and above the total bar. */
+  body.wiw-native-schedule-active .wiw-create-fab {
+    position: fixed !important;
+    right: 16px !important;
+    bottom: calc(112px + env(safe-area-inset-bottom)) !important;
+    z-index: 2147482100 !important;
   }
 }
