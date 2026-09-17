@@ -98,6 +98,7 @@ urlpatterns = [
     path('operations/folders/', client_portal_views.folder_summary),
     path('operations/readiness/', advanced_views.readiness),
     path('operations/templates/import/', advanced_views.import_contract_templates),
+    path('automation/orders/metadata/', automation_ai_views.order_metadata),
     path('automation/orders/parse/', automation_ai_views.order_parse),
     path('automation/orders/approve/', automation_ai_views.order_approve),
     path('automation/orders/packages/', automation_views.order_packages),
