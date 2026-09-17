@@ -89,5 +89,5 @@ def test_ai_order_assigns_named_workers_without_open_shift_fanout(auth_admin, co
     assert all(shift.status == Shift.Status.CONFIRMED for shift in shifts)
     assert all(not shift.is_open for shift in shifts)
     assert not Notification.objects.filter(title='Neue OpenShift verfügbar').exists()
-    assert Notification.objects.filter(user=simret_user, title='Schicht zugewiesen').count() == 1
-    assert Notification.objects.filter(user=marie_user, title='Schicht zugewiesen').count() == 1
+    assert Notification.objects.filter(user=simret_user, title='Deine Schicht wurde aktualisiert').count() == 1
+    assert Notification.objects.filter(user=marie_user, title='Deine Schicht wurde aktualisiert').count() == 1
