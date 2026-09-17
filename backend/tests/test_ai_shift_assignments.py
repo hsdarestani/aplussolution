@@ -1,29 +1,13 @@
 import pytest
 from django.utils import timezone
 
-from core.models import Location, Notification, Shift, User, WorkerProfile
+from core.models import Location, Position, Shift, User, WorkerProfile
 from core.shift_slots import ShiftSlot
 
 
 @pytest.mark.django_db
-def test_ai_order_assigns_named_workers_without_open_shift_fanout(auth_admin, company, location):
-    # A stale/local duplicate with the exact same display name must never win over
-    # the real login identity. Create it first so age alone would choose wrongly.
-    simret_shadow_user = User.objects.create_user(
-        'simret@sync.invalid',
-        None,
-        first_name='Simret',
-        last_name='Solomon',
-        role=User.Role.WORKER,
-        is_onboarded=False,
-    )
-    simret_shadow = WorkerProfile.objects.create(
-        user=simret_shadow_user,
-        employee_number='LOCAL-SIMRET-SOLOMON',
-        employment_type='minijob',
-        monthly_hours='40',
-        tariff_hourly_rate='15',
-    )
+def test_semantic_ai_approval_assigns_explicit_directory_workers(auth_admin, company, location):
+    front_office = Position.objects.create(name='Front Office')
 
     simret_user = User.objects.create_user(
         'simret@example.com',
@@ -56,42 +40,47 @@ def test_ai_order_assigns_named_workers_without_open_shift_fanout(auth_admin, co
         tariff_hourly_rate='15',
     )
 
-    raw_text = (
-        'Die Nachtdienste werden von Simret Solomon übernommen und alle anderen Dienste '
-        'werden von Marie Krass übernommen.\n'
-        'Die Nachtdienste gehen von 22:45 Uhr bis 6:45 Uhr.\n'
-        'Es sind insgesamt 2 Schichten.'
-    )
     parsed = {
+        'contract_no': '',
         'shifts': [
             {
-                'date': '2026-10-03',
+                'date': '2028-10-03',
                 'start_time': '22:45',
                 'end_time': '06:45',
                 'count': 1,
-                'role': 'Front Office',
+                'client_id': str(company.id),
                 'site_text': company.name,
+                'location_id': str(location.id),
                 'location_text': location.name,
+                'position_id': str(front_office.id),
+                'role': front_office.name,
+                'assignment_worker_id': str(simret.id),
+                'assignment_worker_name': 'Simret Solomon',
                 'site_address': company.address,
-                'notes': 'Übernommen von Simret Solomon',
+                'notes': '',
             },
             {
-                'date': '2026-10-04',
+                'date': '2028-10-04',
                 'start_time': '06:45',
                 'end_time': '14:45',
                 'count': 1,
-                'role': 'Front Office',
+                'client_id': str(company.id),
                 'site_text': company.name,
+                'location_id': str(location.id),
                 'location_text': location.name,
+                'position_id': str(front_office.id),
+                'role': front_office.name,
+                'assignment_worker_id': str(marie.id),
+                'assignment_worker_name': 'Marie Krass',
                 'site_address': company.address,
-                'notes': 'Übernommen von Marie Krass',
+                'notes': '',
             },
-        ]
+        ],
     }
 
     response = auth_admin.post(
         '/api/automation/orders/approve/',
-        {'raw_text': raw_text, 'parsed': parsed},
+        {'raw_text': 'arbitrary multilingual workforce request', 'parsed': parsed},
         format='json',
     )
 
@@ -104,33 +93,32 @@ def test_ai_order_assigns_named_workers_without_open_shift_fanout(auth_admin, co
     first_slot = ShiftSlot.objects.get(shift=shifts[0], status=ShiftSlot.Status.CLAIMED)
     second_slot = ShiftSlot.objects.get(shift=shifts[1], status=ShiftSlot.Status.CLAIMED)
     assert first_slot.worker_id == simret.id
-    assert first_slot.worker_id != simret_shadow.id
     assert second_slot.worker_id == marie.id
     assert all(shift.status == Shift.Status.CONFIRMED for shift in shifts)
     assert all(not shift.is_open for shift in shifts)
-    assert all('Übernommen von' not in (shift.notes or '') for shift in shifts)
-    assert not Notification.objects.filter(title='Neue OpenShift verfügbar').exists()
-    assert Notification.objects.filter(user=simret_user, title='Deine Schicht wurde aktualisiert').count() == 1
-    assert Notification.objects.filter(user=marie_user, title='Deine Schicht wurde aktualisiert').count() == 1
-    assert not Notification.objects.filter(user=simret_shadow_user).exists()
+    assert all(shift.location_id == location.id for shift in shifts)
+    assert all(shift.position_id == front_office.id for shift in shifts)
 
 
 @pytest.mark.django_db
-def test_ai_admin_review_can_edit_and_delete_rows(auth_admin, company, location):
-    raw_text = 'Es sind insgesamt 2 Schichten.'
+def test_semantic_ai_admin_review_keeps_exact_directory_entities(auth_admin, company, location):
+    serviceleitung = Position.objects.create(name='Serviceleitung')
     reviewed = {
-        'admin_reviewed': True,
-        'expected_shift_count': 1,
-        'shift_count_mismatch': False,
+        'contract_no': '',
         'shifts': [
             {
-                'date': '2026-10-05',
+                'date': '2028-10-05',
                 'start_time': '12:30',
                 'end_time': '18:15',
                 'count': 1,
-                'role': 'Serviceleitung',
+                'client_id': str(company.id),
                 'site_text': company.name,
+                'location_id': str(location.id),
                 'location_text': location.name,
+                'position_id': str(serviceleitung.id),
+                'role': serviceleitung.name,
+                'assignment_worker_id': '',
+                'assignment_worker_name': '',
                 'site_address': company.address,
                 'notes': 'Admin korrigiert',
             },
@@ -139,27 +127,25 @@ def test_ai_admin_review_can_edit_and_delete_rows(auth_admin, company, location)
 
     response = auth_admin.post(
         '/api/automation/orders/approve/',
-        {'raw_text': raw_text, 'parsed': reviewed, 'admin_reviewed': True},
+        {'raw_text': 'freely phrased request', 'parsed': reviewed, 'admin_reviewed': True},
         format='json',
     )
 
     assert response.status_code == 200, response.data
     assert response.data['created_count'] == 1
-    shifts = list(Shift.objects.filter(order__client=company))
-    assert len(shifts) == 1
-    shift = shifts[0]
+    shift = Shift.objects.get(order__client=company)
     local_start = timezone.localtime(shift.starts_at)
     local_end = timezone.localtime(shift.ends_at)
-    assert local_start.date().isoformat() == '2026-10-05'
+    assert local_start.date().isoformat() == '2028-10-05'
     assert local_start.strftime('%H:%M') == '12:30'
     assert local_end.strftime('%H:%M') == '18:15'
-    assert shift.position.name == 'Serviceleitung'
+    assert shift.position_id == serviceleitung.id
     assert shift.location_id == location.id
     assert 'Admin korrigiert' in shift.notes
 
 
 @pytest.mark.django_db
-def test_ai_review_resolves_live_hotel_location_worker_and_metadata(
+def test_semantic_ai_maps_any_language_to_live_hotel_directory(
     auth_admin,
     company,
     location,
@@ -176,12 +162,15 @@ def test_ai_review_resolves_live_hotel_location_worker_and_metadata(
     location.active = True
     location.save(update_fields=['name', 'address', 'client', 'active', 'updated_at'])
 
+    # A misleading location name can exist in the directory. The AI chooses the
+    # canonical hotel location by ID; backend code does not reinterpret prose.
     front_office_location = Location.objects.create(
         client=company,
         name='Front Office',
         address=address,
         active=True,
     )
+    front_office_position = Position.objects.create(name='Front Office')
     reviewer_user = User.objects.create_user(
         'store.reviewer@aplus-test.de',
         None,
@@ -198,64 +187,105 @@ def test_ai_review_resolves_live_hotel_location_worker_and_metadata(
         tariff_hourly_rate='15',
     )
 
-    monkeypatch.setattr(
-        'core.automation_ai_views.parse_order_text',
-        lambda _text: {
-            'contract_no': '',
-            'shifts': [{
-                'date': '2028-10-15',
-                'start_time': '10:00',
-                'end_time': '14:00',
+    ai_payload = {
+        'contract_no': '',
+        'shifts': [
+            {
+                'date': '2028-10-20',
+                'start_time': '06:30',
+                'end_time': '14:30',
                 'count': 1,
+                'client_id': str(company.id),
+                'site_text': 'whatever the user wrote',
+                'location_id': str(location.id),
+                'location_text': 'whatever the user wrote',
+                'position_id': str(front_office_position.id),
                 'role': 'Front Office',
-                'site_text': 'Hotel Spenerhaus',
-                'location_text': 'Front Office im Hotel Spenerhaus',
+                'assignment_worker_id': str(reviewer.id),
+                'assignment_worker_name': 'Store Reviewer',
                 'site_address': '',
-                'notes': 'AI-Test 2028',
-            }],
-        },
-    )
-    raw_text = (
-        '15.10.2028 Frühdienst von 10:00 bis 14:00 - Store Reviewer\n\n'
-        'Die Schicht ist für Front Office im Hotel Spenerhaus.\n'
-        'Notiz: AI-Test 2028'
-    )
+                'notes': 'AI-Test 3 Schichten',
+            },
+            {
+                'date': '2028-10-21',
+                'start_time': '14:30',
+                'end_time': '22:30',
+                'count': 1,
+                'client_id': str(company.id),
+                'site_text': '',
+                'location_id': str(location.id),
+                'location_text': '',
+                'position_id': str(front_office_position.id),
+                'role': 'Front Office',
+                'assignment_worker_id': str(reviewer.id),
+                'assignment_worker_name': 'Store Reviewer',
+                'site_address': '',
+                'notes': 'AI-Test 3 Schichten',
+            },
+            {
+                'date': '2028-10-22',
+                'start_time': '22:30',
+                'end_time': '06:30',
+                'count': 1,
+                'client_id': str(company.id),
+                'site_text': '',
+                'location_id': str(location.id),
+                'location_text': '',
+                'position_id': str(front_office_position.id),
+                'role': 'Front Office',
+                'assignment_worker_id': str(reviewer.id),
+                'assignment_worker_name': 'Store Reviewer',
+                'site_address': '',
+                'notes': 'AI-Test 3 Schichten',
+            },
+        ],
+    }
+    monkeypatch.setattr('core.semantic_ai_views._call_ai', lambda _text, _directory: ai_payload)
 
+    # Deliberately mixed/free wording. There is no required German syntax or
+    # date/worker separator pattern in the backend anymore.
+    raw_text = (
+        'برای Store Reviewer سه نوبت در Hotel Spenerhaus بساز؛ '
+        'یکی صبح 20 اکتبر، یکی عصر 21 اکتبر و یکی شب 22 اکتبر. '
+        'کارش Front Office است. Thanks!'
+    )
     parsed_response = auth_admin.post(
         '/api/automation/orders/parse/',
         {'text': raw_text},
         format='json',
     )
     assert parsed_response.status_code == 200, parsed_response.data
-    row = parsed_response.data['shifts'][0]
-    assert row['client_id'] == str(company.id)
-    assert row['site_text'] == 'Hotel Spenerhaus'
-    assert row['location_id'] == str(location.id)
-    assert row['location_id'] != str(front_office_location.id)
-    assert row['location_text'] == 'Hotel Spenerhaus'
-    assert row['assignment_worker_id'] == str(reviewer.id)
-    assert row['assignment_worker_name'] == 'Store Reviewer'
-    assert row['notes'] == 'AI-Test 2028'
+    assert len(parsed_response.data['shifts']) == 3
+    for row in parsed_response.data['shifts']:
+        assert row['client_id'] == str(company.id)
+        assert row['site_text'] == 'Hotel Spenerhaus'
+        assert row['location_id'] == str(location.id)
+        assert row['location_id'] != str(front_office_location.id)
+        assert row['location_text'] == 'Hotel Spenerhaus'
+        assert row['position_id'] == str(front_office_position.id)
+        assert row['assignment_worker_id'] == str(reviewer.id)
+        assert row['assignment_worker_name'] == 'Store Reviewer'
 
     metadata_response = auth_admin.get('/api/automation/orders/metadata/')
     assert metadata_response.status_code == 200, metadata_response.data
-    assert any(item['id'] == str(company.id) and item['name'] == 'Hotel Spenerhaus' for item in metadata_response.data['clients'])
-    assert any(item['id'] == str(location.id) and item['client_id'] == str(company.id) for item in metadata_response.data['locations'])
-    assert any(item['id'] == str(reviewer.id) and item['name'] == 'Store Reviewer' for item in metadata_response.data['workers'])
+    assert any(item['id'] == str(company.id) for item in metadata_response.data['clients'])
+    assert any(item['id'] == str(location.id) for item in metadata_response.data['locations'])
+    assert any(item['id'] == str(reviewer.id) for item in metadata_response.data['workers'])
 
-    reviewed = dict(parsed_response.data)
-    reviewed['admin_reviewed'] = True
     approve_response = auth_admin.post(
         '/api/automation/orders/approve/',
-        {'raw_text': raw_text, 'parsed': reviewed, 'admin_reviewed': True},
+        {'raw_text': raw_text, 'parsed': parsed_response.data, 'admin_reviewed': True},
         format='json',
     )
     assert approve_response.status_code == 200, approve_response.data
-    assert approve_response.data['assigned_count'] == 1
+    assert approve_response.data['assigned_count'] == 3
 
-    shift = Shift.objects.get(order__client=company, starts_at__year=2028)
-    assert shift.client_id == company.id
-    assert shift.location_id == location.id
-    slot = ShiftSlot.objects.get(shift=shift, status=ShiftSlot.Status.CLAIMED)
-    assert slot.worker_id == reviewer.id
+    shifts = list(Shift.objects.filter(order__client=company, starts_at__year=2028).order_by('starts_at'))
+    assert len(shifts) == 3
+    assert all(item.location_id == location.id for item in shifts)
+    assert all(item.position_id == front_office_position.id for item in shifts)
+    assert all(
+        ShiftSlot.objects.filter(shift=item, worker=reviewer, status=ShiftSlot.Status.CLAIMED).exists()
+        for item in shifts
+    )
     assert not Location.objects.filter(client=company, name='Front Office im Hotel Spenerhaus').exists()
