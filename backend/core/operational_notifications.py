@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import timedelta
 
@@ -14,6 +15,7 @@ from .shift_slots import ShiftSlot
 
 
 SYNTHETIC_MIGRATION_EMAIL_SUFFIX = '@sync.invalid'
+AI_DIRECT_ASSIGNMENT_RE = re.compile(r'^\s*(?:übernommen|uebernommen)\s+von\s+[^\n,.;]+\s*$', re.I | re.M)
 
 
 def _event_key(prefix: str) -> str:
@@ -67,6 +69,14 @@ def notify_open_shift_available(shift: Shift, reason: str = 'available') -> int:
         return 0
     if shift.status != Shift.Status.PUBLISHED or shift.ends_at <= timezone.now():
         return 0
+
+    # AI intake can carry an explicit named assignment in a human-readable line
+    # such as "Übernommen von Simret Solomon". Those shifts are claimed by the
+    # named worker immediately after creation. Do not briefly publish them to all
+    # eligible workers and trigger a misleading 20+ person notification fanout.
+    if reason == 'ai-order' and AI_DIRECT_ASSIGNMENT_RE.search(str(shift.notes or '')):
+        return 0
+
     if not ShiftSlot.objects.filter(shift=shift, status=ShiftSlot.Status.OPEN, worker__isnull=True).exists():
         return 0
 
