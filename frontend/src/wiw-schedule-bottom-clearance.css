@@ -5,15 +5,24 @@
   }
 
   body.wiw-native-schedule-active .wiw-week-scroll {
-    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+    padding-bottom: calc(118px + env(safe-area-inset-bottom));
   }
 
   body.wiw-native-schedule-active .wiw-day-section:last-child {
     margin-bottom: 18px;
   }
 
-  /* If the weekly total is shown, keep it above the app bottom navigation too. */
+  /* Gesamtstunden is a persistent control, not part of the scrolling week.
+     Keep it visible directly above the fixed mobile navigation on web and native. */
   body.wiw-native-schedule-active .wiw-week-total {
-    bottom: calc(82px + env(safe-area-inset-bottom));
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: calc(62px + env(safe-area-inset-bottom)) !important;
+    z-index: 115 !important;
+    width: 100% !important;
+    min-height: 39px !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
   }
 }
