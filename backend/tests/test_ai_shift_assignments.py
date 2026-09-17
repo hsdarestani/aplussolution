@@ -6,6 +6,24 @@ from core.shift_slots import ShiftSlot
 
 @pytest.mark.django_db
 def test_ai_order_assigns_named_workers_without_open_shift_fanout(auth_admin, company, location):
+    # A stale/local duplicate with the exact same display name must never win over
+    # the real login identity. Create it first so age alone would choose wrongly.
+    simret_shadow_user = User.objects.create_user(
+        'simret@sync.invalid',
+        None,
+        first_name='Simret',
+        last_name='Solomon',
+        role=User.Role.WORKER,
+        is_onboarded=False,
+    )
+    simret_shadow = WorkerProfile.objects.create(
+        user=simret_shadow_user,
+        employee_number='LOCAL-SIMRET-SOLOMON',
+        employment_type='minijob',
+        monthly_hours='40',
+        tariff_hourly_rate='15',
+    )
+
     simret_user = User.objects.create_user(
         'simret@example.com',
         None,
@@ -54,7 +72,7 @@ def test_ai_order_assigns_named_workers_without_open_shift_fanout(auth_admin, co
                 'site_text': company.name,
                 'location_text': location.name,
                 'site_address': company.address,
-                'notes': '',
+                'notes': 'Übernommen von Simret Solomon',
             },
             {
                 'date': '2026-10-04',
@@ -65,7 +83,7 @@ def test_ai_order_assigns_named_workers_without_open_shift_fanout(auth_admin, co
                 'site_text': company.name,
                 'location_text': location.name,
                 'site_address': company.address,
-                'notes': '',
+                'notes': 'Übernommen von Marie Krass',
             },
         ]
     }
@@ -85,9 +103,12 @@ def test_ai_order_assigns_named_workers_without_open_shift_fanout(auth_admin, co
     first_slot = ShiftSlot.objects.get(shift=shifts[0], status=ShiftSlot.Status.CLAIMED)
     second_slot = ShiftSlot.objects.get(shift=shifts[1], status=ShiftSlot.Status.CLAIMED)
     assert first_slot.worker_id == simret.id
+    assert first_slot.worker_id != simret_shadow.id
     assert second_slot.worker_id == marie.id
     assert all(shift.status == Shift.Status.CONFIRMED for shift in shifts)
     assert all(not shift.is_open for shift in shifts)
+    assert all('Übernommen von' not in (shift.notes or '') for shift in shifts)
     assert not Notification.objects.filter(title='Neue OpenShift verfügbar').exists()
     assert Notification.objects.filter(user=simret_user, title='Deine Schicht wurde aktualisiert').count() == 1
     assert Notification.objects.filter(user=marie_user, title='Deine Schicht wurde aktualisiert').count() == 1
+    assert not Notification.objects.filter(user=simret_shadow_user).exists()
