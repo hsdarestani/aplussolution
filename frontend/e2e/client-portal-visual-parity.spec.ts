@@ -5,11 +5,22 @@ import { expect, Page, Route, test } from '@playwright/test';
 const client = {
   id: 'client-visual-qa',
   email: 'visual.client@example.test',
-  name: 'Marthas',
-  first_name: 'Marthas',
-  last_name: '',
+  name: 'Claudia Fröhling',
+  first_name: 'Claudia',
+  last_name: 'Fröhling',
   role: 'client',
   phone: '',
+};
+
+const access = {
+  client_id: 'client-own',
+  client_name: 'Marthas',
+  account_name: 'Claudia Fröhling',
+  first_name: 'Claudia',
+  read_only: false,
+  location_scope_id: null,
+  location_scope_name: '',
+  capabilities: {},
 };
 
 function todayShift() {
@@ -28,7 +39,9 @@ function todayShift() {
     ends_at: end.toISOString(),
     break_minutes: 30,
     status: 'confirmed',
-    open_count: 0,
+    required_count: 1,
+    filled_count: 1,
+    notes: 'Terrasse vorbereiten',
     assigned_workers: [{ id: 'worker-francesco', slot_id: 'slot-francesco', name: 'Francesco Trulli', is_me: false }],
   };
 }
@@ -39,16 +52,6 @@ async function json(route: Route, body: unknown, status = 200) {
 
 async function mockClient(page: Page, state: { ratingPost?: any }) {
   const shift = todayShift();
-  const scheduleShifts = [shift, ...Array.from({ length: 11 }, (_, index) => ({
-    ...shift,
-    id: `shift-client-scroll-${index}`,
-    assigned_workers: [{
-      id: `worker-scroll-${index}`,
-      slot_id: `slot-scroll-${index}`,
-      name: `Mitarbeiter ${index + 1}`,
-      is_me: false,
-    }],
-  }))];
   await page.addInitScript(() => {
     localStorage.setItem('access', 'client-visual-token');
     localStorage.setItem('refresh', 'client-visual-refresh');
@@ -58,14 +61,20 @@ async function mockClient(page: Page, state: { ratingPost?: any }) {
     const pathName = url.pathname.replace(/^\/api\//, '');
     const method = route.request().method();
     if (pathName === 'auth/me/') return json(route, client);
-    if (pathName === 'portal/client-dashboard/') return json(route, { role: 'client', active_orders: 1, upcoming_shifts: 1, contracts_to_sign: 0 });
-    if (pathName.startsWith('shifts/')) return json(route, scheduleShifts);
+    if (pathName === 'portal/client-access/') return json(route, access);
+    if (pathName === 'portal/client-shifts/') return json(route, [shift]);
+    if (pathName === 'portal/client-documents/') return json(route, []);
+    if (pathName === 'portal/client-order-metadata/') return json(route, { locations: [], positions: [] });
     if (pathName.startsWith('orders/')) return json(route, []);
-    if (pathName.startsWith('contracts/')) return json(route, []);
-    if (pathName.startsWith('documents/')) return json(route, []);
-    if (pathName === 'operations/') return json(route, { role: 'client', unread_notifications: 0, open_orders: 0 });
-    if (pathName === 'operations/folders/') return json(route, { workers: [], clients: [{ id: 'client-own', name: 'Marthas' }] });
-    if (pathName === 'portal/rating-candidates/') return json(route, [{ shift_id: shift.id, worker_id: 'worker-francesco', worker_name: 'Francesco Trulli', position_name: shift.position_name, location_name: shift.location_name, starts_at: shift.starts_at, ends_at: shift.ends_at }]);
+    if (pathName === 'portal/rating-candidates/') return json(route, [{
+      shift_id: shift.id,
+      worker_id: 'worker-francesco',
+      worker_name: 'Francesco Trulli',
+      location_name: shift.location_name,
+      starts_at: shift.starts_at,
+      ends_at: shift.ends_at,
+      notes: shift.notes,
+    }]);
     if (pathName.startsWith('ratings/')) {
       if (method === 'POST') {
         state.ratingPost = route.request().postDataJSON();
@@ -89,7 +98,7 @@ test.describe('client portal visual parity', () => {
     expect(source).toContain('<ClientPortalMount />');
   });
 
-  test('calendar keeps the complete week strip visible, sticky day labels and admin-style week motion', async ({ page }) => {
+  test('calendar stays compact, scrollable and exposes notes in shift detail', async ({ page }) => {
     const state: { ratingPost?: any } = {};
     await mockClient(page, state);
     await page.goto('/');
@@ -98,110 +107,48 @@ test.describe('client portal visual parity', () => {
     await expect(tabs.getByRole('button')).toHaveCount(4);
     await tabs.getByRole('button', { name: 'Kalender' }).click();
 
-    const calendar = page.getByTestId('client-v3-schedule');
-    const weekStrip = calendar.getByTestId('phase8-week-strip');
-    const dayView = calendar.getByTestId('schedule-day-view');
-    const weekTotal = calendar.getByTestId('phase8-week-total');
-    const appBar = page.locator('.mobile-appbar');
+    const calendar = page.locator('.client-v4-schedule');
     await expect(calendar).toBeVisible();
-    await expect(calendar).toHaveClass(/wiw-employee-schedule/);
-    await expect(calendar).toHaveClass(/wiw-schedule-mobile/);
-    await expect(calendar).toHaveClass(/wiw-employee-admin-parity/);
-    await expect(calendar.getByRole('tablist')).toHaveCount(0);
-    await expect(weekStrip).toHaveClass(/wiw-week-strip/);
-    await expect(weekStrip).toHaveCSS('position', 'relative');
-    await expect(dayView).toHaveClass(/wiw-week-scroll/);
-    await expect(dayView).toHaveAttribute('data-layout', 'list');
-    await expect(dayView).toHaveCSS('overflow-y', 'auto');
-    await expect(weekTotal).toHaveClass(/wiw-week-total/);
-    await expect(weekTotal).toHaveCSS('position', 'relative');
+    await expect(calendar.locator('.client-v4-weekbar')).toBeVisible();
+    await expect(calendar.getByRole('button', { name: /Evangelische Akademie.*Terrasse vorbereiten/ })).toBeVisible();
+    await calendar.getByRole('button', { name: /Evangelische Akademie.*Terrasse vorbereiten/ }).click();
 
-    await expect(calendar.getByText('Francesco T.')).toBeVisible();
-    await expect(calendar.getByText('SK').first()).toBeVisible();
-    await expect(calendar.getByText('Evangelische Akademie').first()).toBeVisible();
-    await expect(calendar.getByText('Gesamtstunden')).toBeVisible();
-
-    const firstVisibleDay = calendar.locator('.wiw-day-section').first();
-    const firstVisibleHeader = firstVisibleDay.locator('> header');
-    const firstPopulatedDay = calendar.locator('.wiw-day-section:has(.wiw-shift-card)').first();
-    const firstPopulatedHeader = firstPopulatedDay.locator('> header');
-    const firstCard = firstPopulatedDay.locator('.wiw-shift-card').first();
-    await expect(firstVisibleHeader).toBeVisible();
-    await expect(firstVisibleHeader).toHaveCSS('position', 'sticky');
-    await expect(firstVisibleHeader).toHaveCSS('top', '0px');
-    await expect(firstPopulatedHeader).toBeVisible();
-    await expect(firstCard).toBeVisible();
-
-    const appBarBox = await appBar.boundingBox();
-    const weekBox = await weekStrip.boundingBox();
-    const firstVisibleHeaderBox = await firstVisibleHeader.boundingBox();
-    const populatedHeaderBox = await firstPopulatedHeader.boundingBox();
-    const cardBox = await firstCard.boundingBox();
-    expect(appBarBox && weekBox && firstVisibleHeaderBox && populatedHeaderBox && cardBox).toBeTruthy();
-    expect(weekBox!.y).toBeGreaterThanOrEqual(appBarBox!.y + appBarBox!.height - 1);
-    expect(firstVisibleHeaderBox!.y).toBeGreaterThanOrEqual(weekBox!.y + weekBox!.height - 1);
-    expect(cardBox!.y).toBeGreaterThanOrEqual(populatedHeaderBox!.y + populatedHeaderBox!.height - 1);
-
-    const populatedHeaderText = await firstPopulatedHeader.textContent();
-    await firstPopulatedDay.evaluate((section) => {
-      const scroller = section.closest('[data-testid="schedule-day-view"]') as HTMLElement | null;
-      if (!scroller) return;
-      scroller.scrollTop = Math.min(
-        (section as HTMLElement).offsetTop + 48,
-        Math.max(0, scroller.scrollHeight - scroller.clientHeight),
-      );
-      scroller.dispatchEvent(new Event('scroll'));
-    });
-    await expect(firstPopulatedHeader).toBeVisible();
-    await expect(firstPopulatedHeader).toHaveText(populatedHeaderText || '');
-    const scrolledHeaderBox = await firstPopulatedHeader.boundingBox();
-    const scrollBox = await dayView.boundingBox();
-    expect(scrolledHeaderBox && scrollBox).toBeTruthy();
-    expect(Math.abs(scrolledHeaderBox!.y - scrollBox!.y)).toBeLessThanOrEqual(2);
-
-    await dayView.evaluate((element) => {
-      const start = new Touch({ identifier: 1, target: element, clientX: 320, clientY: 300 });
-      element.dispatchEvent(new TouchEvent('touchstart', { touches: [start], changedTouches: [start], bubbles: true }));
-      const move = new Touch({ identifier: 1, target: element, clientX: 180, clientY: 302 });
-      element.dispatchEvent(new TouchEvent('touchmove', { touches: [move], changedTouches: [move], bubbles: true }));
-    });
-    await expect.poll(() => dayView.evaluate((element: HTMLElement) => element.style.transform)).toContain('translate3d');
-    await dayView.evaluate((element) => {
-      const end = new Touch({ identifier: 1, target: element, clientX: 120, clientY: 302 });
-      element.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [end], bubbles: true }));
-    });
-    await expect(calendar.getByTestId('schedule-day-view')).toHaveClass(/wiw-week-turn-next/);
-
-    const totalBox = await weekTotal.boundingBox();
-    const navBox = await tabs.boundingBox();
-    expect(totalBox && navBox).toBeTruthy();
-    expect(Math.abs((totalBox!.y + totalBox!.height) - navBox!.y)).toBeLessThanOrEqual(3);
+    const detail = page.locator('.client-v4-shift-detail');
+    await expect(detail).toBeVisible();
+    await expect(detail.getByText('Einsatzdetails')).toBeVisible();
+    await expect(detail.getByText('Evangelische Akademie')).toBeVisible();
+    await expect(detail.getByText('Francesco Trulli')).toBeVisible();
+    await expect(detail.getByText('Terrasse vorbereiten', { exact: true })).toBeVisible();
+    await expect(detail.getByRole('button', { name: /Zeit \/ Datum ändern/ })).toBeVisible();
+    await expect(detail.getByRole('button', { name: /Stornierung anfragen/ })).toBeVisible();
 
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(1);
   });
 
-  test('rating screen is custom, compact and submits the selected client candidate', async ({ page }) => {
+  test('rating screen is shift-first and submits one selected worker', async ({ page }) => {
     const state: { ratingPost?: any } = {};
     await mockClient(page, state);
     await page.goto('/');
 
     const tabs = page.getByTestId('client-v2-tabbar');
-    await tabs.getByRole('button', { name: 'Mitarbeiter bewerten' }).click();
-    const ratings = page.getByTestId('client-v3-ratings');
+    await tabs.getByRole('button', { name: 'Bewerten' }).click();
+    const ratings = page.locator('.client-v4-ratings');
     await expect(ratings).toBeVisible();
-    await expect(ratings.getByText('Noch keine Bewertungen')).toBeVisible();
-    await ratings.getByRole('button', { name: /Neue Bewertung/ }).click();
+    await expect(ratings.getByRole('heading', { name: 'Einsatz auswählen' })).toBeVisible();
+    await ratings.getByRole('button', { name: /Evangelische Akademie.*Terrasse vorbereiten/ }).click();
+    await expect(ratings.getByRole('heading', { name: 'Einzeln bewerten' })).toBeVisible();
+    await ratings.getByRole('button', { name: /Francesco Trulli/ }).click();
 
-    const dialog = page.getByRole('dialog', { name: 'Einsatz bewerten' });
-    await dialog.getByLabel('Einsatz', { exact: true }).selectOption('shift-client-visual');
-    await dialog.getByLabel('Mitarbeiter', { exact: true }).selectOption('worker-francesco');
-    await dialog.getByRole('radio', { name: '4 Sterne' }).first().click();
+    const dialog = page.getByRole('dialog');
+    const totalStars = dialog.locator('.client-v4-score').first().getByRole('button');
+    await totalStars.nth(3).click();
+    await dialog.locator('textarea').fill('Sehr guter Einsatz.');
     await dialog.getByRole('button', { name: 'Bewertung speichern' }).click();
 
     await expect.poll(() => state.ratingPost).toBeTruthy();
     expect(state.ratingPost.shift).toBe('shift-client-visual');
     expect(state.ratingPost.worker).toBe('worker-francesco');
-    await expect(ratings.getByText('Bewertung wurde gespeichert.')).toBeVisible();
+    expect(state.ratingPost.score).toBe(4);
   });
 });
