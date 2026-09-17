@@ -155,7 +155,11 @@ class Command(BaseCommand):
             if not position.active:
                 position.active = True
                 position.save(update_fields=['active', 'updated_at'])
-        for name in ['Front Office', 'Housekeeping']:
-            Position.objects.get_or_create(name=name, defaults={'active': True})
+
+        # Housekeeping is still a required scheduling position. Front Office is
+        # intentionally NOT bootstrapped: locally managed positions must not be
+        # recreated just because the backend is deployed or restarted.
+        Position.objects.get_or_create(name='Housekeeping', defaults={'active': True})
+
         result = seed_document_catalog()
         self.stdout.write(self.style.SUCCESS(f'Grunddaten sind bereit. Dokumentkatalog: {result}'))
