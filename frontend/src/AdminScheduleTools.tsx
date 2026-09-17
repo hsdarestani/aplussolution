@@ -212,6 +212,15 @@ export default function AdminScheduleTools() {
     });
   };
 
+  const openDatePicker = (input: HTMLInputElement) => {
+    const picker = input as HTMLInputElement & { showPicker?: () => void };
+    try {
+      picker.showPicker?.();
+    } catch {
+      // Safari/iOS already opens its native picker on tap; no fallback needed.
+    }
+  };
+
   const updateAiClient = (index: number, clientId: string) => {
     setParsed((current: any) => {
       if (!current || !Array.isArray(current.shifts)) return current;
@@ -370,10 +379,10 @@ export default function AdminScheduleTools() {
               return <article className={`admin-ai-row${editing ? ' editing' : ''}`} key={`${item.date || 'row'}-${index}`}>
                 <div className="admin-ai-row-head"><strong>Schicht {index + 1}</strong>{item.assignment_worker_name ? <em>{item.assignment_worker_name}</em> : <em>OpenShift</em>}</div>
                 {editing ? <div className="admin-ai-edit-grid">
-                  <label>Datum<input type="date" value={item.date || ''} onChange={(event) => updateParsedShift(index, 'date', event.target.value)} /></label>
+                  <label className="wide">Datum<input type="date" value={item.date || ''} onClick={(event) => openDatePicker(event.currentTarget)} onChange={(event) => updateParsedShift(index, 'date', event.target.value)} /></label>
                   <label>Von<input type="time" value={item.start_time || ''} onChange={(event) => updateParsedShift(index, 'start_time', event.target.value)} /></label>
                   <label>Bis<input type="time" value={item.end_time || ''} onChange={(event) => updateParsedShift(index, 'end_time', event.target.value)} /></label>
-                  <label>Anzahl<input type="number" min="1" value={item.count || 1} onChange={(event) => updateParsedShift(index, 'count', Math.max(1, Number(event.target.value) || 1))} /></label>
+                  <label>Personalplätze<input type="number" min="1" value={item.count || 1} onChange={(event) => updateParsedShift(index, 'count', Math.max(1, Number(event.target.value) || 1))} /></label>
                   <label className="wide">Position<input type="text" value={item.role || ''} onChange={(event) => updateParsedShift(index, 'role', event.target.value)} /></label>
                   <label className="wide">Kunde<select value={item.client_id || ''} disabled={aiDirectoryBusy} onChange={(event) => updateAiClient(index, event.target.value)}><option value="">Bitte Kunde auswählen</option>{aiDirectory.clients.map((client: any) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>
                   <label className="wide">Standort<select value={item.location_id || ''} disabled={aiDirectoryBusy || !item.client_id} onChange={(event) => updateAiLocation(index, event.target.value)}><option value="">Bitte Standort auswählen</option>{locationChoices.map((location: any) => <option key={location.id} value={location.id}>{location.name}{location.address ? ` · ${location.address}` : ''}</option>)}</select></label>
@@ -381,7 +390,7 @@ export default function AdminScheduleTools() {
                   <label className="wide">Notiz<textarea value={item.notes || ''} onChange={(event) => updateParsedShift(index, 'notes', event.target.value)} /></label>
                 </div> : <div className="admin-ai-row-summary">
                   <b>{item.date} · {item.start_time}–{item.end_time}</b>
-                  <span>{item.count || 1}× {item.role || 'Schicht'} · {item.site_text || 'Kunde'}{item.location_text ? ` · ${item.location_text}` : ''}</span>
+                  <span>{Number(item.count || 1) > 1 ? `${item.count} Personalplätze · ` : ''}{item.role || 'Schicht'} · {item.site_text || 'Kunde'}{item.location_text ? ` · ${item.location_text}` : ''}</span>
                   {item.notes ? <small>Notiz: {item.notes}</small> : null}
                 </div>}
                 <div className="admin-ai-row-actions">
