@@ -96,7 +96,7 @@ export default function ClientPortalVisualParity() {
   }, [mobile, user, view]);
 
   if (!user || !access || !mobile || !host) return null;
-  if (view === 'schedule') return createPortal(<ClientScheduleWorkforceMobile />, host);
+  if (view === 'schedule') return createPortal(<ClientScheduleWorkforceMobile readOnly={access.read_only} />, host);
   if (access.read_only && view !== 'dashboard') return createPortal(<RestrictedClientGate access={access} />, host);
   if (view === 'ratings') return createPortal(<ClientRatingsMobileV4 access={access} />, host);
   if (view === 'orders') return createPortal(<ClientOrdersMobile access={access} />, host);
