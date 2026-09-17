@@ -36,20 +36,23 @@ def _shift_body(shift: Shift) -> str:
 
 
 def _notify_admin_open_shift_summary(shift: Shift, event: str, worker_count: int) -> int:
-    """Create exactly one admin confirmation for an OpenShift publication.
+    """Confirm every OpenShift publication to active administration accounts.
 
-    Admin confirmation must not depend on whether any worker matched the current
-    Zeitplan/customer visibility filters. This is especially important for copied
-    shifts: the admin needs a positive publication signal even when fan-out is zero.
+    The confirmation is independent of employee fan-out. Copied shifts intentionally
+    become OpenShifts, so the admin/manager who operates the schedule must still get
+    a notification even when zero employees currently match the visibility rules.
     """
     created = 0
     if worker_count > 0:
         body = f'Benachrichtigung für {worker_count} Mitarbeiter ausgelöst · {_shift_body(shift)}'
     else:
         body = f'Keine passenden Mitarbeiter benachrichtigt · {_shift_body(shift)}'
-    for admin in User.objects.filter(role=User.Role.ADMIN, is_active=True):
+    for recipient in User.objects.filter(
+        role__in=[User.Role.ADMIN, User.Role.MANAGER],
+        is_active=True,
+    ):
         _, was_created = Notification.objects.get_or_create(
-            user=admin,
+            user=recipient,
             kind=f'admin-open-shift-summary-{event}-{shift.id}',
             defaults={
                 'title': 'OpenShift veröffentlicht',
@@ -114,14 +117,17 @@ def notify_open_shift_available(shift: Shift, reason: str = 'available') -> int:
 
 
 def notify_admins_shift_claimed(slot: ShiftSlot) -> int:
-    """Notify each active admin exactly once after a direct OpenShift claim."""
+    """Notify each active administration account exactly once after a direct OpenShift claim."""
     shift = slot.shift
     worker_name = slot.worker.user.get_full_name() or slot.worker.user.email
     body = f'{worker_name} hat eine OpenShift übernommen · {_shift_body(shift)}'
     created = 0
-    for admin in User.objects.filter(role=User.Role.ADMIN, is_active=True):
+    for recipient in User.objects.filter(
+        role__in=[User.Role.ADMIN, User.Role.MANAGER],
+        is_active=True,
+    ):
         _, was_created = Notification.objects.get_or_create(
-            user=admin,
+            user=recipient,
             kind=f'admin-direct-shift-claim-{slot.id}',
             defaults={
                 'title': 'OpenShift übernommen',
@@ -131,6 +137,7 @@ def notify_admins_shift_claimed(slot: ShiftSlot) -> int:
         )
         created += int(was_created)
     return created
+
 
 def notify_worker_shift_event(user: User | None, shift: Shift, title: str, reason: str) -> int:
     if not user or not user.is_active:
