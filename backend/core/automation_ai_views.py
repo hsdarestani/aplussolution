@@ -5,7 +5,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from .ai_shift_normalizer import deterministic_order_request, normalize_order_request
-from .models import Shift, ShiftImportPackage, WorkerProfile
+from .models import ClientCompany, Location, Position, Shift, ShiftImportPackage, WorkerProfile
 from .native_cutover import approve_order
 from .native_workforce import package_shifts
 from .operational_notifications import notify_worker_shift_event
@@ -17,6 +17,7 @@ from .shift_slots import ShiftSlot
 
 _ASSIGNMENT_LINE_RE = re.compile(r'^\s*(?:übernommen|uebernommen)\s+von\s+([^\n,.;]+?)\s*$', re.I | re.M)
 _PLACEHOLDER_EMPLOYEE_PREFIXES = ('LOCAL-', 'WIW-', 'AUTO-', 'TEMP-', 'MIG-')
+_SYNTHETIC_MIGRATION_EMAIL_SUFFIX = '@sync.invalid'
 
 
 def _assignment_from_note(notes: str) -> str:
@@ -148,6 +149,116 @@ def _worker_by_id(worker_id: str) -> WorkerProfile | None:
     )
 
 
+def _client_by_hint(item: dict, raw_text: str = '') -> ClientCompany | None:
+    explicit_id = str(item.get('client_id') or '').strip()
+    if explicit_id:
+        return ClientCompany.objects.filter(pk=explicit_id, active=True).first()
+
+    clients = list(ClientCompany.objects.filter(active=True).order_by('name'))
+    if not clients:
+        return None
+    hints = [
+        str(item.get('site_text') or '').strip(),
+        str(item.get('location_text') or '').strip(),
+    ]
+    for hint in hints:
+        hint_key = normalize_name(hint)
+        if not hint_key:
+            continue
+        exact = next((client for client in clients if normalize_name(client.name) == hint_key), None)
+        if exact:
+            return exact
+
+    raw_key = normalize_name(raw_text)
+    mentioned = [client for client in clients if normalize_name(client.name) and normalize_name(client.name) in raw_key]
+    if mentioned:
+        return max(mentioned, key=lambda client: len(normalize_name(client.name)))
+
+    best = None
+    best_score = 0.45
+    for client in clients:
+        score = max((similarity(hint, client.name) for hint in hints if hint), default=0.0)
+        if score >= best_score:
+            best, best_score = client, score
+    return best
+
+
+def _location_by_hint(client: ClientCompany, item: dict) -> Location | None:
+    explicit_id = str(item.get('location_id') or '').strip()
+    if explicit_id:
+        return Location.objects.filter(pk=explicit_id, client=client, active=True).first()
+
+    locations = list(Location.objects.filter(client=client, active=True).order_by('created_at'))
+    if not locations:
+        return None
+    hint = str(item.get('location_text') or '').strip()
+    if not hint and len(locations) == 1:
+        return locations[0]
+
+    hint_key = normalize_name(hint)
+    client_key = normalize_name(client.name)
+    best = None
+    best_score = 0.55
+    for location in locations:
+        name_key = normalize_name(location.name)
+        score = similarity(hint, location.name) if hint else 0.0
+        if hint_key and name_key == hint_key:
+            score += 3.0
+        if hint_key and name_key and name_key in hint_key:
+            score += 1.0
+        # Phrases such as "Front Office im Hotel Spenerhaus" describe a role
+        # inside the hotel, not a new location. Prefer the customer's canonical
+        # location unless the text exactly names another existing location.
+        if name_key and client_key and name_key == client_key:
+            score += 1.25
+        if client.address and location.address and normalize_name(client.address) == normalize_name(location.address):
+            score += 0.2
+        if score >= best_score:
+            best, best_score = location, score
+    if best:
+        return best
+    if len(locations) == 1:
+        return locations[0]
+    return None
+
+
+def _canonicalize_directory(parsed: dict, raw_text: str = '', *, strict: bool = False) -> dict:
+    for item in parsed.get('shifts') or []:
+        client = _client_by_hint(item, raw_text)
+        if not client:
+            item['client_id'] = ''
+            if strict:
+                raise ValueError('Der Kunde wurde nicht eindeutig gefunden. Bitte im Feld „Kunde“ einen bestehenden Kunden auswählen.')
+            continue
+        item['client_id'] = str(client.id)
+        item['site_text'] = client.name
+        if client.address and not str(item.get('site_address') or '').strip():
+            item['site_address'] = client.address
+
+        location = _location_by_hint(client, item)
+        if not location:
+            item['location_id'] = ''
+            if strict:
+                raise ValueError(f'Für „{client.name}“ wurde kein eindeutiger Standort gefunden. Bitte einen bestehenden Standort auswählen.')
+            continue
+        item['location_id'] = str(location.id)
+        item['location_text'] = location.name
+        if location.address:
+            item['site_address'] = location.address
+    return parsed
+
+
+def _selected_client_id(parsed: dict) -> str | None:
+    ids = {
+        str(item.get('client_id') or '').strip()
+        for item in parsed.get('shifts') or []
+        if str(item.get('client_id') or '').strip()
+    }
+    if len(ids) > 1:
+        raise ValueError('Ein AI-Auftrag kann nur Schichten für einen Kunden enthalten. Bitte die Kunden-Auswahl prüfen.')
+    return next(iter(ids), None)
+
+
 def _validate_roster_count(parsed: dict) -> None:
     if not parsed.get('shift_count_mismatch'):
         return
@@ -226,7 +337,14 @@ def _apply_named_assignments(result: dict, workers_by_id: dict[str, WorkerProfil
         name = _assignment_from_note(shift.notes)
         if not name:
             continue
-        worker = _worker_by_name(name)
+        wanted_key = normalize_name(name)
+        worker = next(
+            (
+                candidate for candidate in workers_by_id.values()
+                if normalize_name(_worker_label(candidate)) == wanted_key
+            ),
+            None,
+        ) or _worker_by_name(name)
         if not worker or str(worker.id) not in workers_by_id:
             continue
 
@@ -274,6 +392,48 @@ def _apply_named_assignments(result: dict, workers_by_id: dict[str, WorkerProfil
     return assigned
 
 
+@api_view(['GET'])
+@permission_classes([IsAdminOrManager])
+def order_metadata(request):
+    clients = ClientCompany.objects.filter(active=True).order_by('name')
+    locations = Location.objects.filter(active=True, client__active=True).select_related('client').order_by('client__name', 'name')
+    workers = (
+        WorkerProfile.objects.filter(active=True, user__is_active=True)
+        .exclude(user__email__iendswith=_SYNTHETIC_MIGRATION_EMAIL_SUFFIX)
+        .select_related('user')
+        .order_by('user__first_name', 'user__last_name', 'employee_number')
+    )
+    positions = Position.objects.filter(active=True).order_by('name')
+    return Response({
+        'clients': [
+            {'id': str(client.id), 'name': client.name, 'address': client.address}
+            for client in clients
+        ],
+        'locations': [
+            {
+                'id': str(location.id),
+                'name': location.name,
+                'address': location.address,
+                'client_id': str(location.client_id),
+                'client_name': location.client.name,
+            }
+            for location in locations
+        ],
+        'workers': [
+            {
+                'id': str(worker.id),
+                'name': _worker_label(worker),
+                'employee_number': worker.employee_number,
+            }
+            for worker in workers
+        ],
+        'positions': [
+            {'id': str(position.id), 'name': position.name}
+            for position in positions
+        ],
+    })
+
+
 @api_view(['POST'])
 @permission_classes([IsAdminOrManager])
 def order_parse(request):
@@ -297,6 +457,7 @@ def order_parse(request):
     try:
         _validate_roster_count(result)
         result, _ = _prepare_named_assignments(result, raw_text, embed_assignment_note=False)
+        result = _canonicalize_directory(result, raw_text, strict=False)
     except ValueError as exc:
         return Response({'detail': str(exc)}, status=400)
 
@@ -335,12 +496,14 @@ def order_approve(request):
     try:
         if not admin_reviewed:
             _validate_roster_count(parsed)
+        parsed = _canonicalize_directory(parsed, raw_text, strict=True)
         parsed, workers_by_id = _prepare_named_assignments(parsed, raw_text, embed_assignment_note=True)
+        selected_client_id = request.data.get('client_id') or _selected_client_id(parsed)
         result = approve_order(
             parsed,
             raw_text,
             actor=request.user,
-            client_id=request.data.get('client_id') or None,
+            client_id=selected_client_id or None,
         )
         assigned_count = _apply_named_assignments(result, workers_by_id)
         if assigned_count:
