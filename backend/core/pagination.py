@@ -2,19 +2,22 @@ from rest_framework.pagination import PageNumberPagination
 
 
 class PathAwarePagination(PageNumberPagination):
-    """Keep normal API pages small while allowing the schedule to receive all shifts.
+    """Use large pages for schedule data and its customer/location metadata.
 
-    The current schedule UI renders calendar views client-side and does not follow
-    DRF pagination links. With a 50-row page size, valid future shifts can be
-    hidden behind historical rows. Shift endpoints therefore use a larger page
-    while every other endpoint keeps the existing page size.
+    The mobile schedule renders its pickers client-side and does not follow DRF
+    pagination links. If customers or locations are paginated before the UI
+    filters inactive legacy rows, valid active entries can disappear from the
+    picker (for example Stadthaus am Markt after many archived WIW records).
     """
 
     page_size = 50
     max_shift_page_size = 5000
+    max_directory_page_size = 5000
 
     def get_page_size(self, request):
         path = str(getattr(request, 'path', '') or '')
         if path.startswith('/api/shifts/') or path == '/api/shifts':
             return self.max_shift_page_size
+        if path in {'/api/clients/', '/api/clients', '/api/locations/', '/api/locations'}:
+            return self.max_directory_page_size
         return self.page_size
