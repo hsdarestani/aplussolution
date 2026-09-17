@@ -15,7 +15,8 @@ ROLE_PATTERNS = (
 
 INLINE_ASSIGNMENT_LINE_RE = re.compile(
     r'^\s*(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})\b'
-    r'(?=[^\n]*\b(?:dienst|schicht)\b)[^\n]*?\s[-–—]\s*'
+    r'(?=[^\n]*\b(?:(?:nacht|spät|spaet|früh|frueh)?dienst(?:e|en)?|schicht(?:en)?)\b)'
+    r'[^\n]*?\s[-–—]\s*'
     r'([A-Za-zÄÖÜäöüßÀ-ÿ][A-Za-zÄÖÜäöüßÀ-ÿ\'’ .-]{1,79})\s*$',
     flags=re.I | re.M,
 )
