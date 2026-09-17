@@ -43,6 +43,7 @@ export default function AdminScheduleTools() {
   const [manageOpen, setManageOpen] = useState(false);
   const [orderText, setOrderText] = useState('');
   const [parsed, setParsed] = useState<any>();
+  const [editingAiIndex, setEditingAiIndex] = useState<number | null>(null);
   const [shifts, setShifts] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -158,9 +159,44 @@ export default function AdminScheduleTools() {
   const openAi = () => {
     setCreateMenuOpen(false);
     setParsed(undefined);
+    setEditingAiIndex(null);
     setOrderText('');
     setMessage('');
     setAiOpen(true);
+  };
+
+  const markAdminReviewed = (next: any) => {
+    const rows = Array.isArray(next?.shifts) ? next.shifts : [];
+    return {
+      ...next,
+      admin_reviewed: true,
+      expected_shift_count: rows.length,
+      shift_count_mismatch: false,
+    };
+  };
+
+  const updateParsedShift = (index: number, key: string, value: any) => {
+    setParsed((current: any) => {
+      if (!current || !Array.isArray(current.shifts)) return current;
+      const rows = [...current.shifts];
+      const row = { ...rows[index], [key]: value };
+      if (key === 'assignment_worker_name') {
+        row.assignment_worker_id = '';
+        row.assignment_worker_override = true;
+      }
+      rows[index] = row;
+      return markAdminReviewed({ ...current, shifts: rows });
+    });
+  };
+
+  const removeParsedShift = (index: number) => {
+    setParsed((current: any) => {
+      if (!current || !Array.isArray(current.shifts)) return current;
+      const rows = current.shifts.filter((_: any, rowIndex: number) => rowIndex !== index);
+      return markAdminReviewed({ ...current, shifts: rows });
+    });
+    setEditingAiIndex((current) => current === index ? null : current != null && current > index ? current - 1 : current);
+    setMessage('Schicht aus der AI-Auswahl entfernt.');
   };
 
   async function parseOrder() {
@@ -172,6 +208,7 @@ export default function AdminScheduleTools() {
     try {
       const result: any = await api('automation/orders/parse/', { method: 'POST', body: JSON.stringify({ text: orderText }) });
       setParsed(result);
+      setEditingAiIndex(null);
       setMessage(`${result.shifts?.length || 0} Schicht(en) erkannt. Bitte kurz prüfen.`);
     } catch (error: any) {
       setMessage(error.message || 'AI-Analyse fehlgeschlagen.');
@@ -182,16 +219,24 @@ export default function AdminScheduleTools() {
 
   async function approveOrder() {
     if (!parsed) return void parseOrder();
+    if (!Array.isArray(parsed.shifts) || parsed.shifts.length === 0) {
+      setMessage('Mindestens eine Schicht muss zur Erstellung übrig bleiben.');
+      return;
+    }
     setBusy(true);
     try {
-      const result: any = await api('automation/orders/approve/', { method: 'POST', body: JSON.stringify({ parsed, raw_text: orderText }) });
-      setMessage(`${result.created_count || 0} Personalplatz/-plätze als OpenShift erstellt.`);
+      const result: any = await api('automation/orders/approve/', {
+        method: 'POST',
+        body: JSON.stringify({ parsed, raw_text: orderText, admin_reviewed: Boolean(parsed.admin_reviewed) }),
+      });
+      setMessage(`${result.created_count || 0} Personalplatz/-plätze erstellt.`);
       setAiOpen(false);
       setParsed(undefined);
+      setEditingAiIndex(null);
       setOrderText('');
       refreshSchedule();
     } catch (error: any) {
-      setMessage(error.message || 'OpenShifts konnten nicht erstellt werden.');
+      setMessage(error.message || 'Schichten konnten nicht erstellt werden.');
     } finally {
       setBusy(false);
     }
@@ -237,9 +282,37 @@ export default function AdminScheduleTools() {
       {aiOpen ? createPortal(<div className="admin-schedule-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setAiOpen(false); }}>
         <section className="admin-schedule-sheet ai" role="dialog" aria-modal="true" aria-label="Schichten mit AI erstellen">
           <header><div><small>AI · PERSONALPLANUNG</small><h2>Schichten mit AI erstellen</h2></div><button type="button" onClick={() => setAiOpen(false)}>Fertig</button></header>
-          <label>Auftragstext<textarea autoFocus value={orderText} onChange={(event) => { setOrderText(event.target.value); setParsed(undefined); }} placeholder="Kundenanfrage hier einfügen …" /></label>
-          {parsed ? <div className="admin-ai-preview"><b>{parsed.shifts?.length || 0} Schicht(en) erkannt</b>{parsed.shifts?.map((item: any, index: number) => <span key={index}>{item.date} · {item.start_time}–{item.end_time} · {item.count}× {item.role} · {item.site_text}</span>)}</div> : null}
-          <div className="admin-schedule-sheet-actions"><button type="button" onClick={() => setAiOpen(false)}>Abbrechen</button><button type="button" className="primary" disabled={busy} onClick={() => void (parsed ? approveOrder() : parseOrder())}>{busy ? '…' : parsed ? 'OpenShifts erstellen' : 'Mit AI analysieren'}</button></div>
+          <label>Auftragstext<textarea autoFocus value={orderText} onChange={(event) => { setOrderText(event.target.value); setParsed(undefined); setEditingAiIndex(null); }} placeholder="Kundenanfrage hier einfügen …" /></label>
+          {parsed ? <div className="admin-ai-preview">
+            <div className="admin-ai-preview-head"><b>{parsed.shifts?.length || 0} Schicht(en) erkannt</b><small>Vor dem Erstellen kannst du jede Zeile bearbeiten oder entfernen.</small></div>
+            {(parsed.shifts || []).map((item: any, index: number) => {
+              const editing = editingAiIndex === index;
+              return <article className={`admin-ai-row${editing ? ' editing' : ''}`} key={`${item.date || 'row'}-${index}`}>
+                <div className="admin-ai-row-head"><strong>Schicht {index + 1}</strong>{item.assignment_worker_name ? <em>{item.assignment_worker_name}</em> : <em>OpenShift</em>}</div>
+                {editing ? <div className="admin-ai-edit-grid">
+                  <label>Datum<input type="date" value={item.date || ''} onChange={(event) => updateParsedShift(index, 'date', event.target.value)} /></label>
+                  <label>Von<input type="time" value={item.start_time || ''} onChange={(event) => updateParsedShift(index, 'start_time', event.target.value)} /></label>
+                  <label>Bis<input type="time" value={item.end_time || ''} onChange={(event) => updateParsedShift(index, 'end_time', event.target.value)} /></label>
+                  <label>Anzahl<input type="number" min="1" value={item.count || 1} onChange={(event) => updateParsedShift(index, 'count', Math.max(1, Number(event.target.value) || 1))} /></label>
+                  <label className="wide">Position<input type="text" value={item.role || ''} onChange={(event) => updateParsedShift(index, 'role', event.target.value)} /></label>
+                  <label className="wide">Kunde<input type="text" value={item.site_text || ''} onChange={(event) => updateParsedShift(index, 'site_text', event.target.value)} /></label>
+                  <label className="wide">Standort<input type="text" value={item.location_text || ''} onChange={(event) => updateParsedShift(index, 'location_text', event.target.value)} /></label>
+                  <label className="wide">Mitarbeiter<input type="text" value={item.assignment_worker_name || ''} placeholder="Leer = OpenShift" onChange={(event) => updateParsedShift(index, 'assignment_worker_name', event.target.value)} /></label>
+                  <label className="wide">Notiz<textarea value={item.notes || ''} onChange={(event) => updateParsedShift(index, 'notes', event.target.value)} /></label>
+                </div> : <div className="admin-ai-row-summary">
+                  <b>{item.date} · {item.start_time}–{item.end_time}</b>
+                  <span>{item.count || 1}× {item.role || 'Schicht'} · {item.site_text || 'Kunde'}{item.location_text ? ` · ${item.location_text}` : ''}</span>
+                  {item.notes ? <small>Notiz: {item.notes}</small> : null}
+                </div>}
+                <div className="admin-ai-row-actions">
+                  <button type="button" onClick={() => setEditingAiIndex(editing ? null : index)}>{editing ? 'Fertig' : 'Bearbeiten'}</button>
+                  <button type="button" className="danger" onClick={() => removeParsedShift(index)}>Löschen</button>
+                </div>
+              </article>;
+            })}
+            {!parsed.shifts?.length ? <div className="admin-ai-empty">Alle erkannten Schichten wurden entfernt.</div> : null}
+          </div> : null}
+          <div className="admin-schedule-sheet-actions"><button type="button" onClick={() => setAiOpen(false)}>Abbrechen</button><button type="button" className="primary" disabled={busy || Boolean(parsed && !parsed.shifts?.length)} onClick={() => void (parsed ? approveOrder() : parseOrder())}>{busy ? '…' : parsed ? 'Geprüfte Schichten erstellen' : 'Mit AI analysieren'}</button></div>
           {message ? <button type="button" className="admin-schedule-message" onClick={() => setMessage('')}>{message}</button> : null}
         </section>
       </div>, document.body) : null}
