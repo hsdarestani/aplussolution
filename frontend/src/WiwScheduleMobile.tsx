@@ -129,14 +129,14 @@ const normalize = (value: string) => String(value || '').normalize('NFD').replac
 const clientKey = (item: any) => String(item?.client || item?.client_name || 'ohne-kunde');
 const allowedWorkerNames = new Set(WORKER_PICKER_NAMES.map(normalize));
 
-function workerInitials(worker?: any) {
+function cardWorkerInitials(worker?: any) {
   const source = String(worker?.name || worker?.employee_number || '').trim();
   const parts = source.split(/\s+/).filter(Boolean);
   return ((parts[0]?.[0] || '') + (parts.length > 1 ? parts[parts.length - 1]?.[0] || '' : '')).toUpperCase() || 'MA';
 }
 
 function CardWorkerAvatar({ worker, open, draft }: { worker?: any; open?: boolean; draft?: boolean }) {
-  const fallback = draft ? 'E' : open ? 'OS' : workerInitials(worker);
+  const fallback = draft ? 'E' : open ? 'OS' : cardWorkerInitials(worker);
   return <span className={`wiw-card-avatar ${open ? 'is-open' : ''}`} aria-hidden="true">
     <span>{fallback}</span>
     {worker?.avatar ? <img src={worker.avatar} alt="" loading="lazy" onError={(event) => event.currentTarget.remove()} /> : null}
