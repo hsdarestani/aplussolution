@@ -551,3 +551,115 @@
     color:#fff!important;
   }
 }
+
+
+/* 2026-09-19 isolate attendance drill-down from Dienstplan avatar styles */
+@media(max-width:900px){
+  .wiw-period-workers,
+  .wiw-worker-timesheet,
+  .wiw-attendance-entry-detail,
+  .wiw-attendance-editor{
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    box-sizing:border-box!important;
+    overflow-x:hidden!important;
+  }
+
+  .wiw-period-workers .wiw-worker-list,
+  .wiw-period-workers .wiw-worker-row{
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    box-sizing:border-box!important;
+  }
+
+  .wiw-period-workers .wiw-worker-row{
+    grid-template-columns:44px minmax(0,1fr)!important;
+    gap:11px!important;
+    min-height:58px!important;
+    padding:8px 12px!important;
+    align-items:center!important;
+  }
+
+  .wiw-period-workers .wiw-worker-avatar,
+  .wiw-worker-timesheet .wiw-worker-avatar{
+    position:static!important;
+    inset:auto!important;
+    z-index:auto!important;
+    flex:none!important;
+    margin:0!important;
+    width:38px!important;
+    min-width:38px!important;
+    height:38px!important;
+    border-radius:50%!important;
+    display:grid!important;
+    place-items:center!important;
+    overflow:hidden!important;
+    background:#e4edf4!important;
+    color:#31556f!important;
+    border:1px solid #d1dce5!important;
+    font-size:11px!important;
+    font-weight:800!important;
+    line-height:1!important;
+  }
+
+  .wiw-worker-timesheet .wiw-worker-avatar.small{
+    width:32px!important;
+    min-width:32px!important;
+    height:32px!important;
+  }
+
+  .wiw-period-workers .wiw-worker-avatar img,
+  .wiw-worker-timesheet .wiw-worker-avatar img{
+    position:static!important;
+    inset:auto!important;
+    width:100%!important;
+    height:100%!important;
+    object-fit:cover!important;
+    border:0!important;
+    border-radius:50%!important;
+  }
+
+  .wiw-period-workers .wiw-worker-row>strong{
+    min-width:0!important;
+    width:auto!important;
+    max-width:100%!important;
+    display:block!important;
+    overflow:hidden!important;
+    text-overflow:ellipsis!important;
+    overflow-wrap:normal!important;
+    word-break:normal!important;
+    white-space:nowrap!important;
+    font-size:13px!important;
+    line-height:1.25!important;
+  }
+
+  .wiw-worker-timesheet .wiw-timesheet-person{
+    width:100%!important;
+    box-sizing:border-box!important;
+    padding:8px 12px!important;
+    gap:10px!important;
+  }
+
+  .wiw-worker-timesheet .wiw-timesheet-person>strong{
+    min-width:0!important;
+    overflow:hidden!important;
+    text-overflow:ellipsis!important;
+    white-space:nowrap!important;
+    word-break:normal!important;
+  }
+
+  .wiw-worker-timesheet .wiw-timesheet-days,
+  .wiw-worker-timesheet .wiw-timesheet-days section,
+  .wiw-worker-timesheet .wiw-timesheet-entry{
+    width:100%!important;
+    max-width:100%!important;
+    box-sizing:border-box!important;
+  }
+
+  .wiw-worker-timesheet .wiw-timesheet-entry span{
+    white-space:nowrap!important;
+    word-break:normal!important;
+  }
+}

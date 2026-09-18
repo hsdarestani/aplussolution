@@ -93,16 +93,6 @@ export default function MobileAttendanceClarityEnhancer() {
       const title = root.querySelector<HTMLElement>('.wiw-mobile-screen-title');
       if (title) title.textContent = manager ? 'Team-Zeiterfassung' : 'Meine Arbeitszeiten';
 
-      let note = root.querySelector<HTMLElement>('.wiw-attendance-role-note');
-      if (!note) {
-        note = document.createElement('div');
-        note.className = 'wiw-attendance-role-note';
-        title?.insertAdjacentElement('afterend', note);
-      }
-      note.innerHTML = manager
-        ? '<b>Abrechnungszeiträume</b><span>Einträge, Mitarbeiter und Gesamtstunden pro Monat auf einen Blick.</span>'
-        : '<b>Deine Zeiterfassung</b><span>Monate ohne erfasste Arbeitszeit sind deutlich als leer markiert.</span>';
-
       const rows = Array.from(root.querySelectorAll<HTMLButtonElement>('.wiw-period-row'));
       rows.forEach((row, index) => {
         const summary = summaries.get(currentBerlinMonthOffset(index));

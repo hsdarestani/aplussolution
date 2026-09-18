@@ -510,6 +510,10 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
 
   return <div className="wiw-pay-periods" data-testid="phase8-pay-periods">
     <div className="wiw-mobile-screen-title">Abrechnungszeiträume</div>
+    <div className="wiw-attendance-role-note">
+      <b>{showWorker ? 'Abrechnungszeiträume' : 'Deine Zeiterfassung'}</b>
+      <span>{showWorker ? 'Einträge, Mitarbeiter und Gesamtstunden pro Monat auf einen Blick.' : 'Monate ohne erfasste Arbeitszeit sind deutlich als leer markiert.'}</span>
+    </div>
     {showWorker && <div className="wiw-attendance-admin-tools">
       <button type="button" onClick={() => setReportOpen(true)}><IonIcon icon={documentTextOutline} /><span><b>Arbeitszeit-PDF</b><small>Mitarbeiter & Zeitraum filtern</small></span></button>
     </div>}
