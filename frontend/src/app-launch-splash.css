@@ -1,1 +1,309 @@
-.app-launch-splash{position:fixed;z-index:999999;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;background:radial-gradient(circle at 50% 31%,#1b588c 0,#0d355f 31%,#071f3e 67%,#05162c 100%);color:#fff;opacity:1;transform:scale(1);filter:blur(0);transition:opacity .38s ease,transform .38s cubic-bezier(.22,.8,.2,1),filter .38s ease}.app-launch-splash:before{content:'';position:absolute;inset:-25%;background:conic-gradient(from 180deg at 50% 50%,transparent,rgba(231,201,110,.07),transparent 28%,rgba(61,151,220,.08),transparent 62%);animation:aplus-ambient-spin 7s linear infinite}.app-launch-splash.is-hiding{opacity:0;transform:scale(1.035);filter:blur(3px);pointer-events:none}.app-launch-logo-wrap{position:relative;width:min(55vw,224px);height:min(55vw,224px);display:grid;place-items:center;animation:aplus-launch-float 2.1s cubic-bezier(.2,.8,.2,1) both}.app-launch-logo-wrap:after{content:'';position:absolute;z-index:1;inset:23%;border-radius:50%;background:rgba(228,194,95,.15);filter:blur(20px);animation:aplus-core-glow 1.7s ease-out both}.app-launch-logo-wrap img{position:relative;z-index:3;width:78%;max-height:78%;object-fit:contain;filter:drop-shadow(0 14px 31px rgba(0,0,0,.32));animation:aplus-logo-in .82s cubic-bezier(.16,.84,.34,1) both}.app-launch-ring{position:absolute;z-index:2;inset:15%;border:1px solid rgba(231,201,110,.58);border-radius:50%;opacity:0;animation:aplus-ring 1.75s .16s cubic-bezier(.16,.72,.25,1) both}.app-launch-ring.ring-two{inset:4%;border-color:rgba(255,236,167,.34);animation-delay:.42s}.app-launch-splash>strong{position:relative;z-index:3;margin-top:17px;font-size:15px;letter-spacing:.17em;font-weight:780;color:#edd073;opacity:0;animation:aplus-copy-in .58s .58s cubic-bezier(.22,.8,.2,1) forwards}.app-launch-splash>small{position:relative;z-index:3;margin-top:9px;font-size:11.5px;letter-spacing:.12em;font-weight:600;color:rgba(255,255,255,.78);opacity:0;animation:aplus-tagline-in .62s .82s cubic-bezier(.22,.8,.2,1) forwards}.app-launch-progress{position:relative;z-index:3;width:min(42vw,154px);height:2px;margin-top:29px;border-radius:99px;overflow:hidden;background:rgba(255,255,255,.13);opacity:0;animation:aplus-progress-shell .3s .72s forwards}.app-launch-progress i{display:block;width:100%;height:100%;background:linear-gradient(90deg,transparent,#d9b74f 40%,#fff0b8 72%,#fff);transform:translateX(-104%);animation:aplus-progress 1.28s .76s cubic-bezier(.22,.72,.22,1) forwards}.app-launch-glow{position:absolute;border-radius:50%;filter:blur(58px);opacity:.2;will-change:transform}.app-launch-glow-one{width:250px;height:250px;top:10%;left:-120px;background:#2583cb;animation:aplus-glow-one 3.1s ease-in-out infinite alternate}.app-launch-glow-two{width:285px;height:285px;right:-155px;bottom:7%;background:#d0a83e;animation:aplus-glow-two 3.6s ease-in-out infinite alternate}@keyframes aplus-logo-in{0%{opacity:0;transform:scale(.72) translateY(16px);filter:blur(5px)}65%{opacity:1;transform:scale(1.035) translateY(-2px);filter:blur(0)}100%{opacity:1;transform:scale(1) translateY(0);filter:blur(0)}}@keyframes aplus-core-glow{0%{opacity:0;transform:scale(.5)}55%{opacity:1;transform:scale(1.2)}100%{opacity:.62;transform:scale(1)}}@keyframes aplus-ring{0%{opacity:0;transform:scale(.62)}25%{opacity:.72}100%{opacity:0;transform:scale(1.42)}}@keyframes aplus-copy-in{from{opacity:0;transform:translateY(9px);letter-spacing:.24em;filter:blur(3px)}to{opacity:1;transform:translateY(0);letter-spacing:.17em;filter:blur(0)}}@keyframes aplus-tagline-in{from{opacity:0;transform:translateY(7px);letter-spacing:.2em}to{opacity:1;transform:translateY(0);letter-spacing:.12em}}@keyframes aplus-progress-shell{to{opacity:1}}@keyframes aplus-progress{0%{transform:translateX(-104%)}100%{transform:translateX(0)}}@keyframes aplus-launch-float{0%,100%{transform:translateY(0)}52%{transform:translateY(-5px)}}@keyframes aplus-ambient-spin{to{transform:rotate(360deg)}}@keyframes aplus-glow-one{from{transform:translate3d(0,0,0) scale(.9)}to{transform:translate3d(55px,28px,0) scale(1.16)}}@keyframes aplus-glow-two{from{transform:translate3d(0,0,0) scale(.92)}to{transform:translate3d(-48px,-28px,0) scale(1.12)}}@media(prefers-reduced-motion:reduce){.app-launch-splash:before,.app-launch-logo-wrap,.app-launch-logo-wrap:after,.app-launch-logo-wrap img,.app-launch-ring,.app-launch-splash>strong,.app-launch-splash>small,.app-launch-progress,.app-launch-progress i,.app-launch-glow{animation:none!important}.app-launch-splash>strong,.app-launch-splash>small,.app-launch-progress{opacity:1}.app-launch-progress i{transform:none}}
+.app-launch-splash {
+  position: fixed;
+  z-index: 999999;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 78% 14%, rgba(56, 98, 157, .24), transparent 30%),
+    radial-gradient(circle at 20% 72%, rgba(43, 72, 113, .18), transparent 32%),
+    radial-gradient(circle at 50% 39%, #102f59 0%, #091f3f 42%, #06152d 76%, #030b19 100%);
+  opacity: 1;
+  transform: scale(1);
+  filter: blur(0);
+  transition:
+    opacity .35s ease,
+    transform .35s cubic-bezier(.22, .8, .2, 1),
+    filter .35s ease;
+  isolation: isolate;
+}
+
+.app-launch-splash::before {
+  content: '';
+  position: absolute;
+  inset: -15%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(156deg, transparent 22%, rgba(127, 155, 197, .065) 37%, transparent 53%),
+    linear-gradient(164deg, transparent 48%, rgba(105, 139, 185, .055) 62%, transparent 73%);
+  filter: blur(18px);
+  animation: aplus-ambient-drift 4.8s ease-in-out infinite alternate;
+}
+
+.app-launch-splash.is-hiding {
+  opacity: 0;
+  transform: scale(1.022);
+  filter: blur(2px);
+  pointer-events: none;
+}
+
+.app-launch-fog {
+  position: absolute;
+  z-index: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  filter: blur(64px);
+  opacity: .16;
+}
+
+.app-launch-fog-one {
+  width: 60vw;
+  height: 36vw;
+  max-width: 410px;
+  max-height: 250px;
+  left: -14%;
+  top: 12%;
+  background: #35699e;
+  animation: aplus-fog-one 3.8s ease-in-out infinite alternate;
+}
+
+.app-launch-fog-two {
+  width: 72vw;
+  height: 40vw;
+  max-width: 490px;
+  max-height: 280px;
+  right: -23%;
+  bottom: 8%;
+  background: #8a642e;
+  opacity: .09;
+  animation: aplus-fog-two 4.2s ease-in-out infinite alternate;
+}
+
+.app-launch-ribbons {
+  position: absolute;
+  z-index: 1;
+  inset: -4%;
+  width: 108%;
+  height: 108%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.app-launch-ribbon-set {
+  fill: none;
+  stroke: url(#aplusRibbonGold);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  animation: aplus-ribbon-settle 2.05s cubic-bezier(.16, .78, .22, 1) both;
+}
+
+.app-launch-ribbon-set path {
+  path-length: 1;
+  stroke-dasharray: .56 .44;
+  stroke-dashoffset: 1.05;
+  animation: aplus-ribbon-flow 2.05s cubic-bezier(.18, .72, .25, 1) both;
+}
+
+.app-launch-ribbon-set path:nth-child(2) { animation-delay: .06s; }
+.app-launch-ribbon-set path:nth-child(3) { animation-delay: .12s; }
+.app-launch-ribbon-set path:nth-child(4) { animation-delay: .18s; }
+
+.app-launch-ribbon-glow {
+  stroke-width: 1.9;
+  opacity: .55;
+}
+
+.app-launch-ribbon-core {
+  stroke-width: .34;
+  filter: drop-shadow(0 0 1.6px rgba(255, 226, 157, .88));
+}
+
+.app-launch-ribbon-core path {
+  stroke-dasharray: .47 .53;
+}
+
+.app-launch-particles {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  pointer-events: none;
+}
+
+.app-launch-particles span {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: rgba(255, 241, 204, .9);
+  box-shadow:
+    0 0 5px rgba(255, 224, 153, .82),
+    0 0 11px rgba(223, 177, 83, .34);
+  opacity: .12;
+  animation-name: aplus-particle-twinkle;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+
+.app-launch-particles span:nth-child(3n) {
+  width: 3px;
+  height: 3px;
+}
+
+.app-launch-particles span:nth-child(4n) {
+  background: rgba(229, 238, 248, .92);
+  box-shadow: 0 0 7px rgba(180, 207, 238, .5);
+}
+
+.app-launch-logo-stage {
+  position: relative;
+  z-index: 4;
+  width: min(82vw, 430px);
+  display: grid;
+  place-items: center;
+  transform-origin: center center;
+  animation: aplus-logo-settle 2.05s cubic-bezier(.16, .82, .22, 1) both;
+  will-change: transform, opacity;
+}
+
+.app-launch-logo-stage img {
+  position: relative;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  height: auto;
+  filter:
+    drop-shadow(0 0 1px rgba(255, 244, 213, .75))
+    drop-shadow(0 0 7px rgba(219, 169, 70, .22));
+}
+
+.app-launch-logo-aura {
+  position: absolute;
+  z-index: 0;
+  width: 72%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: rgba(220, 169, 69, .13);
+  filter: blur(38px);
+  animation: aplus-logo-aura 1.6s ease-out both;
+}
+
+.app-launch-logo-shine {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 30%,
+    rgba(255, 251, 235, .06) 42%,
+    rgba(255, 250, 222, .82) 50%,
+    rgba(255, 244, 202, .1) 58%,
+    transparent 70%
+  );
+  transform: translateX(-125%) skewX(-12deg);
+  -webkit-mask: url('/aplus-intro-logo.svg') center / contain no-repeat;
+  mask: url('/aplus-intro-logo.svg') center / contain no-repeat;
+  animation: aplus-logo-shine 1.2s .2s cubic-bezier(.18, .7, .2, 1) both;
+}
+
+@keyframes aplus-logo-settle {
+  0% {
+    opacity: .3;
+    transform: scale(1.09) translateY(5px);
+  }
+  18% {
+    opacity: .82;
+    transform: scale(1.072) translateY(3px);
+  }
+  42% {
+    opacity: 1;
+    transform: scale(1.042) translateY(1px);
+  }
+  72% {
+    transform: scale(1.014) translateY(0);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes aplus-logo-shine {
+  0%, 12% { opacity: 0; transform: translateX(-125%) skewX(-12deg); }
+  26% { opacity: .85; }
+  76% { opacity: .55; }
+  100% { opacity: 0; transform: translateX(128%) skewX(-12deg); }
+}
+
+@keyframes aplus-logo-aura {
+  0% { opacity: 0; transform: scale(.62); }
+  42% { opacity: .95; transform: scale(1.12); }
+  100% { opacity: .56; transform: scale(1); }
+}
+
+@keyframes aplus-ribbon-flow {
+  0% { stroke-dashoffset: 1.08; }
+  58% { stroke-dashoffset: .18; }
+  100% { stroke-dashoffset: -.34; }
+}
+
+@keyframes aplus-ribbon-settle {
+  0% { opacity: 0; transform: translate3d(-3%, -1.5%, 0) scale(1.04); }
+  14% { opacity: .86; }
+  68% { opacity: .62; }
+  100% { opacity: .18; transform: translate3d(2%, 1.5%, 0) scale(1); }
+}
+
+@keyframes aplus-particle-twinkle {
+  from { opacity: .08; transform: translate3d(0, 4px, 0) scale(.7); }
+  to { opacity: .88; transform: translate3d(2px, -7px, 0) scale(1.2); }
+}
+
+@keyframes aplus-ambient-drift {
+  from { transform: translate3d(-1.5%, -1%, 0) scale(1); }
+  to { transform: translate3d(2%, 1.5%, 0) scale(1.04); }
+}
+
+@keyframes aplus-fog-one {
+  from { transform: translate3d(-12px, -5px, 0) scale(.92); }
+  to { transform: translate3d(54px, 34px, 0) scale(1.1); }
+}
+
+@keyframes aplus-fog-two {
+  from { transform: translate3d(0, 0, 0) scale(.92); }
+  to { transform: translate3d(-45px, -22px, 0) scale(1.08); }
+}
+
+@media (max-width: 430px) {
+  .app-launch-logo-stage {
+    width: min(84vw, 360px);
+  }
+
+  .app-launch-ribbon-glow {
+    stroke-width: 2.15;
+  }
+
+  .app-launch-ribbon-core {
+    stroke-width: .38;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-launch-splash::before,
+  .app-launch-fog,
+  .app-launch-ribbon-set,
+  .app-launch-ribbon-set path,
+  .app-launch-particles span,
+  .app-launch-logo-stage,
+  .app-launch-logo-aura,
+  .app-launch-logo-shine {
+    animation: none !important;
+  }
+
+  .app-launch-logo-stage {
+    opacity: 1;
+    transform: none;
+  }
+
+  .app-launch-ribbon-set {
+    opacity: .18;
+  }
+
+  .app-launch-logo-shine {
+    display: none;
+  }
+}
