@@ -7,12 +7,13 @@ const cwd = process.cwd();
 const requirePush = ['1', 'true', 'yes'].includes(String(process.env.REQUIRE_NATIVE_PUSH || '').toLowerCase());
 
 function installAndroidLauncherArtwork(manifestPath) {
-  const source = path.join(cwd, 'public', 'sicon.png');
-  if (!fs.existsSync(source)) throw new Error(`Official Android icon source not found: ${source}`);
+  const source = path.resolve(cwd, '..', 'newappicon.png');
+  if (!fs.existsSync(source)) throw new Error(`Approved Android app icon source not found: ${source}`);
   const launcherDir = path.join(cwd, 'android', 'app', 'src', 'main', 'res', 'drawable-nodpi');
   const launcherPath = path.join(launcherDir, 'launcher_icon.png');
   fs.mkdirSync(launcherDir, { recursive: true });
   fs.copyFileSync(source, launcherPath);
+  console.log(`Installed Android launcher icon from ${source}.`);
 
   let xml = fs.readFileSync(manifestPath, 'utf8');
   if (!/<application\b/.test(xml)) throw new Error('AndroidManifest.xml has no <application> element.');

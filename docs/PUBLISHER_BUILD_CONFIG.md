@@ -10,6 +10,13 @@ Use this configuration for the `A+ Solution` application in `publisher.smarbiz.s
 - Android package: `de.aplussolution.workforce`
 - iOS bundle ID: `de.aplussolution.workforce`
 
+## App icon source
+
+- Approved native app icon: `newappicon.png` at the repository root.
+- Android Publisher builds copy this file into the generated launcher resources.
+- iOS Publisher builds resize this file into every generated AppIcon slot; if the PNG contains transparency, the iOS build removes alpha as required by App Store Connect.
+- Do not fall back to `frontend/public/sicon.png` for store builds.
+
 ## build_config
 
 ```json

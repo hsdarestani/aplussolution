@@ -24,7 +24,7 @@ node scripts/prepare-native.mjs ios
 # App Store Connect rejects any large app icon that contains transparency/alpha
 # (ITMS-90717). Flatten the source onto an opaque white background first, then
 # resize that RGB PNG into every generated native icon slot.
-ICON_SOURCE="$FRONTEND/public/sicon.png"
+ICON_SOURCE="$ROOT/newappicon.png"
 APP_ICON_SET="$FRONTEND/ios/App/App/Assets.xcassets/AppIcon.appiconset"
 FLAT_ICON_SOURCE="$(mktemp -t aplus-flat-appicon).png"
 test -f "$ICON_SOURCE"
@@ -76,7 +76,7 @@ if [ "$ICON_COUNT" -lt 1 ]; then
   exit 1
 fi
 
-echo "Replaced $ICON_COUNT native AppIcon PNG file(s) with opaque icons from public/sicon.png."
+echo "Replaced $ICON_COUNT native AppIcon PNG file(s) with the approved newappicon.png artwork."
 echo "Opaque source icon SHA256: $(shasum -a 256 "$FLAT_ICON_SOURCE" | awk '{print $1}')"
 find "$APP_ICON_SET" -type f -name '*.png' -maxdepth 1 -print -exec shasum -a 256 {} \;
 

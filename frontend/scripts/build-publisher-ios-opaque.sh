@@ -39,8 +39,8 @@ npx cap add ios
 npx cap sync ios
 node scripts/prepare-native.mjs ios
 
-ICON_SOURCE="$FRONTEND/public/sicon.png"
-OPAQUE_ICON_SOURCE="$FRONTEND/.publisher-sicon-opaque.png"
+ICON_SOURCE="$ROOT/newappicon.png"
+OPAQUE_ICON_SOURCE="$FRONTEND/.publisher-newappicon-opaque.png"
 APP_ICON_SET="$FRONTEND/ios/App/App/Assets.xcassets/AppIcon.appiconset"
 test -f "$ICON_SOURCE"
 test -d "$APP_ICON_SET"
@@ -88,7 +88,7 @@ if [ "$ICON_COUNT" -lt 1 ]; then
   exit 1
 fi
 
-echo "Replaced $ICON_COUNT native AppIcon PNG file(s) with opaque public/sicon.png artwork."
+echo "Replaced $ICON_COUNT native AppIcon PNG file(s) with the approved newappicon.png artwork."
 echo "Opaque icon SHA256: $(shasum -a 256 "$OPAQUE_ICON_SOURCE" | awk '{print $1}')"
 
 python3 scripts/patch-ios-project-signing.py
