@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { IonIcon } from '@ionic/react';
 import {
   addOutline,
@@ -352,13 +353,13 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
       { value: 'housekeeping', label: 'Housekeeping' },
       { value: 'front_office', label: 'Front Office' },
     ];
-    return <>
-      <div className="wiw-sheet-backdrop wiw-pdf-backdrop attendance-pdf-backdrop" data-testid="phase8-attendance-report">
-        <section className="wiw-pdf-sheet">
-          <header>
-            <div><b>Arbeitszeit als PDF</b><small>Filter auswählen und exportieren</small></div>
-            <button type="button" disabled={reportBusy} onClick={() => void downloadAttendanceReport()}>{reportBusy ? 'Erstellen…' : 'Fertig'}</button>
-          </header>
+    return createPortal(<div className="attendance-pdf-screen" data-testid="phase8-attendance-report">
+      <section className="wiw-pdf-sheet attendance-pdf-sheet">
+        <header className="attendance-pdf-topbar">
+          <button type="button" className="attendance-pdf-back" disabled={reportBusy} onClick={() => setReportOpen(false)}>‹ Zurück</button>
+          <div><b>Arbeitszeit als PDF</b><small>Filter auswählen und exportieren</small></div>
+          <button type="button" className="attendance-pdf-finish" disabled={reportBusy} onClick={() => void downloadAttendanceReport()}>{reportBusy ? '…' : 'Fertig'}</button>
+        </header>
           <div className="wiw-pdf-scroll">
             <div className="wiw-pdf-dates">
               <label>Von<button type="button" aria-label="PDF Startdatum" onClick={() => setReportDateField('date_from')}>{reportDateLabel(report.date_from)}</button></label>
@@ -395,18 +396,17 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
             </div>
           </div>
           {reportError ? <p className="wiw-pdf-error" role="alert">{reportError}</p> : null}
-          <footer className="attendance-pdf-footer">
-            <button type="button" className="primary" disabled={reportBusy || !report.date_from || !report.date_to} onClick={() => void downloadAttendanceReport()}>{reportBusy ? 'PDF wird erstellt…' : 'PDF erstellen'}</button>
-          </footer>
-        </section>
-      </div>
+        <footer className="attendance-pdf-footer">
+          <button type="button" className="primary" disabled={reportBusy || !report.date_from || !report.date_to} onClick={() => void downloadAttendanceReport()}>{reportBusy ? 'PDF wird erstellt…' : 'PDF erstellen'}</button>
+        </footer>
+      </section>
       {reportDateField ? <ScheduleDatePicker
         title="PDF Zeitraum"
         value={report[reportDateField]}
         onSelect={(date) => { setReport((current: any) => ({ ...current, [reportDateField]: date })); setReportDateField(''); }}
         onClose={() => setReportDateField('')}
       /> : null}
-    </>;
+    </div>, document.body);
   }
 
   if (form) {

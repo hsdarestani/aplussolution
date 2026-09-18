@@ -415,3 +415,139 @@
     -webkit-tap-highlight-color:transparent;
   }
 }
+
+
+/* 2026-09-19 standalone Arbeitszeit PDF screen */
+@media(max-width:900px){
+  .attendance-pdf-screen{
+    position:fixed;
+    z-index:21500;
+    inset:0 0 calc(62px + env(safe-area-inset-bottom)) 0;
+    width:100dvw;
+    max-width:100dvw;
+    min-width:0;
+    display:block;
+    background:#f7f8f9;
+    color:#263746;
+    overflow:hidden;
+    transform:none!important;
+  }
+  .attendance-pdf-screen .attendance-pdf-sheet{
+    width:100%!important;
+    max-width:none!important;
+    height:100%!important;
+    max-height:none!important;
+    min-width:0!important;
+    margin:0!important;
+    border-radius:0!important;
+    box-shadow:none!important;
+    background:#f7f8f9!important;
+  }
+  .attendance-pdf-screen .attendance-pdf-topbar{
+    min-height:64px!important;
+    padding:8px 12px!important;
+    display:grid!important;
+    grid-template-columns:72px minmax(0,1fr) 58px!important;
+    align-items:center!important;
+    gap:6px!important;
+    background:#fff!important;
+    border-bottom:1px solid #e2e6ea!important;
+    position:sticky!important;
+    top:0!important;
+    z-index:5!important;
+  }
+  .attendance-pdf-topbar>div{
+    min-width:0;
+    display:grid!important;
+    gap:2px!important;
+    text-align:center;
+  }
+  .attendance-pdf-topbar>div b{
+    display:block;
+    font-size:15px!important;
+    line-height:1.15;
+    color:#1d2939!important;
+    white-space:normal;
+  }
+  .attendance-pdf-topbar>div small{
+    display:block;
+    font-size:9.5px!important;
+    line-height:1.2;
+    color:#8a97a3!important;
+  }
+  .attendance-pdf-topbar .attendance-pdf-back,
+  .attendance-pdf-topbar .attendance-pdf-finish{
+    min-width:0!important;
+    height:40px!important;
+    padding:0!important;
+    border:0!important;
+    background:transparent!important;
+    color:#4c8a37!important;
+    font:700 12px/1 inherit!important;
+    white-space:nowrap;
+  }
+  .attendance-pdf-topbar .attendance-pdf-back{text-align:left!important}
+  .attendance-pdf-topbar .attendance-pdf-finish{text-align:right!important}
+
+  .attendance-pdf-screen .wiw-pdf-scroll{
+    width:100%;
+    min-width:0;
+    padding:12px!important;
+    box-sizing:border-box;
+    overflow-x:hidden!important;
+  }
+  .attendance-pdf-screen .wiw-pdf-dates{
+    width:100%;
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;
+  }
+  .attendance-pdf-screen .wiw-pdf-dates label,
+  .attendance-pdf-screen .wiw-pdf-dates button{
+    min-width:0!important;
+  }
+  .attendance-pdf-screen .wiw-pdf-dates button{
+    width:100%;
+    min-height:46px;
+    padding:8px 10px;
+    border:1px solid #d6dce2;
+    border-radius:10px;
+    background:#fff;
+    color:#1d2939;
+    text-align:left;
+    font:700 12px/1.25 inherit;
+    white-space:normal;
+  }
+  .attendance-pdf-screen .wiw-pdf-filter-block{
+    width:100%;
+    min-width:0;
+    box-sizing:border-box;
+  }
+  .attendance-pdf-screen .wiw-pdf-chip-grid{
+    width:100%;
+  }
+  .attendance-pdf-screen .wiw-pdf-chip-grid button{
+    max-width:100%;
+    white-space:nowrap;
+  }
+  .attendance-pdf-screen .wiw-pdf-chip-grid.compact{
+    display:grid!important;
+    grid-template-columns:repeat(3,minmax(0,1fr))!important;
+    gap:6px!important;
+  }
+  .attendance-pdf-screen .wiw-pdf-chip-grid.compact button{
+    width:100%!important;
+    padding:7px 4px!important;
+    font-size:10px!important;
+    overflow:hidden!important;
+    text-overflow:ellipsis!important;
+  }
+  .attendance-pdf-screen .attendance-pdf-footer{
+    grid-template-columns:1fr!important;
+    padding:10px 12px calc(10px + env(safe-area-inset-bottom))!important;
+  }
+  .attendance-pdf-screen .attendance-pdf-footer .primary{
+    width:100%!important;
+    background:#69aa4e!important;
+    border-color:#5c9847!important;
+    color:#fff!important;
+  }
+}

@@ -313,3 +313,15 @@
     .wiw-week-swipe-viewport{overflow:hidden}
   }
 }
+
+
+/* 2026-09-19 day totals */
+@media(max-width:900px){
+  .wiw-day-section>header em,
+  .wiw-week-preview .wiw-day-section>header em{
+    white-space:nowrap!important;
+    min-width:max-content;
+    font-size:10px!important;
+    font-weight:650!important;
+  }
+}
