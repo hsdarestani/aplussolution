@@ -1,0 +1,9 @@
+.german-time-field{display:grid;gap:6px;min-width:0;text-align:left}
+.german-time-field>span{font-size:12px;font-weight:800;color:#647385}
+.german-time-selects{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:7px}
+.german-time-selects select{width:100%;min-height:48px;padding:0 10px;border:1px solid #d8e0e6;border-radius:11px;background:#fff;color:#243446;font:inherit;font-size:17px;font-weight:700;text-align:center;appearance:auto}
+.german-time-selects b{font-size:20px;color:#667085}
+.german-time-selects select:focus{outline:2px solid rgba(99,169,68,.2);border-color:var(--ion-color-primary,#63a944)}
+.german-time-selects select:disabled{opacity:.6;background:#f4f5f6}
+.wiw-time-report-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
+@media(max-width:420px){.wiw-time-report-fields{grid-template-columns:1fr}}

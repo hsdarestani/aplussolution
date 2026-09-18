@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { IonBadge, IonButton, IonIcon, IonInput, IonSpinner } from '@ionic/react';
+import { IonBadge, IonButton, IonIcon, IonSpinner } from '@ionic/react';
 import {
   calendarOutline,
   chevronForwardOutline,
@@ -10,6 +10,8 @@ import {
   stopwatchOutline,
 } from 'ionicons/icons';
 import { api, clockLocationRequired, User } from './api';
+import GermanTimeField from './GermanTimeField';
+import TimeReportLegalConfirmation from './TimeReportLegalConfirmation';
 import './employee-portal.css';
 import './wiw-employee-home-mobile.css';
 
@@ -58,6 +60,7 @@ export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:a
   const [notice,setNotice]=useState('');
   const [timeReport,setTimeReport]=useState<any>();
   const [timeReportBusy,setTimeReportBusy]=useState(false);
+  const [timeReportLegalOpen,setTimeReportLegalOpen]=useState(false);
 
   const load = async () => {
     try {
@@ -84,11 +87,17 @@ export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:a
     });
   },[attendance?.pending_shift_report?.id]);
 
-  async function submitTimeReport() {
+  function requestTimeReportSubmit() {
     if (!timeReport?.shift?.id || !timeReport.clock_in || !timeReport.clock_out) {
       setNotice('Bitte Beginn und Ende vollständig angeben.');
       return;
     }
+    setNotice('');
+    setTimeReportLegalOpen(true);
+  }
+
+  async function submitTimeReport() {
+    if (!timeReport?.shift?.id || !timeReport.clock_in || !timeReport.clock_out) return;
     setTimeReportBusy(true);
     setNotice('');
     try {
@@ -99,9 +108,11 @@ export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:a
           shift: timeReport.shift.id,
           clock_in: `${timeReport.date}T${timeReport.clock_in}:00`,
           clock_out: `${endDate}T${timeReport.clock_out}:00`,
+          legal_acknowledged: true,
         }),
       });
       sessionStorage.removeItem(`aplus:time-report-later:${timeReport.shift.id}`);
+      setTimeReportLegalOpen(false);
       setTimeReport(undefined);
       setNotice('Arbeitszeit wurde zur Freigabe an die Administration gesendet.');
       await load();
@@ -114,6 +125,7 @@ export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:a
 
   function postponeTimeReport() {
     if (timeReport?.shift?.id) sessionStorage.setItem(`aplus:time-report-later:${timeReport.shift.id}`, '1');
+    setTimeReportLegalOpen(false);
     setTimeReport(undefined);
   }
 
@@ -246,13 +258,17 @@ export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:a
         <h2>Wie lange hast du heute gearbeitet?</h2>
         <p>{day(timeReport.shift.starts_at)} · {timeReport.shift.position_name || 'Einsatz'} · {timeReport.shift.location_name || ''}</p>
         <p>Geplant: {time(timeReport.shift.starts_at)}–{time(timeReport.shift.ends_at)}. Bitte trage deine tatsächliche Arbeitszeit ein.</p>
-        <IonInput fill="outline" type="time" label="Von" labelPlacement="floating" value={timeReport.clock_in} onIonInput={(event)=>setTimeReport({...timeReport,clock_in:String(event.detail.value||'')})}/>
-        <IonInput fill="outline" type="time" label="Bis" labelPlacement="floating" value={timeReport.clock_out} onIonInput={(event)=>setTimeReport({...timeReport,clock_out:String(event.detail.value||'')})}/>
+        <div className="wiw-time-report-fields">
+          <GermanTimeField label="Von" value={timeReport.clock_in} disabled={timeReportBusy} onChange={(value)=>setTimeReport({...timeReport,clock_in:value})}/>
+          <GermanTimeField label="Bis" value={timeReport.clock_out} disabled={timeReportBusy} onChange={(value)=>setTimeReport({...timeReport,clock_out:value})}/>
+        </div>
         {notice&&<div className="wiw-location-error">{notice}</div>}
-        <button type="button" className="activate" disabled={timeReportBusy} onClick={()=>void submitTimeReport()}>{timeReportBusy?'Wird gesendet …':'Zur Freigabe senden'}</button>
+        <button type="button" className="activate" disabled={timeReportBusy} onClick={requestTimeReportSubmit}>{timeReportBusy?'Wird gesendet …':'Zur Freigabe senden'}</button>
         <button type="button" className="cancel" disabled={timeReportBusy} onClick={postponeTimeReport}>Später</button>
       </div>
     </div>}
+
+    <TimeReportLegalConfirmation open={timeReportLegalOpen} busy={timeReportBusy} onCancel={()=>setTimeReportLegalOpen(false)} onConfirm={()=>void submitTimeReport()}/>
 
     {clockIntent&&<div className="wiw-location-backdrop" role="dialog" aria-modal="true" aria-label="Standortberechtigung">
       <div className="wiw-location-modal">

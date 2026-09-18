@@ -123,6 +123,7 @@ urlpatterns = [
     path('reports/timesheets.csv', advanced_views.export_timesheets),
     path('reports/schedule.csv', native_operations.export_schedule),
     path('reports/schedule.pdf', schedule_reports.export_schedule_pdf),
+    path('reports/attendance.pdf', schedule_reports.export_attendance_pdf),
     path('reports/payroll-estimate.csv', advanced_views.export_payroll_estimate),
     # Keep the DRF router last so fixed custom endpoints such as
     # workers/portal-status/ and workers/bulk-invite/ are not interpreted

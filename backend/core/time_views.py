@@ -135,6 +135,9 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
             return Response({'detail': 'Arbeitszeiten können hier nur Mitarbeiter melden.'}, status=403)
 
         worker = request.user.worker_profile
+        legal_acknowledged = request.data.get('legal_acknowledged') in (True, 'true', '1', 1)
+        if not legal_acknowledged:
+            return Response({'detail': 'Bitte bestätige zuerst die Erklärung zur Richtigkeit deiner Arbeitszeit.'}, status=400)
         shift_id = request.data.get('shift')
         if not shift_id:
             return Response({'detail': 'Schicht fehlt.'}, status=400)
@@ -173,7 +176,8 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
             clock_in=clock_in,
             clock_out=clock_out,
             approved=False,
-            edit_reason=SELF_REPORTED_REASON,
+            break_minutes=shift.break_minutes,
+            edit_reason=f'{SELF_REPORTED_REASON}\nLEGAL_ACKNOWLEDGED',
         )
         worker_name = request.user.get_full_name() or request.user.email
         for recipient in User.objects.filter(role__in=[User.Role.ADMIN, User.Role.MANAGER], is_active=True):
@@ -202,16 +206,24 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
         if entry.wiw_time_id:
             return Response({'detail': 'Importierte WIW-Arbeitszeiten sind historische, schreibgeschützte Nachweise.'}, status=400)
 
+        requested_clock_in = request.data.get('clock_in')
         requested_clock_out = request.data.get('clock_out')
+        requested_break = request.data.get('break_minutes')
         subtract_minutes = request.data.get('subtract_minutes')
         changed = False
+
+        if requested_clock_in not in (None, ''):
+            parsed_in = _parse_admin_datetime(requested_clock_in)
+            if not parsed_in:
+                return Response({'detail': 'Die angepasste Beginnzeit ist ungültig.'}, status=400)
+            entry.clock_in = parsed_in
+            changed = True
+
         if requested_clock_out not in (None, ''):
-            parsed = _parse_admin_datetime(requested_clock_out)
-            if not parsed:
-                return Response({'detail': 'Die angepasste Check-out-Zeit ist ungültig.'}, status=400)
-            if parsed <= entry.clock_in:
-                return Response({'detail': 'Check-out muss nach dem Check-in liegen.'}, status=400)
-            entry.clock_out = parsed
+            parsed_out = _parse_admin_datetime(requested_clock_out)
+            if not parsed_out:
+                return Response({'detail': 'Die angepasste Endzeit ist ungültig.'}, status=400)
+            entry.clock_out = parsed_out
             changed = True
         elif subtract_minutes not in (None, ''):
             try:
@@ -220,11 +232,21 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
                 return Response({'detail': 'Minutenwert ist ungültig.'}, status=400)
             if not entry.clock_out:
                 return Response({'detail': 'Es gibt noch keine Check-out-Zeit zum Anpassen.'}, status=400)
-            adjusted = entry.clock_out - timedelta(minutes=minutes)
-            if adjusted <= entry.clock_in:
-                return Response({'detail': 'Die angepasste Check-out-Zeit liegt vor dem Check-in.'}, status=400)
-            entry.clock_out = adjusted
-            changed = minutes > 0
+            entry.clock_out = entry.clock_out - timedelta(minutes=minutes)
+            changed = changed or minutes > 0
+
+        if not entry.clock_out or entry.clock_out <= entry.clock_in:
+            return Response({'detail': 'Arbeitsende muss nach dem Arbeitsbeginn liegen.'}, status=400)
+
+        if requested_break not in (None, ''):
+            try:
+                pause = max(0, min(24 * 60, int(requested_break)))
+            except (TypeError, ValueError):
+                return Response({'detail': 'Pausenminuten sind ungültig.'}, status=400)
+            if pause >= int((entry.clock_out - entry.clock_in).total_seconds() // 60):
+                return Response({'detail': 'Die Pause muss kürzer als die gesamte Arbeitszeit sein.'}, status=400)
+            entry.break_minutes = pause
+            changed = True
 
         reason = str(request.data.get('reason') or '').strip()
         previous_reason = entry.edit_reason or ''
@@ -236,10 +258,11 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
         entry.approved_by = request.user
         update_fields = ['approved', 'approved_by', 'edit_reason', 'updated_at']
         if changed:
-            update_fields.append('clock_out')
+            update_fields.extend(['clock_in', 'clock_out', 'break_minutes'])
         entry.save(update_fields=update_fields)
         audit(request, 'time.approved', entry, {
-            'clock_out_changed': changed,
+            'time_or_pause_changed': changed,
+            'break_minutes': entry.effective_break_minutes,
             'reason': reason,
         })
         return Response(self.get_serializer(entry).data)

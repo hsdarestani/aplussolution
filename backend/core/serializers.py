@@ -123,6 +123,7 @@ class ShiftSerializer(serializers.ModelSerializer):
 
 class TimeEntrySerializer(serializers.ModelSerializer):
     worked_minutes = serializers.IntegerField(read_only=True)
+    effective_break_minutes = serializers.IntegerField(read_only=True)
     worker_name = serializers.CharField(source='worker.user.get_full_name', read_only=True)
     shift_title = serializers.CharField(source='shift.position.name', read_only=True)
 

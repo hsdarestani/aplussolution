@@ -210,6 +210,7 @@ class TimeEntry(TimestampedModel):
     shift = models.ForeignKey(Shift, on_delete=models.SET_NULL, related_name='time_entries', null=True, blank=True)
     clock_in = models.DateTimeField()
     clock_out = models.DateTimeField(blank=True, null=True)
+    break_minutes = models.PositiveIntegerField(blank=True, null=True)
     clock_in_lat = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True)
     clock_in_lng = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True)
     clock_out_lat = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True)
@@ -223,9 +224,15 @@ class TimeEntry(TimestampedModel):
     wiw_synced_at = models.DateTimeField(blank=True, null=True)
 
     @property
+    def effective_break_minutes(self):
+        if self.break_minutes is not None:
+            return max(0, int(self.break_minutes))
+        return max(0, int(self.shift.break_minutes if self.shift else 0))
+
+    @property
     def worked_minutes(self):
         end = self.clock_out or timezone.now()
-        return max(0, int((end - self.clock_in).total_seconds() // 60) - (self.shift.break_minutes if self.shift else 0))
+        return max(0, int((end - self.clock_in).total_seconds() // 60) - self.effective_break_minutes)
 
 
 class TimeOffRequest(TimestampedModel):

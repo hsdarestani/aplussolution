@@ -13,12 +13,14 @@ let nativePushStarted = false;
 
 function openActionUrl(actionUrl?: string) {
   if (!actionUrl) return;
-  const route = actionUrl.replace(/^\/+/, '').split(/[?#]/)[0];
+  const source = new URL(actionUrl, window.location.origin);
+  const route = source.pathname.replace(/^\/+/, '').split(/[?#]/)[0];
   const viewMap: Record<string, string> = {
     messages: 'messages',
     contracts: 'contracts',
     documents: 'documents',
     schedule: 'schedule',
+    time: 'time',
     shifts: 'schedule',
     orders: 'orders',
     people: 'people',
@@ -31,6 +33,9 @@ function openActionUrl(actionUrl?: string) {
   }
   const url = new URL(window.location.href);
   url.pathname = '/';
+  source.searchParams.forEach((value, key) => {
+    if (key !== 'view') url.searchParams.set(key, value);
+  });
   url.searchParams.set('view', view);
   window.history.pushState({ view }, '', `${url.pathname}${url.search}${url.hash}`);
   window.dispatchEvent(new PopStateEvent('popstate'));

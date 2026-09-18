@@ -11,6 +11,8 @@ import {
   timeOutline,
 } from 'ionicons/icons';
 import { api } from './api';
+import GermanTimeField from './GermanTimeField';
+import TimeReportLegalConfirmation from './TimeReportLegalConfirmation';
 import { schedulePalette } from './scheduleClientPalette';
 import './wiw-schedule-mobile.css';
 import './wiw-employee-schedule-mobile.css';
@@ -144,6 +146,7 @@ export default function WiwEmployeeScheduleMobile() {
   const [selected, setSelected] = useState<any>();
   const [releaseTarget, setReleaseTarget] = useState<any>();
   const [timeReport, setTimeReport] = useState<any>();
+  const [timeReportLegalOpen, setTimeReportLegalOpen] = useState(false);
   const [releaseCandidates, setReleaseCandidates] = useState<any[]>([]);
   const [requestedWorkerId, setRequestedWorkerId] = useState('');
   const [releaseLoading, setReleaseLoading] = useState(false);
@@ -191,6 +194,20 @@ export default function WiwEmployeeScheduleMobile() {
       setMine(nextMine);
       setOpen(nextOpen);
       setMessage('');
+      const params = new URLSearchParams(window.location.search);
+      const missingShiftId = params.get('missing_shift');
+      if (missingShiftId) {
+        const target = nextMine.find((shift: any) => String(shift.id) === String(missingShiftId));
+        if (target) {
+          setMode('mine');
+          setAnchor(dateKey(target.starts_at));
+          setSelected(target);
+          params.delete('missing_shift');
+          params.delete('missing_month');
+          const nextQuery = params.toString();
+          window.history.replaceState(window.history.state, '', window.location.pathname + (nextQuery ? '?' + nextQuery : '') + window.location.hash);
+        }
+      }
       return { mine: nextMine, open: nextOpen };
     } catch (error: any) {
       setMessage(error?.message || 'Dienstplan konnte nicht geladen werden.');
@@ -343,14 +360,21 @@ export default function WiwEmployeeScheduleMobile() {
 
   function closeTimeReport() {
     if (busy) return;
+    setTimeReportLegalOpen(false);
     setTimeReport(undefined);
   }
 
-  async function submitTimeReport() {
+  function requestTimeReportSubmit() {
     if (!timeReport?.shift?.id || !timeReport.clock_in || !timeReport.clock_out) {
       setMessage('Bitte Beginn und Ende vollständig angeben.');
       return;
     }
+    setMessage('');
+    setTimeReportLegalOpen(true);
+  }
+
+  async function submitTimeReport() {
+    if (!timeReport?.shift?.id || !timeReport.clock_in || !timeReport.clock_out) return;
     setBusy(true);
     setMessage('');
     try {
@@ -361,12 +385,14 @@ export default function WiwEmployeeScheduleMobile() {
           shift: timeReport.shift.id,
           clock_in: `${timeReport.date}T${timeReport.clock_in}:00`,
           clock_out: `${endDate}T${timeReport.clock_out}:00`,
+          legal_acknowledged: true,
         }),
       });
       const updatedShift = { ...timeReport.shift, my_time_entry: entry };
       setMine((current) => current.map((shift) => shift.id === updatedShift.id ? updatedShift : shift));
       setSelected((current: any) => current?.id === updatedShift.id ? updatedShift : current);
       sessionStorage.removeItem(`aplus:time-report-later:${timeReport.shift.id}`);
+      setTimeReportLegalOpen(false);
       setTimeReport(undefined);
       setMessage('Arbeitszeit wurde zur Freigabe an die Administration gesendet.');
     } catch (error: any) {
@@ -509,16 +535,17 @@ export default function WiwEmployeeScheduleMobile() {
           <p>Trage Beginn und Ende ein. Die Administration prüft und bestätigt die Zeit anschließend.</p>
         </div>
         <div className="wiw-time-report-fields">
-          <label><span>Von</span><input type="time" value={timeReport.clock_in} onChange={(event) => setTimeReport({ ...timeReport, clock_in: event.target.value })} /></label>
-          <label><span>Bis</span><input type="time" value={timeReport.clock_out} onChange={(event) => setTimeReport({ ...timeReport, clock_out: event.target.value })} /></label>
+          <GermanTimeField label="Von" value={timeReport.clock_in} disabled={busy} onChange={(value) => setTimeReport({ ...timeReport, clock_in: value })} />
+          <GermanTimeField label="Bis" value={timeReport.clock_out} disabled={busy} onChange={(value) => setTimeReport({ ...timeReport, clock_out: value })} />
         </div>
         {message && <div className="wiw-release-error">{message}</div>}
         <div className="wiw-release-actions">
           <button type="button" disabled={busy} onClick={closeTimeReport}>Abbrechen</button>
-          <button type="button" className="primary" disabled={busy} onClick={() => void submitTimeReport()}>{busy ? 'Wird gesendet …' : 'Zur Freigabe senden'}</button>
+          <button type="button" className="primary" disabled={busy} onClick={requestTimeReportSubmit}>{busy ? 'Wird gesendet …' : 'Zur Freigabe senden'}</button>
         </div>
       </section>
     </div>, document.body) : null}
+    <TimeReportLegalConfirmation open={timeReportLegalOpen} busy={busy} onCancel={() => setTimeReportLegalOpen(false)} onConfirm={() => void submitTimeReport()} />
     {releaseTarget ? createPortal(<div className="wiw-release-backdrop" role="presentation" onClick={closeReleaseChooser}>
       <section className="wiw-release-sheet" role="dialog" aria-modal="true" aria-labelledby="wiw-release-title" onClick={(event) => event.stopPropagation()}>
         <div className="wiw-release-handle" />

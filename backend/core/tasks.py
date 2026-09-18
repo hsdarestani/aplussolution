@@ -1,10 +1,10 @@
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from uuid import uuid4
 
 import redis
 from celery import shared_task
 from django.conf import settings
-from django.core.mail import send_mail
+from django.core.mail import EmailMessage, get_connection, send_mail
 from django.core.management import call_command
 from django.utils import timezone
 
@@ -176,7 +176,7 @@ def send_shift_time_report_prompts():
     """
     now = timezone.now()
     shifts = Shift.objects.filter(
-        ends_at__lte=now,
+        ends_at__lte=now - timedelta(minutes=30),
         ends_at__gte=now - timedelta(hours=48),
         status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED, Shift.Status.COMPLETED],
     ).select_related('worker__user', 'location', 'position').prefetch_related('slots__worker__user')
@@ -214,6 +214,122 @@ def send_shift_time_report_prompts():
             )
             created_count += int(created)
     return created_count
+
+
+def _assigned_workers_for_shift(shift):
+    workers = {}
+    if shift.worker_id and shift.worker and shift.worker.active and shift.worker.user.is_active:
+        workers[str(shift.worker_id)] = shift.worker
+    for slot in shift.slots.all():
+        if (
+            slot.status == ShiftSlot.Status.CLAIMED
+            and slot.worker_id
+            and slot.worker
+            and slot.worker.active
+            and slot.worker.user.is_active
+        ):
+            workers[str(slot.worker_id)] = slot.worker
+    return list(workers.values())
+
+
+def _missing_month_entries(now):
+    local_now = timezone.localtime(now)
+    month_start = timezone.make_aware(datetime.combine(local_now.date().replace(day=1), time.min), timezone.get_current_timezone())
+    shifts = Shift.objects.filter(
+        ends_at__gte=month_start,
+        ends_at__lte=now,
+        status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED, Shift.Status.COMPLETED],
+    ).select_related('worker__user', 'location', 'position').prefetch_related('slots__worker__user').order_by('starts_at')
+
+    result = {}
+    for shift in shifts:
+        for worker in _assigned_workers_for_shift(shift):
+            if TimeEntry.objects.filter(worker=worker, shift=shift).exists():
+                continue
+            bucket = result.setdefault(str(worker.id), {'worker': worker, 'shifts': []})
+            bucket['shifts'].append(shift)
+    return result
+
+
+def _missing_shift_lines(shifts, limit=None):
+    rows = []
+    selected = shifts[:limit] if limit else shifts
+    for shift in selected:
+        start = timezone.localtime(shift.starts_at)
+        end = timezone.localtime(shift.ends_at)
+        rows.append(f'{start:%d.%m.} · {start:%H:%M}–{end:%H:%M} · {shift.position.name} · {shift.location.name}')
+    if limit and len(shifts) > limit:
+        rows.append(f'+ {len(shifts) - limit} weitere fehlende Schicht(en)')
+    return rows
+
+
+def _send_required_worker_email(subject, body, recipient):
+    if not recipient:
+        return 0
+    if not settings.EMAIL_HOST:
+        return send_mail(subject, body, settings.DEFAULT_FROM_EMAIL, [recipient], fail_silently=True)
+    connection = get_connection(
+        'django.core.mail.backends.smtp.EmailBackend',
+        host=settings.EMAIL_HOST,
+        port=settings.EMAIL_PORT,
+        username=settings.EMAIL_HOST_USER,
+        password=settings.EMAIL_HOST_PASSWORD,
+        use_tls=settings.EMAIL_USE_TLS,
+        fail_silently=True,
+    )
+    return EmailMessage(subject, body, settings.DEFAULT_FROM_EMAIL, [recipient], connection=connection).send(fail_silently=True)
+
+
+@shared_task
+def send_monthly_missing_time_reminders():
+    """Remind workers on the 28th/29th by push and on the 30th by email."""
+    now = timezone.now()
+    local_now = timezone.localtime(now)
+    if local_now.day not in {28, 29, 30}:
+        return {'day': local_now.day, 'workers': 0, 'notifications': 0, 'emails': 0}
+
+    missing = _missing_month_entries(now)
+    month_key = local_now.strftime('%Y-%m')
+    notifications = 0
+    emails = 0
+
+    for payload in missing.values():
+        worker = payload['worker']
+        shifts = payload['shifts']
+        if not shifts:
+            continue
+        first_shift = shifts[0]
+        deep_link = f'/schedule?missing_shift={first_shift.id}&missing_month={month_key}'
+        lines = _missing_shift_lines(shifts, limit=4)
+
+        if local_now.day in {28, 29}:
+            _, created = Notification.objects.get_or_create(
+                user=worker.user,
+                kind=f'monthly-missing-time-{month_key}-{local_now.day}-{worker.id}',
+                defaults={
+                    'title': 'Arbeitszeiten fehlen noch',
+                    'body': 'Bitte ergänze deine Arbeitszeiten:\n' + '\n'.join(lines),
+                    'action_url': deep_link,
+                },
+            )
+            notifications += int(created)
+
+        if local_now.day == 30 and worker.user.email:
+            mail_key = f'aplus:missing-time-email:{month_key}:{worker.id}'
+            if _redis_client().set(mail_key, '1', nx=True, ex=40 * 24 * 60 * 60):
+                all_lines = _missing_shift_lines(shifts)
+                link = f"{settings.APP_URL.rstrip('/')}/?view=schedule&missing_shift={first_shift.id}&missing_month={month_key}"
+                subject = 'A+ Solution: Bitte fehlende Arbeitszeiten für diesen Monat ergänzen'
+                body = (
+                    f'Hallo {worker.user.first_name or worker.user.get_full_name() or "Mitarbeiter/in"},\n\n'
+                    'für diesen Monat fehlen noch Arbeitszeiten zu folgenden Schichten:\n\n'
+                    + '\n'.join(f'- {line}' for line in all_lines)
+                    + '\n\nBitte trage die tatsächlichen Beginn- und Endzeiten unbedingt vollständig ein.\n'
+                    + f'Direkt öffnen: {link}\n\nA+ Solution GmbH'
+                )
+                emails += int(bool(_send_required_worker_email(subject, body, worker.user.email)))
+
+    return {'day': local_now.day, 'workers': len(missing), 'notifications': notifications, 'emails': emails}
 
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3})

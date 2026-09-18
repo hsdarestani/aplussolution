@@ -3,6 +3,7 @@ import socket
 from datetime import timedelta
 from pathlib import Path
 import dj_database_url
+from celery.schedules import crontab
 BASE_DIR=Path(__file__).resolve().parent.parent
 SECRET_KEY=os.getenv('DJANGO_SECRET_KEY','development-only-key')
 DEBUG=os.getenv('DEBUG','0')=='1'
@@ -44,6 +45,7 @@ CELERY_BEAT_SCHEDULE={
     'contract-reminders-daily':{'task':'core.tasks.send_contract_reminders','schedule':86400},
     'shift-reminders-hourly':{'task':'core.tasks.send_shift_reminders','schedule':3600},
     'shift-time-report-prompts-5min':{'task':'core.tasks.send_shift_time_report_prompts','schedule':300},
+    'monthly-missing-time-reminders':{'task':'core.tasks.send_monthly_missing_time_reminders','schedule':crontab(hour=9,minute=0)},
     'client-contract-generation-hourly':{'task':'core.tasks.generate_due_client_contracts','schedule':3600},
     'working-time-sync-daily':{'task':'core.tasks.sync_working_time_current_year','schedule':86400},
     'working-time-backup-weekly':{'task':'core.tasks.backup_working_time_current_year','schedule':604800},

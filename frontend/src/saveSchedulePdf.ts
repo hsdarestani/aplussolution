@@ -17,7 +17,7 @@ function downloadBlob(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
-export async function saveSchedulePdf(blob: Blob, filename: string) {
+export async function saveSchedulePdf(blob: Blob, filename: string, title = 'Dienstplan') {
   const normalizedFilename = safeFilename(filename || 'Dienstplan.pdf');
 
   if (Capacitor.isNativePlatform()) {
@@ -33,7 +33,7 @@ export async function saveSchedulePdf(blob: Blob, filename: string) {
       data,
       recursive: true,
     });
-    await Share.share({ title: 'Dienstplan', files: [file.uri], dialogTitle: 'PDF teilen' });
+    await Share.share({ title, files: [file.uri], dialogTitle: `${title} teilen` });
     return;
   }
 
@@ -41,7 +41,7 @@ export async function saveSchedulePdf(blob: Blob, filename: string) {
   // opening the system share sheet immediately after PDF creation instead of
   // silently downloading the file. Keep download as a compatibility fallback.
   const shareFile = new File([blob], normalizedFilename, { type: blob.type || 'application/pdf' });
-  const shareData: ShareData = { title: 'Dienstplan', files: [shareFile] };
+  const shareData: ShareData = { title, files: [shareFile] };
   const canShareFiles = typeof navigator.share === 'function'
     && (typeof navigator.canShare !== 'function' || navigator.canShare(shareData));
 

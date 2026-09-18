@@ -147,6 +147,14 @@ const BUSINESS_TIME_ZONE = 'Europe/Berlin';
 const dateTime = (input?: string) =>
   input ? new Date(input).toLocaleString('de-DE', { timeZone: BUSINESS_TIME_ZONE }) : '–';
 const dateOnly = (input?: string) => (input ? new Date(input).toLocaleDateString('de-DE') : '–');
+const portalGreeting = () => {
+  const hour = Number(new Intl.DateTimeFormat('de-DE', {
+    timeZone: BUSINESS_TIME_ZONE,
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date()));
+  return hour >= 18 || hour < 5 ? 'Guten Abend' : 'Guten Tag';
+};
 const statusText: Record<string, string> = {
   draft: 'Entwurf',
   published: 'Veröffentlicht',
@@ -431,7 +439,7 @@ function Dashboard({
 
   return (
     <>
-      <Title title={`Guten Tag, ${user.first_name || user.name}`} text="Hier ist dein aktueller Überblick." />
+      <Title title={`${user.role === 'client' ? portalGreeting() : 'Guten Tag'}, ${user.first_name || user.name}`} text="Hier ist dein aktueller Überblick." />
       <div className="hero">
         <small>A+ WORKFORCE</small>
         <h2>

@@ -57,3 +57,12 @@
 .sv2-hotel-presets button{min-height:52px;padding:8px 6px;border:1px solid #cdd5df;border-radius:10px;background:#f8fafc;color:#173448;font-weight:800;cursor:pointer}
 .sv2-hotel-presets small{display:block;margin-top:3px;font-size:10px;font-weight:650;color:#607287}
 @media(max-width:700px){.sv2-hotel-presets{grid-template-columns:1fr}.sv2-client-divider{margin:5px 0}}
+
+
+/* 2026-09-18 Dienstplan date readability and today marker */
+.sv2-week-day>header b{font-size:16px!important;font-weight:850!important}
+.sv2-week-day>header span{font-size:14px!important;font-weight:800!important}
+.sv2-single-day>header small{font-size:16px!important;font-weight:850!important}
+.sv2-single-day>header h2{font-size:23px!important;font-weight:900!important}
+.sv2-wiw-week-strip button.today span,.sv2-wiw-week-strip button.today b{color:#d92d20!important;font-weight:900!important}
+.sv2-week-day.is-today>header,.sv2-timeline-head.is-today{color:#d92d20!important;background:#fff5f4!important}

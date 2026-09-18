@@ -120,7 +120,7 @@ def employee_attendance_home(request):
 
     pending_report_shift = Shift.objects.filter(
         ownership,
-        ends_at__lte=now,
+        ends_at__lte=now - timedelta(minutes=30),
         ends_at__gte=now - timedelta(hours=SHIFT_REPORT_LOOKBACK_HOURS),
         status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED, Shift.Status.COMPLETED],
     ).exclude(

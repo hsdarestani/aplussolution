@@ -17,7 +17,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from rest_framework.decorators import api_view
 
-from .models import ClientCompany, Shift, User, WorkerProfile
+from .models import ClientCompany, Shift, TimeEntry, User, WorkerProfile
 from .shift_rules import normalized_groups
 from .shift_slots import ShiftSlot
 
@@ -372,4 +372,252 @@ def export_schedule_pdf(request):
     response['Content-Disposition'] = (
         f'attachment; filename="dienstplan-{filters["start"]:%Y%m%d}-{filters["end"]:%Y%m%d}.pdf"'
     )
+    return response
+
+
+def _attendance_group(entry):
+    if entry.shift:
+        groups = [value for value in _shift_groups(entry.shift) if value in ALLOWED_GROUPS]
+        if groups:
+            return groups[0]
+    return 'service'
+
+
+def _overlap_minutes(start_a, end_a, start_b, end_b):
+    start = max(start_a, start_b)
+    end = min(end_a, end_b)
+    if end <= start:
+        return 0
+    return max(0, int((end - start).total_seconds() // 60))
+
+
+def _local_boundary(day_value, hour_value=0):
+    return timezone.make_aware(datetime.combine(day_value, time(hour_value, 0)), timezone.get_current_timezone())
+
+
+def _attendance_metrics(entry, range_start, range_end):
+    original_start = entry.clock_in
+    original_end = entry.clock_out
+    if not original_end:
+        return None
+    start = max(original_start, range_start)
+    end = min(original_end, range_end)
+    if end <= start:
+        return None
+
+    gross = max(0, int((end - start).total_seconds() // 60))
+    original_gross = max(1, int((original_end - original_start).total_seconds() // 60))
+    original_pause = max(0, int(entry.effective_break_minutes))
+    pause = min(gross, round(original_pause * (gross / original_gross)))
+    net = max(0, gross - pause)
+    factor = (net / gross) if gross else 0
+
+    local_start = timezone.localtime(start)
+    local_end = timezone.localtime(end)
+    night_gross = 0
+    sunday_gross = 0
+    cursor = local_start.date() - timedelta(days=1)
+    last_day = local_end.date()
+    while cursor <= last_day:
+        night_start = _local_boundary(cursor, 23)
+        night_end = _local_boundary(cursor + timedelta(days=1), 6)
+        night_gross += _overlap_minutes(start, end, night_start, night_end)
+
+        if cursor.weekday() == 6:
+            sunday_start = _local_boundary(cursor, 0)
+            sunday_end = _local_boundary(cursor + timedelta(days=1), 0)
+            sunday_gross += _overlap_minutes(start, end, sunday_start, sunday_end)
+        cursor += timedelta(days=1)
+
+    return {
+        'gross': gross,
+        'pause': pause,
+        'net': net,
+        'night': round(night_gross * factor),
+        'sunday': round(sunday_gross * factor),
+    }
+
+
+def _minutes_hhmm(value):
+    minutes = max(0, int(round(value or 0)))
+    return f'{minutes // 60}:{minutes % 60:02d}'
+
+
+@api_view(['GET'])
+def export_attendance_pdf(request):
+    if not _manager_required(request):
+        return JsonResponse({'detail': 'Keine Berechtigung.'}, status=403)
+
+    today = timezone.localdate()
+    month_start = today.replace(day=1)
+    start = parse_date(str(request.query_params.get('date_from') or '')) or month_start
+    end = parse_date(str(request.query_params.get('date_to') or '')) or today
+    if end < start:
+        start, end = end, start
+    if (end - start).days > 366:
+        end = start + timedelta(days=366)
+
+    worker_ids = _uuid_list(request.query_params.get('workers', ''))
+    selected_groups = set(_group_list(request.query_params.get('groups', '')))
+    range_start = _local_boundary(start, 0)
+    range_end = _local_boundary(end + timedelta(days=1), 0)
+
+    qs = TimeEntry.objects.filter(
+        clock_out__isnull=False,
+        approved=True,
+        clock_in__lt=range_end,
+        clock_out__gt=range_start,
+    ).exclude(
+        worker__user__email__iendswith='@sync.invalid'
+    ).select_related('worker__user', 'shift__position').order_by('worker__user__last_name', 'clock_in')
+    if worker_ids:
+        qs = qs.filter(worker_id__in=worker_ids)
+
+    aggregates = {}
+    for entry in qs:
+        group = _attendance_group(entry)
+        if selected_groups and group not in selected_groups:
+            continue
+        metrics = _attendance_metrics(entry, range_start, range_end)
+        if not metrics:
+            continue
+        key = (group, str(entry.worker_id))
+        row = aggregates.setdefault(key, {
+            'group': group,
+            'worker': _worker_label(entry.worker),
+            'net': 0,
+            'night': 0,
+            'sunday': 0,
+            'pause': 0,
+            'entries': 0,
+        })
+        for field in ('net', 'night', 'sunday', 'pause'):
+            row[field] += metrics[field]
+        row['entries'] += 1
+
+    rows = sorted(aggregates.values(), key=lambda item: (
+        ['service', 'housekeeping', 'front_office'].index(item['group']) if item['group'] in {'service', 'housekeeping', 'front_office'} else 99,
+        item['worker'].lower(),
+    ))
+
+    output = BytesIO()
+    document = SimpleDocTemplate(
+        output,
+        pagesize=landscape(A4),
+        leftMargin=12 * mm,
+        rightMargin=12 * mm,
+        topMargin=10 * mm,
+        bottomMargin=10 * mm,
+        title='Arbeitszeitbericht',
+        author='A+ Solution GmbH',
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'AttendanceTitle', parent=styles['Heading1'], fontName='Helvetica-Bold',
+        fontSize=18, leading=22, textColor=colors.HexColor('#10253F'), spaceAfter=2,
+    )
+    subtitle_style = ParagraphStyle(
+        'AttendanceSubtitle', parent=styles['Normal'], fontName='Helvetica',
+        fontSize=9, leading=12, textColor=colors.HexColor('#667085'),
+    )
+    section_style = ParagraphStyle(
+        'AttendanceSection', parent=styles['Heading2'], fontName='Helvetica-Bold',
+        fontSize=12, leading=15, textColor=colors.HexColor('#10253F'), spaceBefore=7, spaceAfter=5,
+    )
+    note_style = ParagraphStyle(
+        'AttendanceNote', parent=styles['Normal'], fontName='Helvetica',
+        fontSize=7.5, leading=10, textColor=colors.HexColor('#667085'),
+    )
+    cell_style = ParagraphStyle(
+        'AttendanceCell', parent=styles['Normal'], fontName='Helvetica',
+        fontSize=8.5, leading=11, textColor=colors.HexColor('#344054'),
+    )
+    cell_bold = ParagraphStyle(
+        'AttendanceCellBold', parent=cell_style, fontName='Helvetica-Bold',
+    )
+    head_style = ParagraphStyle(
+        'AttendanceHead', parent=styles['Normal'], fontName='Helvetica-Bold',
+        fontSize=8, leading=10, textColor=colors.white, alignment=TA_CENTER,
+    )
+
+    story = [
+        Paragraph('A+ Solution · Arbeitszeitbericht', title_style),
+        Paragraph(f'Zeitraum: {start:%d.%m.%Y} – {end:%d.%m.%Y}', subtitle_style),
+        Spacer(1, 4 * mm),
+    ]
+    if worker_ids:
+        names = list(
+            WorkerProfile.objects.filter(pk__in=worker_ids).select_related('user')
+            .order_by('user__last_name', 'user__first_name')
+        )
+        story.append(Paragraph('Mitarbeiter: ' + escape(', '.join(_worker_label(worker) for worker in names)), subtitle_style))
+        story.append(Spacer(1, 2 * mm))
+
+    groups_to_render = [value for value in ('service', 'housekeeping', 'front_office') if not selected_groups or value in selected_groups]
+    for group in groups_to_render:
+        group_rows = [row for row in rows if row['group'] == group]
+        story.append(Paragraph(GROUP_LABELS[group], section_style))
+        if not group_rows:
+            story.append(Paragraph('Keine freigegebenen Arbeitszeiten in diesem Zeitraum.', note_style))
+            continue
+
+        table_data = [[
+            Paragraph('Mitarbeiter', head_style),
+            Paragraph('Arbeitszeit netto', head_style),
+            Paragraph('Nacht 23–06', head_style),
+            Paragraph('Sonntag', head_style),
+            Paragraph('Pause', head_style),
+            Paragraph('Einträge', head_style),
+        ]]
+        for row in group_rows:
+            table_data.append([
+                Paragraph(escape(row['worker']), cell_bold),
+                Paragraph(_minutes_hhmm(row['net']) + ' Std.', cell_style),
+                Paragraph(_minutes_hhmm(row['night']) + ' Std.', cell_style),
+                Paragraph(_minutes_hhmm(row['sunday']) + ' Std.', cell_style),
+                Paragraph(_minutes_hhmm(row['pause']) + ' Std.', cell_style),
+                Paragraph(str(row['entries']), cell_style),
+            ])
+        total = {
+            field: sum(row[field] for row in group_rows)
+            for field in ('net', 'night', 'sunday', 'pause', 'entries')
+        }
+        table_data.append([
+            Paragraph('Gesamt', cell_bold),
+            Paragraph(_minutes_hhmm(total['net']) + ' Std.', cell_bold),
+            Paragraph(_minutes_hhmm(total['night']) + ' Std.', cell_bold),
+            Paragraph(_minutes_hhmm(total['sunday']) + ' Std.', cell_bold),
+            Paragraph(_minutes_hhmm(total['pause']) + ' Std.', cell_bold),
+            Paragraph(str(total['entries']), cell_bold),
+        ])
+        table = Table(table_data, repeatRows=1, colWidths=[70 * mm, 38 * mm, 34 * mm, 34 * mm, 30 * mm, 24 * mm], hAlign='LEFT')
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#10253F')),
+            ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#D0D5DD')),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.HexColor('#F8FAFC')]),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#E9F4E4')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (1, 1), (-1, -1), 'CENTER'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 7),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 7),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(table)
+        story.append(Spacer(1, 3 * mm))
+
+    story.append(Spacer(1, 2 * mm))
+    story.append(Paragraph(
+        'Pausen werden von der Nettoarbeitszeit abgezogen. Da keine genaue Pausenlage gespeichert wird, '
+        'werden Pausen bei Nacht- und Sonntagszuschlagszeiten anteilig auf die Anwesenheitszeit verteilt.',
+        note_style,
+    ))
+    story.append(Paragraph(
+        'Berücksichtigt werden ausschließlich abgeschlossene und durch die Administration freigegebene Zeiteinträge.',
+        note_style,
+    ))
+
+    document.build(story)
+    response = HttpResponse(output.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="arbeitszeit-{start:%Y%m%d}-{end:%Y%m%d}.pdf"'
     return response

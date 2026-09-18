@@ -5,11 +5,14 @@ import {
   IonButton,
   IonInput,
   IonModal,
+  IonSelect,
+  IonSelectOption,
   IonSpinner,
   IonTextarea,
   IonToast,
 } from '@ionic/react';
-import { api, clockLocationRequired, User } from './api';
+import { api, apiBlob, clockLocationRequired, User } from './api';
+import { saveSchedulePdf } from './saveSchedulePdf';
 import Phase8MobileAttendance from './Phase8MobileAttendance';
 import './attendance-v3.css';
 
@@ -61,6 +64,22 @@ function durationLabel(start?: string, end?: string, now = Date.now()) {
   return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`;
 }
 
+function berlinDateKey(value = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(value);
+  const part = (type: string) => parts.find((item) => item.type === type)?.value || '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+function minuteDurationLabel(value?: number) {
+  const minutes = Math.max(0, Number(value || 0));
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`;
+}
+
 async function currentPosition() {
   try {
     return await new Promise<GeolocationPosition>((resolve, reject) =>
@@ -80,6 +99,15 @@ export default function AttendanceV3({ user }: { user: User }) {
   const [correction, setCorrection] = useState<any>();
   const [absence, setAbsence] = useState<any>();
   const [closeTarget, setCloseTarget] = useState<any>();
+  const [approval, setApproval] = useState<any>();
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportWorkers, setReportWorkers] = useState<any[]>([]);
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportError, setReportError] = useState('');
+  const [report, setReport] = useState<any>(() => {
+    const today = berlinDateKey();
+    return { date_from: today.slice(0, 8) + '01', date_to: today, workers: [], groups: [] };
+  });
   const [mobileClockMode] = useState(() => {
     if (typeof window === 'undefined') return false;
     try {
@@ -187,13 +215,71 @@ export default function AttendanceV3({ user }: { user: User }) {
     }
   }
 
-  async function approveEntry(id: string) {
+  function openApproval(entry: any) {
+    setApproval({
+      entry,
+      clock_in: toInput(entry.clock_in),
+      clock_out: toInput(entry.clock_out),
+      break_minutes: Number(entry.effective_break_minutes ?? entry.break_minutes ?? 0),
+      reason: '',
+    });
+  }
+
+  async function approveEntry() {
+    if (!approval?.entry?.id) return;
+    setBusy(true);
     try {
-      await api(`time-entries/${id}/approve/`, { method: 'POST', body: '{}' });
-      setToast('Zeiteintrag wurde freigegeben.');
+      await api(`time-entries/${approval.entry.id}/approve/`, {
+        method: 'POST',
+        body: JSON.stringify({
+          clock_in: approval.clock_in,
+          clock_out: approval.clock_out,
+          break_minutes: Number(approval.break_minutes || 0),
+          reason: String(approval.reason || '').trim(),
+        }),
+      });
+      setApproval(undefined);
+      setToast('Zeiteintrag wurde geprüft und freigegeben.');
       await load();
     } catch (error: any) {
       setToast(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openAttendanceReport() {
+    setReportError('');
+    setReportOpen(true);
+    if (reportWorkers.length) return;
+    try {
+      const payload = await api('workers/?ordering=user__last_name');
+      setReportWorkers(unpack(payload).filter((worker: any) => worker.active !== false && !String(worker?.user_detail?.email || '').endsWith('@sync.invalid')));
+    } catch (error: any) {
+      setReportError(error?.message || 'Mitarbeiter konnten nicht geladen werden.');
+    }
+  }
+
+  async function downloadAttendanceReport() {
+    if (reportBusy) return;
+    if (!report.date_from || !report.date_to || report.date_from > report.date_to) {
+      setReportError('Bitte einen gültigen Zeitraum auswählen.');
+      return;
+    }
+    setReportBusy(true);
+    setReportError('');
+    try {
+      const params = new URLSearchParams({ date_from: report.date_from, date_to: report.date_to });
+      if (report.workers?.length) params.set('workers', report.workers.join(','));
+      if (report.groups?.length) params.set('groups', report.groups.join(','));
+      const result = await apiBlob(`reports/attendance.pdf?${params.toString()}`);
+      await saveSchedulePdf(result.blob, result.filename, 'Arbeitszeitbericht');
+      setReportOpen(false);
+      setToast('Arbeitszeit-PDF wurde erstellt.');
+    } catch (error: any) {
+      setReportError(error?.message || 'Arbeitszeit-PDF konnte nicht erstellt werden.');
+    } finally {
+      setReportBusy(false);
     }
   }
 
@@ -258,6 +344,7 @@ export default function AttendanceV3({ user }: { user: User }) {
             <h1>Nur das, was Aufmerksamkeit braucht.</h1>
             <p>Normale Zeiterfassungen laufen im Hintergrund. Hier landen nur Abweichungen und offene Entscheidungen.</p>
           </div>
+          <IonButton fill="outline" onClick={() => void openAttendanceReport()}>PDF Arbeitszeitbericht</IonButton>
         </section>
 
         <div className="attendance-stats">
@@ -290,8 +377,12 @@ export default function AttendanceV3({ user }: { user: User }) {
           {data.unapproved_entries?.length ? data.unapproved_entries.map((entry: any) => (
             <div className="attendance-row" key={entry.id}>
               <div className="attendance-person"><b>{entry.worker_name}</b><small>{entry.shift_title || 'Arbeitszeit'}</small></div>
-              <div className="attendance-change"><span>{dateTime(entry.clock_in)} – {dateTime(entry.clock_out)}</span><b>{durationLabel(entry.clock_in, entry.clock_out)} Std.</b></div>
-              <IonButton size="small" onClick={() => approveEntry(entry.id)}>Freigeben</IonButton>
+              <div className="attendance-change">
+                <span>{dateTime(entry.clock_in)} – {dateTime(entry.clock_out)}</span>
+                <b>{minuteDurationLabel(entry.worked_minutes)} Std. netto</b>
+                <small>Pause: {entry.effective_break_minutes ?? entry.break_minutes ?? 0} Min.</small>
+              </div>
+              <IonButton size="small" onClick={() => openApproval(entry)}>Prüfen & freigeben</IonButton>
             </div>
           )) : <Empty text="Keine abgeschlossenen Zeiten warten auf Freigabe." />}
         </section>
@@ -308,6 +399,48 @@ export default function AttendanceV3({ user }: { user: User }) {
         </section>
 
         <AbsencePanel rows={absences} manager onDecision={decideAbsence} />
+        <IonModal isOpen={!!approval} onDidDismiss={() => setApproval(undefined)}>
+          <div className="attendance-modal">
+            <small>ARBEITSZEIT PRÜFEN</small>
+            <h2>Zeiten bearbeiten & freigeben</h2>
+            <p>Beginn, Ende und Pause können vor der Freigabe korrigiert werden. Änderungen werden im Prüfverlauf gespeichert.</p>
+            <IonInput fill="outline" type="datetime-local" label="Beginn" labelPlacement="floating" value={approval?.clock_in} onIonInput={(event) => setApproval({ ...approval, clock_in: event.detail.value })} />
+            <IonInput fill="outline" type="datetime-local" label="Ende" labelPlacement="floating" value={approval?.clock_out} onIonInput={(event) => setApproval({ ...approval, clock_out: event.detail.value })} />
+            <div className="attendance-pause-editor">
+              <div><small>PAUSE</small><b>{Number(approval?.break_minutes || 0)} Min.</b></div>
+              <div>
+                <button type="button" aria-label="Pause um 5 Minuten reduzieren" onClick={() => setApproval({ ...approval, break_minutes: Math.max(0, Number(approval?.break_minutes || 0) - 5) })}>−</button>
+                <IonInput type="number" min="0" inputMode="numeric" value={approval?.break_minutes} onIonInput={(event) => setApproval({ ...approval, break_minutes: Math.max(0, Number(event.detail.value || 0)) })} />
+                <button type="button" aria-label="Pause um 5 Minuten erhöhen" onClick={() => setApproval({ ...approval, break_minutes: Number(approval?.break_minutes || 0) + 5 })}>+</button>
+              </div>
+            </div>
+            <IonTextarea fill="outline" label="Prüfhinweis (optional)" labelPlacement="floating" value={approval?.reason} onIonInput={(event) => setApproval({ ...approval, reason: event.detail.value })} />
+            <div className="attendance-modal-actions"><IonButton fill="outline" onClick={() => setApproval(undefined)}>Abbrechen</IonButton><IonButton disabled={busy} onClick={() => void approveEntry()}>{busy ? 'Wird gespeichert …' : 'Ändern & freigeben'}</IonButton></div>
+          </div>
+        </IonModal>
+
+        <IonModal isOpen={reportOpen} onDidDismiss={() => setReportOpen(false)}>
+          <div className="attendance-modal attendance-report-modal">
+            <small>PDF · ARBEITSZEIT</small>
+            <h2>Arbeitszeitbericht erstellen</h2>
+            <p>Der Bericht enthält Nettoarbeitszeit, Nachtzuschlag 23:00–06:00, Sonntagszuschlag und abgezogene Pausen – getrennt nach Service, Housekeeping und Front Office.</p>
+            <div className="attendance-report-dates">
+              <IonInput fill="outline" type="date" label="Von" labelPlacement="floating" value={report.date_from} onIonInput={(event) => setReport({ ...report, date_from: event.detail.value })} />
+              <IonInput fill="outline" type="date" label="Bis" labelPlacement="floating" value={report.date_to} onIonInput={(event) => setReport({ ...report, date_to: event.detail.value })} />
+            </div>
+            <IonSelect fill="outline" multiple interface="alert" label="Mitarbeiter" labelPlacement="floating" value={report.workers} onIonChange={(event) => setReport({ ...report, workers: event.detail.value || [] })}>
+              {reportWorkers.map((worker: any) => <IonSelectOption key={worker.id} value={worker.id}>{worker.user_detail?.name || worker.employee_number}</IonSelectOption>)}
+            </IonSelect>
+            <IonSelect fill="outline" multiple interface="alert" label="Bereiche" labelPlacement="floating" value={report.groups} onIonChange={(event) => setReport({ ...report, groups: event.detail.value || [] })}>
+              <IonSelectOption value="service">Service</IonSelectOption>
+              <IonSelectOption value="housekeeping">Housekeeping</IonSelectOption>
+              <IonSelectOption value="front_office">Front Office</IonSelectOption>
+            </IonSelect>
+            {reportError ? <div className="attendance-report-error">{reportError}</div> : null}
+            <div className="attendance-modal-actions"><IonButton fill="outline" onClick={() => setReportOpen(false)}>Abbrechen</IonButton><IonButton disabled={reportBusy} onClick={() => void downloadAttendanceReport()}>{reportBusy ? 'PDF wird erstellt …' : 'PDF erstellen'}</IonButton></div>
+          </div>
+        </IonModal>
+
         <IonAlert
           isOpen={!!closeTarget}
           onDidDismiss={() => setCloseTarget(undefined)}

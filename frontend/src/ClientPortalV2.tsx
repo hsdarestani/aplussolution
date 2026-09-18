@@ -26,6 +26,15 @@ const dateTime = (value?: string) => value
   ? new Intl.DateTimeFormat('de-DE', { timeZone: TZ, weekday: 'short', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
   : '–';
 
+function berlinGreeting() {
+  const hour = Number(new Intl.DateTimeFormat('de-DE', {
+    timeZone: TZ,
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date()));
+  return hour >= 18 || hour < 5 ? 'Guten Abend' : 'Guten Tag';
+}
+
 const labels: Record<string, string> = {
   dashboard: 'Start',
   schedule: 'Einsätze',
@@ -60,6 +69,12 @@ function ClientHome({ user, access, navigate }: { user: User; access: ClientAcce
   const [shifts, setShifts] = useState<any[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [greeting, setGreeting] = useState(berlinGreeting());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setGreeting(berlinGreeting()), 60000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,7 +96,7 @@ function ClientHome({ user, access, navigate }: { user: User; access: ClientAcce
   if (loading && !shifts.length) return <div className="client-v2-loader"><IonSpinner/><span>Kundenportal wird geladen …</span></div>;
 
   if (access.read_only) return <div className="client-portal-v2-home" data-testid="client-portal-v2-home">
-    <section className="client-v2-welcome"><div className="client-v2-welcome-copy"><small>KUNDENPORTAL</small><h1>Guten Tag, {firstName}</h1><p>{access.client_name} · eingeschränkter Lesezugang</p></div></section>
+    <section className="client-v2-welcome"><div className="client-v2-welcome-copy"><small>KUNDENPORTAL</small><h1>{greeting}, {firstName}</h1><p>{access.client_name} · eingeschränkter Lesezugang</p></div></section>
     <section className="client-v2-hero">
       <div><small>NUR ANSICHT</small><h2>{access.location_scope_name || 'Evangelische Akademie'}</h2><p>Dieser Zugang kann ausschließlich die freigegebenen Einsätze dieses Standorts öffnen und ansehen.</p></div>
       <button type="button" onClick={() => navigate('schedule')}>Kalender öffnen<IonIcon icon={chevronForwardOutline}/></button>
@@ -94,7 +109,7 @@ function ClientHome({ user, access, navigate }: { user: User; access: ClientAcce
 
   return <div className="client-portal-v2-home" data-testid="client-portal-v2-home">
     <section className="client-v2-welcome">
-      <div className="client-v2-welcome-copy"><small>KUNDENPORTAL</small><h1>Guten Tag, {firstName}</h1><p>{access.client_name} · Einsätze und Unterlagen zentral im Blick.</p></div>
+      <div className="client-v2-welcome-copy"><small>KUNDENPORTAL</small><h1>{greeting}, {firstName}</h1><p>{access.client_name} · Einsätze und Unterlagen zentral im Blick.</p></div>
       <button type="button" className="client-v2-message-button" onClick={() => navigate('messages')} aria-label="Mitteilungen öffnen"><IonIcon icon={megaphoneOutline}/></button>
     </section>
     {error ? <div className="client-v2-notice">{error}</div> : null}

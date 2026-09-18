@@ -125,6 +125,20 @@ const normalize = (value: string) => String(value || '').normalize('NFD').replac
 const clientKey = (item: any) => String(item?.client || item?.client_name || 'ohne-kunde');
 const allowedWorkerNames = new Set(WORKER_PICKER_NAMES.map(normalize));
 
+function workerInitials(worker?: any) {
+  const source = String(worker?.name || worker?.employee_number || '').trim();
+  const parts = source.split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] || '') + (parts.length > 1 ? parts[parts.length - 1]?.[0] || '' : '')).toUpperCase() || 'MA';
+}
+
+function CardWorkerAvatar({ worker, open, draft }: { worker?: any; open?: boolean; draft?: boolean }) {
+  const fallback = draft ? 'E' : open ? 'OS' : workerInitials(worker);
+  return <span className={`wiw-card-avatar ${open ? 'is-open' : ''}`} aria-hidden="true">
+    <span>{fallback}</span>
+    {worker?.avatar ? <img src={worker.avatar} alt="" loading="lazy" onError={(event) => event.currentTarget.remove()} /> : null}
+  </span>;
+}
+
 function keyDate(key: string) {
   const [year, month, day] = key.split('-').map(Number);
   return new Date(Date.UTC(year, month - 1, day, 12));
@@ -478,6 +492,19 @@ export default function WiwScheduleMobile() {
     }
   };
 
+  const prefetchScheduleWeek = async (targetWeek: string) => {
+    if (!manager) return;
+    const cacheKey = `${WEEK_CACHE_PREFIX}${targetWeek}`;
+    if (safeSessionGet(cacheKey)) return;
+    try {
+      const scheduleData: any = await api(`admin/mobile-schedule/?date_from=${encodeURIComponent(targetWeek)}&date_to=${encodeURIComponent(addDays(targetWeek, 6))}`);
+      const nextRows = Array.isArray(scheduleData?.shifts) ? scheduleData.shifts : [];
+      safeSessionSet(cacheKey, JSON.stringify(nextRows));
+    } catch (error) {
+      console.warn('Dienstplan background prefetch failed', error);
+    }
+  };
+
   const loadScheduleWeek = async (targetWeek: string, showBusy = true) => {
     if (!manager) return;
     const sequence = ++loadSequence.current;
@@ -501,6 +528,8 @@ export default function WiwScheduleMobile() {
       safeSessionSet(cacheKey, JSON.stringify(nextLocal));
       publishRows();
       setBusy(false);
+      void prefetchScheduleWeek(addDays(targetWeek, -7));
+      void prefetchScheduleWeek(addDays(targetWeek, 7));
 
       void api('admin/mobile-dashboard/').then((dashboardData: any) => {
         if (sequence !== loadSequence.current) return;
@@ -867,9 +896,21 @@ export default function WiwScheduleMobile() {
   }
 
   function changeWeek(delta: number) {
+    const nextAnchor = addDays(anchor, delta);
+    const nextWeek = monday(nextAnchor);
+    const cached = safeSessionGet(`${WEEK_CACHE_PREFIX}${nextWeek}`);
+    if (cached) {
+      try {
+        const cachedRows = JSON.parse(cached);
+        if (Array.isArray(cachedRows)) {
+          localRowsRef.current = cachedRows;
+          publishRows();
+        }
+      } catch { /* optional cache */ }
+    }
     setWeekDirection(delta > 0 ? 'next' : 'prev');
-    setAnchor((current) => addDays(current, delta));
-    window.setTimeout(() => setWeekDirection(''), 190);
+    setAnchor(nextAnchor);
+    window.setTimeout(() => setWeekDirection(''), 180);
   }
 
   function toggleGroupFilter(value: string) {
@@ -934,7 +975,6 @@ export default function WiwScheduleMobile() {
       </div> : null}
 
       <div
-        key={weekStart}
         className={`wiw-week-scroll ${weekDirection ? `wiw-week-turn-${weekDirection}` : ''}`}
         onTouchStart={(event) => {
           const touch = event.touches[0];
@@ -985,8 +1025,17 @@ export default function WiwScheduleMobile() {
           return <section className="wiw-day-section" id={`wiw-day-${day}`} key={day}>
             <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}</em></header>
             {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'} ${recentCopyShiftId && String(card.shift.id) === recentCopyShiftId ? 'is-copy-entering' : ''}`} style={shiftCardStyle(card.shift)} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
-              <div className="wiw-card-line primary"><b>{card.worker?.name || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}{card.isOpen && card.shift.status !== 'draft' ? <span className="wiw-open-alert">!</span> : null}</b><span>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</span></div>
-              <div className="wiw-card-line secondary"><span className={card.isOpen ? 'open' : ''}>{card.shift.position_name || 'Schicht'}</span><small>{card.shift.location_name || 'Einsatzort'}</small></div>
+              <div className="wiw-card-main">
+                <CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} />
+                <span className="wiw-card-copy">
+                  <b>{card.worker?.name || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}{card.isOpen && card.shift.status !== 'draft' ? <span className="wiw-open-alert">!</span> : null}</b>
+                  <small>{card.shift.position_name || 'Schicht'}</small>
+                </span>
+                <span className="wiw-card-meta">
+                  <b>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</b>
+                  <small>{card.shift.location_name || 'Einsatzort'}</small>
+                </span>
+              </div>
             </button></React.Fragment>)}
             {tab !== 'open' && !dayCards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
           </section>;

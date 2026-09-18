@@ -7,12 +7,14 @@ import {
   chevronBackOutline,
   createOutline,
   informationCircleOutline,
+  documentTextOutline,
   locationOutline,
   personOutline,
   timeOutline,
   trashOutline,
 } from 'ionicons/icons';
-import { api } from './api';
+import { api, apiBlob } from './api';
+import { saveSchedulePdf } from './saveSchedulePdf';
 import './phase8-mobile-attendance-flow.css';
 
 const TZ = 'Europe/Berlin';
@@ -96,6 +98,15 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
   const [historyOpen, setHistoryOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [pendingApprovals, setPendingApprovals] = useState<any[]>(() => Array.isArray(data.unapproved_entries) ? data.unapproved_entries : []);
+  const [approval, setApproval] = useState<any>();
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportError, setReportError] = useState('');
+  const [report, setReport] = useState<any>(() => {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    return { date_from: today.slice(0, 8) + '01', date_to: today, workers: [], groups: [] };
+  });
 
   useEffect(() => {
     document.body.classList.add('wiw-attendance-active');
@@ -108,6 +119,10 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
   useEffect(() => {
     setHistory(Array.isArray(data.history) ? data.history : []);
   }, [data.history]);
+
+  useEffect(() => {
+    setPendingApprovals(Array.isArray(data.unapproved_entries) ? data.unapproved_entries : []);
+  }, [data.unapproved_entries]);
 
   useEffect(() => {
     if (!showWorker) return;
@@ -174,6 +189,64 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
     return Array.from(groups.entries());
   }, [workerEntries]);
 
+  function openApproval(entry: any) {
+    setApproval({
+      entry,
+      clock_in: inputDateTime(entry.clock_in),
+      clock_out: inputDateTime(entry.clock_out),
+      break_minutes: Number(entry.effective_break_minutes ?? entry.break_minutes ?? 0),
+      reason: '',
+    });
+    setMessage('');
+  }
+
+  async function approveEntry() {
+    if (!approval?.entry?.id) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      await api(`time-entries/${approval.entry.id}/approve/`, {
+        method: 'POST',
+        body: JSON.stringify({
+          clock_in: approval.clock_in,
+          clock_out: approval.clock_out,
+          break_minutes: Number(approval.break_minutes || 0),
+          reason: String(approval.reason || '').trim(),
+        }),
+      });
+      const approvedId = String(approval.entry.id);
+      setApproval(undefined);
+      setPendingApprovals((current) => current.filter((entry) => String(entry.id) !== approvedId));
+      await refreshHistory();
+    } catch (error: any) {
+      setMessage(error?.message || 'Zeiteintrag konnte nicht freigegeben werden.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function downloadAttendanceReport() {
+    if (reportBusy) return;
+    if (!report.date_from || !report.date_to || report.date_from > report.date_to) {
+      setReportError('Bitte einen gültigen Zeitraum auswählen.');
+      return;
+    }
+    setReportBusy(true);
+    setReportError('');
+    try {
+      const params = new URLSearchParams({ date_from: report.date_from, date_to: report.date_to });
+      if (report.workers?.length) params.set('workers', report.workers.join(','));
+      if (report.groups?.length) params.set('groups', report.groups.join(','));
+      const result = await apiBlob(`reports/attendance.pdf?${params.toString()}`);
+      await saveSchedulePdf(result.blob, result.filename, 'Arbeitszeitbericht');
+      setReportOpen(false);
+    } catch (error: any) {
+      setReportError(error?.message || 'Arbeitszeit-PDF konnte nicht erstellt werden.');
+    } finally {
+      setReportBusy(false);
+    }
+  }
+
   async function refreshHistory() {
     const payload: any = await api('attendance/history/');
     setHistory(Array.isArray(payload?.history) ? payload.history : []);
@@ -235,6 +308,45 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
     } finally {
       setBusy(false);
     }
+  }
+
+  if (approval && showWorker) {
+    return <div className="wiw-attendance-editor" data-testid="phase8-attendance-approval">
+      <div className="wiw-attendance-toolbar">
+        <button type="button" className="back" aria-label="Zurück" onClick={() => setApproval(undefined)}><IonIcon icon={chevronBackOutline} /></button>
+        <strong>Arbeitszeit prüfen</strong>
+        <button type="button" className="text-action" disabled={busy} onClick={() => void approveEntry()}>{busy ? '…' : 'Freigeben'}</button>
+      </div>
+      <div className="wiw-edit-form">
+        <div className="wiw-approval-person"><b>{approval.entry.worker_name}</b><small>{approval.entry.shift_title || 'Arbeitszeit'}</small></div>
+        <label><span>Beginn</span><input type="datetime-local" value={approval.clock_in} onChange={(event) => setApproval({ ...approval, clock_in: event.target.value })} /></label>
+        <label><span>Ende</span><input type="datetime-local" value={approval.clock_out} onChange={(event) => setApproval({ ...approval, clock_out: event.target.value })} /></label>
+        <div className="wiw-mobile-pause-editor">
+          <span>Pause</span>
+          <div><button type="button" onClick={() => setApproval({ ...approval, break_minutes: Math.max(0, Number(approval.break_minutes || 0) - 5) })}>−</button><b>{Number(approval.break_minutes || 0)} Min.</b><button type="button" onClick={() => setApproval({ ...approval, break_minutes: Number(approval.break_minutes || 0) + 5 })}>+</button></div>
+        </div>
+        <label><span>Prüfhinweis (optional)</span><textarea rows={3} value={approval.reason} onChange={(event) => setApproval({ ...approval, reason: event.target.value })} /></label>
+        {message && <div className="wiw-attendance-message">{message}</div>}
+      </div>
+    </div>;
+  }
+
+  if (reportOpen && showWorker) {
+    return <div className="wiw-attendance-editor" data-testid="phase8-attendance-report">
+      <div className="wiw-attendance-toolbar">
+        <button type="button" className="back" aria-label="Zurück" onClick={() => setReportOpen(false)}><IonIcon icon={chevronBackOutline} /></button>
+        <strong>Arbeitszeit-PDF</strong>
+        <button type="button" className="text-action" disabled={reportBusy} onClick={() => void downloadAttendanceReport()}>{reportBusy ? '…' : 'Erstellen'}</button>
+      </div>
+      <div className="wiw-edit-form">
+        <label><span>Von</span><input type="date" value={report.date_from} onChange={(event) => setReport({ ...report, date_from: event.target.value })} /></label>
+        <label><span>Bis</span><input type="date" value={report.date_to} onChange={(event) => setReport({ ...report, date_to: event.target.value })} /></label>
+        <label><span>Mitarbeiter</span><select multiple value={report.workers} onChange={(event) => setReport({ ...report, workers: Array.from(event.target.selectedOptions).map((option) => option.value) })}>{workers.filter((worker: any) => worker.active !== false).map((worker: any) => <option key={worker.id} value={worker.id}>{worker.user_detail?.name || worker.employee_number || 'Mitarbeiter'}</option>)}</select><small>Ohne Auswahl = alle Mitarbeiter</small></label>
+        <label><span>Bereiche</span><select multiple value={report.groups} onChange={(event) => setReport({ ...report, groups: Array.from(event.target.selectedOptions).map((option) => option.value) })}><option value="service">Service</option><option value="housekeeping">Housekeeping</option><option value="front_office">Front Office</option></select><small>Ohne Auswahl = alle Bereiche</small></label>
+        <div className="wiw-report-explainer">Nettoarbeitszeit · Nacht 23:00–06:00 · Sonntag · abgezogene Pause</div>
+        {reportError && <div className="wiw-attendance-message">{reportError}</div>}
+      </div>
+    </div>;
   }
 
   if (form) {
@@ -337,6 +449,16 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
 
   return <div className="wiw-pay-periods" data-testid="phase8-pay-periods">
     <div className="wiw-mobile-screen-title">Abrechnungszeiträume</div>
+    {showWorker && <div className="wiw-attendance-admin-tools">
+      <button type="button" onClick={() => setReportOpen(true)}><IonIcon icon={documentTextOutline} /><span><b>Arbeitszeit-PDF</b><small>Mitarbeiter & Zeitraum filtern</small></span></button>
+    </div>}
+    {showWorker && pendingApprovals.length > 0 && <section className="wiw-pending-approvals">
+      <header><b>Offene Freigaben</b><span>{pendingApprovals.length}</span></header>
+      {pendingApprovals.map((entry: any) => <button type="button" key={entry.id} onClick={() => openApproval(entry)}>
+        <span><b>{entry.worker_name}</b><small>{fmtDay(entry.clock_in)} · {fmtTime(entry.clock_in)}–{entry.clock_out ? fmtTime(entry.clock_out) : '–'} · Pause {entry.effective_break_minutes ?? entry.break_minutes ?? 0} Min.</small></span>
+        <em>Prüfen</em>
+      </button>)}
+    </section>}
     {periods.map((item) => {
       const entries = history.filter((entry: any) => {
         const value = new Date(entry.clock_in).getTime();

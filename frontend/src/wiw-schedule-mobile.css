@@ -221,3 +221,34 @@
   .wiw-hotel-presets b{display:block;font-size:11px;font-weight:850;white-space:nowrap}
   .wiw-hotel-presets small{display:block;margin-top:2px;font-size:8.5px;font-weight:650;color:#697b89;white-space:nowrap}
 }
+
+
+/* 2026-09-18 Dienstplan smooth week navigation + card hierarchy */
+@media(max-width:900px){
+  body.wiw-native-schedule-active .app-main{min-height:0!important;background:#fff!important}
+  .wiw-schedule-mobile{min-height:0!important;background:#fff!important}
+  .wiw-week-scroll{min-height:0!important;padding-bottom:0;background:#fff!important;will-change:transform}
+  .wiw-day-section:last-child{border-bottom:0}
+  .wiw-day-section>header{height:44px!important}
+  .wiw-day-section>header strong{font-size:17px!important;font-weight:850!important;color:#3b4652!important}
+  .wiw-day-section>header span{font-size:16px!important;font-weight:800!important;color:#4b5563!important}
+  .wiw-week-strip button.today small,.wiw-week-strip button.today b{color:#d92d20!important;font-weight:900!important}
+  .wiw-week-strip button.today b{background:#fff!important;box-shadow:inset 0 0 0 2px #d92d20!important}
+  .wiw-shift-card{min-height:68px!important;padding:8px 12px 8px 10px!important}
+  .wiw-card-main{display:grid;grid-template-columns:42px minmax(0,1fr) auto;align-items:center;gap:10px;min-width:0}
+  .wiw-card-avatar{position:relative;width:38px;height:38px;display:grid;place-items:center;overflow:hidden;border-radius:50%;background:#e8eef2;color:#173448;font-size:11px;font-weight:900;box-shadow:0 0 0 2px rgba(255,255,255,.9),0 1px 4px rgba(15,23,42,.13)}
+  .wiw-card-avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#fff}
+  .wiw-card-avatar.is-open{border-radius:11px;background:#fff4d6;color:#9a6700}
+  .wiw-card-copy,.wiw-card-meta{min-width:0;display:grid;gap:3px}
+  .wiw-card-copy b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:850;color:#173448}
+  .wiw-card-copy small{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:700;color:#536776}
+  .wiw-card-meta{justify-items:end;text-align:right}
+  .wiw-card-meta b{white-space:nowrap;font-size:13px;font-weight:850;color:#263746}
+  .wiw-card-meta small{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:650;color:#6d7b87}
+  .wiw-shift-card.is-filled .wiw-card-copy b,.wiw-shift-card.is-filled .wiw-card-meta b{color:#173448!important}
+  .wiw-shift-card.is-filled .wiw-card-copy small,.wiw-shift-card.is-filled .wiw-card-meta small{color:#536776!important}
+  .wiw-week-turn-next{animation:wiw-week-slide-next .18s ease-out!important}
+  .wiw-week-turn-prev{animation:wiw-week-slide-prev .18s ease-out!important}
+  @keyframes wiw-week-slide-next{from{transform:translate3d(10px,0,0)}to{transform:translate3d(0,0,0)}}
+  @keyframes wiw-week-slide-prev{from{transform:translate3d(-10px,0,0)}to{transform:translate3d(0,0,0)}}
+}
