@@ -353,23 +353,16 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
       { value: 'front_office', label: 'Front Office' },
     ];
     return <>
-      {reportDateField ? <ScheduleDatePicker
-        title="PDF Zeitraum"
-        value={report[reportDateField]}
-        onSelect={(date) => { setReport((current: any) => ({ ...current, [reportDateField]: date })); setReportDateField(''); }}
-        onClose={() => setReportDateField('')}
-      /> : null}
       <div className="wiw-sheet-backdrop wiw-pdf-backdrop attendance-pdf-backdrop" data-testid="phase8-attendance-report">
         <section className="wiw-pdf-sheet">
-          <header className="attendance-pdf-header">
-            <button type="button" className="back-link" disabled={reportBusy} onClick={() => setReportOpen(false)}>‹ Zurück</button>
+          <header>
             <div><b>Arbeitszeit als PDF</b><small>Filter auswählen und exportieren</small></div>
-            <button type="button" className="finish-link" disabled={reportBusy} onClick={() => void downloadAttendanceReport()}>{reportBusy ? '…' : 'Fertig'}</button>
+            <button type="button" disabled={reportBusy} onClick={() => void downloadAttendanceReport()}>{reportBusy ? 'Erstellen…' : 'Fertig'}</button>
           </header>
           <div className="wiw-pdf-scroll">
             <div className="wiw-pdf-dates">
-              <label>Von<button type="button" onClick={() => setReportDateField('date_from')}>{reportDateLabel(report.date_from)}</button></label>
-              <label>Bis<button type="button" onClick={() => setReportDateField('date_to')}>{reportDateLabel(report.date_to)}</button></label>
+              <label>Von<button type="button" aria-label="PDF Startdatum" onClick={() => setReportDateField('date_from')}>{reportDateLabel(report.date_from)}</button></label>
+              <label>Bis<button type="button" aria-label="PDF Enddatum" onClick={() => setReportDateField('date_to')}>{reportDateLabel(report.date_to)}</button></label>
             </div>
 
             <div className="wiw-pdf-filter-block">
@@ -407,6 +400,12 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
           </footer>
         </section>
       </div>
+      {reportDateField ? <ScheduleDatePicker
+        title="PDF Zeitraum"
+        value={report[reportDateField]}
+        onSelect={(date) => { setReport((current: any) => ({ ...current, [reportDateField]: date })); setReportDateField(''); }}
+        onClose={() => setReportDateField('')}
+      /> : null}
     </>;
   }
 

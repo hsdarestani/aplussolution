@@ -252,3 +252,60 @@
   @keyframes wiw-week-slide-next{from{transform:translate3d(10px,0,0)}to{transform:translate3d(0,0,0)}}
   @keyframes wiw-week-slide-prev{from{transform:translate3d(-10px,0,0)}to{transform:translate3d(0,0,0)}}
 }
+
+
+/* 2026-09-19 contiguous three-week swipe */
+@media(max-width:900px){
+  .wiw-week-swipe-viewport{
+    position:relative;
+    width:100%;
+    overflow:clip;
+    clip-path:inset(0);
+    background:#fff;
+    overflow-anchor:none;
+  }
+  .wiw-week-swipe-track{
+    --wiw-swipe-x:0px;
+    position:relative;
+    width:100%;
+    transform:translate3d(var(--wiw-swipe-x),0,0);
+    touch-action:pan-y;
+    overscroll-behavior-x:contain;
+    will-change:transform;
+    overflow-anchor:none;
+  }
+  .wiw-week-swipe-track.is-dragging{transition:none!important}
+  .wiw-week-swipe-track.is-settling{transition:transform .18s cubic-bezier(.2,.8,.2,1)!important}
+  .wiw-week-pane{
+    width:100%;
+    min-width:100%;
+    overflow-anchor:none;
+  }
+  .wiw-week-pane-center{position:relative;z-index:2}
+  .wiw-week-pane-prev,
+  .wiw-week-pane-next{
+    position:absolute;
+    top:0;
+    z-index:1;
+    pointer-events:none;
+    background:#fff;
+  }
+  .wiw-week-pane-prev{right:100%}
+  .wiw-week-pane-next{left:100%}
+  .wiw-week-preview .wiw-day-section>header{position:static!important}
+  .wiw-week-swipe-track .wiw-week-scroll{
+    transform:none!important;
+    opacity:1!important;
+    filter:none!important;
+    animation:none!important;
+    will-change:auto!important;
+    backface-visibility:visible!important;
+    perspective:none!important;
+  }
+  .wiw-week-swipe-track .wiw-day-section:last-child{border-bottom:0}
+}
+@supports not (overflow:clip){
+  @media(max-width:900px){
+    .wiw-week-swipe-viewport{overflow:hidden}
+  }
+}

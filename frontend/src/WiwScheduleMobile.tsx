@@ -3,7 +3,7 @@
 // SEP14_PREVIEW_PARITY
 // MODERN_WEEK_CACHE_NAVIGATION
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { IonIcon } from '@ionic/react';
@@ -158,6 +158,106 @@ function CardWorkerAvatar({ worker, open, draft }: { worker?: any; open?: boolea
     <span>{fallback}</span>
     {worker?.avatar ? <img src={worker.avatar} alt="" loading="lazy" onError={(event) => event.currentTarget.remove()} /> : null}
   </span>;
+}
+
+function previewShiftCardStyle(shift: any) {
+  const palette = schedulePalette(shift?.client_name, shift?.position_name, shift?.color_hue);
+  return {
+    '--wiw-client-hue': String(palette.hue),
+    '--wiw-card-accent': palette.accent,
+    '--wiw-card-open-bg': palette.openBackground,
+    '--wiw-card-filled-bg': palette.filledBackground,
+    '--wiw-card-open-text': palette.openText,
+    '--wiw-card-filled-text': palette.filledText,
+    '--wiw-card-open-muted': palette.openMuted,
+    '--wiw-card-filled-muted': palette.filledMuted,
+  } as React.CSSProperties;
+}
+
+function sortPreviewCards(left: CardRow, right: CardRow) {
+  let order = clientRank(left.shift.client_name) - clientRank(right.shift.client_name);
+  if (order) return order;
+  order = String(left.shift.client_name || '').localeCompare(String(right.shift.client_name || ''), 'de');
+  if (order) return order;
+  return new Date(left.shift.starts_at).getTime() - new Date(right.shift.starts_at).getTime();
+}
+
+function AdjacentWeekPreview({ weekStart, groupFilter, query, side }: { weekStart: string; groupFilter: string[]; query: string; side: 'prev' | 'next' }) {
+  const [shifts, setShifts] = useState<any[]>(() => {
+    const cached = safeSessionGet(`${WEEK_CACHE_PREFIX}${weekStart}`);
+    if (!cached) return [];
+    try {
+      const parsed = JSON.parse(cached);
+      return Array.isArray(parsed) ? parsed : Array.isArray(parsed?.shifts) ? parsed.shifts : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    let alive = true;
+    const cached = safeSessionGet(`${WEEK_CACHE_PREFIX}${weekStart}`);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        const next = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.shifts) ? parsed.shifts : [];
+        if (next.length) setShifts(next);
+      } catch { /* optional cache */ }
+    }
+    void api(`admin/mobile-schedule/?date_from=${encodeURIComponent(weekStart)}&date_to=${encodeURIComponent(addDays(weekStart, 6))}`)
+      .then((result: any) => {
+        if (!alive) return;
+        const next = Array.isArray(result?.shifts) ? result.shifts : [];
+        setShifts(next);
+        safeSessionSet(`${WEEK_CACHE_PREFIX}${weekStart}`, JSON.stringify(next));
+      })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [weekStart]);
+
+  const previewDays = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
+  const previewByDay = useMemo(() => {
+    const map: Record<string, CardRow[]> = Object.fromEntries(previewDays.map((day) => [day, []]));
+    const q = query.trim().toLocaleLowerCase('de-DE');
+    shifts.forEach((shift: any) => {
+      if (shift?.source === 'wiw-live') return;
+      if (groupFilter.length && !shiftGroups(shift).some((group: string) => groupFilter.includes(group))) return;
+      if (!groupFilter.length) return;
+      activeSlots(shift).forEach((slot: any, index: number) => {
+        const card: CardRow = {
+          key: `${shift.id}:${slot.id || index}`,
+          shift,
+          slot,
+          worker: slot.worker || undefined,
+          isOpen: Boolean(slot.is_open || (slot.status === 'open' && !slot.worker)),
+        };
+        const haystack = `${shift.position_name || ''} ${shift.client_name || ''} ${shift.location_name || ''} ${card.worker?.name || ''}`.toLocaleLowerCase('de-DE');
+        if (q && !haystack.includes(q)) return;
+        const day = dateKeyFromIso(shift.starts_at);
+        if (map[day]) map[day].push(card);
+      });
+    });
+    Object.values(map).forEach((cards) => cards.sort(sortPreviewCards));
+    return map;
+  }, [previewDays, shifts, groupFilter, query]);
+
+  return <div className={`wiw-week-pane wiw-week-preview wiw-week-pane-${side}`} aria-hidden="true">
+    {previewDays.map((day) => {
+      const header = formatDayHeader(day);
+      const dayCards = previewByDay[day] || [];
+      return <section className="wiw-day-section" key={day}>
+        <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}</em></header>
+        {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" tabIndex={-1} className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'}`} style={previewShiftCardStyle(card.shift)}>
+          <div className="wiw-card-main">
+            <CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} />
+            <span className="wiw-card-copy"><b>{cardWorkerShortName(card.worker?.name) || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}</b><small>{cardPositionShortLabel(card.shift.position_name)}</small></span>
+            <span className="wiw-card-meta"><b>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</b><small>{card.shift.location_name || 'Einsatzort'}</small></span>
+          </div>
+        </button></React.Fragment>)}
+        {!dayCards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
+      </section>;
+    })}
+  </div>;
 }
 
 function keyDate(key: string) {
@@ -444,7 +544,6 @@ export default function WiwScheduleMobile() {
   const [workers, setWorkers] = useState<any[]>([]);
   const [anchor, setAnchor] = useState(berlinToday());
   const [tab, setTab] = useState<TabKey>('all');
-  const [weekDirection, setWeekDirection] = useState<'next' | 'prev' | ''>('');
   const [query, setQuery] = useState('');
   const [groupFilter, setGroupFilter] = useState<string[]>(SCHEDULE_GROUPS.map((item) => item.value));
   const [busy, setBusy] = useState(false);
@@ -462,6 +561,9 @@ export default function WiwScheduleMobile() {
   const swipe = useRef<{ x: number; y: number } | undefined>(undefined);
   const swipeFrame = useRef<number | undefined>(undefined);
   const swipeTravel = useRef(0);
+  const swipeAxis = useRef<'horizontal' | 'vertical' | null>(null);
+  const swipeScrollElement = useRef<HTMLElement | null>(null);
+  const swipeScrollTop = useRef(0);
   const localRowsRef = useRef<any[]>([]);
   const liveRowsRef = useRef<any[]>([]);
   const loadSequence = useRef(0);
@@ -916,22 +1018,43 @@ export default function WiwScheduleMobile() {
     }
   }
 
-  function changeWeek(delta: number) {
+  function changeWeek(delta: number, swipeTrack?: HTMLElement) {
     const nextAnchor = addDays(anchor, delta);
     const nextWeek = monday(nextAnchor);
+    let cachedRows: any[] | undefined;
     const cached = safeSessionGet(`${WEEK_CACHE_PREFIX}${nextWeek}`);
     if (cached) {
       try {
-        const cachedRows = JSON.parse(cached);
-        if (Array.isArray(cachedRows)) {
-          localRowsRef.current = cachedRows;
-          publishRows();
-        }
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) cachedRows = parsed;
       } catch { /* optional cache */ }
     }
-    setWeekDirection(delta > 0 ? 'next' : 'prev');
-    setAnchor(nextAnchor);
-    window.setTimeout(() => setWeekDirection(''), 180);
+
+    const apply = () => {
+      if (cachedRows) {
+        localRowsRef.current = cachedRows;
+        setRows([...cachedRows, ...liveRowsRef.current]);
+      }
+      setAnchor(nextAnchor);
+    };
+
+    if (swipeTrack) {
+      const savedTop = swipeScrollElement.current?.scrollTop ?? swipeScrollTop.current;
+      swipeTrack.style.transition = 'none';
+      flushSync(apply);
+      swipeTrack.style.setProperty('--wiw-swipe-x', '0px');
+      swipeTrack.classList.remove('is-dragging', 'is-settling');
+      void swipeTrack.offsetWidth;
+      swipeTrack.style.transition = '';
+      const restore = () => {
+        if (swipeScrollElement.current) swipeScrollElement.current.scrollTop = savedTop;
+        else window.scrollTo({ top: savedTop, left: window.scrollX, behavior: 'auto' });
+      };
+      restore();
+      window.requestAnimationFrame(() => window.requestAnimationFrame(restore));
+    } else {
+      apply();
+    }
   }
 
   function toggleGroupFilter(value: string) {
@@ -995,74 +1118,111 @@ export default function WiwScheduleMobile() {
         <button type="button" onClick={() => changeWeek(7)}>›</button>
       </div> : null}
 
-      <div
-        className={`wiw-week-scroll ${weekDirection ? `wiw-week-turn-${weekDirection}` : ''}`}
-        onTouchStart={(event) => {
-          const touch = event.touches[0];
-          swipe.current = { x: touch.clientX, y: touch.clientY };
-          swipeTravel.current = 0;
-          event.currentTarget.classList.add('is-swipe-dragging');
-        }}
-        onTouchMove={(event) => {
-          if (!swipe.current || !event.touches.length || tab === 'open') return;
-          const touch = event.touches[0];
-          const dx = touch.clientX - swipe.current.x;
-          const dy = touch.clientY - swipe.current.y;
-          if (Math.abs(dx) < Math.abs(dy) * 1.08) return;
-          swipeTravel.current = Math.max(-105, Math.min(105, dx * .5));
-          if (swipeFrame.current) return;
-          const target = event.currentTarget;
-          swipeFrame.current = window.requestAnimationFrame(() => {
+      {tab !== 'open' ? <div className="wiw-week-swipe-viewport">
+        <div
+          className="wiw-week-swipe-track"
+          onTouchStart={(event) => {
+            const touch = event.touches[0];
+            swipe.current = { x: touch.clientX, y: touch.clientY };
+            swipeTravel.current = 0;
+            swipeAxis.current = null;
+            event.currentTarget.classList.remove('is-dragging', 'is-settling');
+            event.currentTarget.style.setProperty('--wiw-swipe-x', '0px');
+            const ionContent = document.querySelector('ion-content.app-content') as any;
+            void ionContent?.getScrollElement?.().then((element: HTMLElement) => {
+              swipeScrollElement.current = element;
+              swipeScrollTop.current = element.scrollTop;
+            }).catch(() => {
+              swipeScrollElement.current = null;
+              swipeScrollTop.current = window.scrollY;
+            });
+          }}
+          onTouchMove={(event) => {
+            if (!swipe.current || !event.touches.length) return;
+            const touch = event.touches[0];
+            const dx = touch.clientX - swipe.current.x;
+            const dy = touch.clientY - swipe.current.y;
+            if (!swipeAxis.current && (Math.abs(dx) > 7 || Math.abs(dy) > 7)) {
+              swipeAxis.current = Math.abs(dx) > Math.abs(dy) * 1.12 ? 'horizontal' : 'vertical';
+            }
+            if (swipeAxis.current !== 'horizontal') return;
+            if (event.cancelable) event.preventDefault();
+            const width = event.currentTarget.parentElement?.clientWidth || window.innerWidth;
+            swipeTravel.current = Math.max(-width, Math.min(width, dx));
+            event.currentTarget.classList.add('is-dragging');
+            if (swipeFrame.current) return;
+            const target = event.currentTarget;
+            swipeFrame.current = window.requestAnimationFrame(() => {
+              swipeFrame.current = undefined;
+              target.style.setProperty('--wiw-swipe-x', `${swipeTravel.current}px`);
+            });
+          }}
+          onTouchEnd={(event) => {
+            if (swipeFrame.current) window.cancelAnimationFrame(swipeFrame.current);
             swipeFrame.current = undefined;
-            target.style.transform = `translate3d(${swipeTravel.current}px,0,0)`;
-            target.style.opacity = String(Math.max(.72, 1 - Math.abs(swipeTravel.current) / 430));
-          });
-        }}
-        onTouchEnd={(event) => {
-          if (swipeFrame.current) window.cancelAnimationFrame(swipeFrame.current);
-          swipeFrame.current = undefined;
-          event.currentTarget.classList.remove('is-swipe-dragging');
-          event.currentTarget.style.transform = '';
-          event.currentTarget.style.opacity = '';
-          if (!swipe.current || !event.changedTouches.length) return;
-          const touch = event.changedTouches[0];
-          const dx = touch.clientX - swipe.current.x;
-          const dy = touch.clientY - swipe.current.y;
-          swipe.current = undefined;
-          if (tab !== 'open' && Math.abs(dx) > 44 && Math.abs(dx) > Math.abs(dy) * 1.12) changeWeek(dx < 0 ? 7 : -7);
-        }}
-        onTouchCancel={(event) => {
-          if (swipeFrame.current) window.cancelAnimationFrame(swipeFrame.current);
-          swipeFrame.current = undefined;
-          swipe.current = undefined;
-          event.currentTarget.classList.remove('is-swipe-dragging');
-          event.currentTarget.style.transform = '';
-          event.currentTarget.style.opacity = '';
-        }}
-      >
+            if (!swipe.current || !event.changedTouches.length) return;
+            const touch = event.changedTouches[0];
+            const dx = touch.clientX - swipe.current.x;
+            const dy = touch.clientY - swipe.current.y;
+            const axis = swipeAxis.current;
+            swipe.current = undefined;
+            swipeAxis.current = null;
+            const target = event.currentTarget;
+            target.classList.remove('is-dragging');
+            target.classList.add('is-settling');
+            if (axis === 'horizontal' && Math.abs(dx) > 44 && Math.abs(dx) > Math.abs(dy) * 1.12) {
+              const width = target.parentElement?.clientWidth || window.innerWidth;
+              target.style.setProperty('--wiw-swipe-x', `${dx < 0 ? -width : width}px`);
+              window.setTimeout(() => changeWeek(dx < 0 ? 7 : -7, target), 180);
+              return;
+            }
+            target.style.setProperty('--wiw-swipe-x', '0px');
+            window.setTimeout(() => target.classList.remove('is-settling'), 180);
+          }}
+          onTouchCancel={(event) => {
+            if (swipeFrame.current) window.cancelAnimationFrame(swipeFrame.current);
+            swipeFrame.current = undefined;
+            swipe.current = undefined;
+            swipeAxis.current = null;
+            event.currentTarget.classList.remove('is-dragging');
+            event.currentTarget.classList.add('is-settling');
+            event.currentTarget.style.setProperty('--wiw-swipe-x', '0px');
+            window.setTimeout(() => event.currentTarget.classList.remove('is-settling'), 180);
+          }}
+        >
+          <AdjacentWeekPreview weekStart={addDays(weekStart, -7)} groupFilter={groupFilter} query={query} side="prev" />
+          <div key={weekStart} className="wiw-week-scroll wiw-week-pane wiw-week-pane-center">
+            {visibleDays.map((day) => {
+              const header = formatDayHeader(day);
+              const dayCards = byDay[day] || [];
+              return <section className="wiw-day-section" id={`wiw-day-${day}`} key={day}>
+                <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}</em></header>
+                {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'} ${recentCopyShiftId && String(card.shift.id) === recentCopyShiftId ? 'is-copy-entering' : ''}`} style={shiftCardStyle(card.shift)} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
+                  <div className="wiw-card-main">
+                    <CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} />
+                    <span className="wiw-card-copy"><b>{cardWorkerShortName(card.worker?.name) || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}{card.isOpen && card.shift.status !== 'draft' ? <span className="wiw-open-alert">!</span> : null}</b><small>{cardPositionShortLabel(card.shift.position_name)}</small></span>
+                    <span className="wiw-card-meta"><b>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</b><small>{card.shift.location_name || 'Einsatzort'}</small></span>
+                  </div>
+                </button></React.Fragment>)}
+                {!dayCards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
+              </section>;
+            })}
+          </div>
+          <AdjacentWeekPreview weekStart={addDays(weekStart, 7)} groupFilter={groupFilter} query={query} side="next" />
+        </div>
+      </div> : <div className="wiw-week-scroll">
         {visibleDays.map((day) => {
           const header = formatDayHeader(day);
           const dayCards = byDay[day] || [];
           return <section className="wiw-day-section" id={`wiw-day-${day}`} key={day}>
             <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}</em></header>
-            {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'} ${recentCopyShiftId && String(card.shift.id) === recentCopyShiftId ? 'is-copy-entering' : ''}`} style={shiftCardStyle(card.shift)} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
-              <div className="wiw-card-main">
-                <CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} />
-                <span className="wiw-card-copy">
-                  <b>{cardWorkerShortName(card.worker?.name) || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}{card.isOpen && card.shift.status !== 'draft' ? <span className="wiw-open-alert">!</span> : null}</b>
-                  <small>{cardPositionShortLabel(card.shift.position_name)}</small>
-                </span>
-                <span className="wiw-card-meta">
-                  <b>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</b>
-                  <small>{card.shift.location_name || 'Einsatzort'}</small>
-                </span>
-              </div>
+            {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'}`} style={shiftCardStyle(card.shift)} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
+              <div className="wiw-card-main"><CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} /><span className="wiw-card-copy"><b>{cardWorkerShortName(card.worker?.name) || 'OpenShift'}</b><small>{cardPositionShortLabel(card.shift.position_name)}</small></span><span className="wiw-card-meta"><b>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</b><small>{card.shift.location_name || 'Einsatzort'}</small></span></div>
             </button></React.Fragment>)}
-            {tab !== 'open' && !dayCards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
           </section>;
         })}
-        {tab === 'open' && !visibleDays.length ? <div className="wiw-day-empty">Keine verfügbaren OpenShifts</div> : null}
-      </div>
+        {!visibleDays.length ? <div className="wiw-day-empty">Keine verfügbaren OpenShifts</div> : null}
+      </div>}
 
       {tab !== 'open' ? <div className="wiw-week-total"><span>Gesamtstunden</span><strong>{weekHours.toFixed(1)}</strong></div> : null}
       <button type="button" className="wiw-create-fab" aria-label="Schicht anlegen" onClick={() => openCreate(anchor)}>+</button>
