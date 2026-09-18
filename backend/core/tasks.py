@@ -318,7 +318,10 @@ def send_monthly_missing_time_reminders():
             mail_key = f'aplus:missing-time-email:{month_key}:{worker.id}'
             if _redis_client().set(mail_key, '1', nx=True, ex=40 * 24 * 60 * 60):
                 all_lines = _missing_shift_lines(shifts)
-                link = f"{settings.APP_URL.rstrip('/')}/?view=schedule&missing_shift={first_shift.id}&missing_month={month_key}"
+                base_url = settings.APP_URL.rstrip('/')
+                if 'localhost' in base_url or '127.0.0.1' in base_url:
+                    base_url = 'https://app.aplus-solution.de'
+                link = f"{base_url}/?view=schedule&missing_shift={first_shift.id}&missing_month={month_key}"
                 subject = 'A+ Solution: Bitte fehlende Arbeitszeiten für diesen Monat ergänzen'
                 body = (
                     f'Hallo {worker.user.first_name or worker.user.get_full_name() or "Mitarbeiter/in"},\n\n'

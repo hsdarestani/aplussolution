@@ -84,6 +84,7 @@ type EditForm = {
   worker: string;
   clock_in: string;
   clock_out: string;
+  break_minutes: number;
   edit_reason: string;
 };
 
@@ -255,14 +256,14 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
   function openCreate(worker = '') {
     if (!showWorker) return;
     const start = defaultInput(period);
-    setForm({ mode: 'create', worker, clock_in: start, clock_out: addInputMinutes(start, 240), edit_reason: '' });
+    setForm({ mode: 'create', worker, clock_in: start, clock_out: addInputMinutes(start, 240), break_minutes: 0, edit_reason: '' });
     setMessage('');
   }
 
   function openEdit(entry: any) {
     if (!showWorker) return;
     setForm({
-      mode: 'edit', id: String(entry.id), worker: workerId(entry), clock_in: inputDateTime(entry.clock_in), clock_out: inputDateTime(entry.clock_out), edit_reason: entry.edit_reason || '',
+      mode: 'edit', id: String(entry.id), worker: workerId(entry), clock_in: inputDateTime(entry.clock_in), clock_out: inputDateTime(entry.clock_out), break_minutes: Number(entry.effective_break_minutes ?? entry.break_minutes ?? 0), edit_reason: entry.edit_reason || '',
     });
     setMessage('');
   }
@@ -274,7 +275,7 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
     if (form.mode === 'edit' && form.edit_reason.trim().length < 3) { setMessage('Bitte einen kurzen Änderungsgrund angeben.'); return; }
     setBusy(true);
     try {
-      const body: any = { worker: form.worker, clock_in: form.clock_in, clock_out: form.clock_out };
+      const body: any = { worker: form.worker, clock_in: form.clock_in, clock_out: form.clock_out, break_minutes: Number(form.break_minutes || 0) };
       if (form.mode === 'edit') body.edit_reason = form.edit_reason.trim();
       const saved: any = await api(form.mode === 'edit' ? `time-entries/${form.id}/` : 'time-entries/', {
         method: form.mode === 'edit' ? 'PATCH' : 'POST', body: JSON.stringify(body),
@@ -361,6 +362,7 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
         {showWorker && <label><span>Mitarbeiter</span><select value={form.worker} disabled={form.mode === 'edit'} onChange={(event) => setForm({ ...form, worker: event.target.value })}><option value="">Bitte auswählen …</option>{availableWorkers.filter((worker: any) => worker.active !== false).map((worker: any) => <option key={worker.id} value={worker.id}>{worker.user_detail?.name || worker.user_detail?.email || worker.employee_number || 'Mitarbeiter'}</option>)}</select></label>}
         <label><span>Beginn</span><input type="datetime-local" value={form.clock_in} onChange={(event) => setForm({ ...form, clock_in: event.target.value })} /></label>
         <label><span>Ende</span><input type="datetime-local" value={form.clock_out} onChange={(event) => setForm({ ...form, clock_out: event.target.value })} /></label>
+        <div className="wiw-mobile-pause-editor"><span>Pause</span><div><button type="button" onClick={() => setForm({ ...form, break_minutes: Math.max(0, Number(form.break_minutes || 0) - 5) })}>−</button><b>{Number(form.break_minutes || 0)} Min.</b><button type="button" onClick={() => setForm({ ...form, break_minutes: Number(form.break_minutes || 0) + 5 })}>+</button></div></div>
         {form.mode === 'edit' && <label><span>Änderungsgrund</span><textarea rows={3} placeholder="Warum wird der Eintrag geändert?" value={form.edit_reason} onChange={(event) => setForm({ ...form, edit_reason: event.target.value })} /></label>}
         {message && <div className="wiw-attendance-message">{message}</div>}
       </div>
