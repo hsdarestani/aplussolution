@@ -24,6 +24,17 @@ const fmtMonthShort = (date: Date) => new Intl.DateTimeFormat('de-DE', { month: 
 const fmtDate = (value: string) => new Date(value).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: TZ });
 const fmtDay = (value: string) => new Date(value).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: 'short', timeZone: TZ });
 const fmtTime = (value: string) => new Date(value).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: TZ });
+function reportDateLabel(value: string) {
+  const [year, month, day] = String(value || '').split('-').map(Number);
+  if (!year || !month || !day) return value || '–';
+  return new Intl.DateTimeFormat('de-DE', {
+    timeZone: 'UTC',
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(new Date(Date.UTC(year, month - 1, day, 12)));
+}
 
 function firstOfMonth(date: Date) { return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1, 12)); }
 function monthStart(offset: number, from = firstOfMonth(new Date())) { return new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + offset, 1, 12)); }
