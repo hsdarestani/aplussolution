@@ -1,3 +1,7 @@
+// SEP14_WEEK_SWIPE_STABILITY
+// SEP14_WEEK_SWIPE_HANDOFF
+// SEP14_PREVIEW_PARITY
+// MODERN_WEEK_CACHE_NAVIGATION
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
