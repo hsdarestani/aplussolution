@@ -246,7 +246,7 @@ function AdjacentWeekPreview({ weekStart, groupFilter, query, side }: { weekStar
       const header = formatDayHeader(day);
       const dayCards = previewByDay[day] || [];
       return <section className="wiw-day-section wiw-day-visual" key={day}>
-        <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length} · {scheduleDayHours(dayCards).toFixed(1)} Std.</em></header>
+        <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}<small> · {dayCards.reduce((sum, card) => { const gross = Math.max(0, (new Date(card.shift.ends_at).getTime() - new Date(card.shift.starts_at).getTime()) / 3600000); return sum + Math.max(0, gross - Number(card.shift.break_minutes || 0) / 60); }, 0).toFixed(1)} Std.</small></em></header>
         {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" tabIndex={-1} className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'}`} style={previewShiftCardStyle(card.shift)}>
           <div className="wiw-card-main">
             <CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} />
@@ -316,15 +316,6 @@ function automaticBreak(start: number | null, end: number | null) {
   if (hours >= 9) return 45;
   if (hours >= 6) return 30;
   return 0;
-}
-function scheduleCardHours(card: CardRow) {
-  const start = new Date(card.shift?.starts_at || '').getTime();
-  const end = new Date(card.shift?.ends_at || '').getTime();
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
-  return (end - start) / 3600000;
-}
-function scheduleDayHours(cards: CardRow[]) {
-  return cards.reduce((sum, card) => sum + scheduleCardHours(card), 0);
 }
 function localDateTime(key: string, absoluteMinute: number) {
   const dayOffset = Math.floor(absoluteMinute / 1440);
@@ -1207,7 +1198,7 @@ export default function WiwScheduleMobile() {
               const header = formatDayHeader(day);
               const dayCards = byDay[day] || [];
               return <section className="wiw-day-section wiw-day-visual" id={`wiw-day-${day}`} key={day}>
-                <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length} · {scheduleDayHours(dayCards).toFixed(1)} Std.</em></header>
+                <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}<small> · {dayCards.reduce((sum, card) => { const gross = Math.max(0, (new Date(card.shift.ends_at).getTime() - new Date(card.shift.starts_at).getTime()) / 3600000); return sum + Math.max(0, gross - Number(card.shift.break_minutes || 0) / 60); }, 0).toFixed(1)} Std.</small></em></header>
                 {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'} ${recentCopyShiftId && String(card.shift.id) === recentCopyShiftId ? 'is-copy-entering' : ''}`} style={shiftCardStyle(card.shift)} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
                   <div className="wiw-card-main">
                     <CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} />
@@ -1226,7 +1217,7 @@ export default function WiwScheduleMobile() {
           const header = formatDayHeader(day);
           const dayCards = byDay[day] || [];
           return <section className="wiw-day-section wiw-day-visual" id={`wiw-day-${day}`} key={day}>
-            <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length} · {scheduleDayHours(dayCards).toFixed(1)} Std.</em></header>
+            <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}<small> · {dayCards.reduce((sum, card) => { const gross = Math.max(0, (new Date(card.shift.ends_at).getTime() - new Date(card.shift.starts_at).getTime()) / 3600000); return sum + Math.max(0, gross - Number(card.shift.break_minutes || 0) / 60); }, 0).toFixed(1)} Std.</small></em></header>
             {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'}`} style={shiftCardStyle(card.shift)} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
               <div className="wiw-card-main"><CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} /><span className="wiw-card-copy"><b>{cardWorkerShortName(card.worker?.name) || 'OpenShift'}</b><small>{cardPositionShortLabel(card.shift.position_name)}</small></span><span className="wiw-card-meta"><b>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</b><small>{card.shift.location_name || 'Einsatzort'}</small></span></div>
             </button></React.Fragment>)}
