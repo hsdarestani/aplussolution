@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Shift
+from .models import Shift, TimeEntry
 from .premium_approval_models import ShiftReleaseRequest
 from .shift_slots import ShiftSlot
 from .shift_rules import automatic_break_minutes, normalized_groups
@@ -16,6 +16,7 @@ class ShiftApiSerializer(serializers.ModelSerializer):
     assigned_workers = serializers.SerializerMethodField()
     slot_cards = serializers.SerializerMethodField()
     my_release_request = serializers.SerializerMethodField()
+    my_time_entry = serializers.SerializerMethodField()
 
     def get_geofence_required(self, obj):
         return obj.location.latitude is not None and obj.location.longitude is not None
@@ -165,6 +166,41 @@ class ShiftApiSerializer(serializers.ModelSerializer):
             'created_at': row.created_at,
         }
 
+    def get_my_time_entry(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated or getattr(request.user, 'role', None) != 'worker':
+            return None
+        try:
+            worker = request.user.worker_profile
+        except Exception:
+            return None
+
+        bulk_map = getattr(self, '_bulk_my_time_entry_map', None)
+        rows = self._list_instances()
+        if bulk_map is None:
+            shift_ids = [item.pk for item in rows if getattr(item, 'pk', None)]
+            bulk_map = {}
+            if shift_ids:
+                entries = TimeEntry.objects.filter(
+                    shift_id__in=shift_ids,
+                    worker=worker,
+                ).order_by('shift_id', '-clock_in')
+                for entry in entries:
+                    bulk_map.setdefault(entry.shift_id, entry)
+            self._bulk_my_time_entry_map = bulk_map
+
+        row = bulk_map.get(obj.pk)
+        if row is None and not rows:
+            row = TimeEntry.objects.filter(shift=obj, worker=worker).order_by('-clock_in').first()
+        if not row:
+            return None
+        return {
+            'id': str(row.id),
+            'clock_in': row.clock_in,
+            'clock_out': row.clock_out,
+            'approved': row.approved,
+        }
+
     def validate(self, attrs):
         attrs = super().validate(attrs)
         starts_at = attrs.get('starts_at', getattr(self.instance, 'starts_at', None))
@@ -183,5 +219,5 @@ class ShiftApiSerializer(serializers.ModelSerializer):
             'id', 'order', 'order_title', 'client', 'client_name', 'location', 'location_name', 'geofence_required',
             'position', 'position_name', 'starts_at', 'ends_at', 'break_minutes', 'status', 'notes',
             'required_count', 'confirmation_required', 'schedule_groups', 'color_hue', 'open_count', 'filled_count',
-            'assigned_workers', 'slot_cards', 'my_release_request',
+            'assigned_workers', 'slot_cards', 'my_release_request', 'my_time_entry',
         ]

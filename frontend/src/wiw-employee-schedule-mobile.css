@@ -359,3 +359,35 @@
   }
   .wiw-release-actions button:disabled { opacity: .58; }
 }
+
+
+@media (max-width: 900px) {
+  .wiw-time-report-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin: 14px 0 4px;
+  }
+  .wiw-time-report-fields label {
+    display: grid;
+    gap: 6px;
+    color: #647385;
+    font-size: 12px;
+    font-weight: 800;
+  }
+  .wiw-time-report-fields input {
+    width: 100%;
+    min-height: 48px;
+    padding: 0 12px;
+    border: 1px solid #d8e0e6;
+    border-radius: 11px;
+    background: #fff;
+    color: #243446;
+    font: inherit;
+    font-size: 16px;
+  }
+  .wiw-time-report-fields input:focus {
+    outline: 2px solid rgba(99, 169, 68, .2);
+    border-color: var(--ion-color-primary, #63a944);
+  }
+}

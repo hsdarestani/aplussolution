@@ -143,6 +143,7 @@ export default function WiwEmployeeScheduleMobile() {
   const [anchor, setAnchor] = useState(berlinToday());
   const [selected, setSelected] = useState<any>();
   const [releaseTarget, setReleaseTarget] = useState<any>();
+  const [timeReport, setTimeReport] = useState<any>();
   const [releaseCandidates, setReleaseCandidates] = useState<any[]>([]);
   const [requestedWorkerId, setRequestedWorkerId] = useState('');
   const [releaseLoading, setReleaseLoading] = useState(false);
@@ -329,8 +330,55 @@ export default function WiwEmployeeScheduleMobile() {
     }
   }
 
+
+  function openTimeReport(shift: any) {
+    setMessage('');
+    setTimeReport({
+      shift,
+      date: dateKey(shift.starts_at),
+      clock_in: time(shift.starts_at),
+      clock_out: time(shift.ends_at),
+    });
+  }
+
+  function closeTimeReport() {
+    if (busy) return;
+    setTimeReport(undefined);
+  }
+
+  async function submitTimeReport() {
+    if (!timeReport?.shift?.id || !timeReport.clock_in || !timeReport.clock_out) {
+      setMessage('Bitte Beginn und Ende vollständig angeben.');
+      return;
+    }
+    setBusy(true);
+    setMessage('');
+    try {
+      const endDate = timeReport.clock_out <= timeReport.clock_in ? addDays(timeReport.date, 1) : timeReport.date;
+      const entry: any = await api('time-entries/report_shift/', {
+        method: 'POST',
+        body: JSON.stringify({
+          shift: timeReport.shift.id,
+          clock_in: `${timeReport.date}T${timeReport.clock_in}:00`,
+          clock_out: `${endDate}T${timeReport.clock_out}:00`,
+        }),
+      });
+      const updatedShift = { ...timeReport.shift, my_time_entry: entry };
+      setMine((current) => current.map((shift) => shift.id === updatedShift.id ? updatedShift : shift));
+      setSelected((current: any) => current?.id === updatedShift.id ? updatedShift : current);
+      sessionStorage.removeItem(`aplus:time-report-later:${timeReport.shift.id}`);
+      setTimeReport(undefined);
+      setMessage('Arbeitszeit wurde zur Freigabe an die Administration gesendet.');
+    } catch (error: any) {
+      setMessage(error?.message || 'Arbeitszeit konnte nicht gesendet werden.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!active || !mobile || !worker) return null;
   const host = document.querySelector('.app-main') || document.body;
+  const selectedEnded = Boolean(selected?.ends_at && new Date(selected.ends_at).getTime() <= Date.now());
 
   const screen = selected ? (
     <div className="wiw-employee-shift-detail" data-testid="wiw-employee-shift-detail">
@@ -353,6 +401,16 @@ export default function WiwEmployeeScheduleMobile() {
           <button type="button" className="primary" disabled={busy} onClick={() => void claim(selected)}>{busy ? 'Bitte warten …' : 'Schicht übernehmen'}</button>
         ) : !isOwnShift(selected) ? (
           <button type="button" disabled>Nur sichtbar · Service Zeitplan</button>
+        ) : selectedEnded ? (
+          selected.my_time_entry ? (
+            <button type="button" disabled>
+              {selected.my_time_entry.clock_out
+                ? (selected.my_time_entry.approved ? 'Arbeitszeit bestätigt' : 'Arbeitszeit wartet auf Freigabe')
+                : 'Arbeitszeit bereits erfasst'}
+            </button>
+          ) : (
+            <button type="button" className="primary" disabled={busy} onClick={() => openTimeReport(selected)}>Arbeitszeit eintragen</button>
+          )
         ) : selected.my_release_request?.status === 'pending' ? (
           <button type="button" disabled>
             {selected.my_release_request?.requested_worker
@@ -431,6 +489,36 @@ export default function WiwEmployeeScheduleMobile() {
 
   return <>
     {createPortal(screen, host)}
+    {timeReport ? createPortal(<div className="wiw-release-backdrop" role="presentation" onClick={closeTimeReport}>
+      <section className="wiw-release-sheet wiw-time-report-sheet" role="dialog" aria-modal="true" aria-labelledby="wiw-time-report-title" onClick={(event) => event.stopPropagation()}>
+        <div className="wiw-release-handle" />
+        <header>
+          <div>
+            <small>ARBEITSZEIT</small>
+            <h2 id="wiw-time-report-title">Arbeitszeit eintragen</h2>
+          </div>
+          <button type="button" aria-label="Schließen" disabled={busy} onClick={closeTimeReport}>×</button>
+        </header>
+        <div className="wiw-release-shift-summary">
+          <strong>{timeReport.shift.position_name || 'Einsatz'}</strong>
+          <span>{fullDate(timeReport.shift.starts_at)} · geplant {time(timeReport.shift.starts_at)}–{time(timeReport.shift.ends_at)}</span>
+          <small>{timeReport.shift.client_name || 'A+'} · {timeReport.shift.location_name || 'Einsatzort'}</small>
+        </div>
+        <div className="wiw-release-copy">
+          <strong>Wie lange hast du tatsächlich gearbeitet?</strong>
+          <p>Trage Beginn und Ende ein. Die Administration prüft und bestätigt die Zeit anschließend.</p>
+        </div>
+        <div className="wiw-time-report-fields">
+          <label><span>Von</span><input type="time" value={timeReport.clock_in} onChange={(event) => setTimeReport({ ...timeReport, clock_in: event.target.value })} /></label>
+          <label><span>Bis</span><input type="time" value={timeReport.clock_out} onChange={(event) => setTimeReport({ ...timeReport, clock_out: event.target.value })} /></label>
+        </div>
+        {message && <div className="wiw-release-error">{message}</div>}
+        <div className="wiw-release-actions">
+          <button type="button" disabled={busy} onClick={closeTimeReport}>Abbrechen</button>
+          <button type="button" className="primary" disabled={busy} onClick={() => void submitTimeReport()}>{busy ? 'Wird gesendet …' : 'Zur Freigabe senden'}</button>
+        </div>
+      </section>
+    </div>, document.body) : null}
     {releaseTarget ? createPortal(<div className="wiw-release-backdrop" role="presentation" onClick={closeReleaseChooser}>
       <section className="wiw-release-sheet" role="dialog" aria-modal="true" aria-labelledby="wiw-release-title" onClick={(event) => event.stopPropagation()}>
         <div className="wiw-release-handle" />
