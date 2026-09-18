@@ -6,3 +6,11 @@
 .attendance-pause-editor ion-input{min-width:0;--padding-start:8px;--padding-end:8px;text-align:center;border:1px solid #d8e0e6;border-radius:11px;background:#fff}
 .attendance-report-modal{max-width:700px}.attendance-report-dates{display:grid;grid-template-columns:1fr 1fr;gap:10px}.attendance-report-error{padding:11px 13px;border-radius:11px;background:#fff1f0;color:#9b2c2c;font-size:13px;line-height:1.4}
 @media(max-width:560px){.attendance-pause-editor{align-items:stretch;flex-direction:column}.attendance-pause-editor>div:last-child{grid-template-columns:48px minmax(0,1fr) 48px}.attendance-report-dates{grid-template-columns:1fr}}
+
+.attendance-report-filter-block{padding:14px;border:1px solid #e1e6ea;border-radius:14px;background:#fff;display:grid;gap:8px}
+.attendance-report-filter-block>b{font-size:13px;color:#263746}
+.attendance-report-filter-block>small{font-size:10px;color:#98a2b3}
+.attendance-report-chip-grid{display:flex;flex-wrap:wrap;gap:7px;max-height:210px;overflow:auto}
+.attendance-report-chip-grid button{min-height:32px;padding:6px 10px;border:1px solid #d7dde2;border-radius:999px;background:#fff;color:#5d6d78;font:650 11px/1.15 inherit}
+.attendance-report-chip-grid button.active{border-color:#5b9747;background:#eef7ea;color:#39752b}
+.attendance-report-chip-grid.compact button{flex:1 1 140px}

@@ -378,3 +378,14 @@
 .wiw-approval-person{display:grid;gap:3px;padding:13px;border:1px solid #e1e6eb;border-radius:12px;background:#f8fafc}.wiw-approval-person small{color:#718091}.wiw-mobile-pause-editor{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid #dce3e9;border-radius:12px;background:#fff}.wiw-mobile-pause-editor>span{font-size:13px;font-weight:800;color:#52606d}.wiw-mobile-pause-editor>div{display:flex;align-items:center;gap:10px}.wiw-mobile-pause-editor button{width:42px;height:42px;border:1px solid #cbd5df;border-radius:11px;background:#f8fafc;color:#173448;font-size:25px}.wiw-mobile-pause-editor b{min-width:62px;text-align:center;font-size:14px}
 .wiw-report-explainer{padding:12px;border-radius:11px;background:#eef4f8;color:#51687b;font-size:12px;line-height:1.45}
 .wiw-edit-form select[multiple]{min-height:128px;padding:8px}
+
+.attendance-pdf-backdrop .wiw-pdf-sheet{max-width:760px}
+.attendance-pdf-summary{margin-top:10px;padding:12px;border:1px solid #dce6d8;border-radius:13px;background:#f4faF1;display:grid;gap:4px;color:#40533a}
+.attendance-pdf-summary b{font-size:12px;color:#315f2d}
+.attendance-pdf-summary span{font-size:10.5px;line-height:1.45;color:#61705d}
+
+.attendance-pdf-header{display:grid!important;grid-template-columns:auto minmax(0,1fr) auto!important;align-items:center!important;gap:8px!important}
+.attendance-pdf-header>div{text-align:center;min-width:0}.attendance-pdf-header>div b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.attendance-pdf-header>div small{display:block}
+.attendance-pdf-header .back-link,.attendance-pdf-header .finish-link{min-width:58px!important;padding:0!important;background:transparent!important;border:0!important;font-size:12px!important;font-weight:700!important}
+.attendance-pdf-header .back-link{text-align:left;color:#4c8a37!important}.attendance-pdf-header .finish-link{text-align:right;color:#4c8a37!important}
+.attendance-pdf-footer{grid-template-columns:1fr!important}.attendance-pdf-footer .primary{width:100%!important;background:#69aa4e!important;border-color:#5c9847!important;color:#fff!important}

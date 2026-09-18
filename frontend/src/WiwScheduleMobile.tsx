@@ -135,6 +135,23 @@ function cardWorkerInitials(worker?: any) {
   return ((parts[0]?.[0] || '') + (parts.length > 1 ? parts[parts.length - 1]?.[0] || '' : '')).toUpperCase() || 'MA';
 }
 
+function cardWorkerShortName(value?: string) {
+  const parts = String(value || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return parts[0] || '';
+  const last = parts[parts.length - 1];
+  return `${parts[0]} ${(last[0] || '').toLocaleUpperCase('de-DE')}.`;
+}
+
+function cardPositionShortLabel(name?: string) {
+  const key = normalize(String(name || ''));
+  if (key.includes('serviceleitung')) return 'SL';
+  if (key.includes('servicekraft') || key.includes('servicekrat')) return 'SK';
+  if (key.includes('frontoffice') || key.includes('rezeption') || key.includes('reception')) return 'FO';
+  if (key.includes('housekeeping') || key.includes('houskeeping') || key.includes('zimmer')) return 'HK';
+  if (key.includes('bar')) return 'Bar';
+  return String(name || 'Schicht');
+}
+
 function CardWorkerAvatar({ worker, open, draft }: { worker?: any; open?: boolean; draft?: boolean }) {
   const fallback = draft ? 'E' : open ? 'OS' : cardWorkerInitials(worker);
   return <span className={`wiw-card-avatar ${open ? 'is-open' : ''}`} aria-hidden="true">
@@ -1032,8 +1049,8 @@ export default function WiwScheduleMobile() {
               <div className="wiw-card-main">
                 <CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} />
                 <span className="wiw-card-copy">
-                  <b>{card.worker?.name || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}{card.isOpen && card.shift.status !== 'draft' ? <span className="wiw-open-alert">!</span> : null}</b>
-                  <small>{card.shift.position_name || 'Schicht'}</small>
+                  <b>{cardWorkerShortName(card.worker?.name) || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}{card.isOpen && card.shift.status !== 'draft' ? <span className="wiw-open-alert">!</span> : null}</b>
+                  <small>{cardPositionShortLabel(card.shift.position_name)}</small>
                 </span>
                 <span className="wiw-card-meta">
                   <b>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</b>

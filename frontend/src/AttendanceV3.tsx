@@ -5,8 +5,6 @@ import {
   IonButton,
   IonInput,
   IonModal,
-  IonSelect,
-  IonSelectOption,
   IonSpinner,
   IonTextarea,
   IonToast,
@@ -423,19 +421,33 @@ export default function AttendanceV3({ user }: { user: User }) {
           <div className="attendance-modal attendance-report-modal">
             <small>PDF · ARBEITSZEIT</small>
             <h2>Arbeitszeitbericht erstellen</h2>
-            <p>Der Bericht enthält Nettoarbeitszeit, Nachtzuschlag 23:00–06:00, Sonntagszuschlag und abgezogene Pausen – getrennt nach Service, Housekeeping und Front Office.</p>
+            <p>Filter wie im Dienstplan-PDF: Zeitraum und Mitarbeiter auswählen, Bereiche optional eingrenzen.</p>
             <div className="attendance-report-dates">
               <IonInput fill="outline" type="date" label="Von" labelPlacement="floating" value={report.date_from} onIonInput={(event) => setReport({ ...report, date_from: event.detail.value })} />
               <IonInput fill="outline" type="date" label="Bis" labelPlacement="floating" value={report.date_to} onIonInput={(event) => setReport({ ...report, date_to: event.detail.value })} />
             </div>
-            <IonSelect fill="outline" multiple interface="alert" label="Mitarbeiter" labelPlacement="floating" value={report.workers} onIonChange={(event) => setReport({ ...report, workers: event.detail.value || [] })}>
-              {reportWorkers.map((worker: any) => <IonSelectOption key={worker.id} value={worker.id}>{worker.user_detail?.name || worker.employee_number}</IonSelectOption>)}
-            </IonSelect>
-            <IonSelect fill="outline" multiple interface="alert" label="Bereiche" labelPlacement="floating" value={report.groups} onIonChange={(event) => setReport({ ...report, groups: event.detail.value || [] })}>
-              <IonSelectOption value="service">Service</IonSelectOption>
-              <IonSelectOption value="housekeeping">Housekeeping</IonSelectOption>
-              <IonSelectOption value="front_office">Front Office</IonSelectOption>
-            </IonSelect>
+            <div className="attendance-report-filter-block">
+              <b>Mitarbeiter</b>
+              <div className="attendance-report-chip-grid">
+                <button type="button" className={report.workers.length === 0 ? 'active' : ''} onClick={() => setReport({ ...report, workers: [] })}>Alle Mitarbeiter</button>
+                {reportWorkers.map((worker: any) => {
+                  const id = String(worker.id);
+                  const selected = report.workers.includes(id);
+                  return <button type="button" key={id} className={selected ? 'active' : ''} onClick={() => setReport((current: any) => ({ ...current, workers: selected ? current.workers.filter((item: string) => item !== id) : [...current.workers, id] }))}>{worker.user_detail?.name || worker.employee_number}</button>;
+                })}
+              </div>
+              <small>Nichts ausgewählt = alle Mitarbeiter</small>
+            </div>
+            <div className="attendance-report-filter-block">
+              <b>Bereiche</b>
+              <div className="attendance-report-chip-grid compact">
+                {[['service','Service'],['housekeeping','Housekeeping'],['front_office','Front Office']].map(([value,label]) => {
+                  const selected = report.groups.includes(value);
+                  return <button type="button" key={value} className={selected ? 'active' : ''} onClick={() => setReport((current: any) => ({ ...current, groups: selected ? current.groups.filter((item: string) => item !== value) : [...current.groups, value] }))}>{label}</button>;
+                })}
+              </div>
+              <small>Nichts ausgewählt = alle Bereiche</small>
+            </div>
             {reportError ? <div className="attendance-report-error">{reportError}</div> : null}
             <div className="attendance-modal-actions"><IonButton fill="outline" onClick={() => setReportOpen(false)}>Abbrechen</IonButton><IonButton disabled={reportBusy} onClick={() => void downloadAttendanceReport()}>{reportBusy ? 'PDF wird erstellt …' : 'PDF erstellen'}</IonButton></div>
           </div>

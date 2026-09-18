@@ -15,6 +15,7 @@ import {
 } from 'ionicons/icons';
 import { api, apiBlob } from './api';
 import { saveSchedulePdf } from './saveSchedulePdf';
+import ScheduleDatePicker from './ScheduleDatePicker';
 import './phase8-mobile-attendance-flow.css';
 
 const TZ = 'Europe/Berlin';
@@ -104,6 +105,7 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
   const [reportOpen, setReportOpen] = useState(false);
   const [reportBusy, setReportBusy] = useState(false);
   const [reportError, setReportError] = useState('');
+  const [reportDateField, setReportDateField] = useState<'date_from' | 'date_to' | ''>('');
   const [report, setReport] = useState<any>(() => {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
     return { date_from: today.slice(0, 8) + '01', date_to: today, workers: [], groups: [] };
@@ -333,21 +335,68 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
   }
 
   if (reportOpen && showWorker) {
-    return <div className="wiw-attendance-editor" data-testid="phase8-attendance-report">
-      <div className="wiw-attendance-toolbar">
-        <button type="button" className="back" aria-label="Zurück" onClick={() => setReportOpen(false)}><IonIcon icon={chevronBackOutline} /></button>
-        <strong>Arbeitszeit-PDF</strong>
-        <button type="button" className="text-action" disabled={reportBusy} onClick={() => void downloadAttendanceReport()}>{reportBusy ? '…' : 'Erstellen'}</button>
+    const activeWorkers = workers.filter((worker: any) => worker.active !== false && !String(worker?.user_detail?.email || '').endsWith('@sync.invalid'));
+    const groups = [
+      { value: 'service', label: 'Service' },
+      { value: 'housekeeping', label: 'Housekeeping' },
+      { value: 'front_office', label: 'Front Office' },
+    ];
+    return <>
+      {reportDateField ? <ScheduleDatePicker
+        title="PDF Zeitraum"
+        value={report[reportDateField]}
+        onSelect={(date) => { setReport((current: any) => ({ ...current, [reportDateField]: date })); setReportDateField(''); }}
+        onClose={() => setReportDateField('')}
+      /> : null}
+      <div className="wiw-sheet-backdrop wiw-pdf-backdrop attendance-pdf-backdrop" data-testid="phase8-attendance-report">
+        <section className="wiw-pdf-sheet">
+          <header className="attendance-pdf-header">
+            <button type="button" className="back-link" disabled={reportBusy} onClick={() => setReportOpen(false)}>‹ Zurück</button>
+            <div><b>Arbeitszeit als PDF</b><small>Filter auswählen und exportieren</small></div>
+            <button type="button" className="finish-link" disabled={reportBusy} onClick={() => void downloadAttendanceReport()}>{reportBusy ? '…' : 'Fertig'}</button>
+          </header>
+          <div className="wiw-pdf-scroll">
+            <div className="wiw-pdf-dates">
+              <label>Von<button type="button" onClick={() => setReportDateField('date_from')}>{reportDateLabel(report.date_from)}</button></label>
+              <label>Bis<button type="button" onClick={() => setReportDateField('date_to')}>{reportDateLabel(report.date_to)}</button></label>
+            </div>
+
+            <div className="wiw-pdf-filter-block">
+              <b>Mitarbeiter</b>
+              <div className="wiw-pdf-chip-grid">
+                <button type="button" className={report.workers.length === 0 ? 'active' : ''} aria-pressed={report.workers.length === 0} onClick={() => setReport((current: any) => ({ ...current, workers: [] }))}>Alle Mitarbeiter</button>
+                {activeWorkers.map((worker: any) => {
+                  const workerId = String(worker.id);
+                  const selected = report.workers.includes(workerId);
+                  return <button type="button" key={workerId} className={selected ? 'active' : ''} aria-pressed={selected} onClick={() => setReport((current: any) => ({ ...current, workers: selected ? current.workers.filter((item: string) => item !== workerId) : [...current.workers, workerId] }))}>{worker.user_detail?.name || worker.employee_number || 'Mitarbeiter'}</button>;
+                })}
+              </div>
+              <small>Nichts ausgewählt = alle Mitarbeiter</small>
+            </div>
+
+            <div className="wiw-pdf-filter-block">
+              <b>Bereiche</b>
+              <div className="wiw-pdf-chip-grid compact">
+                {groups.map((choice) => {
+                  const selected = report.groups.includes(choice.value);
+                  return <button type="button" key={choice.value} className={selected ? 'active' : ''} aria-pressed={selected} onClick={() => setReport((current: any) => ({ ...current, groups: selected ? current.groups.filter((item: string) => item !== choice.value) : [...current.groups, choice.value] }))}>{choice.label}</button>;
+                })}
+              </div>
+              <small>Nichts ausgewählt = alle Bereiche</small>
+            </div>
+
+            <div className="attendance-pdf-summary">
+              <b>Im Bericht</b>
+              <span>Nettoarbeitszeit · Nachtzuschlag 23:00–06:00 · Sonntagszuschlag · abgezogene Pause</span>
+            </div>
+          </div>
+          {reportError ? <p className="wiw-pdf-error" role="alert">{reportError}</p> : null}
+          <footer className="attendance-pdf-footer">
+            <button type="button" className="primary" disabled={reportBusy || !report.date_from || !report.date_to} onClick={() => void downloadAttendanceReport()}>{reportBusy ? 'PDF wird erstellt…' : 'PDF erstellen'}</button>
+          </footer>
+        </section>
       </div>
-      <div className="wiw-edit-form">
-        <label><span>Von</span><input type="date" value={report.date_from} onChange={(event) => setReport({ ...report, date_from: event.target.value })} /></label>
-        <label><span>Bis</span><input type="date" value={report.date_to} onChange={(event) => setReport({ ...report, date_to: event.target.value })} /></label>
-        <label><span>Mitarbeiter</span><select multiple value={report.workers} onChange={(event) => setReport({ ...report, workers: Array.from(event.target.selectedOptions).map((option) => option.value) })}>{workers.filter((worker: any) => worker.active !== false).map((worker: any) => <option key={worker.id} value={worker.id}>{worker.user_detail?.name || worker.employee_number || 'Mitarbeiter'}</option>)}</select><small>Ohne Auswahl = alle Mitarbeiter</small></label>
-        <label><span>Bereiche</span><select multiple value={report.groups} onChange={(event) => setReport({ ...report, groups: Array.from(event.target.selectedOptions).map((option) => option.value) })}><option value="service">Service</option><option value="housekeeping">Housekeeping</option><option value="front_office">Front Office</option></select><small>Ohne Auswahl = alle Bereiche</small></label>
-        <div className="wiw-report-explainer">Nettoarbeitszeit · Nacht 23:00–06:00 · Sonntag · abgezogene Pause</div>
-        {reportError && <div className="wiw-attendance-message">{reportError}</div>}
-      </div>
-    </div>;
+    </>;
   }
 
   if (form) {
