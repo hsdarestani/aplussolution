@@ -16,6 +16,7 @@ from .shift_api import ShiftApiSerializer
 SYNTHETIC_MIGRATION_EMAIL_SUFFIX = '@sync.invalid'
 ATTENDANCE_LIST_LIMIT = 100
 STALE_WORKER_TIMER_HOURS = 16
+SHIFT_REPORT_LOOKBACK_HOURS = 48
 
 
 def _parse_requested_datetime(value):
@@ -117,6 +118,15 @@ def employee_attendance_home(request):
             status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
         ).select_related('order', 'client', 'location', 'position').distinct().order_by('starts_at').first()
 
+    pending_report_shift = Shift.objects.filter(
+        ownership,
+        ends_at__lte=now,
+        ends_at__gte=now - timedelta(hours=SHIFT_REPORT_LOOKBACK_HOURS),
+        status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED, Shift.Status.COMPLETED],
+    ).exclude(
+        time_entries__worker=worker,
+    ).select_related('order', 'client', 'location', 'position').distinct().order_by('ends_at').first()
+
     corrections = TimeEntryCorrection.objects.select_related(
         'entry', 'requested_by__user'
     ).filter(
@@ -128,6 +138,7 @@ def employee_attendance_home(request):
         'active_entry': TimeEntrySerializer(active, context={'request': request}).data if active else None,
         'stale_active_entry': TimeEntrySerializer(stale_active, context={'request': request}).data if stale_active else None,
         'eligible_shift': ShiftApiSerializer(eligible_shift, context={'request': request}).data if eligible_shift else None,
+        'pending_shift_report': ShiftApiSerializer(pending_report_shift, context={'request': request}).data if pending_report_shift else None,
         'month_worked_minutes': month_worked_minutes,
         'pending_corrections': sum(1 for item in corrections if item.status == TimeEntryCorrection.Status.PENDING),
         'history': TimeEntrySerializer(history_qs, many=True, context={'request': request}).data,

@@ -9,7 +9,7 @@ from django.core.management import call_command
 from django.utils import timezone
 
 from .document_center import dispatch_contract_reminders
-from .models import Notification, Shift, ShiftImportPackage
+from .models import Notification, Shift, ShiftImportPackage, TimeEntry
 from .operational_notifications import dispatch_attendance_reminders
 from .shift_slots import ShiftSlot
 
@@ -165,6 +165,55 @@ def send_shift_reminders():
                 fail_silently=True,
             )
     return count
+
+
+@shared_task
+def send_shift_time_report_prompts():
+    """Ask assigned workers for actual hours after a shift has ended.
+
+    The 48-hour scan window makes the task resilient to worker/beat downtime;
+    get_or_create keeps the push idempotent across repeated scans.
+    """
+    now = timezone.now()
+    shifts = Shift.objects.filter(
+        ends_at__lte=now,
+        ends_at__gte=now - timedelta(hours=48),
+        status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED, Shift.Status.COMPLETED],
+    ).select_related('worker__user', 'location', 'position').prefetch_related('slots__worker__user')
+
+    created_count = 0
+    for shift in shifts:
+        workers = {}
+        if shift.worker_id and shift.worker and shift.worker.active and shift.worker.user.is_active:
+            workers[str(shift.worker_id)] = shift.worker
+        for slot in shift.slots.all():
+            if (
+                slot.status == ShiftSlot.Status.CLAIMED
+                and slot.worker_id
+                and slot.worker
+                and slot.worker.active
+                and slot.worker.user.is_active
+            ):
+                workers[str(slot.worker_id)] = slot.worker
+
+        if not workers:
+            continue
+        local_start = timezone.localtime(shift.starts_at)
+        local_end = timezone.localtime(shift.ends_at)
+        for worker in workers.values():
+            if TimeEntry.objects.filter(worker=worker, shift=shift).exists():
+                continue
+            _, created = Notification.objects.get_or_create(
+                user=worker.user,
+                kind=f'shift-time-report-{shift.id}-{worker.id}',
+                defaults={
+                    'title': 'Wie lange hast du heute gearbeitet?',
+                    'body': f'{local_start:%d.%m.%Y} · geplant {local_start:%H:%M}–{local_end:%H:%M} · {shift.location.name}',
+                    'action_url': '/time',
+                },
+            )
+            created_count += int(created)
+    return created_count
 
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={'max_retries': 3})

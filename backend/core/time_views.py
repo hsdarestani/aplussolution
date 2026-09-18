@@ -14,6 +14,8 @@ from .views import TimeEntryViewSet as LegacyTimeEntryViewSet, geofence_error
 
 
 OUTSIDE_GEOFENCE_PREFIX = 'OUTSIDE_GEOFENCE:'
+SELF_REPORTED_REASON = 'SELF_REPORTED_AFTER_SHIFT'
+MAX_SELF_REPORTED_HOURS = 24
 
 
 def _parse_admin_datetime(value):
@@ -121,6 +123,78 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
         payload['review_required'] = bool(geofence_issue)
         payload['review_reason'] = geofence_issue or ''
         return Response(payload)
+
+    @action(detail=False, methods=['post'])
+    def report_shift(self, request):
+        """Let a worker report actual hours after a completed scheduled shift.
+
+        This flow intentionally does not request or store GPS coordinates. The
+        submitted row always enters the existing admin review queue.
+        """
+        if request.user.role != User.Role.WORKER:
+            return Response({'detail': 'Arbeitszeiten können hier nur Mitarbeiter melden.'}, status=403)
+
+        worker = request.user.worker_profile
+        shift_id = request.data.get('shift')
+        if not shift_id:
+            return Response({'detail': 'Schicht fehlt.'}, status=400)
+
+        ownership = Q(worker=worker) | Q(slots__worker=worker, slots__status='claimed')
+        shift = Shift.objects.filter(ownership, pk=shift_id).select_related(
+            'location', 'position'
+        ).distinct().first()
+        if not shift:
+            return Response({'detail': 'Diese Schicht gehört nicht zu deinem Profil.'}, status=403)
+        if shift.status in {Shift.Status.DRAFT, Shift.Status.CANCELLED}:
+            return Response({'detail': 'Für diese Schicht kann keine Arbeitszeit gemeldet werden.'}, status=400)
+
+        now = timezone.now()
+        if shift.ends_at > now:
+            return Response({'detail': 'Die Schicht ist noch nicht beendet.'}, status=400)
+        if TimeEntry.objects.filter(worker=worker, shift=shift).exists():
+            return Response({'detail': 'Für diese Schicht wurde bereits Arbeitszeit erfasst.'}, status=400)
+
+        clock_in = _parse_admin_datetime(request.data.get('clock_in'))
+        clock_out = _parse_admin_datetime(request.data.get('clock_out'))
+        if not clock_in or not clock_out:
+            return Response({'detail': 'Bitte Beginn und Ende vollständig angeben.'}, status=400)
+        if clock_out <= clock_in:
+            return Response({'detail': 'Arbeitsende muss nach Arbeitsbeginn liegen.'}, status=400)
+        if clock_out > now + timedelta(minutes=15):
+            return Response({'detail': 'Arbeitsende darf nicht in der Zukunft liegen.'}, status=400)
+        if clock_out - clock_in > timedelta(hours=MAX_SELF_REPORTED_HOURS):
+            return Response({'detail': 'Eine gemeldete Arbeitszeit darf maximal 24 Stunden umfassen.'}, status=400)
+        if clock_in < shift.starts_at - timedelta(hours=12) or clock_out > shift.ends_at + timedelta(hours=12):
+            return Response({'detail': 'Die gemeldete Zeit liegt zu weit außerhalb der geplanten Schicht.'}, status=400)
+
+        entry = TimeEntry.objects.create(
+            worker=worker,
+            shift=shift,
+            clock_in=clock_in,
+            clock_out=clock_out,
+            approved=False,
+            edit_reason=SELF_REPORTED_REASON,
+        )
+        worker_name = request.user.get_full_name() or request.user.email
+        for recipient in User.objects.filter(role__in=[User.Role.ADMIN, User.Role.MANAGER], is_active=True):
+            Notification.objects.get_or_create(
+                user=recipient,
+                kind=f'shift-time-report-review-{entry.id}',
+                defaults={
+                    'title': 'Arbeitszeit wartet auf Freigabe',
+                    'body': f'{worker_name}: {timezone.localtime(clock_in):%d.%m.%Y %H:%M}–{timezone.localtime(clock_out):%H:%M}',
+                    'action_url': '/time',
+                },
+            )
+        Notification.objects.filter(
+            user=request.user,
+            kind=f'shift-time-report-{shift.id}-{worker.id}',
+            read_at__isnull=True,
+        ).update(read_at=timezone.now())
+        audit(request, 'time.shift_reported', entry, {'shift': str(shift.id)})
+        payload = self.get_serializer(entry).data
+        payload['review_required'] = True
+        return Response(payload, status=201)
 
     @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
     def approve(self, request, pk=None):

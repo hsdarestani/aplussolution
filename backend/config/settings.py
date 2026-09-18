@@ -43,6 +43,7 @@ CELERY_BEAT_SCHEDULE={
     'attendance-reminders-5min':{'task':'core.tasks.send_attendance_reminders','schedule':300},
     'contract-reminders-daily':{'task':'core.tasks.send_contract_reminders','schedule':86400},
     'shift-reminders-hourly':{'task':'core.tasks.send_shift_reminders','schedule':3600},
+    'shift-time-report-prompts-5min':{'task':'core.tasks.send_shift_time_report_prompts','schedule':300},
     'client-contract-generation-hourly':{'task':'core.tasks.generate_due_client_contracts','schedule':3600},
     'working-time-sync-daily':{'task':'core.tasks.sync_working_time_current_year','schedule':86400},
     'working-time-backup-weekly':{'task':'core.tasks.backup_working_time_current_year','schedule':604800},
