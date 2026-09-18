@@ -52,10 +52,13 @@ patchFile('WiwScheduleMobile.tsx', (source) => {
   const swipeStart = `\n      <div\n        key={weekStart}`;
   const totalMarker = `\n\n      {tab !== 'open' ? <div className="wiw-week-total">`;
   const startIndex = next.indexOf(swipeStart);
-  const endIndex = next.indexOf(totalMarker, startIndex);
-  if (startIndex < 0 || endIndex < 0) throw new Error('SEP13 patch marker changed: week swipe block');
-  const weekTemplate = readFileSync(scriptAsset('sep13-wiw-week.txt'), 'utf8').trim();
-  next = `${next.slice(0, startIndex)}\n      ${weekTemplate}${next.slice(endIndex)}`;
+  const endIndex = next.indexOf(totalMarker, Math.max(0, startIndex));
+  if (startIndex >= 0 && endIndex >= 0) {
+    const weekTemplate = readFileSync(scriptAsset('sep13-wiw-week.txt'), 'utf8').trim();
+    next = `${next.slice(0, startIndex)}\n      ${weekTemplate}${next.slice(endIndex)}`;
+  } else if (!next.includes('className={`wiw-week-scroll')) {
+    throw new Error('SEP13 patch marker changed: week swipe block');
+  }
 
   return `// SEP13_DIENSTPLAN_POLISH\n${next}`;
 });
