@@ -268,6 +268,9 @@
     --wiw-swipe-x:0px;
     position:relative;
     width:100%;
+    margin-left:0;
+    display:block;
+    align-items:initial;
     transform:translate3d(var(--wiw-swipe-x),0,0);
     touch-action:pan-y;
     overscroll-behavior-x:contain;
@@ -279,6 +282,7 @@
   .wiw-week-pane{
     width:100%;
     min-width:100%;
+    flex:none;
     overflow-anchor:none;
   }
   .wiw-week-pane-center{position:relative;z-index:2}

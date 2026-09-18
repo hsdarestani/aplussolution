@@ -18,11 +18,16 @@ function replaceRequired(source, needle, replacement, label) {
 patchFile('WiwScheduleMobile.tsx', (source) => {
   if (source.includes('SEP13_DIENSTPLAN_POLISH')) return source;
   let next = source;
+  const modernContiguousSwipe = source.includes('MODERN_WEEK_CACHE_NAVIGATION')
+    && source.includes('wiw-week-swipe-track')
+    && source.includes('function AdjacentWeekPreview(');
 
   next = replaceRequired(
     next,
     "import './wiw-schedule-mobile.css';",
-    "import './wiw-schedule-mobile.css';\nimport './sep13-dienstplan-polish.css';",
+    modernContiguousSwipe
+      ? "import './sep13-dienstplan-polish.css';\nimport './wiw-schedule-mobile.css';"
+      : "import './wiw-schedule-mobile.css';\nimport './sep13-dienstplan-polish.css';",
     'Dienstplan polish CSS import',
   );
 
@@ -33,19 +38,21 @@ patchFile('WiwScheduleMobile.tsx', (source) => {
     'hotel night preset',
   );
 
-  const helpers = readFileSync(scriptAsset('sep13-wiw-helpers.txt'), 'utf8').trim();
-  next = replaceRequired(next, '\nfunction WheelColumn(', `\n${helpers}\n\nfunction WheelColumn(`, 'Dienstplan helpers');
+  if (!modernContiguousSwipe) {
+    const helpers = readFileSync(scriptAsset('sep13-wiw-helpers.txt'), 'utf8').trim();
+    next = replaceRequired(next, '\nfunction WheelColumn(', `\n${helpers}\n\nfunction WheelColumn(`, 'Dienstplan helpers');
 
-  // Anchor this replacement to the real byDay memo instead of duplicating its
-  // exact whitespace. prepare:build and the older WIW patch are intentionally
-  // allowed to rewrite nearby source before this patch runs.
-  const byDayIndex = next.indexOf('  const byDay = useMemo(() => {');
-  const sortStart = next.indexOf('    Object.values(map).forEach((dayCards) => {', byDayIndex);
-  const sortEnd = next.indexOf('    return map;', sortStart);
-  if (byDayIndex < 0 || sortStart < 0 || sortEnd < 0) {
-    throw new Error('SEP13 patch marker changed: daily card ordering');
+    // Anchor this replacement to the real byDay memo instead of duplicating its
+    // exact whitespace. prepare:build and the older WIW patch are intentionally
+    // allowed to rewrite nearby source before this patch runs.
+    const byDayIndex = next.indexOf('  const byDay = useMemo(() => {');
+    const sortStart = next.indexOf('    Object.values(map).forEach((dayCards) => {', byDayIndex);
+    const sortEnd = next.indexOf('    return map;', sortStart);
+    if (byDayIndex < 0 || sortStart < 0 || sortEnd < 0) {
+      throw new Error('SEP13 patch marker changed: daily card ordering');
+    }
+    next = `${next.slice(0, sortStart)}    Object.values(map).forEach((dayCards) => dayCards.sort(sortScheduleCards));\n${next.slice(sortEnd)}`;
   }
-  next = `${next.slice(0, sortStart)}    Object.values(map).forEach((dayCards) => dayCards.sort(sortScheduleCards));\n${next.slice(sortEnd)}`;
 
   // Replace only the current-week scroll block. The exact class list has changed
   // a few times, while key={weekStart} and the weekly-total boundary are stable.
@@ -56,7 +63,7 @@ patchFile('WiwScheduleMobile.tsx', (source) => {
   if (startIndex >= 0 && endIndex >= 0) {
     const weekTemplate = readFileSync(scriptAsset('sep13-wiw-week.txt'), 'utf8').trim();
     next = `${next.slice(0, startIndex)}\n      ${weekTemplate}${next.slice(endIndex)}`;
-  } else if (!next.includes('className={`wiw-week-scroll')) {
+  } else if (!modernContiguousSwipe && !next.includes('className={`wiw-week-scroll')) {
     throw new Error('SEP13 patch marker changed: week swipe block');
   }
 
