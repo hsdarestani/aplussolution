@@ -245,7 +245,7 @@ function AdjacentWeekPreview({ weekStart, groupFilter, query, side }: { weekStar
     {previewDays.map((day) => {
       const header = formatDayHeader(day);
       const dayCards = previewByDay[day] || [];
-      return <section className="wiw-day-section" key={day}>
+      return <section className="wiw-day-section wiw-day-visual" key={day}>
         <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}</em></header>
         {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" tabIndex={-1} className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'}`} style={previewShiftCardStyle(card.shift)}>
           <div className="wiw-card-main">
@@ -1126,6 +1126,8 @@ export default function WiwScheduleMobile() {
             swipe.current = { x: touch.clientX, y: touch.clientY };
             swipeTravel.current = 0;
             swipeAxis.current = null;
+            swipeScrollElement.current = null;
+            swipeScrollTop.current = window.scrollY;
             event.currentTarget.classList.remove('is-dragging', 'is-settling');
             event.currentTarget.style.setProperty('--wiw-swipe-x', '0px');
             const ionContent = document.querySelector('ion-content.app-content') as any;
@@ -1195,7 +1197,7 @@ export default function WiwScheduleMobile() {
             {visibleDays.map((day) => {
               const header = formatDayHeader(day);
               const dayCards = byDay[day] || [];
-              return <section className="wiw-day-section" id={`wiw-day-${day}`} key={day}>
+              return <section className="wiw-day-section wiw-day-visual" id={`wiw-day-${day}`} key={day}>
                 <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}</em></header>
                 {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'} ${recentCopyShiftId && String(card.shift.id) === recentCopyShiftId ? 'is-copy-entering' : ''}`} style={shiftCardStyle(card.shift)} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
                   <div className="wiw-card-main">
@@ -1214,7 +1216,7 @@ export default function WiwScheduleMobile() {
         {visibleDays.map((day) => {
           const header = formatDayHeader(day);
           const dayCards = byDay[day] || [];
-          return <section className="wiw-day-section" id={`wiw-day-${day}`} key={day}>
+          return <section className="wiw-day-section wiw-day-visual" id={`wiw-day-${day}`} key={day}>
             <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}</em></header>
             {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'}`} style={shiftCardStyle(card.shift)} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
               <div className="wiw-card-main"><CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} /><span className="wiw-card-copy"><b>{cardWorkerShortName(card.worker?.name) || 'OpenShift'}</b><small>{cardPositionShortLabel(card.shift.position_name)}</small></span><span className="wiw-card-meta"><b>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</b><small>{card.shift.location_name || 'Einsatzort'}</small></span></div>
