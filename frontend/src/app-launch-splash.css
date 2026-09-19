@@ -6,10 +6,9 @@
   place-items: center;
   overflow: hidden;
   background:
-    radial-gradient(circle at 78% 14%, rgba(56, 98, 157, .22), transparent 30%),
-    radial-gradient(circle at 20% 72%, rgba(43, 72, 113, .16), transparent 32%),
-    radial-gradient(circle at 50% 39%, #102f59 0%, #091f3f 42%, #06152d 76%, #030b19 100%);
-  color: #fff;
+    radial-gradient(circle at 79% 12%, rgba(58, 93, 142, .20), transparent 32%),
+    radial-gradient(circle at 18% 73%, rgba(37, 70, 111, .16), transparent 34%),
+    radial-gradient(circle at 50% 42%, #102d50 0%, #0a213d 42%, #07182f 76%, #040d1d 100%);
   opacity: 1;
   transform: scale(1);
   transition: opacity .35s ease, transform .35s cubic-bezier(.22,.8,.2,1);
@@ -20,13 +19,13 @@
 .app-launch-splash::before {
   content: '';
   position: absolute;
-  inset: -18%;
+  inset: -16%;
   z-index: 0;
   pointer-events: none;
   background:
-    linear-gradient(158deg, transparent 20%, rgba(124, 153, 197, .055) 38%, transparent 55%),
-    linear-gradient(165deg, transparent 48%, rgba(103, 136, 180, .045) 63%, transparent 76%);
-  filter: blur(18px);
+    linear-gradient(155deg, transparent 18%, rgba(135, 157, 185, .065) 38%, transparent 56%),
+    linear-gradient(166deg, transparent 45%, rgba(104, 130, 168, .052) 62%, transparent 78%);
+  filter: blur(17px);
   animation: aplus-ambient-drift 5.2s ease-in-out infinite alternate;
 }
 
@@ -41,33 +40,33 @@
   z-index: 0;
   border-radius: 50%;
   pointer-events: none;
-  filter: blur(68px);
+  filter: blur(72px);
 }
 
 .app-launch-fog-one {
-  width: min(64vw, 430px);
-  height: min(40vw, 270px);
-  left: -16%;
-  top: 11%;
-  background: rgba(53, 105, 158, .16);
-  animation: aplus-fog-one 4.2s ease-in-out infinite alternate;
+  width: min(70vw, 470px);
+  height: min(43vw, 290px);
+  left: -20%;
+  top: 10%;
+  background: rgba(52, 93, 143, .18);
+  animation: aplus-fog-one 4.4s ease-in-out infinite alternate;
 }
 
 .app-launch-fog-two {
-  width: min(74vw, 500px);
-  height: min(42vw, 300px);
-  right: -24%;
-  bottom: 7%;
-  background: rgba(138, 100, 46, .08);
-  animation: aplus-fog-two 4.7s ease-in-out infinite alternate;
+  width: min(78vw, 520px);
+  height: min(44vw, 310px);
+  right: -27%;
+  bottom: 5%;
+  background: rgba(151, 108, 43, .10);
+  animation: aplus-fog-two 4.9s ease-in-out infinite alternate;
 }
 
 .app-launch-ribbons {
   position: absolute;
-  z-index: 1;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  z-index: 2;
+  inset: -3%;
+  width: 106%;
+  height: 106%;
   pointer-events: none;
   overflow: visible;
 }
@@ -79,31 +78,44 @@
   stroke-linecap: round;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
-  transform-box: fill-box;
-  transform-origin: center;
 }
 
 .app-launch-ribbon-glow {
-  stroke-width: 4.2;
-  opacity: 0;
-  animation: aplus-ribbon-glow 2.2s cubic-bezier(.2,.75,.22,1) both;
+  stroke-width: 8.2;
+  opacity: .76;
 }
 
 .app-launch-ribbon-core {
-  stroke-width: 1.15;
-  opacity: 0;
-  animation: aplus-ribbon-core 2.2s cubic-bezier(.2,.75,.22,1) both;
+  stroke-width: 1.65;
+  opacity: .98;
+  filter: drop-shadow(0 0 2px rgba(255,234,177,.9));
 }
 
 .app-launch-ribbon-glow path,
 .app-launch-ribbon-core path {
-  stroke-dasharray: none;
-  stroke-dashoffset: 0;
+  stroke-dasharray: .19 .81;
+  stroke-dashoffset: 1.05;
+  animation: aplus-ribbon-travel 2.25s cubic-bezier(.12,.72,.18,1) both;
 }
+
+.app-launch-ribbon-glow path:nth-child(2),
+.app-launch-ribbon-core path:nth-child(2) { animation-delay: .09s; }
+
+.app-launch-ribbon-glow path:nth-child(3),
+.app-launch-ribbon-core path:nth-child(3) { animation-delay: .16s; }
+
+.app-launch-ribbon-glow path:nth-child(4),
+.app-launch-ribbon-core path:nth-child(4) { animation-delay: .22s; }
+
+.app-launch-ribbon-glow path:nth-child(5),
+.app-launch-ribbon-core path:nth-child(5) { animation-delay: .29s; }
+
+.app-launch-ribbon-glow path:nth-child(6),
+.app-launch-ribbon-core path:nth-child(6) { animation-delay: .35s; }
 
 .app-launch-particles {
   position: absolute;
-  z-index: 2;
+  z-index: 3;
   inset: 0;
   pointer-events: none;
 }
@@ -113,8 +125,8 @@
   width: 2px;
   height: 2px;
   border-radius: 50%;
-  background: rgba(255, 241, 204, .86);
-  box-shadow: 0 0 5px rgba(255, 224, 153, .64);
+  background: rgba(255,239,198,.88);
+  box-shadow: 0 0 6px rgba(255,214,128,.72);
   opacity: .12;
   animation-name: aplus-particle-twinkle;
   animation-timing-function: ease-in-out;
@@ -123,16 +135,14 @@
 }
 
 .app-launch-particles span:nth-child(4n) {
-  background: rgba(229, 238, 248, .9);
-  box-shadow: 0 0 6px rgba(180, 207, 238, .42);
+  background: rgba(229,238,248,.9);
+  box-shadow: 0 0 7px rgba(180,207,238,.46);
 }
 
 .app-launch-logo-stage {
   position: relative;
   z-index: 5;
-  width: min(76vw, 392px);
-  padding: 20px 26px;
-  box-sizing: border-box;
+  width: min(86vw, 380px);
   display: grid;
   place-items: center;
   overflow: visible;
@@ -147,39 +157,41 @@
   display: block;
   width: 100%;
   height: auto;
-  max-width: 100%;
+  max-width: none;
   object-fit: contain;
   overflow: visible;
   user-select: none;
   -webkit-user-drag: none;
   filter:
-    drop-shadow(0 0 1px rgba(255,244,213,.7))
-    drop-shadow(0 0 6px rgba(219,169,70,.18));
+    brightness(1.13)
+    saturate(1.08)
+    drop-shadow(0 0 1px rgba(255,247,219,.88))
+    drop-shadow(0 0 7px rgba(224,174,72,.30));
 }
 
 .app-launch-logo-aura {
   position: absolute;
   z-index: 0;
-  width: 66%;
+  width: 76%;
   aspect-ratio: 1;
   border-radius: 50%;
-  background: rgba(220,169,69,.11);
-  filter: blur(40px);
-  animation: aplus-logo-aura 1.75s ease-out both;
+  background: rgba(226,174,69,.17);
+  filter: blur(42px);
+  animation: aplus-logo-aura 1.8s ease-out both;
 }
 
 @keyframes aplus-logo-settle {
   0% {
-    opacity: .2;
-    transform: scale(1.055) translateY(4px);
+    opacity: .56;
+    transform: scale(1.085) translateY(3px);
   }
-  28% {
-    opacity: .82;
-    transform: scale(1.04) translateY(2px);
+  24% {
+    opacity: .88;
+    transform: scale(1.066) translateY(2px);
   }
-  62% {
+  58% {
     opacity: 1;
-    transform: scale(1.018) translateY(0);
+    transform: scale(1.032) translateY(0);
   }
   100% {
     opacity: 1;
@@ -188,28 +200,21 @@
 }
 
 @keyframes aplus-logo-aura {
-  0% { opacity: 0; transform: scale(.7); }
-  42% { opacity: .85; transform: scale(1.08); }
-  100% { opacity: .48; transform: scale(1); }
+  0% { opacity: 0; transform: scale(.68); }
+  40% { opacity: .92; transform: scale(1.10); }
+  100% { opacity: .58; transform: scale(1); }
 }
 
-@keyframes aplus-ribbon-glow {
-  0% { opacity: 0; transform: scale(1.02); }
-  22% { opacity: .34; }
-  65% { opacity: .24; }
-  100% { opacity: .1; transform: scale(1); }
-}
-
-@keyframes aplus-ribbon-core {
-  0% { opacity: 0; transform: scale(1.02); }
-  24% { opacity: .72; }
-  68% { opacity: .48; }
-  100% { opacity: .2; transform: scale(1); }
+@keyframes aplus-ribbon-travel {
+  0% { stroke-dashoffset: 1.06; opacity: 0; }
+  12% { opacity: 1; }
+  78% { opacity: .96; }
+  100% { stroke-dashoffset: -.28; opacity: .08; }
 }
 
 @keyframes aplus-particle-twinkle {
-  from { opacity: .08; transform: translate3d(0,4px,0) scale(.72); }
-  to { opacity: .8; transform: translate3d(2px,-6px,0) scale(1.14); }
+  from { opacity: .07; transform: translate3d(0,3px,0) scale(.72); }
+  to { opacity: .72; transform: translate3d(1px,-5px,0) scale(1.12); }
 }
 
 @keyframes aplus-ambient-drift {
@@ -218,30 +223,29 @@
 }
 
 @keyframes aplus-fog-one {
-  from { transform: translate3d(-12px,-5px,0) scale(.93); }
-  to { transform: translate3d(48px,30px,0) scale(1.08); }
+  from { transform: translate3d(-10px,-5px,0) scale(.94); }
+  to { transform: translate3d(48px,28px,0) scale(1.08); }
 }
 
 @keyframes aplus-fog-two {
-  from { transform: translate3d(0,0,0) scale(.93); }
-  to { transform: translate3d(-42px,-20px,0) scale(1.06); }
+  from { transform: translate3d(0,0,0) scale(.94); }
+  to { transform: translate3d(-44px,-22px,0) scale(1.07); }
 }
 
 @media (max-width: 430px) {
   .app-launch-logo-stage {
-    width: min(78vw, 340px);
-    padding-inline: 24px;
+    width: min(88vw, 366px);
   }
 
-  .app-launch-ribbon-glow { stroke-width: 3.6; }
-  .app-launch-ribbon-core { stroke-width: 1; }
+  .app-launch-ribbon-glow { stroke-width: 7.4; }
+  .app-launch-ribbon-core { stroke-width: 1.5; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .app-launch-splash::before,
   .app-launch-fog,
-  .app-launch-ribbon-glow,
-  .app-launch-ribbon-core,
+  .app-launch-ribbon-glow path,
+  .app-launch-ribbon-core path,
   .app-launch-particles span,
   .app-launch-logo-stage,
   .app-launch-logo-aura {
@@ -253,6 +257,6 @@
     transform: none;
   }
 
-  .app-launch-ribbon-glow { opacity: .1; }
-  .app-launch-ribbon-core { opacity: .2; }
+  .app-launch-ribbon-glow { opacity: .22; }
+  .app-launch-ribbon-core { opacity: .38; }
 }
