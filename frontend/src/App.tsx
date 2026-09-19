@@ -3319,7 +3319,7 @@ export default function App() {
 
             <main className="app-main">
               <React.Fragment key={`resume-${resumeGeneration}`}>
-                {isManager(user) && <GlobalSearch onNavigate={navigateTo} />}
+                {isManager(user) && view !== 'time' && <GlobalSearch onNavigate={navigateTo} />}
                 {content}
               </React.Fragment>
             </main>

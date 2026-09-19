@@ -173,6 +173,9 @@ function shortLabel(start: Date, end: Date) { const last = periodLastDay(end); r
 
 patchFile('App.tsx', (source) => {
   if (source.includes('SEP14_TIME_GLOBAL_SEARCH_REMOVAL')) return source;
+  if (source.includes("isManager(user) && view !== 'time' && <GlobalSearch")) {
+    return `// SEP14_TIME_GLOBAL_SEARCH_REMOVAL\n${source}`;
+  }
   const next = replaceRequired(
     source,
     `<main className="app-main">{isManager(user) && <GlobalSearch onNavigate={navigateTo} />}{content}</main>`,
