@@ -63,7 +63,7 @@
     z-index: 43000 !important;
   }
 
-  .wiw-pdf-sheet {
+  .wiw-pdf-backdrop .wiw-pdf-sheet {
     display: flex !important;
     flex-direction: column !important;
     height: 100dvh !important;
@@ -73,8 +73,8 @@
     background: #fff !important;
   }
 
-  .wiw-pdf-sheet > header,
-  .wiw-pdf-sheet > footer {
+  .wiw-pdf-backdrop .wiw-pdf-sheet > header,
+  .wiw-pdf-backdrop .wiw-pdf-sheet > footer {
     position: relative !important;
     z-index: 3 !important;
     flex: 0 0 auto !important;
@@ -83,14 +83,14 @@
     background: #fff !important;
   }
 
-  .wiw-pdf-sheet > header {
+  .wiw-pdf-backdrop .wiw-pdf-sheet > header {
     min-height: calc(58px + env(safe-area-inset-top)) !important;
     padding: max(8px, env(safe-area-inset-top)) 10px 8px 94px !important;
   }
 
   /* Reuse the already-wired Abbrechen action as a persistent top-left back
      button, so the export screen can always be exited without scrolling. */
-  .wiw-pdf-sheet > footer > button:first-child {
+  .wiw-pdf-backdrop .wiw-pdf-sheet > footer > button:first-child {
     position: fixed !important;
     top: calc(max(8px, env(safe-area-inset-top)) + 1px) !important;
     left: 8px !important;
@@ -107,31 +107,31 @@
     font-weight: 600 !important;
     text-align: left !important;
   }
-  .wiw-pdf-sheet > footer > button:first-child::before {
+  .wiw-pdf-backdrop .wiw-pdf-sheet > footer > button:first-child::before {
     content: '‹ Zurück';
     font-size: 14px;
     line-height: 42px;
   }
 
-  .wiw-pdf-sheet > footer {
+  .wiw-pdf-backdrop .wiw-pdf-sheet > footer {
     display: flex !important;
     gap: 10px !important;
     min-height: calc(66px + env(safe-area-inset-bottom)) !important;
     padding: 10px 12px calc(10px + env(safe-area-inset-bottom)) !important;
     border-top: 1px solid #ddd !important;
   }
-  .wiw-pdf-sheet > footer button {
+  .wiw-pdf-backdrop .wiw-pdf-sheet > footer button {
     display: block !important;
     flex: 1 1 0 !important;
     min-height: 44px !important;
     visibility: visible !important;
   }
-  .wiw-pdf-sheet > footer > button.primary {
+  .wiw-pdf-backdrop .wiw-pdf-sheet > footer > button.primary {
     flex: 1 1 100% !important;
   }
 
-  .wiw-pdf-sheet > header > div { min-width: 0 !important; }
-  .wiw-pdf-scroll {
+  .wiw-pdf-backdrop .wiw-pdf-sheet > header > div { min-width: 0 !important; }
+  .wiw-pdf-backdrop .wiw-pdf-scroll {
     flex: 1 1 auto !important;
     min-height: 0 !important;
     width: 100% !important;
@@ -145,21 +145,21 @@
     touch-action: pan-y;
   }
 
-  .wiw-pdf-dates,
-  .wiw-pdf-dates label,
-  .wiw-pdf-dates label > button,
-  .wiw-pdf-filter-block,
-  .wiw-pdf-chip-grid {
+  .wiw-pdf-backdrop .wiw-pdf-dates,
+  .wiw-pdf-backdrop .wiw-pdf-dates label,
+  .wiw-pdf-backdrop .wiw-pdf-dates label > button,
+  .wiw-pdf-backdrop .wiw-pdf-filter-block,
+  .wiw-pdf-backdrop .wiw-pdf-chip-grid {
     min-width: 0 !important;
     max-width: 100% !important;
     box-sizing: border-box !important;
   }
-  .wiw-pdf-dates label > button {
+  .wiw-pdf-backdrop .wiw-pdf-dates label > button {
     width: 100% !important;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .wiw-pdf-chip-grid button {
+  .wiw-pdf-backdrop .wiw-pdf-chip-grid button {
     max-width: 100% !important;
     white-space: normal !important;
     overflow-wrap: anywhere;
@@ -248,7 +248,7 @@
 }
 
 @media (max-width: 360px) {
-  .wiw-pdf-dates { grid-template-columns: minmax(0, 1fr) !important; }
-  .wiw-pdf-sheet > header { gap: 8px !important; }
-  .wiw-pdf-sheet > header b { font-size: 15px !important; }
+  .wiw-pdf-backdrop .wiw-pdf-dates { grid-template-columns: minmax(0, 1fr) !important; }
+  .wiw-pdf-backdrop .wiw-pdf-sheet > header { gap: 8px !important; }
+  .wiw-pdf-backdrop .wiw-pdf-sheet > header b { font-size: 15px !important; }
 }
