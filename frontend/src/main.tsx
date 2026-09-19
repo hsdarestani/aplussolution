@@ -110,6 +110,46 @@ function ClientPortalMount() {
   </React.Fragment>;
 }
 
+function ResumeAwareEnhancers() {
+  const [generation, setGeneration] = useState(0);
+
+  useEffect(() => {
+    const resume = () => setGeneration((value) => value + 1);
+    window.addEventListener('aplus-app-resume', resume);
+    return () => window.removeEventListener('aplus-app-resume', resume);
+  }, []);
+
+  return <React.Fragment key={generation}>
+    <ClientPortalMount />
+    <HeaderQuickAccess />
+    <ScheduleMobileEnhancer />
+    <ScheduleEntryFilterEnhancer />
+    <SchedulePdfLocationFilter />
+    <WiwScheduleMobile />
+    <WiwEmployeeScheduleMobile />
+    <WiwShiftFormUxEnhancer />
+    <WiwShiftKeyboardGuard />
+    <WiwWorkerPickerEligibilityEnhancer />
+    <ShiftReleaseApprovalPanel />
+    <AdminScheduleTools />
+    <AdminAvailabilityManager />
+    <AdminClientRequestPanel />
+    <CheckoutReviewEnhancer />
+    <DesktopAttendanceHistoryEnhancer />
+    <MobileAttendanceClarityEnhancer />
+    <MobileOperationsSectionMenu />
+    <NativePushRegistration />
+    <SelfProfileAvatarEnhancer />
+    <AdminAkteAvatarEnhancer />
+    <StoreComplianceLinks />
+    <FriendlyDateTimePicker />
+    <PayrollWorkspaceEnhancer />
+    <WorkflowCompletionEnhancer />
+    <OrderDocumentImportEnhancer />
+    <ApiHealthBanner />
+  </React.Fragment>;
+}
+
 function renderApp() {
   const splashPreview = isSplashPreviewMode();
   const legalPage = legalPageFromPath(window.location.pathname);
@@ -124,33 +164,7 @@ function renderApp() {
         <>
           <AppLaunchSplash />
           <App />
-          <ClientPortalMount />
-          <HeaderQuickAccess />
-          <ScheduleMobileEnhancer />
-          <ScheduleEntryFilterEnhancer />
-          <SchedulePdfLocationFilter />
-          <WiwScheduleMobile />
-          <WiwEmployeeScheduleMobile />
-          <WiwShiftFormUxEnhancer />
-          <WiwShiftKeyboardGuard />
-          <WiwWorkerPickerEligibilityEnhancer />
-          <ShiftReleaseApprovalPanel />
-          <AdminScheduleTools />
-          <AdminAvailabilityManager />
-          <AdminClientRequestPanel />
-          <CheckoutReviewEnhancer />
-          <DesktopAttendanceHistoryEnhancer />
-          <MobileAttendanceClarityEnhancer />
-          <MobileOperationsSectionMenu />
-          <NativePushRegistration />
-          <SelfProfileAvatarEnhancer />
-          <AdminAkteAvatarEnhancer />
-          <StoreComplianceLinks />
-          <FriendlyDateTimePicker />
-          <PayrollWorkspaceEnhancer />
-          <WorkflowCompletionEnhancer />
-          <OrderDocumentImportEnhancer />
-          <ApiHealthBanner />
+          <ResumeAwareEnhancers />
         </>
       )}
     </React.StrictMode>,

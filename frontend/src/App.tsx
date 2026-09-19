@@ -1,4 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 import {
   IonApp,
   IonBadge,
@@ -3093,6 +3095,10 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [view, setView] = useState<View>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [resumeGeneration, setResumeGeneration] = useState(0);
+  const resumeInFlight = useRef(false);
+  const backgroundedAt = useRef<number | null>(null);
+  const lastResumeRecoveryAt = useRef(0);
 
   useEffect(() => {
     consumeOAuth();
@@ -3107,6 +3113,83 @@ export default function App() {
       setReady(true);
     }
     return () => window.removeEventListener('auth-lost', lost);
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let nativeHandle: { remove: () => Promise<void> } | undefined;
+    const MIN_BACKGROUND_MS = 3_000;
+    const RECOVERY_DEBOUNCE_MS = 1_500;
+
+    const recover = async (reason: 'native-resume' | 'visibility' | 'online' | 'pageshow') => {
+      if (disposed || !localStorage.getItem('access') || resumeInFlight.current) return;
+      const now = Date.now();
+      if (now - lastResumeRecoveryAt.current < RECOVERY_DEBOUNCE_MS) return;
+      lastResumeRecoveryAt.current = now;
+      resumeInFlight.current = true;
+
+      try {
+        const currentUser = await me();
+        if (disposed) return;
+        setUser(currentUser);
+        setResumeGeneration((value) => value + 1);
+        window.dispatchEvent(new CustomEvent('aplus-app-resume', {
+          detail: { reason, at: Date.now() },
+        }));
+        window.dispatchEvent(new Event('aplus-notifications-refresh'));
+      } catch (error) {
+        // api.ts emits auth-lost only when refresh credentials are genuinely no
+        // longer usable. A transient network failure after resume must not log
+        // the user out or replace the current screen with the login page.
+        console.warn('A+ resume recovery deferred', error);
+      } finally {
+        resumeInFlight.current = false;
+      }
+    };
+
+    const markBackgrounded = () => {
+      if (backgroundedAt.current == null) backgroundedAt.current = Date.now();
+    };
+
+    const recoverIfStale = (reason: 'native-resume' | 'visibility') => {
+      const started = backgroundedAt.current;
+      backgroundedAt.current = null;
+      if (started == null || Date.now() - started < MIN_BACKGROUND_MS) return;
+      void recover(reason);
+    };
+
+    if (Capacitor.isNativePlatform()) {
+      void CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) recoverIfStale('native-resume');
+        else markBackgrounded();
+      }).then((handle) => {
+        if (disposed) void handle.remove();
+        else nativeHandle = handle;
+      }).catch((error) => {
+        console.warn('Native lifecycle listener unavailable', error);
+      });
+    }
+
+    const onVisibility = () => {
+      if (document.hidden) markBackgrounded();
+      else recoverIfStale('visibility');
+    };
+    const onOnline = () => void recover('online');
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) void recover('pageshow');
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('pageshow', onPageShow);
+
+    return () => {
+      disposed = true;
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('pageshow', onPageShow);
+      if (nativeHandle) void nativeHandle.remove();
+    };
   }, []);
 
   if (location.pathname === '/aktivieren') return <IonApp><ActivationPage /></IonApp>;
@@ -3226,7 +3309,12 @@ export default function App() {
               </IonButton>
             </aside>
 
-            <main className="app-main">{isManager(user) && <GlobalSearch onNavigate={navigateTo} />}{content}</main>
+            <main className="app-main">
+              <React.Fragment key={`resume-${resumeGeneration}`}>
+                {isManager(user) && <GlobalSearch onNavigate={navigateTo} />}
+                {content}
+              </React.Fragment>
+            </main>
           </div>
         </IonContent>
 
