@@ -3258,7 +3258,7 @@ export default function App() {
   }
 
   return (
-    <IonApp className="mobile-first-app-shell-v1" data-view={mobileMenuOpen ? 'more' : view}>
+    <IonApp className="mobile-first-app-shell-v1" data-view={mobileMenuOpen ? 'more' : view} data-role={user.role}>
       <IonPage>
         <Header title="A+ Solution" appShell />
         <IonContent className="app-content">

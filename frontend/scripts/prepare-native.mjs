@@ -9,11 +9,14 @@ const requirePush = ['1', 'true', 'yes'].includes(String(process.env.REQUIRE_NAT
 function installAndroidLauncherArtwork(manifestPath) {
   const source = path.resolve(cwd, '..', 'newappicon.png');
   if (!fs.existsSync(source)) throw new Error(`Approved Android app icon source not found: ${source}`);
+  const cleaned = path.join(cwd, '.publisher-appicon-clean.png');
+  const cleaner = path.join(cwd, 'scripts', 'prepare-app-icon.py');
+  execFileSync('python3', [cleaner, source, cleaned, '--background', '#00142F'], { stdio: 'inherit' });
   const launcherDir = path.join(cwd, 'android', 'app', 'src', 'main', 'res', 'drawable-nodpi');
   const launcherPath = path.join(launcherDir, 'launcher_icon.png');
   fs.mkdirSync(launcherDir, { recursive: true });
-  fs.copyFileSync(source, launcherPath);
-  console.log(`Installed Android launcher icon from ${source}.`);
+  fs.copyFileSync(cleaned, launcherPath);
+  console.log(`Installed cleaned Android launcher icon from ${source}.`);
 
   let xml = fs.readFileSync(manifestPath, 'utf8');
   if (!/<application\b/.test(xml)) throw new Error('AndroidManifest.xml has no <application> element.');

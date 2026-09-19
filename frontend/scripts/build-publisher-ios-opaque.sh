@@ -46,22 +46,11 @@ test -f "$ICON_SOURCE"
 test -d "$APP_ICON_SET"
 test -f "$APP_ICON_SET/Contents.json"
 
-# Apple rejects App Store icons that contain an alpha channel. The approved
-# source artwork has transparency outside its rounded-square artwork, so flatten
-# it onto the brand navy before resizing it into every native AppIcon slot.
+# Normalize the approved artwork before filling the native AppIcon slots.
+# This trims accidental transparent/white export margins first, then flattens
+# onto brand navy so the installed icon has no white frame and no alpha.
 python3 -m pip install --quiet --disable-pip-version-check pillow
-ICON_SOURCE_ENV="$ICON_SOURCE" OPAQUE_ICON_ENV="$OPAQUE_ICON_SOURCE" python3 - <<'PY'
-import os
-from PIL import Image
-src = Image.open(os.environ['ICON_SOURCE_ENV']).convert('RGBA')
-bg = Image.new('RGB', src.size, (0, 20, 47))
-bg.paste(src, mask=src.getchannel('A'))
-bg.save(os.environ['OPAQUE_ICON_ENV'], 'PNG', optimize=True)
-check = Image.open(os.environ['OPAQUE_ICON_ENV'])
-if 'A' in check.getbands():
-    raise SystemExit('Flattened icon unexpectedly still has alpha.')
-print(f'Prepared opaque App Store icon: {check.size[0]}x{check.size[1]}, mode={check.mode}')
-PY
+python3 scripts/prepare-app-icon.py "$ICON_SOURCE" "$OPAQUE_ICON_SOURCE" --background "#00142F"
 
 if [ "$(sips -g hasAlpha "$OPAQUE_ICON_SOURCE" | awk '/hasAlpha:/ {print $2}')" = "yes" ]; then
   echo "Opaque source still contains alpha." >&2

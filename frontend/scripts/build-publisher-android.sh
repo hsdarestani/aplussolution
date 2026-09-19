@@ -17,6 +17,7 @@ npm run build
 rm -rf android
 npx cap add android
 npx cap sync android
+python3 -m pip install --quiet --disable-pip-version-check pillow
 node scripts/prepare-native.mjs android
 
 cp "$ANDROID_KEYSTORE_PATH" android/app/aplus-release.jks

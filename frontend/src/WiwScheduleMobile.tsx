@@ -696,10 +696,15 @@ export default function WiwScheduleMobile() {
 
   useEffect(() => {
     const root = document.getElementById('root');
-    const sync = () => setActive(Boolean(document.querySelector('.mobile-first-app-shell-v1[data-view="schedule"]')));
+    const sync = () => {
+      const shell = document.querySelector<HTMLElement>('.mobile-first-app-shell-v1[data-view="schedule"]');
+      setActive(Boolean(shell));
+      const role = shell?.dataset.role || '';
+      if (role) setManager(['admin', 'manager'].includes(role));
+    };
     sync();
     const observer = new MutationObserver(sync);
-    if (root) observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-view'] });
+    if (root) observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-view', 'data-role'] });
     return () => observer.disconnect();
   }, []);
 
@@ -716,7 +721,12 @@ export default function WiwScheduleMobile() {
     let cancelled = false;
     api('auth/me/').then((user: any) => {
       if (!cancelled) setManager(['admin', 'manager'].includes(user?.role));
-    }).catch(() => setManager(false));
+    }).catch((error) => {
+      // The app shell already carries the authenticated role. A temporary
+      // resume/network failure must never demote a manager and reveal the old
+      // ScheduleV2 fallback underneath the WIW mobile schedule.
+      console.warn('Dienstplan role revalidation deferred', error);
+    });
     return () => { cancelled = true; };
   }, [active, mobile]);
 
