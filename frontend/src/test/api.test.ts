@@ -47,6 +47,22 @@ describe('API client', () => {
     expect(localStorage.getItem('access')).toBeNull();
   });
 
+  it('keeps the session when token refresh is interrupted by the network', async () => {
+    localStorage.setItem('access', 'expired');
+    localStorage.setItem('refresh', 'still-valid-refresh');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(401, { detail: 'expired' }))
+      .mockRejectedValueOnce(new TypeError('network unavailable'));
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = vi.fn();
+    window.addEventListener('auth-lost', handler);
+
+    await expect(api('dashboard/')).rejects.toThrow('Der A+ Server ist momentan nicht erreichbar');
+    expect(handler).not.toHaveBeenCalled();
+    expect(localStorage.getItem('access')).toBe('expired');
+    expect(localStorage.getItem('refresh')).toBe('still-valid-refresh');
+  });
+
   it('preserves FormData content type handling', async () => {
     localStorage.setItem('access', 'token');
     const fetchMock = vi.fn().mockResolvedValue(response(200, { ok: true }));

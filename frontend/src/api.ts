@@ -76,25 +76,33 @@ async function reliableCoordinates(): Promise<{ lat: number; lng: number }> {
 }
 
 async function refreshAccessToken(): Promise<string | null> {
-  if (!refreshToken()) return null;
+  const refresh = refreshToken();
+  if (!refresh) return null;
   if (!refreshPromise) {
-    refreshPromise = request(`${API}/auth/refresh/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh: refreshToken() }),
-    })
-      .then(async (response) => {
-        if (!response.ok) return null;
-        const data = await response.json();
-        if (!data.access) return null;
-        localStorage.setItem('access', data.access);
-        if (data.refresh) localStorage.setItem('refresh', data.refresh);
-        return data.access as string;
-      })
-      .catch(() => null)
-      .finally(() => {
-        refreshPromise = null;
+    refreshPromise = (async () => {
+      const response = await request(`${API}/auth/refresh/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh }),
       });
+
+      // Only an explicit authentication rejection means the stored refresh token
+      // is no longer usable. Network failures, rate limits and server errors are
+      // transient and must keep the local session intact so a resumed native app
+      // can recover as soon as connectivity is fully restored.
+      if (!response.ok) {
+        if ([400, 401, 403].includes(response.status)) return null;
+        throw new Error(await parseError(response));
+      }
+
+      const data = await response.json();
+      if (!data.access) return null;
+      localStorage.setItem('access', data.access);
+      if (data.refresh) localStorage.setItem('refresh', data.refresh);
+      return data.access as string;
+    })().finally(() => {
+      refreshPromise = null;
+    });
   }
   return refreshPromise;
 }
