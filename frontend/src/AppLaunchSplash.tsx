@@ -7,14 +7,13 @@ export function isSplashPreviewMode() {
 }
 
 const particles = [
-  ['10%', '16%', '-.2s', '2.2s'], ['18%', '34%', '.4s', '2.7s'],
-  ['28%', '10%', '.8s', '2.4s'], ['39%', '78%', '.2s', '2.8s'],
-  ['48%', '18%', '.6s', '2.5s'], ['57%', '86%', '1s', '2.1s'],
-  ['66%', '13%', '.3s', '2.7s'], ['76%', '72%', '.7s', '2.3s'],
-  ['86%', '27%', '1.1s', '2.6s'], ['92%', '54%', '.1s', '2.9s'],
-  ['14%', '88%', '1.2s', '2.3s'], ['33%', '56%', '.5s', '2.6s'],
-  ['61%', '43%', '.9s', '2.7s'], ['74%', '91%', '.35s', '2.5s'],
-  ['6%', '63%', '.65s', '2.4s'], ['95%', '17%', '.75s', '2.35s'],
+  ['8%', '18%', '-.2s', '2.5s'], ['17%', '43%', '.5s', '2.9s'],
+  ['27%', '12%', '.9s', '2.4s'], ['36%', '77%', '.15s', '2.8s'],
+  ['47%', '22%', '.65s', '2.6s'], ['58%', '85%', '1.1s', '2.25s'],
+  ['67%', '15%', '.3s', '2.75s'], ['77%', '69%', '.8s', '2.35s'],
+  ['88%', '28%', '1.2s', '2.65s'], ['93%', '56%', '.1s', '2.85s'],
+  ['14%', '90%', '1.05s', '2.35s'], ['33%', '58%', '.55s', '2.55s'],
+  ['62%', '46%', '.95s', '2.7s'], ['74%', '92%', '.35s', '2.45s'],
 ] as const;
 
 export default function AppLaunchSplash() {
@@ -63,28 +62,33 @@ export default function AppLaunchSplash() {
       <svg className="app-launch-ribbons" viewBox="0 0 100 160" preserveAspectRatio="xMidYMid slice">
         <defs>
           <linearGradient id="aplusRibbonGold" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor="#9b6f31" />
-            <stop offset=".45" stopColor="#d9ae55" />
-            <stop offset=".72" stopColor="#f5dda2" />
-            <stop offset="1" stopColor="#a57131" />
+            <stop offset="0" stopColor="#8e6129" />
+            <stop offset=".38" stopColor="#d7a948" />
+            <stop offset=".62" stopColor="#ffe7a0" />
+            <stop offset=".78" stopColor="#fff6d3" />
+            <stop offset="1" stopColor="#9f6b2d" />
           </linearGradient>
-          <filter id="aplusRibbonGlow" x="-70%" y="-70%" width="240%" height="240%">
-            <feGaussianBlur stdDeviation=".95" />
+          <filter id="aplusRibbonGlow" x="-90%" y="-90%" width="280%" height="280%">
+            <feGaussianBlur stdDeviation="1.45" />
           </filter>
         </defs>
 
         <g className="app-launch-ribbon-glow" filter="url(#aplusRibbonGlow)">
-          <path d="M-18 9 C 4 8, 13 17, 15 33 C 17 49, 8 60, -11 71" />
-          <path d="M112 23 C 95 23, 89 29, 87 41 C 85 52, 91 61, 111 68" />
-          <path d="M-14 126 C 5 124, 14 132, 20 151 C 22 158, 23 164, 22 172" />
-          <path d="M112 118 C 96 120, 90 132, 87 148 C 85 157, 84 164, 82 171" />
+          <path pathLength="1" d="M-8 47 C -2 27, 11 15, 31 7" />
+          <path pathLength="1" d="M69 10 C 81 8, 94 7, 110 11" />
+          <path pathLength="1" d="M106 58 C 104 73, 107 85, 116 97" />
+          <path pathLength="1" d="M108 124 C 100 136, 91 145, 77 153" />
+          <path pathLength="1" d="M24 164 C 14 154, 5 147, -10 145" />
+          <path pathLength="1" d="M-11 94 C -4 87, 0 80, 1 70" />
         </g>
 
         <g className="app-launch-ribbon-core">
-          <path d="M-18 9 C 4 8, 13 17, 15 33 C 17 49, 8 60, -11 71" />
-          <path d="M112 23 C 95 23, 89 29, 87 41 C 85 52, 91 61, 111 68" />
-          <path d="M-14 126 C 5 124, 14 132, 20 151 C 22 158, 23 164, 22 172" />
-          <path d="M112 118 C 96 120, 90 132, 87 148 C 85 157, 84 164, 82 171" />
+          <path pathLength="1" d="M-8 47 C -2 27, 11 15, 31 7" />
+          <path pathLength="1" d="M69 10 C 81 8, 94 7, 110 11" />
+          <path pathLength="1" d="M106 58 C 104 73, 107 85, 116 97" />
+          <path pathLength="1" d="M108 124 C 100 136, 91 145, 77 153" />
+          <path pathLength="1" d="M24 164 C 14 154, 5 147, -10 145" />
+          <path pathLength="1" d="M-11 94 C -4 87, 0 80, 1 70" />
         </g>
       </svg>
 
