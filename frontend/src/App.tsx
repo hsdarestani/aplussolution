@@ -3118,10 +3118,14 @@ export default function App() {
   useEffect(() => {
     let disposed = false;
     let nativeHandle: { remove: () => Promise<void> } | undefined;
-    const MIN_BACKGROUND_MS = 3_000;
+    const MIN_SESSION_RECHECK_MS = 3_000;
+    const STALE_UI_BACKGROUND_MS = 30_000;
     const RECOVERY_DEBOUNCE_MS = 1_500;
 
-    const recover = async (reason: 'native-resume' | 'visibility' | 'online' | 'pageshow') => {
+    const recover = async (
+      reason: 'native-resume' | 'visibility' | 'online' | 'pageshow',
+      refreshUi = true,
+    ) => {
       if (disposed || !localStorage.getItem('access') || resumeInFlight.current) return;
       const now = Date.now();
       if (now - lastResumeRecoveryAt.current < RECOVERY_DEBOUNCE_MS) return;
@@ -3132,11 +3136,13 @@ export default function App() {
         const currentUser = await me();
         if (disposed) return;
         setUser(currentUser);
-        setResumeGeneration((value) => value + 1);
-        window.dispatchEvent(new CustomEvent('aplus-app-resume', {
-          detail: { reason, at: Date.now() },
-        }));
-        window.dispatchEvent(new Event('aplus-notifications-refresh'));
+        if (refreshUi) {
+          setResumeGeneration((value) => value + 1);
+          window.dispatchEvent(new CustomEvent('aplus-app-resume', {
+            detail: { reason, at: Date.now() },
+          }));
+          window.dispatchEvent(new Event('aplus-notifications-refresh'));
+        }
       } catch (error) {
         // api.ts emits auth-lost only when refresh credentials are genuinely no
         // longer usable. A transient network failure after resume must not log
@@ -3154,8 +3160,10 @@ export default function App() {
     const recoverIfStale = (reason: 'native-resume' | 'visibility') => {
       const started = backgroundedAt.current;
       backgroundedAt.current = null;
-      if (started == null || Date.now() - started < MIN_BACKGROUND_MS) return;
-      void recover(reason);
+      if (started == null) return;
+      const elapsed = Date.now() - started;
+      if (elapsed < MIN_SESSION_RECHECK_MS) return;
+      void recover(reason, elapsed >= STALE_UI_BACKGROUND_MS);
     };
 
     if (Capacitor.isNativePlatform()) {
