@@ -123,3 +123,38 @@ def test_attendance_home_prefers_latest_completed_shift_for_manual_report(auth_w
     assert response.status_code == 200
     assert response.data['pending_shift_report']['id'] == str(latest.id)
     assert response.data['pending_shift_report']['id'] != str(older.id)
+
+
+@pytest.mark.django_db
+def test_mobile_schedule_exposes_time_log_only_to_admin(auth_admin, manager_user, worker_user, shift):
+    start = shift.starts_at
+    TimeEntry.objects.create(
+        worker=worker_user.worker_profile,
+        shift=shift,
+        clock_in=start,
+        clock_out=shift.ends_at,
+        break_minutes=30,
+        approved=True,
+        wiw_time_id=None,
+        edit_reason='ADMIN_SHIFT_ENTRY: mobile test',
+    )
+    day = timezone.localtime(start).date().isoformat()
+
+    admin_response = auth_admin.get('/api/admin/mobile-schedule/', {
+        'date_from': day,
+        'date_to': day,
+    })
+    assert admin_response.status_code == 200
+    admin_shift = next(row for row in admin_response.data['shifts'] if str(row['id']) == str(shift.id))
+    assert len(admin_shift['admin_time_entries']) == 1
+    assert admin_shift['admin_time_entries'][0]['worker'] == str(worker_user.worker_profile.id)
+
+    manager = APIClient()
+    manager.force_authenticate(manager_user)
+    manager_response = manager.get('/api/admin/mobile-schedule/', {
+        'date_from': day,
+        'date_to': day,
+    })
+    assert manager_response.status_code == 200
+    manager_shift = next(row for row in manager_response.data['shifts'] if str(row['id']) == str(shift.id))
+    assert manager_shift['admin_time_entries'] == []

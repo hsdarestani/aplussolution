@@ -34,7 +34,7 @@ import './wiw-schedule-mobile.css';
 type TabKey = 'all' | 'open' | 'filled' | 'draft';
 type Choice = { value: string; label: string };
 type ColorChoice = { value: string; label: string; hue: number | null };
-type EditingCard = { shiftId: string; slotId: string; parentCount: number; workerName?: string; workerId?: string; isOpen: boolean };
+type EditingCard = { shiftId: string; slotId: string; parentCount: number; workerName?: string; workerId?: string; isOpen: boolean; timeEntries?: any[] };
 type FormState = {
   client: string;
   date: string;
@@ -152,11 +152,49 @@ function cardPositionShortLabel(name?: string) {
   return String(name || 'Schicht');
 }
 
+function adminInputDateTime(value?: string) {
+  if (!value) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BERLIN,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(value));
+  const get = (type: string) => parts.find((part) => part.type === type)?.value || '';
+  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
+}
+function adminLogStamp(value?: string) {
+  return value ? new Intl.DateTimeFormat('de-DE', {
+    timeZone: BERLIN, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+  }).format(new Date(value)) : '–';
+}
+function adminWorkedLabel(value?: number) {
+  const minutes = Math.max(0, Number(value || 0));
+  return `${Math.floor(minutes / 60)}:${pad(minutes % 60)} Std.`;
+}
+function adminTimeSource(source?: string) {
+  if (source === 'wiw') return 'WIW';
+  if (source === 'employee_manual') return 'Mitarbeiter · manuell';
+  if (source === 'location') return 'Standort-Erfassung';
+  return 'Administration';
+}
+function adminAuditLabel(action?: string) {
+  return ({
+    'time.admin_shift_created': 'Admin · angelegt',
+    'time.admin_shift_updated': 'Admin · bearbeitet',
+    'time.shift_reported': 'Mitarbeiter · gemeldet',
+    'time.approved': 'Admin · freigegeben',
+    'time.clock_in': 'Check-in',
+    'time.clock_out': 'Check-out',
+    'timeentry.created': 'Eintrag angelegt',
+    'timeentry.updated': 'Eintrag bearbeitet',
+  } as Record<string, string>)[String(action || '')] || String(action || '');
+}
+
 function CardWorkerAvatar({ worker, open, draft }: { worker?: any; open?: boolean; draft?: boolean }) {
   const fallback = draft ? 'E' : open ? 'OS' : cardWorkerInitials(worker);
   return <span className={`wiw-card-avatar ${open ? 'is-open' : ''}`} aria-hidden="true">
     <span>{fallback}</span>
-    {worker?.avatar ? <img src={worker.avatar} alt="" loading="lazy" onError={(event) => event.currentTarget.remove()} /> : null}
+    {worker?.avatar ? <img src={worker.avatar} alt="" loading="eager" decoding="async" onError={(event) => event.currentTarget.remove()} /> : null}
   </span>;
 }
 
@@ -537,6 +575,7 @@ export default function WiwScheduleMobile() {
   const [active, setActive] = useState(false);
   const [mobile, setMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches);
   const [manager, setManager] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [rows, setRows] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
@@ -550,6 +589,8 @@ export default function WiwScheduleMobile() {
   const [toast, setToast] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<EditingCard>();
+  const [timeEditor, setTimeEditor] = useState<any>();
+  const [timeBusy, setTimeBusy] = useState(false);
   const [copying, setCopying] = useState(false);
   const [recentCopyShiftId, setRecentCopyShiftId] = useState('');
   const [form, setForm] = useState<FormState>(() => emptyForm(berlinToday()));
@@ -700,7 +741,10 @@ export default function WiwScheduleMobile() {
       const shell = document.querySelector<HTMLElement>('.mobile-first-app-shell-v1[data-view="schedule"]');
       setActive(Boolean(shell));
       const role = shell?.dataset.role || '';
-      if (role) setManager(['admin', 'manager'].includes(role));
+      if (role) {
+        setManager(['admin', 'manager'].includes(role));
+        setIsAdmin(role === 'admin');
+      }
     };
     sync();
     const observer = new MutationObserver(sync);
@@ -720,7 +764,10 @@ export default function WiwScheduleMobile() {
     if (!active || !mobile) return;
     let cancelled = false;
     api('auth/me/').then((user: any) => {
-      if (!cancelled) setManager(['admin', 'manager'].includes(user?.role));
+      if (!cancelled) {
+        setManager(['admin', 'manager'].includes(user?.role));
+        setIsAdmin(user?.role === 'admin');
+      }
     }).catch((error) => {
       // The app shell already carries the authenticated role. A temporary
       // resume/network failure must never demote a manager and reveal the old
@@ -853,9 +900,15 @@ export default function WiwScheduleMobile() {
     .sort((a: Choice, b: Choice) => a.label.localeCompare(b.label, 'de', { sensitivity: 'base' })), [workers]);
   const selectedWorkerNames = form.workers.map((workerId) => workerChoices.find((choice) => choice.value === workerId)?.label).filter(Boolean).join(', ');
   const pdfHasHotel = useMemo(() => pdf.clients.some((clientId) => isHotelClientName(clients.find((item: any) => String(item.id) === clientId)?.name)), [clients, pdf.clients]);
+  const editingTimeEntries = useMemo(() => {
+    if (!editing?.workerId) return [] as any[];
+    return (editing.timeEntries || []).filter((entry: any) => String(entry.worker) === String(editing.workerId));
+  }, [editing]);
+  const editingTimeEntry = editingTimeEntries.find((entry: any) => !entry.wiw_time_id) || editingTimeEntries[0];
 
   function openCreate(date = anchor) {
     setEditing(undefined);
+    setTimeEditor(undefined);
     setCopying(false);
     setForm(emptyForm(date));
     setTimeOpen(false);
@@ -870,7 +923,16 @@ export default function WiwScheduleMobile() {
     const startMinute = timeMinuteFromIso(card.shift.starts_at);
     const endMinute = timeMinuteFromIso(card.shift.ends_at);
     const dayOffset = Math.round((keyDate(endDate).getTime() - keyDate(startDate).getTime()) / 86400000);
-    setEditing({ shiftId: String(card.shift.id), slotId: String(card.slot.id), parentCount: Number(card.shift.required_count || 1), workerName: card.worker?.name, workerId: card.worker?.id ? String(card.worker.id) : '', isOpen: card.isOpen });
+    setEditing({
+      shiftId: String(card.shift.id),
+      slotId: String(card.slot.id),
+      parentCount: Number(card.shift.required_count || 1),
+      workerName: card.worker?.name,
+      workerId: card.worker?.id ? String(card.worker.id) : '',
+      isOpen: card.isOpen,
+      timeEntries: Array.isArray(card.shift.admin_time_entries) ? card.shift.admin_time_entries : [],
+    });
+    setTimeEditor(undefined);
     setForm({
       client: String(card.shift.client || ''),
       date: startDate,
@@ -898,6 +960,66 @@ export default function WiwScheduleMobile() {
     setForm((current) => ({ ...current, startMinute: start, endAbsolute: start + 360 }));
   }
 
+  function openAdminTimeEditor() {
+    if (!isAdmin || !editing?.workerId) return;
+    if (editingTimeEntry?.wiw_time_id) {
+      setToast('WIW-Arbeitszeit ist historisch und schreibgeschützt.');
+      return;
+    }
+    const fallbackStart = form.startMinute == null ? '' : localDateTime(form.date, form.startMinute);
+    const fallbackEnd = form.endAbsolute == null ? '' : localDateTime(form.date, form.endAbsolute);
+    setTimeEditor({
+      entry: editingTimeEntry,
+      clock_in: editingTimeEntry?.clock_in ? adminInputDateTime(editingTimeEntry.clock_in) : fallbackStart,
+      clock_out: editingTimeEntry?.clock_out ? adminInputDateTime(editingTimeEntry.clock_out) : fallbackEnd,
+      break_minutes: Number(editingTimeEntry?.break_minutes ?? automaticBreak(form.startMinute, form.endAbsolute)),
+      reason: '',
+    });
+  }
+
+  function applyAdminTimeEntries(shiftId: string, entries: any[]) {
+    const patch = (items: any[]) => items.map((shift: any) => String(shift.id) === String(shiftId) ? { ...shift, admin_time_entries: entries } : shift);
+    localRowsRef.current = patch(localRowsRef.current);
+    liveRowsRef.current = patch(liveRowsRef.current);
+    publishRows();
+    setEditing((current) => current && String(current.shiftId) === String(shiftId) ? { ...current, timeEntries: entries } : current);
+  }
+
+  async function saveAdminTime() {
+    if (!isAdmin || !editing?.workerId || !timeEditor) return;
+    if (!timeEditor.clock_in || !timeEditor.clock_out) {
+      setToast('Bitte Beginn und Ende vollständig angeben.');
+      return;
+    }
+    if (String(timeEditor.clock_out) <= String(timeEditor.clock_in)) {
+      setToast('Arbeitsende muss nach dem Arbeitsbeginn liegen.');
+      return;
+    }
+    setTimeBusy(true);
+    const wasExisting = Boolean(timeEditor.entry);
+    try {
+      await api('time-entries/set-for-shift/', {
+        method: 'POST',
+        body: JSON.stringify({
+          shift: editing.shiftId,
+          worker: editing.workerId,
+          clock_in: timeEditor.clock_in,
+          clock_out: timeEditor.clock_out,
+          break_minutes: Math.max(0, Number(timeEditor.break_minutes || 0)),
+          reason: String(timeEditor.reason || '').trim(),
+        }),
+      });
+      const detail: any = await api(`shifts/${editing.shiftId}/`);
+      const entries = Array.isArray(detail?.admin_time_entries) ? detail.admin_time_entries : [];
+      applyAdminTimeEntries(editing.shiftId, entries);
+      setTimeEditor(undefined);
+      setToast(wasExisting ? 'Arbeitszeit wurde bearbeitet.' : 'Arbeitszeit wurde eingetragen.');
+    } catch (error: any) {
+      setToast(error.message || 'Arbeitszeit konnte nicht gespeichert werden.');
+    } finally {
+      setTimeBusy(false);
+    }
+  }
 
   async function sendManualReminder() {
     if (!editing || !editing.workerName || busy) return;
@@ -1240,7 +1362,7 @@ export default function WiwScheduleMobile() {
       <button type="button" className="wiw-create-fab" aria-label="Schicht anlegen" onClick={() => openCreate(anchor)}>+</button>
 
       {formOpen ? <div ref={formScreenRef} className="wiw-shift-form-screen" data-testid="wiw-shift-form">
-        <header className="wiw-form-topbar"><button type="button" onClick={() => { noteRef.current?.blur(); setFormOpen(false); }}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null} onClick={() => void save()}>Sichern</button></header>
+        <header className="wiw-form-topbar"><button type="button" onClick={() => { noteRef.current?.blur(); setTimeEditor(undefined); setFormOpen(false); }}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null} onClick={() => void save()}>Sichern</button></header>
         {dateOpen ? <ScheduleDatePicker value={form.date} onSelect={(date) => { setForm((current) => ({ ...current, date })); setDateOpen(false); }} onClose={() => setDateOpen(false)} /> : null}
         <div ref={formScrollRef} className="wiw-form-scroll">
           <Row icon={calendarOutline} label={formatDateRow(form.date)} field="date" onClick={() => setDateOpen(true)} />
@@ -1267,6 +1389,27 @@ export default function WiwScheduleMobile() {
           {!editing ? <Row icon={layersOutline} label={`${form.required_count} Schicht${form.required_count === 1 ? '' : 'en'}`} trailing={<div className="wiw-count-stepper"><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: Math.max(current.workers.length || 1, current.required_count - 1) }))}>−</button><b>{form.required_count}</b><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: current.required_count + 1 }))}>+</button></div>} /> : <Row icon={layersOutline} label="1 Schichtkarte" value={editing.workerName || 'OpenShift'} emphasizeValue={Boolean(editing.workerName)} />}
           <Row icon={checkmarkOutline} label="Erfordere Übernahme-Bestätigung" trailing={<Switch checked={form.confirmation_required} onChange={(value) => setForm((current) => ({ ...current, confirmation_required: value }))} />} />
           <Row icon={peopleOutline} label={editing ? (form.workers.length ? 'Mitarbeiter ändern' : 'Mitarbeiter zuweisen') : (form.workers.length ? `${form.workers.length} Benutzer direkt zugewiesen` : 'Geeignete Benutzer anzeigen')} value={selectedWorkerNames || undefined} emphasizeValue={Boolean(selectedWorkerNames)} muted={!form.workers.length} onClick={() => setSheet('workers')} />
+
+          {isAdmin && editing?.workerId ? <>
+            <Row
+              field="admin-time"
+              icon={timeOutline}
+              label="Arbeitszeit"
+              value={editingTimeEntry ? (editingTimeEntry.wiw_time_id ? 'WIW · schreibgeschützt' : 'Zeit bearbeiten') : 'Zeit eintragen'}
+              emphasizeValue
+              onClick={openAdminTimeEditor}
+            />
+            <div className="wiw-admin-time-log" data-testid="wiw-admin-time-log">
+              <div className="wiw-admin-time-log-title"><b>ZEITLOG · NUR ADMIN</b><span>{editing.workerName}</span></div>
+              {editingTimeEntries.length ? editingTimeEntries.map((entry: any) => <div className="wiw-admin-time-log-entry" key={entry.id}>
+                <div className="wiw-admin-time-log-main"><strong>{adminLogStamp(entry.clock_in)}–{entry.clock_out ? adminLogStamp(entry.clock_out) : 'offen'}</strong><span>Pause {entry.break_minutes || 0} Min. · {adminWorkedLabel(entry.worked_minutes)}</span></div>
+                <small>{adminTimeSource(entry.source)} · {entry.approved ? 'freigegeben' : 'offen'}{entry.approved_by_name ? ` · ${entry.approved_by_name}` : ''}</small>
+                <small>Erstellt {adminLogStamp(entry.created_at)} · geändert {adminLogStamp(entry.updated_at)}</small>
+                {entry.edit_reason ? <small className="wiw-admin-time-log-reason">{String(entry.edit_reason).replace(/\n/g, ' · ')}</small> : null}
+                {(entry.logs || []).slice(0, 5).map((log: any, index: number) => <small className="wiw-admin-time-audit" key={`${entry.id}-${index}`}>{adminLogStamp(log.created_at)} · {adminAuditLabel(log.action)} · {log.actor}{log.metadata?.reason ? ` · ${log.metadata.reason}` : ''}</small>)}
+              </div>) : <small className="wiw-admin-time-empty">Noch kein Zeiteintrag für diese Schichtkarte.</small>}
+            </div>
+          </> : null}
 
           {editing && editing.parentCount > 1 && !editing.isOpen ? <div className="wiw-bulk-edit-row"><div><b>Alle Karten dieser Schicht mitändern</b><span>Wenn aus, wird nur diese Person / OpenShift-Karte geändert.</span></div><Switch checked={form.apply_all} onChange={(value) => setForm((current) => ({ ...current, apply_all: value }))} /></div> : null}
 
@@ -1307,6 +1450,19 @@ export default function WiwScheduleMobile() {
         {sheet === 'groups' ? <MultiChoiceSheet title="Zeitplan" choices={SCHEDULE_GROUPS} selected={form.schedule_groups} onClose={() => setSheet('')} onChange={(values) => setForm((current) => { const currentPosition = positions.find((item: any) => String(item.id) === current.position); const keepPosition = !current.position || !values.length || values.includes(positionGroup(currentPosition?.name)); return { ...current, schedule_groups: values, position: keepPosition ? current.position : '' }; })} /> : null}
         {sheet === 'color' ? <ColorSheet selected={form.color_hue} autoHue={formAutoHue} onClose={() => setSheet('')} onSelect={(hue) => setForm((current) => ({ ...current, color_hue: hue }))} /> : null}
         {sheet === 'workers' ? <MultiChoiceSheet title={editing ? 'Mitarbeiter auswählen / ändern' : 'Geeignete Benutzer'} choices={workerChoices} selected={form.workers} limit={editing ? 1 : form.required_count} onClose={() => setSheet('')} onChange={(values) => setForm((current) => ({ ...current, workers: values, apply_all: editing ? false : current.apply_all }))} /> : null}
+      </div> : null}
+
+      {timeEditor ? <div className="wiw-sheet-backdrop wiw-admin-time-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !timeBusy) setTimeEditor(undefined); }}>
+        <section className="wiw-admin-time-sheet" role="dialog" aria-modal="true" aria-label="Arbeitszeit bearbeiten">
+          <header><div><small>ARBEITSZEIT · NUR ADMIN</small><b>{timeEditor.entry ? 'Zeit bearbeiten' : 'Zeit eintragen'}</b><span>{editing?.workerName || 'Mitarbeiter'}</span></div><button type="button" disabled={timeBusy} onClick={() => setTimeEditor(undefined)}>Abbrechen</button></header>
+          <div className="wiw-admin-time-fields">
+            <label>Beginn<input type="datetime-local" value={timeEditor.clock_in || ''} onChange={(event) => setTimeEditor((current: any) => ({ ...current, clock_in: event.target.value }))} /></label>
+            <label>Ende<input type="datetime-local" value={timeEditor.clock_out || ''} onChange={(event) => setTimeEditor((current: any) => ({ ...current, clock_out: event.target.value }))} /></label>
+            <label>Pause (Min.)<input type="number" min="0" step="5" inputMode="numeric" value={timeEditor.break_minutes ?? 0} onChange={(event) => setTimeEditor((current: any) => ({ ...current, break_minutes: Math.max(0, Number(event.target.value || 0)) }))} /></label>
+            <label className="wide">Notiz / Änderungsgrund<textarea value={timeEditor.reason || ''} onChange={(event) => setTimeEditor((current: any) => ({ ...current, reason: event.target.value }))} placeholder="z. B. Korrektur laut Einsatzleitung" /></label>
+          </div>
+          <footer><button type="button" disabled={timeBusy} onClick={() => setTimeEditor(undefined)}>Abbrechen</button><button type="button" className="primary" disabled={timeBusy || !timeEditor.clock_in || !timeEditor.clock_out} onClick={() => void saveAdminTime()}>{timeBusy ? 'Wird gespeichert …' : 'Arbeitszeit speichern'}</button></footer>
+        </section>
       </div> : null}
 
       {pdfOpen && pdfDateField ? <ScheduleDatePicker title="PDF Zeitraum" value={pdf[pdfDateField]} onSelect={(date) => { setPdf((current) => ({ ...current, [pdfDateField]: date })); setPdfDateField(''); }} onClose={() => setPdfDateField('')} /> : null}

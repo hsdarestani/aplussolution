@@ -325,3 +325,38 @@
     font-weight:650!important;
   }
 }
+
+
+/* Admin time entry inside WIW-style mobile shift editor */
+@media (max-width:900px){
+  .wiw-admin-time-log{padding:8px 14px 10px;background:#fff;border-bottom:1px solid #ddd;display:grid;gap:6px}
+  .wiw-admin-time-log-title{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .wiw-admin-time-log-title b{font-size:9px;letter-spacing:.06em;color:#667085}
+  .wiw-admin-time-log-title span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:700;color:#344054}
+  .wiw-admin-time-log-entry{padding-top:6px;border-top:1px solid #eef0f3;display:grid;gap:2px}
+  .wiw-admin-time-log-main{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  .wiw-admin-time-log-main strong{font-size:10px;color:#344054}
+  .wiw-admin-time-log-main span{font-size:9px;color:#667085}
+  .wiw-admin-time-log-entry small,.wiw-admin-time-empty{font-size:8px;line-height:1.35;color:#667085;overflow-wrap:anywhere}
+  .wiw-admin-time-log-reason{color:#475467!important}
+  .wiw-admin-time-audit{padding-left:7px;border-left:2px solid #d8dee8}
+  .wiw-admin-time-backdrop{z-index:23000}
+  .wiw-admin-time-sheet{width:100%;max-height:82dvh;padding-bottom:calc(12px + env(safe-area-inset-bottom));overflow:auto;border-radius:15px 15px 0 0;background:#f7f7f7;box-shadow:0 -8px 28px rgba(0,0,0,.2)}
+  .wiw-admin-time-sheet>header{position:sticky;top:0;z-index:2;min-height:62px;padding:8px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff;border-bottom:1px solid #ddd}
+  .wiw-admin-time-sheet>header>div{display:grid;gap:2px}
+  .wiw-admin-time-sheet>header small{font-size:8px;letter-spacing:.08em;color:#667085}
+  .wiw-admin-time-sheet>header b{font-size:15px;color:#263746}
+  .wiw-admin-time-sheet>header span{font-size:10px;color:#667085}
+  .wiw-admin-time-sheet>header button{border:0;background:transparent;color:#5d9f45;font:inherit;font-size:13px}
+  .wiw-admin-time-fields{padding:12px 14px;display:grid;grid-template-columns:1fr 1fr;gap:10px;background:#f7f7f7}
+  .wiw-admin-time-fields label{display:grid;gap:5px;font-size:10px;font-weight:700;color:#667085}
+  .wiw-admin-time-fields label.wide{grid-column:1/-1}
+  .wiw-admin-time-fields input,.wiw-admin-time-fields textarea{width:100%;box-sizing:border-box;border:1px solid #d0d5dd;border-radius:9px;background:#fff;color:#344054;font:inherit;font-size:14px}
+  .wiw-admin-time-fields input{height:46px;padding:0 9px}
+  .wiw-admin-time-fields textarea{min-height:82px;padding:9px;resize:vertical;line-height:1.35}
+  .wiw-admin-time-sheet>footer{position:sticky;bottom:0;padding:10px 14px calc(10px + env(safe-area-inset-bottom));display:grid;grid-template-columns:1fr 1.4fr;gap:8px;background:#fff;border-top:1px solid #ddd}
+  .wiw-admin-time-sheet>footer button{min-height:43px;border:1px solid #d0d5dd;border-radius:9px;background:#fff;color:#475467;font:inherit;font-weight:700}
+  .wiw-admin-time-sheet>footer button.primary{border-color:#0b4d6b;background:#0b4d6b;color:#fff}
+  .wiw-admin-time-sheet>footer button:disabled{opacity:.5}
+  .wiw-card-avatar img{backface-visibility:hidden;transform:translateZ(0)}
+}
