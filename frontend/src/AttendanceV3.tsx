@@ -437,6 +437,7 @@ export default function AttendanceV3({ user }: { user: User }) {
     );
   }
 
+  const active = data.active_entry;
   return (
     <>
       <section className="attendance-head worker-attendance-head">
