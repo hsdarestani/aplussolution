@@ -1,0 +1,364 @@
+name: Stream final WIW full archive
+
+on:
+  push:
+    branches:
+      - wiw-final-export-20260920
+    paths:
+      - '.github/workflows/wiw-final-export-stream.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wiw-final-export-stream
+  cancel-in-progress: false
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Build and stream exhaustive WIW archive in one SSH session
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=20 \
+            -o ServerAliveCountMax=30 \
+            root@"$STRATO_HOST" 'bash -s' > ./wiw-final-account-archive.tar.gz <<'REMOTE'
+          set -Eeuo pipefail
+          cd /opt/aplussolution
+
+          STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+          BASE="/root/aplussolution-backups"
+          OUT="$BASE/final-wiw-stream-export-$STAMP"
+
+          mkdir -p "$OUT"/{live,local,database,media,historical,meta}
+          chmod 700 "$OUT"
+
+          printf '%s\n' "$STAMP" > "$OUT/meta/export-stamp-utc.txt"
+          (git rev-parse HEAD > "$OUT/meta/repo-commit.txt" 2>/dev/null || printf '%s\n' 'production checkout has no .git directory' > "$OUT/meta/repo-commit.txt")
+          docker compose ps > "$OUT/meta/docker-compose-ps.txt" 2>&1
+
+          # Complete live WIW snapshot. Dynamic resources are fetched across
+          # 2000-01-01..2100-01-01 with recursive date-window splitting and
+          # safety checks against WIW's 1000-row response limit.
+          docker compose exec -T backend python - <<'PY' > "$OUT/live/core-snapshot.json"
+          import json, os
+          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+          import django
+          django.setup()
+          from core.wiw import WhenIWorkClient
+          from core.wiw_migration import fetch_complete_wiw_snapshot
+          client = WhenIWorkClient()
+          snapshot, errors = fetch_complete_wiw_snapshot(client)
+          result = {
+              "resources": snapshot,
+              "counts": {k: len(v) for k, v in snapshot.items()},
+              "errors": errors,
+          }
+          print(json.dumps(result, ensure_ascii=False, default=str, indent=2, sort_keys=True))
+          if errors:
+              raise SystemExit("WIW core snapshot incomplete: " + json.dumps(errors, ensure_ascii=False))
+          PY
+          gzip -9 "$OUT/live/core-snapshot.json"
+
+          # Extra read-only resource probes beyond the 8 resources historically
+          # integrated by A+. We retain payloads when endpoints are available and
+          # explicit errors when they are not.
+          docker compose exec -T backend python - <<'PY' > "$OUT/live/additional-readonly-probes.json"
+          import json, os
+          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+          import django
+          django.setup()
+          from core.wiw import WhenIWorkClient
+          c = WhenIWorkClient()
+          candidates = {
+              "schedules": [
+                  ("/schedules", {"limit": 1000}),
+              ],
+              "shift_templates": [
+                  ("/shift_templates", {"limit": 1000}),
+                  ("/shifttemplates", {"limit": 1000}),
+                  ("/templates", {"limit": 1000}),
+              ],
+              "absences": [
+                  ("/absences", {"start": "2000-01-01T00:00:00Z", "end": "2100-01-01T00:00:00Z", "limit": 1000}),
+                  ("/absences", {"limit": 1000}),
+              ],
+              "pay_periods": [
+                  ("/pay_periods", {"limit": 1000}),
+                  ("/payperiods", {"limit": 1000}),
+              ],
+              "payroll": [
+                  ("/payroll", {"limit": 1000}),
+              ],
+              "account": [
+                  ("/account", {}),
+              ],
+              "settings": [
+                  ("/settings", {}),
+              ],
+              "tasks": [
+                  ("/tasks", {"limit": 1000}),
+              ],
+              "task_lists": [
+                  ("/task_lists", {"limit": 1000}),
+                  ("/tasklists", {"limit": 1000}),
+              ],
+          }
+          out = {}
+          for name, variants in candidates.items():
+              attempts = []
+              success = None
+              for path, params in variants:
+                  try:
+                      payload = c.get(path, params=params)
+                      success = {"path": path, "params": params, "payload": payload}
+                      attempts.append({"path": path, "params": params, "ok": True})
+                      break
+                  except Exception as exc:
+                      attempts.append({"path": path, "params": params, "ok": False, "error": str(exc)})
+              out[name] = {"success": success, "attempts": attempts}
+          print(json.dumps(out, ensure_ascii=False, default=str, indent=2, sort_keys=True))
+          PY
+          gzip -9 "$OUT/live/additional-readonly-probes.json"
+
+          # Preserve a read-only remote/local comparison. A false cutover_ready is
+          # retained as evidence and does not discard the raw WIW backup.
+          docker compose exec -T backend python - <<'PY' > "$OUT/meta/wiw-reconciliation.json"
+          import json, os
+          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+          import django
+          django.setup()
+          from core.wiw_migration import build_wiw_migration_report
+          report = build_wiw_migration_report(apply_full_sync=False)
+          print(json.dumps(report, ensure_ascii=False, default=str, indent=2, sort_keys=True))
+          PY
+
+          # Full production PostgreSQL backups: restore-grade custom format plus
+          # schema-only SQL. This captures all imported WIW payloads and legacy
+          # WordPress migration records, plus all A+ state linked to them.
+          DB_USER="$(docker compose exec -T db printenv POSTGRES_USER | tr -d '\r')"
+          DB_NAME="$(docker compose exec -T db printenv POSTGRES_DB | tr -d '\r')"
+          : "${DB_USER:?POSTGRES_USER missing}"
+          : "${DB_NAME:?POSTGRES_DB missing}"
+          docker compose exec -T db pg_dump -U "$DB_USER" -d "$DB_NAME" -Fc > "$OUT/database/full-production.dump"
+          test -s "$OUT/database/full-production.dump"
+          docker compose exec -T db pg_dump -U "$DB_USER" -d "$DB_NAME" --schema-only | gzip -9 > "$OUT/database/schema.sql.gz"
+
+          # Human-readable full core dataset as an independent representation.
+          docker compose exec -T backend python manage.py dumpdata core --indent 2 | gzip -9 > "$OUT/local/core-dumpdata.json.gz"
+          test -s "$OUT/local/core-dumpdata.json.gz"
+
+          # Model inventory and WIW-linked counts.
+          docker compose exec -T backend python - <<'PY' > "$OUT/meta/model-counts.json"
+          import json, os
+          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+          import django
+          django.setup()
+          from django.apps import apps
+          from core.models import User, WorkerProfile, Location, Position, Shift, TimeEntry
+          counts = {}
+          for model in apps.get_app_config("core").get_models():
+              try:
+                  counts[model.__name__] = model.objects.count()
+              except Exception as exc:
+                  counts[model.__name__] = {"error": str(exc)}
+          focused = {
+              "users_with_wiw_id": User.objects.exclude(wiw_id__isnull=True).exclude(wiw_id="").count(),
+              "workers_with_wiw_id": WorkerProfile.objects.exclude(wiw_user_id__isnull=True).exclude(wiw_user_id="").count(),
+              "locations_with_wiw_location_id": Location.objects.exclude(wiw_location_id__isnull=True).exclude(wiw_location_id="").count(),
+              "locations_with_wiw_site_id": Location.objects.exclude(wiw_site_id__isnull=True).exclude(wiw_site_id="").count(),
+              "positions_with_wiw_id": Position.objects.exclude(wiw_position_id__isnull=True).exclude(wiw_position_id="").count(),
+              "shifts_with_wiw_id": Shift.objects.exclude(wiw_shift_id__isnull=True).exclude(wiw_shift_id="").count(),
+              "times_with_wiw_id": TimeEntry.objects.exclude(wiw_time_id__isnull=True).exclude(wiw_time_id="").count(),
+          }
+          print(json.dumps({"all_core_models": counts, "wiw_linked": focused}, ensure_ascii=False, default=str, indent=2, sort_keys=True))
+          PY
+
+          # Preserve integration behavior and identifiers without writing secret
+          # credential values to the archive.
+          docker compose exec -T backend python - <<'PY' > "$OUT/meta/wiw-config-sanitized.json"
+          import json, os
+          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+          import django
+          django.setup()
+          from django.conf import settings
+          data = {
+              "API_BASE": "https://api.wheniwork.com/2",
+              "WIW_USER_ID": getattr(settings, "WIW_USER_ID", ""),
+              "WIW_SYNC_ENABLED": getattr(settings, "WIW_SYNC_ENABLED", False),
+              "WIW_READ_ONLY": getattr(settings, "WIW_READ_ONLY", True),
+              "WIW_HTTP_TIMEOUT": getattr(settings, "WIW_HTTP_TIMEOUT", None),
+              "WIW_TOKEN_CACHE_SECONDS": getattr(settings, "WIW_TOKEN_CACHE_SECONDS", None),
+              "credentials_present": {
+                  "WIW_DEV_KEY": bool(getattr(settings, "WIW_DEV_KEY", "")),
+                  "WIW_EMAIL": bool(getattr(settings, "WIW_EMAIL", "")),
+                  "WIW_PASSWORD": bool(getattr(settings, "WIW_PASSWORD", "")),
+                  "WIW_WEBHOOK_SECRET": bool(getattr(settings, "WIW_WEBHOOK_SECRET", "")),
+              },
+          }
+          print(json.dumps(data, ensure_ascii=False, default=str, indent=2, sort_keys=True))
+          PY
+
+          # Entire production media: contracts, documents, payroll statements,
+          # avatars, order attachments and time-clock photos.
+          docker compose exec -T backend sh -c 'tar -C /app/media -czf - .' > "$OUT/media/media.tar.gz"
+          test -s "$OUT/media/media.tar.gz"
+
+          # Earlier WIW migration SQL backups/reports on this production node.
+          shopt -s nullglob
+          for f in "$BASE"/*wiw* "$BASE"/pre-wiw-* "$BASE"/post-wiw-*; do
+            if [[ -f "$f" ]]; then
+              cp -a "$f" "$OUT/historical/"
+            fi
+          done
+          shopt -u nullglob
+
+          cat > "$OUT/README.txt" <<'TXT'
+          FINAL WIW ACCOUNT ARCHIVE
+
+          This package is intentionally redundant so the When I Work account can
+          later be removed without making A+ Solution depend on external access.
+
+          live/core-snapshot.json.gz
+            Complete bounded-history WIW snapshot for:
+            users, positions, locations, sites, shifts, times,
+            availabilities and requests.
+
+          live/additional-readonly-probes.json.gz
+            Read-only attempts to preserve additional WIW resource families
+            including schedules, shift templates, absences, pay periods/payroll,
+            account/settings and task resources. Unsupported endpoints and their
+            errors are preserved explicitly.
+
+          database/full-production.dump
+            Restore-grade PostgreSQL custom-format backup of production.
+
+          database/schema.sql.gz
+            Database schema backup.
+
+          local/core-dumpdata.json.gz
+            Human-readable Django JSON for every core model.
+
+          media/media.tar.gz
+            Complete production media volume.
+
+          historical/
+            Earlier WIW migration backups/reports present on this production node.
+
+          meta/
+            Reconciliation report, model counts, sanitized integration config,
+            inventory and SHA-256 checksums.
+
+          Credential secret values are intentionally excluded. Production user
+          password hashes and personal/business records inside the database backup
+          remain included because this is a restore-grade private archive.
+          TXT
+
+          find "$OUT" -type f -printf '%P\t%s bytes\n' | sort > "$OUT/meta/file-inventory.txt"
+          (
+            cd "$OUT"
+            find . -type f ! -path './meta/checksums.sha256' -print0 | sort -z | xargs -0 sha256sum
+          ) > "$OUT/meta/checksums.sha256"
+
+          # Stream the finished archive through THIS SAME SSH connection.
+          # No second connection or transient remote path is required.
+          tar -C "$OUT" -czf - .
+          REMOTE
+
+          test -s ./wiw-final-account-archive.tar.gz
+          tar -tzf ./wiw-final-account-archive.tar.gz >/dev/null
+          sha256sum ./wiw-final-account-archive.tar.gz > ./wiw-final-account-archive.sha256
+          echo "Archive streamed and tar integrity check passed."
+          echo "Archive size: $(du -h ./wiw-final-account-archive.tar.gz | cut -f1)"
+
+      - name: Validate internal checksums and summarize
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p verify
+          tar -xzf ./wiw-final-account-archive.tar.gz -C verify
+          (
+            cd verify
+            sha256sum -c meta/checksums.sha256
+          )
+
+          echo "=== CORE WIW COUNTS ==="
+          gzip -dc verify/live/core-snapshot.json.gz \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({"counts": d.get("counts", {}), "errors": d.get("errors", {})}, ensure_ascii=False, sort_keys=True))'
+
+          echo "=== RECONCILIATION ==="
+          python3 - <<'PY'
+          import json
+          with open("verify/meta/wiw-reconciliation.json", "r", encoding="utf-8") as f:
+              d=json.load(f)
+          out={"cutover_ready":d.get("cutover_ready"),"resources":{}}
+          for k,v in d.get("resources",{}).items():
+              out["resources"][k]={
+                  "remote_count":v.get("remote_count"),
+                  "local_count":v.get("local_count"),
+                  "missing_count":len(v.get("missing",[])),
+                  "extra_count":len(v.get("extra",[])),
+                  "complete":v.get("complete"),
+              }
+          print(json.dumps(out, ensure_ascii=False, sort_keys=True))
+          PY
+
+          echo "=== ADDITIONAL WIW PROBES ==="
+          gzip -dc verify/live/additional-readonly-probes.json.gz \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({k: {"supported": bool(v.get("success")), "path": (v.get("success") or {}).get("path"), "attempt_errors": [a.get("error") for a in v.get("attempts", []) if not a.get("ok")]} for k,v in d.items()}, ensure_ascii=False, sort_keys=True))'
+
+          echo "=== MODEL COUNTS ==="
+          cat verify/meta/model-counts.json
+
+          echo "=== FILE INVENTORY ==="
+          cat verify/meta/file-inventory.txt
+
+      - name: Split large archive if needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          size="$(stat -c %s ./wiw-final-account-archive.tar.gz)"
+          if [ "$size" -gt 1800000000 ]; then
+            split -b 1700M -d -a 3 ./wiw-final-account-archive.tar.gz artifact/wiw-final-account-archive.tar.gz.part-
+            printf '%s\n' 'Restore: cat wiw-final-account-archive.tar.gz.part-* > wiw-final-account-archive.tar.gz' > artifact/RESTORE_PARTS.txt
+          else
+            mv ./wiw-final-account-archive.tar.gz artifact/
+          fi
+          cp ./wiw-final-account-archive.sha256 artifact/
+
+      - name: Upload final WIW archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: wiw-final-account-archive-20260920
+          path: artifact/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
