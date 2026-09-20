@@ -156,8 +156,8 @@ jobs:
           from core.wiw_migration import build_wiw_migration_report
           report = build_wiw_migration_report(apply_full_sync=False)
           print(json.dumps(report, ensure_ascii=False, default=str, indent=2, sort_keys=True))
-          if not report.get("cutover_ready"):
-              raise SystemExit("WIW reconciliation is not cutover-ready")
+          # A false cutover_ready is important evidence, not a reason to discard
+          # the backup. The raw remote snapshot above is still preserved in full.
           PY
 
           # 4) Complete production PostgreSQL backup. This is the restore source
