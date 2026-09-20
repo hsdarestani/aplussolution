@@ -1,3 +1,4 @@
+// SEP14_TIME_GLOBAL_SEARCH_REMOVAL
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
