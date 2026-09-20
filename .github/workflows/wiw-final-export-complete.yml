@@ -1,0 +1,716 @@
+name: Complete final WIW account archive
+
+on:
+  push:
+    branches:
+      - wiw-final-export-20260920
+    paths:
+      - '.github/workflows/wiw-final-export-complete.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wiw-final-export-complete
+  cancel-in-progress: false
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH and archive folders
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh" archive/{live,database,local,media,historical,meta,source}
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+          printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > archive/meta/export-stamp-utc.txt
+          git rev-parse HEAD > archive/meta/export-workflow-commit.txt
+          git rev-parse origin/main > archive/meta/main-commit.txt || true
+
+      - name: Export complete live WIW API snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'cd /opt/aplussolution && docker compose exec -T backend python -' <<'PY' > archive/live/core-snapshot.json
+          import json, os
+          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+          import django
+          django.setup()
+          from core.wiw import WhenIWorkClient
+          from core.wiw_migration import fetch_complete_wiw_snapshot
+          client = WhenIWorkClient()
+          snapshot, errors = fetch_complete_wiw_snapshot(client)
+          result = {
+              "resources": snapshot,
+              "counts": {k: len(v) for k, v in snapshot.items()},
+              "errors": errors,
+          }
+          print(json.dumps(result, ensure_ascii=False, default=str, indent=2, sort_keys=True))
+          if errors:
+              raise SystemExit("WIW core snapshot incomplete: " + json.dumps(errors, ensure_ascii=False))
+          PY
+          test -s archive/live/core-snapshot.json
+          gzip -9 archive/live/core-snapshot.json
+
+      - name: Export additional read-only WIW resource probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'cd /opt/aplussolution && docker compose exec -T backend python -' <<'PY' > archive/live/additional-readonly-probes.json
+          import json, os
+          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+          import django
+          django.setup()
+          from core.wiw import WhenIWorkClient
+          c = WhenIWorkClient()
+          candidates = {
+              "schedules": [("/schedules", {"limit": 1000})],
+              "shift_templates": [
+                  ("/shift_templates", {"limit": 1000}),
+                  ("/shifttemplates", {"limit": 1000}),
+                  ("/templates", {"limit": 1000}),
+              ],
+              "absences": [
+                  ("/absences", {"start": "2000-01-01T00:00:00Z", "end": "2100-01-01T00:00:00Z", "limit": 1000}),
+                  ("/absences", {"limit": 1000}),
+              ],
+              "pay_periods": [
+                  ("/pay_periods", {"limit": 1000}),
+                  ("/payperiods", {"limit": 1000}),
+              ],
+              "payroll": [("/payroll", {"limit": 1000})],
+              "account": [("/account", {})],
+              "settings": [("/settings", {})],
+              "tasks": [("/tasks", {"limit": 1000})],
+              "task_lists": [
+                  ("/task_lists", {"limit": 1000}),
+                  ("/tasklists", {"limit": 1000}),
+              ],
+          }
+          out = {}
+          for name, variants in candidates.items():
+              attempts = []
+              success = None
+              for path, params in variants:
+                  try:
+                      payload = c.get(path, params=params)
+                      success = {"path": path, "params": params, "payload": payload}
+                      attempts.append({"path": path, "params": params, "ok": True})
+                      break
+                  except Exception as exc:
+                      attempts.append({"path": path, "params": params, "ok": False, "error": str(exc)})
+              out[name] = {"success": success, "attempts": attempts}
+          print(json.dumps(out, ensure_ascii=False, default=str, indent=2, sort_keys=True))
+          PY
+          test -s archive/live/additional-readonly-probes.json
+          gzip -9 archive/live/additional-readonly-probes.json
+
+      - name: Export documented WIW resources missed by generic probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p archive/live/documented archive/ui-equivalents
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'cd /opt/aplussolution && docker compose exec -T backend python -' <<'PY' > archive/live/documented/documented-resources.json
+          import json, os, time
+          from datetime import datetime, timezone
+
+          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+          import django
+          django.setup()
+
+          from core.wiw import WhenIWorkClient
+
+          c = WhenIWorkClient()
+          out = {
+              "generated_at": datetime.now(timezone.utc).isoformat(),
+              "resources": {},
+              "errors": {},
+          }
+
+          def request(name, path, params=None, retries=3):
+              last = None
+              for attempt in range(retries):
+                  try:
+                      payload = c.get(path, params=params or {})
+                      return payload
+                  except Exception as exc:
+                      last = exc
+                      time.sleep(0.4 * (attempt + 1))
+              out["errors"][name] = str(last)
+              return None
+
+          def list_from(payload, key):
+              if payload is None:
+                  return []
+              value = payload.get(key, []) if isinstance(payload, dict) else []
+              return value if isinstance(value, list) else []
+
+          def paged(name, path, key, *, page_start=1, limit=100, extra=None, max_pages=500):
+              rows = []
+              pages = []
+              seen = set()
+              for page in range(page_start, page_start + max_pages):
+                  params = dict(extra or {})
+                  params.update({"page": page, "limit": limit})
+                  payload = request(f"{name}:page:{page}", path, params)
+                  if payload is None:
+                      break
+                  part = list_from(payload, key)
+                  pages.append({"page": page, "count": len(part)})
+                  for item in part:
+                      ident = None
+                      if isinstance(item, dict):
+                          ident = item.get("id") or item.get("swap_id") or item.get("request_id")
+                      fingerprint = str(ident) if ident is not None else json.dumps(item, sort_keys=True, default=str)
+                      if fingerprint in seen:
+                          continue
+                      seen.add(fingerprint)
+                      rows.append(item)
+                  if len(part) < limit:
+                      break
+              return {"items": rows, "pages": pages, "count": len(rows)}
+
+          # Users including archived/deleted profiles. The documented Users API
+          # supports show_deleted / only_deleted, which is the API equivalent of
+          # the archived-user export.
+          users_all = request(
+              "users_all_including_archived",
+              "/users",
+              {"show_deleted": "true", "show_pending": "true"},
+          )
+          users_deleted = request(
+              "users_archived_only",
+              "/users",
+              {"only_deleted": "true", "show_pending": "true"},
+          )
+          out["resources"]["users_all_including_archived"] = users_all
+          out["resources"]["users_archived_only"] = users_deleted
+
+          # Correct documented endpoints.
+          out["resources"]["shift_templates_blocks"] = request("shift_templates_blocks", "/blocks")
+          out["resources"]["schedule_templates"] = request("schedule_templates", "/templates")
+          out["resources"]["time_off_request_types"] = request("time_off_request_types", "/requesttypes")
+          out["resources"]["account"] = request("account", "/account")
+
+          # Swap/drop/alert requests. WIW retains shift requests for one year,
+          # so exhaustive pagination without a date filter covers all data the
+          # service still retains.
+          out["resources"]["shift_requests_swaps"] = paged(
+              "shift_requests_swaps", "/swaps", "swaps", page_start=1, limit=100
+          )
+
+          # OpenShift approval/bidding requests.
+          out["resources"]["openshift_approval_requests"] = paged(
+              "openshift_approval_requests",
+              "/openshiftapprovalrequests",
+              "openshiftapprovalrequests",
+              page_start=0,
+              limit=100,
+          )
+
+          # Payroll / pay period hours. The API accepts start/end ranges. Fetch
+          # the entire 2000..2100 safety horizon in 10-year windows, dedupe by ID,
+          # then fetch each payroll detail and stats. Closed payroll details
+          # contain immutable payrollhours; open payrolls expose current hourstats.
+          payrolls = []
+          payroll_seen = set()
+          payroll_windows = []
+          for year in range(2000, 2100, 10):
+              start = f"{year:04d}-01-01T00:00:00Z"
+              end = f"{min(year + 10, 2100):04d}-01-01T00:00:00Z"
+              payload = request(f"payrolls:{year}", "/payrolls", {"start": start, "end": end})
+              rows = list_from(payload, "payrolls")
+              payroll_windows.append({"start": start, "end": end, "count": len(rows)})
+              for row in rows:
+                  ident = row.get("id") if isinstance(row, dict) else None
+                  fingerprint = str(ident) if ident is not None else json.dumps(row, sort_keys=True, default=str)
+                  if fingerprint in payroll_seen:
+                      continue
+                  payroll_seen.add(fingerprint)
+                  payrolls.append(row)
+
+          payroll_details = {}
+          payroll_stats = {}
+          for row in payrolls:
+              if not isinstance(row, dict) or row.get("id") is None:
+                  continue
+              pid = str(row["id"])
+              detail = request(f"payroll_detail:{pid}", f"/payrolls/{pid}")
+              if detail is not None:
+                  payroll_details[pid] = detail
+              stats = request(f"payroll_stats:{pid}", f"/payrolls/{pid}/stats", {"mapObjects": "true"})
+              if stats is not None:
+                  payroll_stats[pid] = stats
+
+          notices = request(
+              "payroll_notices",
+              "/payrolls/notices",
+              {"ignoreDismissedAt": "true"},
+          )
+
+          out["resources"]["payrolls"] = {
+              "windows": payroll_windows,
+              "summaries": payrolls,
+              "count": len(payrolls),
+              "details": payroll_details,
+              "stats": payroll_stats,
+              "notices": notices,
+          }
+
+          # Keep a focused absence subset from the attendance notices. Raw notices
+          # are retained above even if the exact notice schema changes.
+          def mentions_absence(value):
+              try:
+                  return "absence" in json.dumps(value, ensure_ascii=False, default=str).lower()
+              except Exception:
+                  return False
+
+          absence_candidates = []
+          if isinstance(notices, dict):
+              for key, value in notices.items():
+                  if isinstance(value, list):
+                      absence_candidates.extend([item for item in value if mentions_absence(item)])
+          elif isinstance(notices, list):
+              absence_candidates = [item for item in notices if mentions_absence(item)]
+          out["resources"]["absence_related_attendance_notices"] = absence_candidates
+
+          # Completeness assertions for documented endpoints that must exist.
+          required = [
+              "users_all_including_archived",
+              "shift_templates_blocks",
+              "schedule_templates",
+              "time_off_request_types",
+              "shift_requests_swaps",
+              "openshift_approval_requests",
+              "payrolls",
+          ]
+          out["required_resource_status"] = {
+              name: (name in out["resources"] and out["resources"][name] is not None)
+              for name in required
+          }
+
+          print(json.dumps(out, ensure_ascii=False, default=str, indent=2, sort_keys=True))
+
+          missing = [k for k, ok in out["required_resource_status"].items() if not ok]
+          if missing:
+              raise SystemExit("Required documented WIW resource exports failed: " + ", ".join(missing))
+          PY
+          test -s archive/live/documented/documented-resources.json
+          gzip -9 archive/live/documented/documented-resources.json
+
+      - name: Build UI-equivalent CSV exports
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import csv, gzip, json
+          from pathlib import Path
+
+          outdir = Path("archive/ui-equivalents")
+          outdir.mkdir(parents=True, exist_ok=True)
+
+          with gzip.open("archive/live/core-snapshot.json.gz", "rt", encoding="utf-8") as f:
+              core = json.load(f)["resources"]
+          with gzip.open("archive/live/documented/documented-resources.json.gz", "rt", encoding="utf-8") as f:
+              doc = json.load(f)["resources"]
+
+          def flatten(value, prefix="", row=None):
+              row = {} if row is None else row
+              if isinstance(value, dict):
+                  for k, v in value.items():
+                      key = f"{prefix}.{k}" if prefix else str(k)
+                      if isinstance(v, dict):
+                          flatten(v, key, row)
+                      elif isinstance(v, list):
+                          row[key] = json.dumps(v, ensure_ascii=False, default=str)
+                      else:
+                          row[key] = v
+              else:
+                  row[prefix or "value"] = value
+              return row
+
+          def write_csv(filename, rows):
+              path = outdir / filename
+              flat_rows = [flatten(r) if isinstance(r, dict) else {"value": r} for r in (rows or [])]
+              fields = []
+              seen = set()
+              for row in flat_rows:
+                  for key in row:
+                      if key not in seen:
+                          seen.add(key)
+                          fields.append(key)
+              if not fields:
+                  fields = ["_empty"]
+                  flat_rows = []
+              with path.open("w", newline="", encoding="utf-8-sig") as f:
+                  w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+                  w.writeheader()
+                  w.writerows(flat_rows)
+
+          def list_payload(payload, key):
+              return payload.get(key, []) if isinstance(payload, dict) and isinstance(payload.get(key, []), list) else []
+
+          # Official-export equivalents.
+          write_csv("users-current-and-archived.csv", list_payload(doc.get("users_all_including_archived"), "users"))
+          write_csv("users-archived-only.csv", list_payload(doc.get("users_archived_only"), "users"))
+          write_csv("job-sites.csv", core.get("sites", []))
+          write_csv("schedules-locations.csv", core.get("locations", []))
+          write_csv("schedule-shifts.csv", core.get("shifts", []))
+          write_csv("shift-requests.csv", (doc.get("shift_requests_swaps") or {}).get("items", []))
+          write_csv("openshift-requests.csv", (doc.get("openshift_approval_requests") or {}).get("items", []))
+          write_csv("shift-templates.csv", list_payload(doc.get("shift_templates_blocks"), "blocks"))
+          write_csv("schedule-templates.csv", list_payload(doc.get("schedule_templates"), "templates"))
+          write_csv("timesheets.csv", core.get("times", []))
+          write_csv("time-off-requests.csv", core.get("requests", []))
+          write_csv("time-off-request-types.csv", list_payload(doc.get("time_off_request_types"), "request-types"))
+          write_csv("availabilities.csv", core.get("availabilities", []))
+          write_csv("positions.csv", core.get("positions", []))
+
+          payroll = doc.get("payrolls") or {}
+          write_csv("payroll-periods.csv", payroll.get("summaries", []))
+
+          payhours = []
+          for pid, payload in (payroll.get("details") or {}).items():
+              if not isinstance(payload, dict):
+                  continue
+              for item in payload.get("payrollhours", []) or []:
+                  if isinstance(item, dict):
+                      item = dict(item)
+                      item.setdefault("_payroll_id", pid)
+                  payhours.append(item)
+          write_csv("pay-period-hours-closed.csv", payhours)
+
+          hourstats = []
+          for pid, payload in (payroll.get("stats") or {}).items():
+              if not isinstance(payload, dict):
+                  continue
+              p = payload.get("payroll")
+              if isinstance(p, dict):
+                  stats = p.get("hourstats")
+                  if isinstance(stats, list):
+                      for item in stats:
+                          if isinstance(item, dict):
+                              item = dict(item)
+                              item.setdefault("_payroll_id", pid)
+                          hourstats.append(item)
+                  elif isinstance(stats, dict):
+                      for key, item in stats.items():
+                          if isinstance(item, dict):
+                              item = dict(item)
+                              item.setdefault("_payroll_id", pid)
+                              item.setdefault("_hourstat_key", key)
+                          hourstats.append(item)
+          write_csv("pay-period-hours-open-stats.csv", hourstats)
+
+          notices = payroll.get("notices")
+          notice_rows = []
+          if isinstance(notices, dict):
+              for key, value in notices.items():
+                  if isinstance(value, list):
+                      for item in value:
+                          if isinstance(item, dict):
+                              item = dict(item)
+                              item.setdefault("_notice_collection", key)
+                          notice_rows.append(item)
+          elif isinstance(notices, list):
+              notice_rows = notices
+          write_csv("attendance-notices.csv", notice_rows)
+          write_csv("absence-related-notices.csv", doc.get("absence_related_attendance_notices", []))
+
+          manifest = {
+              p.name: sum(1 for _ in p.open("r", encoding="utf-8-sig")) - 1
+              for p in sorted(outdir.glob("*.csv"))
+          }
+          (outdir / "CSV-MANIFEST.json").write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          PY
+
+          test -s archive/ui-equivalents/CSV-MANIFEST.json
+
+      - name: Export WIW reconciliation report
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'cd /opt/aplussolution && docker compose exec -T backend python -' <<'PY' > archive/meta/wiw-reconciliation.json
+          import json, os
+          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+          import django
+          django.setup()
+          from core.wiw_migration import build_wiw_migration_report
+          report = build_wiw_migration_report(apply_full_sync=False)
+          print(json.dumps(report, ensure_ascii=False, default=str, indent=2, sort_keys=True))
+          PY
+          test -s archive/meta/wiw-reconciliation.json
+
+      - name: Stream full PostgreSQL production database
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" \
+            'cd /opt/aplussolution && docker compose exec -T db sh -lc '"'"'PGPASSWORD="$POSTGRES_PASSWORD" exec pg_dump -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc'"'"'' \
+            > archive/database/full-production.dump
+          test -s archive/database/full-production.dump
+          file archive/database/full-production.dump
+
+      - name: Stream PostgreSQL schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" \
+            'cd /opt/aplussolution && docker compose exec -T db sh -lc '"'"'PGPASSWORD="$POSTGRES_PASSWORD" exec pg_dump -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" --schema-only'"'"'' \
+            | gzip -9 > archive/database/schema.sql.gz
+          test -s archive/database/schema.sql.gz
+          gzip -t archive/database/schema.sql.gz
+
+      - name: Stream complete human-readable core dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" \
+            'cd /opt/aplussolution && docker compose exec -T backend python manage.py dumpdata core --indent 2' \
+            | gzip -9 > archive/local/core-dumpdata.json.gz
+          test -s archive/local/core-dumpdata.json.gz
+          gzip -t archive/local/core-dumpdata.json.gz
+
+      - name: Export all core model counts and sanitized WIW config
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'cd /opt/aplussolution && docker compose exec -T backend python -' <<'PY' > archive/meta/model-counts.json
+          import json, os
+          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+          import django
+          django.setup()
+          from django.apps import apps
+          from core.models import User, WorkerProfile, Location, Position, Shift, TimeEntry
+          counts = {}
+          for model in apps.get_app_config("core").get_models():
+              try:
+                  counts[model.__name__] = model.objects.count()
+              except Exception as exc:
+                  counts[model.__name__] = {"error": str(exc)}
+          focused = {
+              "users_with_wiw_id": User.objects.exclude(wiw_id__isnull=True).exclude(wiw_id="").count(),
+              "workers_with_wiw_id": WorkerProfile.objects.exclude(wiw_user_id__isnull=True).exclude(wiw_user_id="").count(),
+              "locations_with_wiw_location_id": Location.objects.exclude(wiw_location_id__isnull=True).exclude(wiw_location_id="").count(),
+              "locations_with_wiw_site_id": Location.objects.exclude(wiw_site_id__isnull=True).exclude(wiw_site_id="").count(),
+              "positions_with_wiw_id": Position.objects.exclude(wiw_position_id__isnull=True).exclude(wiw_position_id="").count(),
+              "shifts_with_wiw_id": Shift.objects.exclude(wiw_shift_id__isnull=True).exclude(wiw_shift_id="").count(),
+              "times_with_wiw_id": TimeEntry.objects.exclude(wiw_time_id__isnull=True).exclude(wiw_time_id="").count(),
+          }
+          print(json.dumps({"all_core_models": counts, "wiw_linked": focused}, ensure_ascii=False, default=str, indent=2, sort_keys=True))
+          PY
+
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'cd /opt/aplussolution && docker compose exec -T backend python -' <<'PY' > archive/meta/wiw-config-sanitized.json
+          import json, os
+          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+          import django
+          django.setup()
+          from django.conf import settings
+          data = {
+              "API_BASE": "https://api.wheniwork.com/2",
+              "WIW_USER_ID": getattr(settings, "WIW_USER_ID", ""),
+              "WIW_SYNC_ENABLED": getattr(settings, "WIW_SYNC_ENABLED", False),
+              "WIW_READ_ONLY": getattr(settings, "WIW_READ_ONLY", True),
+              "WIW_HTTP_TIMEOUT": getattr(settings, "WIW_HTTP_TIMEOUT", None),
+              "WIW_TOKEN_CACHE_SECONDS": getattr(settings, "WIW_TOKEN_CACHE_SECONDS", None),
+              "credentials_present": {
+                  "WIW_DEV_KEY": bool(getattr(settings, "WIW_DEV_KEY", "")),
+                  "WIW_EMAIL": bool(getattr(settings, "WIW_EMAIL", "")),
+                  "WIW_PASSWORD": bool(getattr(settings, "WIW_PASSWORD", "")),
+                  "WIW_WEBHOOK_SECRET": bool(getattr(settings, "WIW_WEBHOOK_SECRET", "")),
+              },
+          }
+          print(json.dumps(data, ensure_ascii=False, default=str, indent=2, sort_keys=True))
+          PY
+
+      - name: Stream entire production media volume
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" \
+            'cd /opt/aplussolution && docker compose exec -T backend sh -c '"'"'tar -C /app/media -czf - .'"'"'' \
+            > archive/media/media.tar.gz
+          test -s archive/media/media.tar.gz
+          tar -tzf archive/media/media.tar.gz >/dev/null
+
+      - name: Stream historical server-side WIW backups and reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" \
+            'if [ -d /root/aplussolution-backups ]; then tar -C /root/aplussolution-backups -czf - --ignore-failed-read --wildcards "*wiw*" "pre-wiw-*" "post-wiw-*" 2>/dev/null || tar -czf - --files-from /dev/null; else tar -czf - --files-from /dev/null; fi' \
+            > archive/historical/server-wiw-backups.tar.gz
+          test -s archive/historical/server-wiw-backups.tar.gz
+          tar -tzf archive/historical/server-wiw-backups.tar.gz >/dev/null
+
+      - name: Save WIW-related source code snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import tarfile, re
+          root=Path(".")
+          out=Path("archive/source/wiw-related-source.tar.gz")
+          rx=re.compile(r"(wiw|when.?i.?work|working_time|attendance|shift|schedule|timeentry|worker|employee|payroll|contract|document)", re.I)
+          files=[]
+          for p in root.rglob("*"):
+              if not p.is_file() or ".git" in p.parts or "archive" in p.parts:
+                  continue
+              rel=p.as_posix()
+              if rx.search(rel):
+                  files.append(p)
+          with tarfile.open(out, "w:gz") as t:
+              for p in sorted(files):
+                  t.add(p, arcname=p.as_posix())
+          Path("archive/meta/source-file-count.txt").write_text(str(len(files))+"\n")
+          PY
+          test -s archive/source/wiw-related-source.tar.gz
+
+      - name: Create README, inventories and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > archive/README.txt <<'TXT'
+          FINAL WHEN I WORK (WIW) ACCOUNT ARCHIVE
+
+          This is a private, restore-grade archive made before deleting/cancelling
+          the external When I Work account.
+
+          live/core-snapshot.json.gz
+            Direct complete WIW API snapshot for users, positions, locations,
+            sites, shifts, times, availabilities and requests. Dynamic resources
+            are fetched across 2000-01-01..2100-01-01 with recursive window
+            splitting and 1000-row safety checks.
+
+          live/additional-readonly-probes.json.gz
+            Legacy probe report retained for auditability.
+
+          live/documented/documented-resources.json.gz
+            Documented WIW resource archive using the correct API endpoints:
+            archived/current users, shift templates (/blocks), schedule templates
+            (/templates), shift requests (/swaps), OpenShift requests, time-off
+            request types, payroll periods, closed payroll hours, open payroll
+            stats, attendance notices and absence-related notices.
+
+          ui-equivalents/
+            CSV equivalents of the exports WIW recommends before cancellation:
+            users (including archived), job sites, schedules/shifts, shift
+            requests, shift templates, timesheets, time-off requests, payroll
+            hours, attendance/absence notices, plus supporting lookup data.
+
+          database/full-production.dump
+            Full restore-grade PostgreSQL custom-format production backup.
+
+          database/schema.sql.gz
+            Full PostgreSQL schema backup.
+
+          local/core-dumpdata.json.gz
+            Human-readable Django JSON for every core model, including legacy
+            WIW migration data and raw WIW payloads stored in A+.
+
+          media/media.tar.gz
+            Entire production media volume: contracts, documents, payroll files,
+            avatars, order attachments and time-clock photos.
+
+          historical/server-wiw-backups.tar.gz
+            Earlier server-side WIW migration backups/reports if present.
+
+          source/wiw-related-source.tar.gz
+            Snapshot of WIW/workforce/time/schedule-related source files from the
+            repository at the commit recorded in meta/.
+
+          meta/
+            Reconciliation report, model counts, sanitized WIW integration config,
+            source commits, inventories and SHA-256 checksums.
+
+          Secret credential values (API keys/passwords/webhook secrets) are not
+          copied into this archive. Restore-grade database content, including
+          password hashes and personal/business records, is included.
+          TXT
+
+          find archive -type f -printf '%P\t%s bytes\n' | sort > archive/meta/file-inventory.txt
+          (
+            cd archive
+            find . -type f ! -path './meta/checksums.sha256' -print0 | sort -z | xargs -0 sha256sum
+          ) > archive/meta/checksums.sha256
+
+      - name: Verify every archived file and summarize
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd archive
+            sha256sum -c meta/checksums.sha256
+          )
+
+          echo "=== CORE WIW COUNTS ==="
+          gzip -dc archive/live/core-snapshot.json.gz | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({"counts":d.get("counts",{}),"errors":d.get("errors",{})},ensure_ascii=False,sort_keys=True))'
+
+          echo "=== RECONCILIATION ==="
+          python3 - <<'PY'
+          import json
+          d=json.load(open("archive/meta/wiw-reconciliation.json",encoding="utf-8"))
+          out={"cutover_ready":d.get("cutover_ready"),"resources":{}}
+          for k,v in d.get("resources",{}).items():
+              out["resources"][k]={
+                  "remote_count":v.get("remote_count"),
+                  "local_count":v.get("local_count"),
+                  "missing_count":len(v.get("missing",[])),
+                  "extra_count":len(v.get("extra",[])),
+                  "complete":v.get("complete"),
+              }
+          print(json.dumps(out,ensure_ascii=False,sort_keys=True))
+          PY
+
+          echo "=== ADDITIONAL PROBES ==="
+          gzip -dc archive/live/additional-readonly-probes.json.gz | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({k:{"supported":bool(v.get("success")),"path":(v.get("success") or {}).get("path"),"attempt_errors":[a.get("error") for a in v.get("attempts",[]) if not a.get("ok")]} for k,v in d.items()},ensure_ascii=False,sort_keys=True))'
+
+          echo "=== DOCUMENTED WIW RESOURCE SUMMARY ==="
+          gzip -dc archive/live/documented/documented-resources.json.gz | python3 -c 'import json,sys; d=json.load(sys.stdin); r=d.get("resources",{}); p=r.get("payrolls") or {}; print(json.dumps({"required_status":d.get("required_resource_status",{}),"errors":d.get("errors",{}),"users_all":len((r.get("users_all_including_archived") or {}).get("users",[])),"users_archived":len((r.get("users_archived_only") or {}).get("users",[])),"shift_templates":len((r.get("shift_templates_blocks") or {}).get("blocks",[])),"schedule_templates":len((r.get("schedule_templates") or {}).get("templates",[])),"shift_requests":(r.get("shift_requests_swaps") or {}).get("count"),"openshift_requests":(r.get("openshift_approval_requests") or {}).get("count"),"payroll_periods":p.get("count"),"absence_related_notices":len(r.get("absence_related_attendance_notices") or [])},ensure_ascii=False,sort_keys=True))'
+
+          echo "=== UI-EQUIVALENT CSV MANIFEST ==="
+          cat archive/ui-equivalents/CSV-MANIFEST.json
+
+          echo "=== MODEL COUNTS ==="
+          cat archive/meta/model-counts.json
+          echo "=== INVENTORY ==="
+          cat archive/meta/file-inventory.txt
+
+      - name: Package final archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -czf wiw-final-account-archive.tar.gz -C archive .
+          tar -tzf wiw-final-account-archive.tar.gz >/dev/null
+          sha256sum wiw-final-account-archive.tar.gz > wiw-final-account-archive.sha256
+          echo "Final archive: $(du -h wiw-final-account-archive.tar.gz | cut -f1)"
+
+      - name: Upload final WIW artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wiw-final-account-archive-COMPLETE-20260920
+          path: |
+            wiw-final-account-archive.tar.gz
+            wiw-final-account-archive.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
