@@ -125,7 +125,7 @@ def employee_attendance_home(request):
         status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED, Shift.Status.COMPLETED],
     ).exclude(
         time_entries__worker=worker,
-    ).select_related('order', 'client', 'location', 'position').distinct().order_by('ends_at').first()
+    ).select_related('order', 'client', 'location', 'position').distinct().order_by('-ends_at').first()
 
     corrections = TimeEntryCorrection.objects.select_related(
         'entry', 'requested_by__user'

@@ -6,6 +6,7 @@ from io import BytesIO
 from uuid import UUID
 from xml.sax.saxutils import escape
 
+from django.db.models import Q
 from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -462,9 +463,12 @@ def export_attendance_pdf(request):
     range_start = _local_boundary(start, 0)
     range_end = _local_boundary(end + timedelta(days=1), 0)
 
+    # Native A+ entries belong in the payroll PDF only after approval. Imported
+    # WIW rows are historical source records and must be included even when WIW
+    # did not flag the original time row as approved.
     qs = TimeEntry.objects.filter(
+        Q(approved=True) | Q(wiw_time_id__isnull=False),
         clock_out__isnull=False,
-        approved=True,
         clock_in__lt=range_end,
         clock_out__gt=range_start,
     ).exclude(

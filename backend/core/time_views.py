@@ -6,7 +6,7 @@ from django.utils.dateparse import parse_datetime
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .models import Notification, Shift, TimeEntry, User
+from .models import Notification, Shift, TimeEntry, User, WorkerProfile
 from .operational_notifications import notify_managers_attendance
 from .permissions import IsAdminOrManager
 from .services import audit
@@ -27,6 +27,20 @@ def _parse_admin_datetime(value):
     if timezone.is_naive(parsed):
         parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
     return parsed
+
+
+def _entry_snapshot(entry):
+    if not entry:
+        return None
+    return {
+        'id': str(entry.id),
+        'clock_in': entry.clock_in.isoformat() if entry.clock_in else '',
+        'clock_out': entry.clock_out.isoformat() if entry.clock_out else '',
+        'break_minutes': entry.effective_break_minutes,
+        'worked_minutes': entry.worked_minutes,
+        'approved': bool(entry.approved),
+        'edit_reason': entry.edit_reason or '',
+    }
 
 
 class TimeEntryViewSet(LegacyTimeEntryViewSet):
@@ -199,6 +213,105 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
         payload = self.get_serializer(entry).data
         payload['review_required'] = True
         return Response(payload, status=201)
+
+    @action(detail=False, methods=['post'], url_path='set-for-shift', permission_classes=[IsAdminOrManager])
+    def set_for_shift(self, request):
+        """Create or edit one employee's native A+ time row from a shift card."""
+        if request.user.role != User.Role.ADMIN:
+            return Response({'detail': 'Diese Funktion ist ausschließlich für Administratoren verfügbar.'}, status=403)
+
+        shift_id = request.data.get('shift')
+        worker_id = request.data.get('worker')
+        if not shift_id or not worker_id:
+            return Response({'detail': 'Schicht und Mitarbeiter sind erforderlich.'}, status=400)
+
+        shift = Shift.objects.filter(pk=shift_id).first()
+        worker = WorkerProfile.objects.filter(pk=worker_id).select_related('user').first()
+        if not shift or not worker:
+            return Response({'detail': 'Schicht oder Mitarbeiter wurde nicht gefunden.'}, status=404)
+
+        assigned = (
+            shift.worker_id == worker.id
+            or shift.slots.filter(worker=worker, status='claimed').exists()
+        )
+        if not assigned:
+            return Response({'detail': 'Dieser Mitarbeiter ist dieser Schicht nicht zugewiesen.'}, status=400)
+
+        clock_in = _parse_admin_datetime(request.data.get('clock_in'))
+        clock_out = _parse_admin_datetime(request.data.get('clock_out'))
+        if not clock_in or not clock_out:
+            return Response({'detail': 'Bitte Beginn und Ende vollständig angeben.'}, status=400)
+        if clock_out <= clock_in:
+            return Response({'detail': 'Arbeitsende muss nach dem Arbeitsbeginn liegen.'}, status=400)
+        if clock_out - clock_in > timedelta(hours=MAX_SELF_REPORTED_HOURS):
+            return Response({'detail': 'Eine Arbeitszeit darf maximal 24 Stunden umfassen.'}, status=400)
+
+        try:
+            pause = max(0, min(24 * 60, int(request.data.get('break_minutes') or 0)))
+        except (TypeError, ValueError):
+            return Response({'detail': 'Pausenminuten sind ungültig.'}, status=400)
+        total_minutes = int((clock_out - clock_in).total_seconds() // 60)
+        if pause >= total_minutes:
+            return Response({'detail': 'Die Pause muss kürzer als die gesamte Arbeitszeit sein.'}, status=400)
+
+        entry = TimeEntry.objects.filter(
+            shift=shift,
+            worker=worker,
+            wiw_time_id__isnull=True,
+        ).order_by('-clock_in').first()
+        if entry is None and TimeEntry.objects.filter(
+            shift=shift,
+            worker=worker,
+            wiw_time_id__isnull=False,
+        ).exists():
+            return Response({
+                'detail': 'Für diese Schicht existiert bereits eine importierte WIW-Arbeitszeit. WIW-Nachweise bleiben schreibgeschützt.'
+            }, status=400)
+
+        before = _entry_snapshot(entry)
+        created = entry is None
+        reason = str(request.data.get('reason') or '').strip() or (
+            'Direkt über die Schichtkarte erfasst.' if created else 'Direkt über die Schichtkarte bearbeitet.'
+        )
+        marker = f'ADMIN_SHIFT_ENTRY: {reason}'
+
+        if created:
+            entry = TimeEntry.objects.create(
+                worker=worker,
+                shift=shift,
+                clock_in=clock_in,
+                clock_out=clock_out,
+                break_minutes=pause,
+                approved=True,
+                approved_by=request.user,
+                edit_reason=marker,
+            )
+        else:
+            previous_reason = str(entry.edit_reason or '').strip()
+            entry.clock_in = clock_in
+            entry.clock_out = clock_out
+            entry.break_minutes = pause
+            entry.approved = True
+            entry.approved_by = request.user
+            entry.edit_reason = f'{previous_reason}\n{marker}'.strip()
+            entry.save(update_fields=[
+                'clock_in', 'clock_out', 'break_minutes', 'approved',
+                'approved_by', 'edit_reason', 'updated_at',
+            ])
+
+        audit(
+            request,
+            'time.admin_shift_created' if created else 'time.admin_shift_updated',
+            entry,
+            {
+                'shift': str(shift.id),
+                'worker': str(worker.id),
+                'reason': reason,
+                'before': before,
+                'after': _entry_snapshot(entry),
+            },
+        )
+        return Response(self.get_serializer(entry).data, status=201 if created else 200)
 
     @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
     def approve(self, request, pk=None):

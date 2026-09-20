@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Shift, TimeEntry
+from .models import AuditLog, Shift, TimeEntry, User
 from .premium_approval_models import ShiftReleaseRequest
 from .shift_slots import ShiftSlot
 from .shift_rules import automatic_break_minutes, normalized_groups
@@ -17,6 +17,7 @@ class ShiftApiSerializer(serializers.ModelSerializer):
     slot_cards = serializers.SerializerMethodField()
     my_release_request = serializers.SerializerMethodField()
     my_time_entry = serializers.SerializerMethodField()
+    admin_time_entries = serializers.SerializerMethodField()
 
     def get_geofence_required(self, obj):
         return obj.location.latitude is not None and obj.location.longitude is not None
@@ -201,6 +202,108 @@ class ShiftApiSerializer(serializers.ModelSerializer):
             'approved': row.approved,
         }
 
+    def get_admin_time_entries(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated or getattr(request.user, 'role', None) != User.Role.ADMIN:
+            return []
+
+        rows = self._list_instances()
+        if rows:
+            entry_map = getattr(self, '_bulk_admin_time_entry_map', None)
+            audit_map = getattr(self, '_bulk_admin_time_audit_map', None)
+            if entry_map is None or audit_map is None:
+                shift_ids = [item.pk for item in rows if getattr(item, 'pk', None)]
+                entry_map = {shift_id: [] for shift_id in shift_ids}
+                entries = list(
+                    TimeEntry.objects.filter(shift_id__in=shift_ids)
+                    .select_related('worker__user', 'approved_by')
+                    .order_by('shift_id', 'clock_in')
+                )
+                for entry in entries:
+                    entry_map.setdefault(entry.shift_id, []).append(entry)
+
+                entry_ids = [str(entry.pk) for entry in entries]
+                audit_map = {entry_id: [] for entry_id in entry_ids}
+                if entry_ids:
+                    logs = (
+                        AuditLog.objects.filter(object_type='TimeEntry', object_id__in=entry_ids)
+                        .select_related('actor')
+                        .order_by('object_id', '-created_at')
+                    )
+                    for log in logs:
+                        bucket = audit_map.setdefault(str(log.object_id), [])
+                        if len(bucket) < 8:
+                            bucket.append(log)
+                self._bulk_admin_time_entry_map = entry_map
+                self._bulk_admin_time_audit_map = audit_map
+            entries = entry_map.get(obj.pk, [])
+        else:
+            entries = list(
+                TimeEntry.objects.filter(shift=obj)
+                .select_related('worker__user', 'approved_by')
+                .order_by('clock_in')
+            )
+            entry_ids = [str(entry.pk) for entry in entries]
+            audit_map = {entry_id: [] for entry_id in entry_ids}
+            if entry_ids:
+                logs = (
+                    AuditLog.objects.filter(object_type='TimeEntry', object_id__in=entry_ids)
+                    .select_related('actor')
+                    .order_by('object_id', '-created_at')
+                )
+                for log in logs:
+                    bucket = audit_map.setdefault(str(log.object_id), [])
+                    if len(bucket) < 8:
+                        bucket.append(log)
+
+        payload = []
+        for entry in entries:
+            reason = str(entry.edit_reason or '')
+            if entry.wiw_time_id:
+                source = 'wiw'
+            elif 'SELF_REPORTED_AFTER_SHIFT' in reason:
+                source = 'employee_manual'
+            elif any(value is not None for value in (
+                entry.clock_in_lat, entry.clock_in_lng, entry.clock_out_lat, entry.clock_out_lng
+            )):
+                source = 'location'
+            else:
+                source = 'admin'
+
+            approved_by = ''
+            if entry.approved_by:
+                approved_by = entry.approved_by.get_full_name() or entry.approved_by.email
+
+            payload.append({
+                'id': str(entry.id),
+                'worker': str(entry.worker_id),
+                'worker_name': entry.worker.user.get_full_name() or entry.worker.user.email,
+                'clock_in': entry.clock_in,
+                'clock_out': entry.clock_out,
+                'break_minutes': entry.effective_break_minutes,
+                'worked_minutes': entry.worked_minutes,
+                'approved': entry.approved,
+                'approved_by_name': approved_by,
+                'edit_reason': reason,
+                'wiw_time_id': entry.wiw_time_id or '',
+                'source': source,
+                'created_at': entry.created_at,
+                'updated_at': entry.updated_at,
+                'logs': [
+                    {
+                        'action': log.action,
+                        'actor': (
+                            log.actor.get_full_name() or log.actor.email
+                            if log.actor else 'System'
+                        ),
+                        'created_at': log.created_at,
+                        'metadata': log.metadata or {},
+                    }
+                    for log in audit_map.get(str(entry.id), [])
+                ],
+            })
+        return payload
+
     def validate(self, attrs):
         attrs = super().validate(attrs)
         starts_at = attrs.get('starts_at', getattr(self.instance, 'starts_at', None))
@@ -219,5 +322,5 @@ class ShiftApiSerializer(serializers.ModelSerializer):
             'id', 'order', 'order_title', 'client', 'client_name', 'location', 'location_name', 'geofence_required',
             'position', 'position_name', 'starts_at', 'ends_at', 'break_minutes', 'status', 'notes',
             'required_count', 'confirmation_required', 'schedule_groups', 'color_hue', 'open_count', 'filled_count',
-            'assigned_workers', 'slot_cards', 'my_release_request', 'my_time_entry',
+            'assigned_workers', 'slot_cards', 'my_release_request', 'my_time_entry', 'admin_time_entries',
         ]
