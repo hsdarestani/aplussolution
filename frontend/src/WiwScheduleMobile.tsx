@@ -597,6 +597,7 @@ export default function WiwScheduleMobile() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<EditingCard>();
   const [timeEditor, setTimeEditor] = useState<any>();
+  const [timeLogOpen, setTimeLogOpen] = useState(false);
   const [timeBusy, setTimeBusy] = useState(false);
   const [copying, setCopying] = useState(false);
   const [recentCopyShiftId, setRecentCopyShiftId] = useState('');
@@ -946,6 +947,8 @@ export default function WiwScheduleMobile() {
   function openCreate(date = anchor) {
     setEditing(undefined);
     setTimeEditor(undefined);
+    setTimeLogOpen(false);
+    setTimeLogOpen(false);
     setCopying(false);
     setForm(emptyForm(date));
     setTimeOpen(false);
@@ -1399,7 +1402,7 @@ export default function WiwScheduleMobile() {
       <button type="button" className="wiw-create-fab" aria-label="Schicht anlegen" onClick={() => openCreate(anchor)}>+</button>
 
       {formOpen ? <div ref={formScreenRef} className="wiw-shift-form-screen" data-testid="wiw-shift-form">
-        <header className="wiw-form-topbar"><button type="button" onClick={() => { noteRef.current?.blur(); setTimeEditor(undefined); setFormOpen(false); }}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null} onClick={() => void save()}>Sichern</button></header>
+        <header className="wiw-form-topbar"><button type="button" onClick={() => { noteRef.current?.blur(); setTimeEditor(undefined); setTimeLogOpen(false); setFormOpen(false); }}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null} onClick={() => void save()}>Sichern</button></header>
         {dateOpen ? <ScheduleDatePicker value={form.date} onSelect={(date) => { setForm((current) => ({ ...current, date })); setDateOpen(false); }} onClose={() => setDateOpen(false)} /> : null}
         <div ref={formScrollRef} className="wiw-form-scroll">
           <Row icon={calendarOutline} label={formatDateRow(form.date)} field="date" onClick={() => setDateOpen(true)} />
@@ -1436,16 +1439,14 @@ export default function WiwScheduleMobile() {
               emphasizeValue
               onClick={openAdminTimeEditor}
             />
-            <div className="wiw-admin-time-log" data-testid="wiw-admin-time-log">
-              <div className="wiw-admin-time-log-title"><b>ZEITLOG · NUR ADMIN</b><span>{editing.workerName}</span></div>
-              {editingTimeEntries.length ? editingTimeEntries.map((entry: any) => <div className="wiw-admin-time-log-entry" key={entry.id}>
-                <div className="wiw-admin-time-log-main"><strong>{adminLogStamp(entry.clock_in)}–{entry.clock_out ? adminLogStamp(entry.clock_out) : 'offen'}</strong><span>Pause {entry.break_minutes || 0} Min. · {adminWorkedLabel(entry.worked_minutes)}</span></div>
-                <small>{adminTimeSource(entry.source)} · {entry.approved ? 'freigegeben' : 'offen'}{entry.approved_by_name ? ` · ${entry.approved_by_name}` : ''}</small>
-                <small>Erstellt {adminLogStamp(entry.created_at)} · geändert {adminLogStamp(entry.updated_at)}</small>
-                {entry.edit_reason ? <small className="wiw-admin-time-log-reason">{String(entry.edit_reason).replace(/\n/g, ' · ')}</small> : null}
-                {(entry.logs || []).slice(0, 5).map((log: any, index: number) => <small className="wiw-admin-time-audit" key={`${entry.id}-${index}`}>{adminLogStamp(log.created_at)} · {adminAuditLabel(log.action)} · {log.actor}{log.metadata?.reason ? ` · ${log.metadata.reason}` : ''}</small>)}
-              </div>) : <small className="wiw-admin-time-empty">Noch kein Zeiteintrag für diese Schichtkarte.</small>}
-            </div>
+            <Row
+              field="admin-time-log"
+              icon={documentTextOutline}
+              label="Zeitlog"
+              value={editingTimeEntries.length ? `${editingTimeEntries.length} Eintrag${editingTimeEntries.length === 1 ? '' : 'e'} · Anzeigen` : 'Anzeigen'}
+              emphasizeValue={Boolean(editingTimeEntries.length)}
+              onClick={() => setTimeLogOpen(true)}
+            />
           </> : null}
 
           {editing && editing.parentCount > 1 && !editing.isOpen ? <div className="wiw-bulk-edit-row"><div><b>Alle Karten dieser Schicht mitändern</b><span>Wenn aus, wird nur diese Person / OpenShift-Karte geändert.</span></div><Switch checked={form.apply_all} onChange={(value) => setForm((current) => ({ ...current, apply_all: value }))} /></div> : null}
@@ -1499,6 +1500,21 @@ export default function WiwScheduleMobile() {
             <label className="wide">Notiz / Änderungsgrund<textarea value={timeEditor.reason || ''} onChange={(event) => setTimeEditor((current: any) => ({ ...current, reason: event.target.value }))} placeholder="z. B. Korrektur laut Einsatzleitung" /></label>
           </div>
           <footer><button type="button" disabled={timeBusy} onClick={() => setTimeEditor(undefined)}>Abbrechen</button><button type="button" className="primary" disabled={timeBusy || !timeEditor.clock_in || !timeEditor.clock_out} onClick={() => void saveAdminTime()}>{timeBusy ? 'Wird gespeichert …' : 'Arbeitszeit speichern'}</button></footer>
+        </section>
+      </div> : null}
+
+      {timeLogOpen && isAdmin && editing?.workerId ? <div className="wiw-sheet-backdrop wiw-admin-time-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setTimeLogOpen(false); }}>
+        <section className="wiw-admin-log-sheet" role="dialog" aria-modal="true" aria-label="Zeitlog">
+          <header><div><small>ZEITLOG · NUR ADMIN</small><b>Arbeitszeit-Verlauf</b><span>{editing.workerName || 'Mitarbeiter'}</span></div><button type="button" onClick={() => setTimeLogOpen(false)}>Fertig</button></header>
+          <div className="wiw-admin-log-scroll" data-testid="wiw-admin-time-log">
+            {editingTimeEntries.length ? editingTimeEntries.map((entry: any) => <div className="wiw-admin-time-log-entry" key={entry.id}>
+              <div className="wiw-admin-time-log-main"><strong>{adminLogStamp(entry.clock_in)}–{entry.clock_out ? adminLogStamp(entry.clock_out) : 'offen'}</strong><span>Pause {entry.break_minutes || 0} Min. · {adminWorkedLabel(entry.worked_minutes)}</span></div>
+              <small>{adminTimeSource(entry.source)} · {entry.approved ? 'freigegeben' : 'offen'}{entry.approved_by_name ? ` · ${entry.approved_by_name}` : ''}</small>
+              <small>Erstellt {adminLogStamp(entry.created_at)} · geändert {adminLogStamp(entry.updated_at)}</small>
+              {entry.edit_reason ? <small className="wiw-admin-time-log-reason">{String(entry.edit_reason).replace(/\n/g, ' · ')}</small> : null}
+              {(entry.logs || []).slice(0, 8).map((log: any, index: number) => <small className="wiw-admin-time-audit" key={`${entry.id}-${index}`}>{adminLogStamp(log.created_at)} · {adminAuditLabel(log.action)} · {log.actor}{log.metadata?.reason ? ` · ${log.metadata.reason}` : ''}</small>)}
+            </div>) : <div className="wiw-admin-time-empty">Noch kein Zeiteintrag für diese Schichtkarte.</div>}
+          </div>
         </section>
       </div> : null}
 
