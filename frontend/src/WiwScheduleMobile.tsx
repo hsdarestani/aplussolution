@@ -597,6 +597,7 @@ export default function WiwScheduleMobile() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<EditingCard>();
   const [timeEditor, setTimeEditor] = useState<any>();
+  const [timeEditorDateOpen, setTimeEditorDateOpen] = useState(false);
   const [timeLogOpen, setTimeLogOpen] = useState(false);
   const [timeBusy, setTimeBusy] = useState(false);
   const [copying, setCopying] = useState(false);
@@ -1008,12 +1009,23 @@ export default function WiwScheduleMobile() {
     }
     const fallbackStart = form.startMinute == null ? '' : localDateTime(form.date, form.startMinute);
     const fallbackEnd = form.endAbsolute == null ? '' : localDateTime(form.date, form.endAbsolute);
+    const startIso = editingTimeEntry?.clock_in || fallbackStart;
+    const endIso = editingTimeEntry?.clock_out || fallbackEnd;
+    const date = startIso ? dateKeyFromIso(startIso) : form.date;
+    const startMinute = startIso ? timeMinuteFromIso(startIso) : Number(form.startMinute || 0);
+    const endDate = endIso ? dateKeyFromIso(endIso) : date;
+    const endMinute = endIso ? timeMinuteFromIso(endIso) : Number(form.endAbsolute || startMinute + 360);
+    const dayOffset = Math.max(0, Math.round((keyDate(endDate).getTime() - keyDate(date).getTime()) / 86400000));
+    const endAbsolute = endMinute + dayOffset * 1440;
+    setTimeEditorDateOpen(false);
     setTimeEditor({
       entry: editingTimeEntry,
-      clock_in: editingTimeEntry?.clock_in ? adminInputDateTime(editingTimeEntry.clock_in) : fallbackStart,
-      clock_out: editingTimeEntry?.clock_out ? adminInputDateTime(editingTimeEntry.clock_out) : fallbackEnd,
+      date,
+      startMinute,
+      endAbsolute: endAbsolute > startMinute ? endAbsolute : startMinute + 15,
       break_minutes: Number(editingTimeEntry?.break_minutes ?? automaticBreak(form.startMinute, form.endAbsolute)),
       reason: '',
+      timeOpen: true,
     });
   }
 
@@ -1027,11 +1039,11 @@ export default function WiwScheduleMobile() {
 
   async function saveAdminTime() {
     if (!isAdmin || !editing?.workerId || !timeEditor) return;
-    if (!timeEditor.clock_in || !timeEditor.clock_out) {
-      setToast('Bitte Beginn und Ende vollständig angeben.');
+    if (!timeEditor.date || timeEditor.startMinute == null || timeEditor.endAbsolute == null) {
+      setToast('Bitte Datum, Beginn und Ende vollständig angeben.');
       return;
     }
-    if (String(timeEditor.clock_out) <= String(timeEditor.clock_in)) {
+    if (Number(timeEditor.endAbsolute) <= Number(timeEditor.startMinute)) {
       setToast('Arbeitsende muss nach dem Arbeitsbeginn liegen.');
       return;
     }
@@ -1043,8 +1055,8 @@ export default function WiwScheduleMobile() {
         body: JSON.stringify({
           shift: editing.shiftId,
           worker: editing.workerId,
-          clock_in: timeEditor.clock_in,
-          clock_out: timeEditor.clock_out,
+          clock_in: localDateTime(timeEditor.date, Number(timeEditor.startMinute)),
+          clock_out: localDateTime(timeEditor.date, Number(timeEditor.endAbsolute)),
           break_minutes: Math.max(0, Number(timeEditor.break_minutes || 0)),
           reason: String(timeEditor.reason || '').trim(),
         }),
@@ -1402,7 +1414,7 @@ export default function WiwScheduleMobile() {
       <button type="button" className="wiw-create-fab" aria-label="Schicht anlegen" onClick={() => openCreate(anchor)}>+</button>
 
       {formOpen ? <div ref={formScreenRef} className="wiw-shift-form-screen" data-testid="wiw-shift-form">
-        <header className="wiw-form-topbar"><button type="button" onClick={() => { noteRef.current?.blur(); setTimeEditor(undefined); setTimeLogOpen(false); setFormOpen(false); }}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null} onClick={() => void save()}>Sichern</button></header>
+        <header className="wiw-form-topbar"><button type="button" onClick={() => { noteRef.current?.blur(); setTimeEditorDateOpen(false); setTimeEditor(undefined); setTimeLogOpen(false); setFormOpen(false); }}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null} onClick={() => void save()}>Sichern</button></header>
         {dateOpen ? <ScheduleDatePicker value={form.date} onSelect={(date) => { setForm((current) => ({ ...current, date })); setDateOpen(false); }} onClose={() => setDateOpen(false)} /> : null}
         <div ref={formScrollRef} className="wiw-form-scroll">
           <Row icon={calendarOutline} label={formatDateRow(form.date)} field="date" onClick={() => setDateOpen(true)} />
@@ -1490,18 +1502,46 @@ export default function WiwScheduleMobile() {
         {sheet === 'workers' ? <MultiChoiceSheet title={editing ? 'Mitarbeiter auswählen / ändern' : 'Geeignete Benutzer'} choices={workerChoices} selected={form.workers} limit={editing ? 1 : form.required_count} onClose={() => setSheet('')} onChange={(values) => setForm((current) => ({ ...current, workers: values, apply_all: editing ? false : current.apply_all }))} /> : null}
       </div> : null}
 
-      {timeEditor ? <div className="wiw-sheet-backdrop wiw-admin-time-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !timeBusy) setTimeEditor(undefined); }}>
+      {timeEditor ? <div className="wiw-sheet-backdrop wiw-admin-time-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !timeBusy) { setTimeEditorDateOpen(false); setTimeEditor(undefined); } }}>
         <section className="wiw-admin-time-sheet" role="dialog" aria-modal="true" aria-label="Arbeitszeit bearbeiten">
-          <header><div><small>ARBEITSZEIT · NUR ADMIN</small><b>{timeEditor.entry ? 'Zeit bearbeiten' : 'Zeit eintragen'}</b><span>{editing?.workerName || 'Mitarbeiter'}</span></div><button type="button" disabled={timeBusy} onClick={() => setTimeEditor(undefined)}>Abbrechen</button></header>
+          <header><div><small>ARBEITSZEIT · NUR ADMIN</small><b>{timeEditor.entry ? 'Zeit bearbeiten' : 'Zeit eintragen'}</b><span>{editing?.workerName || 'Mitarbeiter'}</span></div><button type="button" disabled={timeBusy} onClick={() => { setTimeEditorDateOpen(false); setTimeEditor(undefined); }}>Abbrechen</button></header>
           <div className="wiw-admin-time-fields">
-            <label>Beginn<input type="datetime-local" value={timeEditor.clock_in || ''} onChange={(event) => setTimeEditor((current: any) => ({ ...current, clock_in: event.target.value }))} /></label>
-            <label>Ende<input type="datetime-local" value={timeEditor.clock_out || ''} onChange={(event) => setTimeEditor((current: any) => ({ ...current, clock_out: event.target.value }))} /></label>
-            <label>Pause (Min.)<input type="number" min="0" step="5" inputMode="numeric" value={timeEditor.break_minutes ?? 0} onChange={(event) => setTimeEditor((current: any) => ({ ...current, break_minutes: Math.max(0, Number(event.target.value || 0)) }))} /></label>
+            <div className="wiw-admin-time-picker-block">
+              <span>Datum</span>
+              <button type="button" className="wiw-admin-picker-button" onClick={() => setTimeEditorDateOpen(true)}>
+                <IonIcon icon={calendarOutline}/><b>{formatDateRow(timeEditor.date)}</b><IonIcon icon={chevronForwardOutline}/>
+              </button>
+            </div>
+            <div className="wiw-admin-time-picker-block">
+              <span>Arbeitszeit</span>
+              <button type="button" className="wiw-admin-picker-button" onClick={() => setTimeEditor((current: any) => ({ ...current, timeOpen: !current.timeOpen }))}>
+                <IonIcon icon={timeOutline}/><b>{formatMinute(Number(timeEditor.startMinute || 0))} – {Number(timeEditor.endAbsolute || 0) >= 1440 ? '~ ' : ''}{formatMinute(Number(timeEditor.endAbsolute || 0))}</b><IonIcon icon={chevronForwardOutline}/>
+              </button>
+              {timeEditor.timeOpen ? <TimeFrameWheel
+                start={Number(timeEditor.startMinute || 0)}
+                end={Number(timeEditor.endAbsolute || 15)}
+                onChange={(start, end) => setTimeEditor((current: any) => ({ ...current, startMinute: start, endAbsolute: end }))}
+              /> : null}
+            </div>
+            <div className="wiw-admin-time-picker-block">
+              <span>Pause</span>
+              <div className="wiw-admin-pause-row">
+                {[0,15,30,45,60].map((minutes) => <button type="button" key={minutes} className={Number(timeEditor.break_minutes || 0) === minutes ? 'active' : ''} onClick={() => setTimeEditor((current: any) => ({ ...current, break_minutes: minutes }))}>{minutes} Min.</button>)}
+              </div>
+              <label className="wiw-admin-pause-custom">Andere Minuten<input type="number" min="0" step="5" inputMode="numeric" value={timeEditor.break_minutes ?? 0} onChange={(event) => setTimeEditor((current: any) => ({ ...current, break_minutes: Math.max(0, Number(event.target.value || 0)) }))} /></label>
+            </div>
             <label className="wide">Notiz / Änderungsgrund<textarea value={timeEditor.reason || ''} onChange={(event) => setTimeEditor((current: any) => ({ ...current, reason: event.target.value }))} placeholder="z. B. Korrektur laut Einsatzleitung" /></label>
           </div>
-          <footer><button type="button" disabled={timeBusy} onClick={() => setTimeEditor(undefined)}>Abbrechen</button><button type="button" className="primary" disabled={timeBusy || !timeEditor.clock_in || !timeEditor.clock_out} onClick={() => void saveAdminTime()}>{timeBusy ? 'Wird gespeichert …' : 'Arbeitszeit speichern'}</button></footer>
+          <footer><button type="button" disabled={timeBusy} onClick={() => { setTimeEditorDateOpen(false); setTimeEditor(undefined); }}>Abbrechen</button><button type="button" className="primary" disabled={timeBusy || !timeEditor.date || timeEditor.startMinute == null || timeEditor.endAbsolute == null} onClick={() => void saveAdminTime()}>{timeBusy ? 'Wird gespeichert …' : 'Arbeitszeit speichern'}</button></footer>
         </section>
       </div> : null}
+
+      {timeEditor && timeEditorDateOpen ? <ScheduleDatePicker
+        title="Arbeitstag"
+        value={timeEditor.date}
+        onSelect={(date) => { setTimeEditor((current: any) => ({ ...current, date })); setTimeEditorDateOpen(false); }}
+        onClose={() => setTimeEditorDateOpen(false)}
+      /> : null}
 
       {timeLogOpen && isAdmin && editing?.workerId ? <div className="wiw-sheet-backdrop wiw-admin-time-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setTimeLogOpen(false); }}>
         <section className="wiw-admin-log-sheet" role="dialog" aria-modal="true" aria-label="Zeitlog">
