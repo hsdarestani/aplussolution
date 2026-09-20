@@ -1,0 +1,64 @@
+name: Diagnose production database topology
+
+on:
+  push:
+    branches: [wiw-final-export-20260920]
+    paths:
+      - '.github/workflows/wiw-db-diag.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Diagnose
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/key"
+          chmod 600 "$HOME/.ssh/key"
+          ssh -i "$HOME/.ssh/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -u
+          cd /opt/aplussolution
+          echo "=== hostname ==="
+          hostname
+          echo "=== compose ps ==="
+          docker compose ps || true
+          echo "=== db service probe ==="
+          if docker compose ps --services --status running 2>/dev/null | grep -qx db; then
+            echo "db_service_running=yes"
+            docker compose exec -T db sh -lc '
+              echo "postgres_user_present=$([ -n "${POSTGRES_USER:-}" ] && echo yes || echo no)"
+              echo "postgres_db_present=$([ -n "${POSTGRES_DB:-}" ] && echo yes || echo no)"
+              command -v pg_dump || true
+              pg_dump --version || true
+            ' || true
+          else
+            echo "db_service_running=no"
+          fi
+          echo "=== backend database config shape ==="
+          docker compose exec -T backend python - <<'PY' || true
+          import os
+          os.environ.setdefault("DJANGO_SETTINGS_MODULE","config.settings")
+          import django
+          django.setup()
+          from django.conf import settings
+          d=settings.DATABASES["default"]
+          print({
+            "ENGINE": d.get("ENGINE"),
+            "HOST_present": bool(d.get("HOST")),
+            "HOST_value": d.get("HOST"),
+            "PORT": d.get("PORT"),
+            "NAME_present": bool(d.get("NAME")),
+            "USER_present": bool(d.get("USER")),
+            "PASSWORD_present": bool(d.get("PASSWORD")),
+          })
+          PY
+          REMOTE
