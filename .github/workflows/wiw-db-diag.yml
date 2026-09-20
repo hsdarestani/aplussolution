@@ -39,6 +39,16 @@ jobs:
               echo "postgres_db_present=$([ -n "${POSTGRES_DB:-}" ] && echo yes || echo no)"
               command -v pg_dump || true
               pg_dump --version || true
+              if PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" --schema-only >/dev/null; then
+                echo "schema_dump_tcp=yes"
+              else
+                echo "schema_dump_tcp=no"
+              fi
+              if pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --schema-only >/dev/null 2>&1; then
+                echo "schema_dump_socket=yes"
+              else
+                echo "schema_dump_socket=no"
+              fi
             ' || true
           else
             echo "db_service_running=no"
