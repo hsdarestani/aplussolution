@@ -3095,10 +3095,21 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [view, setView] = useState<View>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileViewport, setMobileViewport] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches
+  );
   const [resumeGeneration, setResumeGeneration] = useState(0);
   const resumeInFlight = useRef(false);
   const backgroundedAt = useRef<number | null>(null);
   const lastResumeRecoveryAt = useRef(0);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 900px)');
+    const sync = () => setMobileViewport(media.matches);
+    sync();
+    media.addEventListener?.('change', sync);
+    return () => media.removeEventListener?.('change', sync);
+  }, []);
 
   useEffect(() => {
     consumeOAuth();
@@ -3239,7 +3250,14 @@ export default function App() {
 
   let content: React.ReactNode = user.role === 'worker' ? <EmployeeHome user={user} navigate={navigateTo} /> : isManager(user) ? <AdminHomeV4 navigate={navigateTo} /> : <Dashboard user={user} navigate={navigateTo} />;
 
-  if (view === 'schedule') content = <ScheduleV2 user={user} />;
+  if (view === 'schedule') {
+    // On manager/admin phones the compact WIW-style Dienstplan is the only
+    // schedule surface. Do not mount the legacy ScheduleV2 behind it: on resume
+    // that hidden duplicate could become visible until navigation forced a rerender.
+    content = isManager(user) && mobileViewport
+      ? <div className="wiw-mobile-schedule-host" aria-hidden="true" />
+      : <ScheduleV2 user={user} />;
+  }
   else if (view === 'time') content = <AttendanceV3 user={user} />;
   else if (view === 'contracts' && user.role !== 'worker') content = <Contracts user={user} />;
   else if (view === 'documents') content = <Documents user={user} />;
@@ -3319,7 +3337,7 @@ export default function App() {
 
             <main className="app-main">
               <React.Fragment key={`resume-${resumeGeneration}`}>
-                {isManager(user) && view !== 'time' && <GlobalSearch onNavigate={navigateTo} />}
+                {isManager(user) && view !== 'time' && !(view === 'schedule' && mobileViewport) && <GlobalSearch onNavigate={navigateTo} />}
                 {content}
               </React.Fragment>
             </main>

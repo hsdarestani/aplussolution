@@ -119,13 +119,17 @@ function ResumeAwareEnhancers() {
     return () => window.removeEventListener('aplus-app-resume', resume);
   }, []);
 
-  return <React.Fragment key={generation}>
+  // Keep the manager/admin mobile Dienstplan mounted across app resume.
+  // Remounting this surface used to briefly (and sometimes persistently) expose
+  // the legacy ScheduleV2 underneath until the user changed tabs.
+  return <>
+    <WiwScheduleMobile />
+    <React.Fragment key={generation}>
     <ClientPortalMount />
     <HeaderQuickAccess />
     <ScheduleMobileEnhancer />
     <ScheduleEntryFilterEnhancer />
     <SchedulePdfLocationFilter />
-    <WiwScheduleMobile />
     <WiwEmployeeScheduleMobile />
     <WiwShiftFormUxEnhancer />
     <WiwShiftKeyboardGuard />
@@ -147,7 +151,8 @@ function ResumeAwareEnhancers() {
     <WorkflowCompletionEnhancer />
     <OrderDocumentImportEnhancer />
     <ApiHealthBanner />
-  </React.Fragment>;
+    </React.Fragment>
+  </>;
 }
 
 function renderApp() {

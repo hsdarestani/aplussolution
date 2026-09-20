@@ -2,7 +2,7 @@
 // SEP14_WEEK_SWIPE_HANDOFF
 // SEP14_PREVIEW_PARITY
 // MODERN_WEEK_CACHE_NAVIGATION
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
@@ -571,11 +571,18 @@ function MultiChoiceSheet({ title, choices, selected, limit, onChange, onClose }
   );
 }
 
+function currentManagerScheduleShell() {
+  if (typeof document === 'undefined') return null;
+  return document.querySelector<HTMLElement>('.mobile-first-app-shell-v1[data-view="schedule"]');
+}
+
 export default function WiwScheduleMobile() {
-  const [active, setActive] = useState(false);
+  const initialShell = currentManagerScheduleShell();
+  const initialRole = initialShell?.dataset.role || '';
+  const [active, setActive] = useState(() => Boolean(initialShell));
   const [mobile, setMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches);
-  const [manager, setManager] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [manager, setManager] = useState(() => ['admin', 'manager'].includes(initialRole));
+  const [isAdmin, setIsAdmin] = useState(() => initialRole === 'admin');
   const [rows, setRows] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
@@ -738,7 +745,7 @@ export default function WiwScheduleMobile() {
   useEffect(() => {
     const root = document.getElementById('root');
     const sync = () => {
-      const shell = document.querySelector<HTMLElement>('.mobile-first-app-shell-v1[data-view="schedule"]');
+      const shell = currentManagerScheduleShell();
       setActive(Boolean(shell));
       const role = shell?.dataset.role || '';
       if (role) {
@@ -777,20 +784,50 @@ export default function WiwScheduleMobile() {
     return () => { cancelled = true; };
   }, [active, mobile]);
 
-  useEffect(() => {
-    if (!active || !mobile || !manager) return;
+  useLayoutEffect(() => {
+    if (!active || !mobile || !manager) {
+      const shell = currentManagerScheduleShell();
+      const role = shell?.dataset.role || '';
+      if (!shell || !['admin', 'manager'].includes(role) || !window.matchMedia('(max-width: 900px)').matches) {
+        document.body.classList.remove('wiw-native-schedule-active');
+      }
+      return;
+    }
     document.body.classList.add('wiw-native-schedule-active');
     const requested = sessionStorage.getItem('aplus:schedule-entry-filter');
     sessionStorage.removeItem('aplus:schedule-entry-filter');
     setTab(requested === 'open' ? 'open' : 'all');
     restoreMetadataCache();
     void loadMetadata();
-    return () => document.body.classList.remove('wiw-native-schedule-active');
+    return () => {
+      // Resume refreshes must not uncover the legacy scheduler between React
+      // cleanup and the next effect. Only remove the guard after the app really
+      // left the manager/admin mobile schedule.
+      const shell = currentManagerScheduleShell();
+      const role = shell?.dataset.role || '';
+      const shouldStay = Boolean(shell && ['admin', 'manager'].includes(role) && window.matchMedia('(max-width: 900px)').matches);
+      if (!shouldStay) document.body.classList.remove('wiw-native-schedule-active');
+    };
   }, [active, mobile, manager]);
 
   useEffect(() => {
     if (!active || !mobile || !manager) return;
     void loadScheduleWeek(weekStart, true);
+  }, [active, mobile, manager, weekStart]);
+
+  useEffect(() => {
+    if (!active || !mobile || !manager) return;
+    const refreshAfterResume = () => {
+      document.body.classList.add('wiw-native-schedule-active');
+      void loadScheduleWeek(weekStart, false);
+      void loadMetadata();
+    };
+    window.addEventListener('aplus-app-resume', refreshAfterResume);
+    window.addEventListener('pageshow', refreshAfterResume);
+    return () => {
+      window.removeEventListener('aplus-app-resume', refreshAfterResume);
+      window.removeEventListener('pageshow', refreshAfterResume);
+    };
   }, [active, mobile, manager, weekStart]);
 
   useEffect(() => {

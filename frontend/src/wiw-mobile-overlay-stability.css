@@ -252,3 +252,20 @@
   .wiw-pdf-backdrop .wiw-pdf-sheet > header { gap: 8px !important; }
   .wiw-pdf-backdrop .wiw-pdf-sheet > header b { font-size: 15px !important; }
 }
+
+
+/* 2026-09-20: never expose the legacy scheduler while the mobile manager/admin
+   Dienstplan is the active route. This guard keys off the App shell itself, so
+   it does not depend on an enhancer effect running after resume. */
+@media (max-width:900px){
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="admin"] .wiw-mobile-schedule-host,
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="manager"] .wiw-mobile-schedule-host{
+    display:none!important;
+  }
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="admin"] .app-main>.global-search,
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="manager"] .app-main>.global-search,
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="admin"] .app-main>.sv2,
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="manager"] .app-main>.sv2{
+    display:none!important;
+  }
+}
