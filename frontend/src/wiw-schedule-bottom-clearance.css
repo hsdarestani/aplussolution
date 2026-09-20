@@ -1,38 +1,62 @@
-/* Keep the final Dienstplan rows reachable above the persistent mobile nav,
-   without stretching short weeks into a tall empty canvas. */
+/* Compact Dienstplan bottom clearance + lifecycle hardening. */
 @media (max-width: 900px) {
-  body.wiw-native-schedule-active .wiw-schedule-mobile {
-    padding-bottom: calc(70px + env(safe-area-inset-bottom)) !important;
+  /* The route itself is the source of truth. Even if a resume effect briefly
+     drops the body helper class, the compact scheduler remains in normal flow. */
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="admin"] .app-main,
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="manager"] .app-main {
+    position: relative !important;
+    min-height: calc(100dvh - 126px) !important;
+    overflow: visible !important;
   }
 
-  /* One small breathing space is enough. Older layers reserved 118–132px here,
-     which produced the large white block visible on short weeks. */
-  body.wiw-native-schedule-active .wiw-week-scroll,
-  body.wiw-native-schedule-active .wiw-week-swipe-viewport {
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="admin"] .app-main > .wiw-schedule-mobile,
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="manager"] .app-main > .wiw-schedule-mobile {
+    display: block !important;
+    position: relative !important;
+    inset: auto !important;
+    width: 100% !important;
+    min-height: calc(100dvh - 126px) !important;
     padding-bottom: 0 !important;
-    margin-bottom: 0 !important;
-  }
-
-  body.wiw-native-schedule-active .wiw-day-section:last-child {
-    margin-bottom: 0 !important;
-    border-bottom: 0 !important;
-  }
-
-  /* Do not establish a containing block around the compact schedule. */
-  body.wiw-native-schedule-active .app-main,
-  body.wiw-native-schedule-active .app-main > .wiw-schedule-mobile {
+    visibility: visible !important;
+    pointer-events: auto !important;
     contain: none !important;
     transform: none !important;
     filter: none !important;
     perspective: none !important;
+    background: #fff !important;
   }
 
-  /* Keep Gesamtstunden directly after the week when the week is short.
-     On long weeks it still behaves as a bottom-sticky summary above navigation. */
-  body.wiw-native-schedule-active .wiw-week-total {
-    position: sticky !important;
-    left: auto !important;
-    right: auto !important;
+  /* The old calendar/filter overlay belongs to ScheduleV2 and must never appear
+     over the compact admin/manager Dienstplan. */
+  body:has(.mobile-first-app-shell-v1[data-view="schedule"][data-role="admin"]) .schedule-mobile-actions,
+  body:has(.mobile-first-app-shell-v1[data-view="schedule"][data-role="manager"]) .schedule-mobile-actions {
+    display: none !important;
+  }
+
+  /* Keep only the exact amount of scroll clearance needed for the fixed total. */
+  body.wiw-native-schedule-active .wiw-week-scroll,
+  body.wiw-native-schedule-active .wiw-week-swipe-viewport,
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="admin"] .wiw-week-scroll,
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="manager"] .wiw-week-scroll {
+    padding-bottom: 44px !important;
+    margin-bottom: 0 !important;
+  }
+
+  body.wiw-native-schedule-active .wiw-day-section:last-child,
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="admin"] .wiw-day-section:last-child,
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="manager"] .wiw-day-section:last-child {
+    margin-bottom: 0 !important;
+    border-bottom: 0 !important;
+  }
+
+  /* Gesamtstunden must remain viewport-fixed above the bottom navigation.
+     Sticky positioning caused it to rise when the scroll container reached end. */
+  body.wiw-native-schedule-active .wiw-week-total,
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="admin"] .wiw-week-total,
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="manager"] .wiw-week-total {
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
     bottom: calc(62px + env(safe-area-inset-bottom)) !important;
     z-index: 2147482000 !important;
     width: 100% !important;
@@ -44,8 +68,9 @@
     box-shadow: 0 -1px 5px rgba(15,23,42,.12) !important;
   }
 
-  /* Keep the create action above the total/nav without reserving layout space. */
-  body.wiw-native-schedule-active .wiw-create-fab {
+  body.wiw-native-schedule-active .wiw-create-fab,
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="admin"] .wiw-create-fab,
+  .mobile-first-app-shell-v1[data-view="schedule"][data-role="manager"] .wiw-create-fab {
     position: fixed !important;
     right: 16px !important;
     bottom: calc(112px + env(safe-area-inset-bottom)) !important;

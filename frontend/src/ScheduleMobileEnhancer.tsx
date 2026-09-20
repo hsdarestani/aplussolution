@@ -182,10 +182,16 @@ export default function ScheduleMobileEnhancer() {
 
   useEffect(() => {
     const root = document.getElementById('root');
-    const sync = () => setActive(Boolean(document.querySelector('.mobile-first-app-shell-v1[data-view="schedule"]')));
+    const sync = () => {
+      const shell = document.querySelector<HTMLElement>('.mobile-first-app-shell-v1[data-view="schedule"]');
+      const role = shell?.dataset.role || '';
+      // Admin/manager mobile schedule has its own native-style controls.
+      // Never mount the legacy ScheduleV2 quick actions on top of it.
+      setActive(Boolean(shell) && !['admin', 'manager'].includes(role));
+    };
     sync();
     const observer = new MutationObserver(sync);
-    if (root) observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-view'] });
+    if (root) observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-view', 'data-role'] });
     window.addEventListener('popstate', sync);
     return () => {
       observer.disconnect();

@@ -747,18 +747,33 @@ export default function WiwScheduleMobile() {
   useEffect(() => {
     const root = document.getElementById('root');
     const sync = () => {
-      const shell = currentManagerScheduleShell();
-      setActive(Boolean(shell));
-      const role = shell?.dataset.role || '';
-      if (role) {
-        setManager(['admin', 'manager'].includes(role));
-        setIsAdmin(role === 'admin');
-      }
+      const appShell = document.querySelector<HTMLElement>('.mobile-first-app-shell-v1');
+      // During resume React can briefly replace descendants. Do not tear down
+      // the compact Dienstplan just because the app shell is momentarily absent.
+      if (!appShell) return;
+      const role = appShell.dataset.role || '';
+      const enabled = appShell.dataset.view === 'schedule' && ['admin', 'manager'].includes(role);
+      setActive(enabled);
+      setManager(['admin', 'manager'].includes(role));
+      setIsAdmin(role === 'admin');
+      const mobileNow = window.matchMedia('(max-width: 900px)').matches;
+      document.body.classList.toggle('wiw-native-schedule-active', enabled && mobileNow);
     };
     sync();
     const observer = new MutationObserver(sync);
     if (root) observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-view', 'data-role'] });
-    return () => observer.disconnect();
+    const watchdog = window.setInterval(sync, 1000);
+    const onVisible = () => { if (!document.hidden) sync(); };
+    window.addEventListener('focus', sync);
+    window.addEventListener('pageshow', sync);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      observer.disconnect();
+      window.clearInterval(watchdog);
+      window.removeEventListener('focus', sync);
+      window.removeEventListener('pageshow', sync);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   useEffect(() => {
