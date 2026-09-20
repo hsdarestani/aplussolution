@@ -47,6 +47,8 @@ jobs:
             -o ServerAliveCountMax=30 \
             root@"$STRATO_HOST" 'bash -s' > ./wiw-final-account-archive.tar.gz <<'REMOTE'
           set -Eeuo pipefail
+          trap 'rc=$?; echo "REMOTE_FAIL rc=$rc line=$LINENO cmd=$BASH_COMMAND" >&2' ERR
+          echo "CHECKPOINT remote-start" >&2
           cd /opt/aplussolution
 
           STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -82,6 +84,7 @@ jobs:
               raise SystemExit("WIW core snapshot incomplete: " + json.dumps(errors, ensure_ascii=False))
           PY
           gzip -9 "$OUT/live/core-snapshot.json"
+          echo "CHECKPOINT core-snapshot" >&2
 
           # Extra read-only resource probes beyond the 8 resources historically
           # integrated by A+. We retain payloads when endpoints are available and
@@ -143,6 +146,7 @@ jobs:
           print(json.dumps(out, ensure_ascii=False, default=str, indent=2, sort_keys=True))
           PY
           gzip -9 "$OUT/live/additional-readonly-probes.json"
+          echo "CHECKPOINT extra-probes" >&2
 
           # Preserve a read-only remote/local comparison. A false cutover_ready is
           # retained as evidence and does not discard the raw WIW backup.
@@ -155,6 +159,7 @@ jobs:
           report = build_wiw_migration_report(apply_full_sync=False)
           print(json.dumps(report, ensure_ascii=False, default=str, indent=2, sort_keys=True))
           PY
+          echo "CHECKPOINT reconciliation" >&2
 
           # Full production PostgreSQL backups: restore-grade custom format plus
           # schema-only SQL. This captures all imported WIW payloads and legacy
@@ -166,10 +171,12 @@ jobs:
           docker compose exec -T db pg_dump -U "$DB_USER" -d "$DB_NAME" -Fc > "$OUT/database/full-production.dump"
           test -s "$OUT/database/full-production.dump"
           docker compose exec -T db pg_dump -U "$DB_USER" -d "$DB_NAME" --schema-only | gzip -9 > "$OUT/database/schema.sql.gz"
+          echo "CHECKPOINT database" >&2
 
           # Human-readable full core dataset as an independent representation.
           docker compose exec -T backend python manage.py dumpdata core --indent 2 | gzip -9 > "$OUT/local/core-dumpdata.json.gz"
           test -s "$OUT/local/core-dumpdata.json.gz"
+          echo "CHECKPOINT dumpdata" >&2
 
           # Model inventory and WIW-linked counts.
           docker compose exec -T backend python - <<'PY' > "$OUT/meta/model-counts.json"
@@ -196,6 +203,7 @@ jobs:
           }
           print(json.dumps({"all_core_models": counts, "wiw_linked": focused}, ensure_ascii=False, default=str, indent=2, sort_keys=True))
           PY
+          echo "CHECKPOINT model-counts" >&2
 
           # Preserve integration behavior and identifiers without writing secret
           # credential values to the archive.
@@ -221,11 +229,13 @@ jobs:
           }
           print(json.dumps(data, ensure_ascii=False, default=str, indent=2, sort_keys=True))
           PY
+          echo "CHECKPOINT sanitized-config" >&2
 
           # Entire production media: contracts, documents, payroll statements,
           # avatars, order attachments and time-clock photos.
           docker compose exec -T backend sh -c 'tar -C /app/media -czf - .' > "$OUT/media/media.tar.gz"
           test -s "$OUT/media/media.tar.gz"
+          echo "CHECKPOINT media" >&2
 
           # Earlier WIW migration SQL backups/reports on this production node.
           shopt -s nullglob
@@ -235,6 +245,7 @@ jobs:
             fi
           done
           shopt -u nullglob
+          echo "CHECKPOINT historical" >&2
 
           cat > "$OUT/README.txt" <<'TXT'
           FINAL WIW ACCOUNT ARCHIVE
@@ -282,10 +293,13 @@ jobs:
             cd "$OUT"
             find . -type f ! -path './meta/checksums.sha256' -print0 | sort -z | xargs -0 sha256sum
           ) > "$OUT/meta/checksums.sha256"
+          echo "CHECKPOINT manifest-checksums" >&2
 
           # Stream the finished archive through THIS SAME SSH connection.
           # No second connection or transient remote path is required.
+          echo "CHECKPOINT stream-start" >&2
           tar -C "$OUT" -czf - .
+          echo "CHECKPOINT stream-done" >&2
           REMOTE
 
           test -s ./wiw-final-account-archive.tar.gz
