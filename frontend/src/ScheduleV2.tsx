@@ -60,6 +60,15 @@ const statusInfo = (x:any) => {
 };
 const clientKey = (item:any) => String(item?.client || item?.client_name || 'ohne-kunde');
 const workerInitials = (worker:any) => String(worker?.name || worker?.employee_number || 'MA').trim().split(/\s+/).slice(0,2).map((part:string)=>part[0]||'').join('').toUpperCase() || 'MA';
+const AVATAR_PRELOAD_CACHE = new Set<string>();
+const berlinInputDateTime = (value?:string) => {
+  if(!value) return '';
+  const parts=new Intl.DateTimeFormat('en-CA',{timeZone:BERLIN_TIME_ZONE,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(value));
+  const pick=(type:string)=>parts.find(part=>part.type===type)?.value||'';
+  return `${pick('year')}-${pick('month')}-${pick('day')}T${pick('hour')}:${pick('minute')}`;
+};
+const adminLogStamp=(value?:string)=>value?berlinFormatter({day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(value)):'–';
+const minutesAsClock=(value?:number)=>{const minutes=Math.max(0,Number(value||0));return `${Math.floor(minutes/60)}:${String(minutes%60).padStart(2,'0')}`;};
 const renderCustomerSeparated=(items:any[],render:(item:any)=>React.ReactNode)=>items.map((item,index)=><React.Fragment key={`${item.id}-${index}`}>{index>0&&clientKey(items[index-1])!==clientKey(item)?<div className="sv2-client-divider" aria-hidden="true"/>:null}{render(item)}</React.Fragment>);
 const serviceText = (item:any) => `${item?.position_name||''} ${item?.order_title||''} ${item?.client_name||''} ${item?.location_name||''}`.toLocaleLowerCase('de-DE');
 type ScheduleView = 'list'|'day'|'week'|'month'|'timeline';
@@ -108,6 +117,8 @@ export default function ScheduleV2({user}:{user:User}) {
   const [serviceFilter,setServiceFilter]=useState<ServiceFilter>('all');
   const [aiOpen,setAiOpen]=useState(false), [orderText,setOrderText]=useState(''), [parsedOrder,setParsedOrder]=useState<any>();
   const [locationOpen,setLocationOpen]=useState(false), [locationForm,setLocationForm]=useState<any>({geofence_radius_m:250});
+  const [timeEditor,setTimeEditor]=useState<any>();
+  const [timeBusy,setTimeBusy]=useState(false);
 
   async function load() {
     const q=search.trim()?`&search=${encodeURIComponent(search.trim())}`:'';
@@ -117,6 +128,17 @@ export default function ScheduleV2({user}:{user:User}) {
     setRows(unpack(s)); setClients(sortClients(unpack(c).filter(item=>item.active!==false))); setLocations(unpack(l).filter((item:any)=>item.active!==false)); setPositions(unpack(p).filter((item:any)=>item.active!==false)); setWorkers(unpack(w).filter((item:any)=>item.active!==false&&!isSyntheticWorker(item)));
   }
   useEffect(()=>{void load();},[tab]);
+  const avatarUrls=useMemo(()=>Array.from(new Set(rows.flatMap((row:any)=>(row.assigned_workers||[]).map((worker:any)=>worker.avatar).filter(Boolean)))) as string[],[rows]);
+  useEffect(()=>{
+    if(typeof Image==='undefined') return;
+    avatarUrls.forEach(url=>{
+      if(AVATAR_PRELOAD_CACHE.has(url)) return;
+      AVATAR_PRELOAD_CACHE.add(url);
+      const image=new Image();
+      image.decoding='async';
+      image.src=url;
+    });
+  },[avatarUrls]);
 
   const clientStyle=(item:any)=>{
     const palette=schedulePalette(item?.client_name,item?.position_name,item?.color_hue);
@@ -207,13 +229,66 @@ export default function ScheduleV2({user}:{user:User}) {
     if(!isManager(user)||!id) return <span>{label}</span>;
     return <a className="sv2-entity-link" href={akteHref(kind,id)} onClick={event=>{event.preventDefault();event.stopPropagation();openAkte(kind,id);}}>{label}</a>;
   };
+  const timeEntryForWorker=(item:any,workerId:string)=>{
+    const entries=(item.admin_time_entries||[]).filter((entry:any)=>String(entry.worker)===String(workerId));
+    return entries.find((entry:any)=>!entry.wiw_time_id)||entries[0];
+  };
+  function openAdminTimeEditor(item:any,worker:any){
+    if(user.role!=='admin') return;
+    const existing=timeEntryForWorker(item,worker.id);
+    if(existing?.wiw_time_id){
+      setToast('Importierte WIW-Arbeitszeiten sind schreibgeschützt.');
+      return;
+    }
+    setTimeEditor({
+      shift:item,
+      worker,
+      entry:existing,
+      clock_in:berlinInputDateTime(existing?.clock_in||item.starts_at),
+      clock_out:berlinInputDateTime(existing?.clock_out||item.ends_at),
+      break_minutes:Number(existing?.break_minutes??item.break_minutes??0),
+      reason:'',
+    });
+  }
+  async function saveAdminTimeEditor(){
+    if(!timeEditor?.shift?.id||!timeEditor?.worker?.id) return;
+    if(!timeEditor.clock_in||!timeEditor.clock_out){setToast('Bitte Beginn und Ende vollständig angeben.');return;}
+    if(wallClockMs(timeEditor.clock_out)<=wallClockMs(timeEditor.clock_in)){setToast('Das Ende muss nach dem Beginn liegen.');return;}
+    setTimeBusy(true);
+    try{
+      await api('time-entries/set-for-shift/',{method:'POST',body:JSON.stringify({
+        shift:timeEditor.shift.id,
+        worker:timeEditor.worker.id,
+        clock_in:timeEditor.clock_in,
+        clock_out:timeEditor.clock_out,
+        break_minutes:Number(timeEditor.break_minutes||0),
+        reason:String(timeEditor.reason||'').trim(),
+      })});
+      setToast(timeEditor.entry?'Arbeitszeit wurde aktualisiert.':'Arbeitszeit wurde eingetragen.');
+      setTimeEditor(undefined);
+      await load();
+    }catch(e:any){setToast(e.message||'Arbeitszeit konnte nicht gespeichert werden.');}
+    finally{setTimeBusy(false);}
+  }
+  const timeSourceLabel=(source:string)=>source==='wiw'?'WIW':source==='employee_manual'?'Mitarbeiter · manuell':source==='location'?'Standort-Erfassung':'Administration';
+  const auditActionLabel=(action:string)=>({
+    'time.admin_shift_created':'Admin · angelegt',
+    'time.admin_shift_updated':'Admin · bearbeitet',
+    'time.shift_reported':'Mitarbeiter · gemeldet',
+    'time.approved':'Admin · freigegeben',
+    'time.clock_in':'Check-in',
+    'time.clock_out':'Check-out',
+    'timeentry.created':'Eintrag angelegt',
+    'timeentry.updated':'Eintrag bearbeitet',
+  } as Record<string,string>)[action]||action;
+
   const renderWorkerAvatars=(item:any,compact=false)=>{
     const assigned=item.assigned_workers||[];
     if(!assigned.length) return <span className="sv2-no-profile">Noch kein Profilbild</span>;
     const limit=compact?4:8;
     return <div className={`sv2-worker-avatars ${compact?'compact':''}`} aria-label="Profilbilder der zugewiesenen Mitarbeiter">
       {assigned.slice(0,limit).map((worker:any)=>{
-        const content=<><span>{workerInitials(worker)}</span>{worker.avatar&&<img src={worker.avatar} alt="" loading="lazy" onError={e=>{e.currentTarget.style.display='none';}}/>}</>;
+        const content=<><span>{workerInitials(worker)}</span>{worker.avatar&&<img src={worker.avatar} alt="" loading="eager" decoding="async" onError={e=>{e.currentTarget.style.display='none';}}/>}</>;
         return isManager(user)&&worker.id?<a className="sv2-worker-avatar" href={akteHref('worker',worker.id)} key={worker.id||worker.name} title={worker.name} aria-label={`${worker.name} · Akte öffnen`} onClick={event=>{event.preventDefault();event.stopPropagation();openAkte('worker',worker.id);}}>{content}</a>:<span className="sv2-worker-avatar" key={worker.id||worker.name} title={worker.name} aria-label={worker.name}>{content}</span>;
       })}
       {assigned.length>limit&&<span className="sv2-worker-more" title={`${assigned.length-limit} weitere Mitarbeiter`}>+{assigned.length-limit}</span>}
@@ -222,7 +297,10 @@ export default function ScheduleV2({user}:{user:User}) {
   const renderWorkerNames=(item:any)=>{
     const assigned=item.assigned_workers||[];
     if(!assigned.length) return <span>Noch nicht besetzt</span>;
-    return <span className="sv2-worker-names">{assigned.map((worker:any,index:number)=><React.Fragment key={worker.id||worker.name}>{index>0&&<span className="sv2-name-separator">, </span>}{renderAkteLink('worker',worker.id,worker.name||worker.employee_number||'Mitarbeiter')}</React.Fragment>)}</span>;
+    return <span className="sv2-worker-names">{assigned.map((worker:any,index:number)=>{
+      const entry=timeEntryForWorker(item,worker.id);
+      return <React.Fragment key={worker.id||worker.name}>{index>0&&<span className="sv2-name-separator">, </span>}<span className="sv2-worker-name-time">{renderAkteLink('worker',worker.id,worker.name||worker.employee_number||'Mitarbeiter')}{user.role==='admin'&&(entry?.wiw_time_id?<span className="sv2-time-readonly" title="WIW-Arbeitszeit ist schreibgeschützt">WIW-Zeit</span>:<button type="button" className="sv2-time-action" disabled={timeBusy} onClick={event=>{event.preventDefault();event.stopPropagation();openAdminTimeEditor(item,worker);}}>{entry?'Zeit bearbeiten':'Zeit eintragen'}</button>)}</span></React.Fragment>;
+    })}</span>;
   };
   const confirmationLabel=(status:string)=>status==='pending'?'Ausstehend':status==='rejected'?'Abgelehnt':'Bestätigt';
   const confirmationColor=(status:string)=>status==='pending'?'warning':status==='rejected'?'danger':'success';
@@ -238,6 +316,17 @@ export default function ScheduleV2({user}:{user:User}) {
       {isManager(user)&&!compact&&<span className="sv2-confirmation-actions admin"><IonButton size="small" fill="clear" disabled={busy||worker.confirmation_status==='pending'} onClick={event=>{event.stopPropagation();void setConfirmation(item,'pending',worker.slot_id);}}>Ausstehend</IonButton><IonButton size="small" fill="clear" color="success" disabled={busy||worker.confirmation_status==='confirmed'} onClick={event=>{event.stopPropagation();void setConfirmation(item,'confirmed',worker.slot_id);}}>Bestätigt</IonButton><IonButton size="small" fill="clear" color="danger" disabled={busy||worker.confirmation_status==='rejected'} onClick={event=>{event.stopPropagation();void setConfirmation(item,'rejected',worker.slot_id);}}>Abgelehnt</IonButton></span>}
     </div>)}</div>;
   };
+  const renderAdminTimeLog=(item:any,compact=false)=>{
+    if(user.role!=='admin') return null;
+    const entries=item.admin_time_entries||[];
+    if(!entries.length) return <div className={`sv2-admin-time-log ${compact?'compact':''}`}><span className="sv2-admin-time-title">ZEITLOG · NUR ADMIN</span><small>Noch kein Zeiteintrag.</small></div>;
+    return <div className={`sv2-admin-time-log ${compact?'compact':''}`}><span className="sv2-admin-time-title">ZEITLOG · NUR ADMIN</span>{entries.map((entry:any)=><div className="sv2-admin-time-entry" key={entry.id}>
+      <div><strong>{entry.worker_name}</strong><span>{adminLogStamp(entry.clock_in)}–{entry.clock_out?adminLogStamp(entry.clock_out):'offen'} · Pause {entry.break_minutes||0} Min. · {minutesAsClock(entry.worked_minutes)} Std.</span></div>
+      <small>{timeSourceLabel(entry.source)} · {entry.approved?'freigegeben':'offen'}{entry.approved_by_name?` · ${entry.approved_by_name}`:''}</small>
+      {entry.edit_reason&&<small className="sv2-admin-time-reason">{String(entry.edit_reason).replace(/\n/g,' · ')}</small>}
+      {(entry.logs||[]).slice(0,compact?2:4).map((log:any,index:number)=><small className="sv2-admin-time-audit" key={`${entry.id}-${index}`}>{adminLogStamp(log.created_at)} · {auditActionLabel(log.action)} · {log.actor}{log.metadata?.reason?` · ${log.metadata.reason}`:''}</small>)}
+    </div>)}</div>;
+  };
   const renderShiftDetails=(item:any,compact=false)=><div className={`sv2-event-details ${compact?'compact':''}`} data-testid="shift-card-details">
     <div className="sv2-event-line" data-field="client"><IonIcon icon={businessOutline}/><span className="sv2-field-copy"><small>Kunde</small>{renderAkteLink('client',item.client,item.client_name||'Ohne Kunde')}</span></div>
     <div className="sv2-event-line" data-field="location"><IonIcon icon={locationOutline}/><span className="sv2-field-copy"><small>Standort</small><span>{item.location_name||'Ohne Einsatzort'}</span></span></div>
@@ -245,6 +334,7 @@ export default function ScheduleV2({user}:{user:User}) {
     <div className="sv2-event-line" data-field="time"><IonIcon icon={timeOutline}/><span className="sv2-field-copy"><small>Start–Ende</small><span>{tm(item.starts_at)}–{tm(item.ends_at)}</span></span></div>
     <div className="sv2-event-line sv2-profile-line" data-field="profile"><IonIcon icon={personCircleOutline}/><span className="sv2-field-copy"><small>Profilbild</small>{renderWorkerAvatars(item,compact)}</span></div>
     {renderConfirmationPanel(item,compact)}
+    {renderAdminTimeLog(item,compact)}
   </div>;
   const renderMini=(item:any,compact=false)=>{const status=statusInfo(item);const canOpen=isManager(user);const mine=workerView&&tab==='mine';return <article style={clientStyle(item)} className={`sv2-event ${compact?'compact':''}`} key={item.id} role={canOpen?'button':undefined} tabIndex={canOpen?0:undefined} onClick={()=>openItem(item)} onKeyDown={event=>{if(canOpen&&(event.key==='Enter'||event.key===' ')){event.preventDefault();openItem(item);}}}><div className="sv2-event-head"><strong>{item.position_name||'Einsatz'}</strong><span>{status.label}</span></div>{renderShiftDetails(item,compact)}{workerView&&<div className="sv2-mini-actions">{!mine&&status.open&&<IonButton size="small" disabled={busy} onClick={event=>{event.stopPropagation();void act(`shifts/${item.id}/claim/`,'Schicht übernommen.');}}><IonIcon slot="start" icon={checkmarkCircleOutline}/>Übernehmen</IonButton>}{mine&&<IonButton size="small" fill="outline" color="medium" disabled={busy} onClick={event=>{event.stopPropagation();setReleaseTarget(item);}}>Freigeben</IonButton>}</div>}</article>;};
 
@@ -303,6 +393,13 @@ export default function ScheduleV2({user}:{user:User}) {
       <IonSelect className="full" fill="outline" label="Textvorlage für Mitarbeiterhinweis" labelPlacement="floating" value="" onIonChange={e=>{const key=String(val(e)||'');const template=NOTE_TEMPLATES.find(([id])=>id===key)?.[1];if(key&&template)setForm({...form,notes:template});}}>{NOTE_TEMPLATES.map(([key,label])=><IonSelectOption key={key||'empty'} value={key}>{label}</IonSelectOption>)}</IonSelect>
       <IonTextarea className="full" fill="outline" label="Hinweise für Mitarbeiter" labelPlacement="floating" value={form.notes} onIonInput={e=>setForm({...form,notes:val(e)})}/><label className="sv2-toggle full">Bestätigung durch zugewiesene Mitarbeiter erforderlich <IonToggle checked={!!form.confirmation_required} onIonChange={e=>setForm({...form,confirmation_required:e.detail.checked})}/></label><label className="sv2-toggle full">{(form.workers||[]).length>0?'Restliche freie Plätze als OpenShift veröffentlichen':'Direkt als OpenShift veröffentlichen'} <IonToggle checked={!!form.publish_now} onIonChange={e=>setForm({...form,publish_now:e.detail.checked})}/></label>
     </div><div className="sv2-modal-actions"><IonButton fill="outline" onClick={()=>setModal(false)}>Abbrechen</IonButton><IonButton disabled={busy} onClick={()=>void save()}>Speichern</IonButton></div></div></IonModal>
+
+    <IonModal isOpen={!!timeEditor} onDidDismiss={()=>setTimeEditor(undefined)}><div className="sv2-modal"><div className="sv2-modal-head"><div><small>ARBEITSZEIT · NUR ADMIN</small><h2>{timeEditor?.entry?'Arbeitszeit bearbeiten':'Arbeitszeit eintragen'}</h2><p>{timeEditor?.worker?.name||''} · {timeEditor?.shift?.position_name||'Schicht'}</p></div><IonButton fill="clear" onClick={()=>setTimeEditor(undefined)}>Schließen</IonButton></div><div className="sv2-form">
+      <IonInput fill="outline" type="datetime-local" label="Beginn *" labelPlacement="floating" value={timeEditor?.clock_in||''} onIonInput={e=>setTimeEditor({...timeEditor,clock_in:String(val(e))})}/>
+      <IonInput fill="outline" type="datetime-local" label="Ende *" labelPlacement="floating" value={timeEditor?.clock_out||''} onIonInput={e=>setTimeEditor({...timeEditor,clock_out:String(val(e))})}/>
+      <IonInput fill="outline" type="number" min="0" label="Pause (Min.)" labelPlacement="floating" value={timeEditor?.break_minutes??0} onIonInput={e=>setTimeEditor({...timeEditor,break_minutes:Math.max(0,Number(val(e)||0))})}/>
+      <IonTextarea className="full" fill="outline" autoGrow label="Notiz / Änderungsgrund" labelPlacement="floating" value={timeEditor?.reason||''} onIonInput={e=>setTimeEditor({...timeEditor,reason:String(val(e)||'')})}/>
+    </div><div className="sv2-modal-actions"><IonButton fill="outline" onClick={()=>setTimeEditor(undefined)}>Abbrechen</IonButton><IonButton disabled={timeBusy} onClick={()=>void saveAdminTimeEditor()}>{timeBusy?'Wird gespeichert …':'Arbeitszeit speichern'}</IonButton></div></div></IonModal>
 
     <IonModal isOpen={locationOpen} onDidDismiss={()=>setLocationOpen(false)}><div className="sv2-modal"><div className="sv2-modal-head"><h2>Einsatzort anlegen</h2><IonButton fill="clear" onClick={()=>setLocationOpen(false)}>Schließen</IonButton></div><div className="sv2-form"><IonInput fill="outline" label="Bezeichnung *" labelPlacement="floating" value={locationForm.name} onIonInput={e=>setLocationForm({...locationForm,name:val(e)})}/><IonTextarea className="full" fill="outline" label="Adresse *" labelPlacement="floating" value={locationForm.address} onIonInput={e=>setLocationForm({...locationForm,address:val(e)})}/><IonInput fill="outline" type="number" label="Geofence-Radius in Metern" labelPlacement="floating" value={locationForm.geofence_radius_m} onIonInput={e=>setLocationForm({...locationForm,geofence_radius_m:val(e)})}/></div><div className="sv2-modal-actions"><IonButton fill="outline" onClick={()=>setLocationOpen(false)}>Abbrechen</IonButton><IonButton disabled={busy} onClick={()=>void saveInlineLocation()}>Speichern</IonButton></div></div></IonModal>
 

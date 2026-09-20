@@ -4,12 +4,11 @@ import {
   calendarOutline,
   chevronForwardOutline,
   documentTextOutline,
-  locationOutline,
   notificationsOutline,
   peopleOutline,
   stopwatchOutline,
 } from 'ionicons/icons';
-import { api, clockLocationRequired, User } from './api';
+import { api, User } from './api';
 import GermanTimeField from './GermanTimeField';
 import TimeReportLegalConfirmation from './TimeReportLegalConfirmation';
 import './employee-portal.css';
@@ -38,25 +37,10 @@ function MobileRow({icon,label,count,onClick,muted}:{icon:string;label:string;co
   </button>;
 }
 
-async function currentPosition(): Promise<GeolocationPosition> {
-  if (!navigator.geolocation) throw new Error('Standortdienste werden auf diesem Gerät nicht unterstützt.');
-  return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(
-    resolve,
-    (error) => {
-      if (error.code === error.PERMISSION_DENIED) reject(new Error('Standortzugriff wurde nicht erlaubt. Bitte Standortdienste aktivieren.'));
-      else if (error.code === error.TIMEOUT) reject(new Error('Standort konnte nicht rechtzeitig bestimmt werden. Bitte erneut versuchen.'));
-      else reject(new Error('Standort konnte nicht bestimmt werden.'));
-    },
-    { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 },
-  ));
-}
-
 export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:any)=>void}) {
   const [data,setData]=useState<any>();
   const [attendance,setAttendance]=useState<any>();
   const [error,setError]=useState('');
-  const [clockIntent,setClockIntent]=useState<'in'|'out'|''>('');
-  const [clockBusy,setClockBusy]=useState(false);
   const [notice,setNotice]=useState('');
   const [timeReport,setTimeReport]=useState<any>();
   const [timeReportBusy,setTimeReportBusy]=useState(false);
@@ -74,18 +58,6 @@ export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:a
   };
 
   useEffect(()=>{void load();},[]);
-
-  useEffect(()=>{
-    const shift = attendance?.pending_shift_report;
-    if (!shift?.id || timeReport) return;
-    if (sessionStorage.getItem(`aplus:time-report-later:${shift.id}`) === '1') return;
-    setTimeReport({
-      shift,
-      date: dateKey(shift.starts_at),
-      clock_in: inputTime(shift.starts_at),
-      clock_out: inputTime(shift.ends_at),
-    });
-  },[attendance?.pending_shift_report?.id]);
 
   function requestTimeReportSubmit() {
     if (!timeReport?.shift?.id || !timeReport.clock_in || !timeReport.clock_out) {
@@ -111,7 +83,6 @@ export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:a
           legal_acknowledged: true,
         }),
       });
-      sessionStorage.removeItem(`aplus:time-report-later:${timeReport.shift.id}`);
       setTimeReportLegalOpen(false);
       setTimeReport(undefined);
       setNotice('Arbeitszeit wurde zur Freigabe an die Administration gesendet.');
@@ -123,62 +94,32 @@ export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:a
     }
   }
 
-  function postponeTimeReport() {
-    if (timeReport?.shift?.id) sessionStorage.setItem(`aplus:time-report-later:${timeReport.shift.id}`, '1');
+  function closeTimeReport() {
     setTimeReportLegalOpen(false);
     setTimeReport(undefined);
+    setNotice('');
   }
 
-  async function clock(intent: 'in'|'out', requireLocation: boolean) {
-    setClockBusy(true);
-    setNotice('');
-    try {
-      const payload:any = {};
-      if (requireLocation) {
-        const position = await currentPosition();
-        payload.lat = position.coords.latitude;
-        payload.lng = position.coords.longitude;
-      } else {
-        payload.skip_location = true;
-      }
-      if (intent === 'in' && attendance?.eligible_shift?.id) payload.shift = attendance.eligible_shift.id;
-      const result:any = await api(`time-entries/clock_${intent}/`, { method: 'POST', body: JSON.stringify(payload) });
-      setNotice(intent === 'in'
-        ? 'Du bist eingestempelt.'
-        : result?.review_required ? 'Ausgestempelt. Der Standort wird von der Administration geprüft.' : 'Du bist ausgestempelt.');
-      setClockIntent('');
-      await load();
-    } catch (e:any) {
-      setNotice(e.message || 'Zeiterfassung konnte nicht gestartet werden.');
-    } finally {
-      setClockBusy(false);
+  function openLatestTimeReport() {
+    const shift = attendance?.pending_shift_report;
+    if (!shift?.id) {
+      setNotice('Für deine zuletzt beendete Schicht ist keine offene Arbeitszeiterfassung vorhanden.');
+      return;
     }
-  }
-
-  async function beginClock(intent: 'in'|'out') {
-    setClockBusy(true);
     setNotice('');
-    try {
-      const shiftId = intent === 'in' ? attendance?.eligible_shift?.id : attendance?.active_entry?.shift;
-      const requireLocation = await clockLocationRequired(shiftId);
-      if (requireLocation) {
-        setClockIntent(intent);
-        return;
-      }
-      await clock(intent, false);
-    } catch (e:any) {
-      setNotice(e.message || 'Zeiterfassung konnte nicht gestartet werden.');
-    } finally {
-      setClockBusy(false);
-    }
+    setTimeReport({
+      shift,
+      date: dateKey(shift.starts_at),
+      clock_in: inputTime(shift.starts_at),
+      clock_out: inputTime(shift.ends_at),
+    });
   }
 
   if(error) return <div className="employee-empty"><h2>Startseite konnte nicht geladen werden</h2><p>{error}</p></div>;
   if(!data||!attendance) return <div className="employee-loader"><IonSpinner/><span>Dein Bereich wird geladen …</span></div>;
   const worked = Number(data.month_worked_minutes||0);
   const nextShift = data.next_shift;
-  const active = attendance.active_entry;
-  const canClockIn = Boolean(attendance.eligible_shift?.id);
+  const pendingReportShift = attendance.pending_shift_report;
 
   return <>
     <div className="wiw-mobile-dashboard wiw-worker-home" data-testid="phase8-mobile-dashboard">
@@ -203,15 +144,13 @@ export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:a
       <div className="wiw-section-label">Zeiterfassung</div>
       <div className="wiw-home-clock-card">
         <div className="wiw-home-clock-copy">
-          <span className="wiw-home-clock-icon"><IonIcon icon={locationOutline}/></span>
+          <span className="wiw-home-clock-icon"><IonIcon icon={stopwatchOutline}/></span>
           <div>
-            <b>{active ? 'Arbeitszeit läuft' : canClockIn ? 'Bereit zum Einstempeln' : 'Noch keine Zeiterfassung möglich'}</b>
-            <small>{active ? `Seit ${time(active.clock_in)}` : canClockIn ? `${attendance.eligible_shift.position_name || 'Einsatz'} · ${attendance.eligible_shift.location_name}` : 'Einstempeln ist rund um eine bestätigte Schicht möglich.'}</small>
+            <b>{pendingReportShift ? 'Arbeitszeit für letzte Schicht eintragen' : 'Keine offene Arbeitszeiterfassung'}</b>
+            <small>{pendingReportShift ? `${day(pendingReportShift.starts_at)} · ${time(pendingReportShift.starts_at)}–${time(pendingReportShift.ends_at)} · ${pendingReportShift.position_name || 'Einsatz'}` : 'Sobald deine letzte Schicht beendet ist, kannst du hier die tatsächlichen Zeiten eintragen.'}</small>
           </div>
         </div>
-        <button type="button" className={active ? 'clock-out' : ''} disabled={clockBusy || (!active && !canClockIn)} onClick={()=>void beginClock(active?'out':'in')}>
-          {active ? 'Ausstempeln' : 'Einstempeln'}
-        </button>
+        <button type="button" disabled={!pendingReportShift} onClick={openLatestTimeReport}>Zeit eintragen</button>
       </div>
 
       <div className="wiw-section-label">Wichtige bevorstehende Daten</div>
@@ -246,6 +185,7 @@ export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:a
 
         <section className="employee-section compact">
           <div className="employee-section-head"><div><small>AKTIONEN</small><h2>Was deine Aufmerksamkeit braucht</h2></div></div>
+          <button className="employee-action-row" disabled={!pendingReportShift} onClick={openLatestTimeReport}><span><IonIcon icon={stopwatchOutline}/></span><div><b>Arbeitszeit eintragen</b><p>{pendingReportShift ? `${day(pendingReportShift.starts_at)} · ${time(pendingReportShift.starts_at)}–${time(pendingReportShift.ends_at)} · ${pendingReportShift.position_name || 'Einsatz'}` : 'Keine abgeschlossene Schicht ohne Zeiterfassung'}</p></div><IonIcon icon={chevronForwardOutline}/></button>
           <button className="employee-action-row" onClick={()=>navigate('contracts')}><span><IonIcon icon={documentTextOutline}/></span><div><b>Verträge & Dokumente</b><p>{data.contract_actions||0} benötigen eine Aktion · {data.contracts_expiring_30||0} laufen bald aus</p></div><IonIcon icon={chevronForwardOutline}/></button>
           <button className="employee-action-row" onClick={()=>navigate('messages')}><span><IonIcon icon={notificationsOutline}/></span><div><b>Benachrichtigungen</b><p>{data.unread_notifications||0} ungelesene Hinweise</p></div><IonIcon icon={chevronForwardOutline}/></button>
         </section>
@@ -264,21 +204,11 @@ export default function EmployeeHome({user,navigate}:{user:User;navigate:(view:a
         </div>
         {notice&&<div className="wiw-location-error">{notice}</div>}
         <button type="button" className="activate" disabled={timeReportBusy} onClick={requestTimeReportSubmit}>{timeReportBusy?'Wird gesendet …':'Zur Freigabe senden'}</button>
-        <button type="button" className="cancel" disabled={timeReportBusy} onClick={postponeTimeReport}>Später</button>
+        <button type="button" className="cancel" disabled={timeReportBusy} onClick={closeTimeReport}>Schließen</button>
       </div>
     </div>}
 
     <TimeReportLegalConfirmation open={timeReportLegalOpen} busy={timeReportBusy} onCancel={()=>setTimeReportLegalOpen(false)} onConfirm={()=>void submitTimeReport()}/>
 
-    {clockIntent&&<div className="wiw-location-backdrop" role="dialog" aria-modal="true" aria-label="Standortberechtigung">
-      <div className="wiw-location-modal">
-        <div className="wiw-location-symbol"><IonIcon icon={locationOutline}/></div>
-        <h2>Für die Zeiterfassung ist eine Berechtigung zur Standortbestimmung erforderlich</h2>
-        <p>Aktiviere die Standortdienste, damit A+ weiß, wo du deine Arbeitszeit {clockIntent==='in'?'beginnst':'beendest'}.</p>
-        {notice&&<div className="wiw-location-error">{notice}</div>}
-        <button type="button" className="activate" disabled={clockBusy} onClick={()=>void clock(clockIntent, true)}>{clockBusy?'Standort wird bestimmt …':'Standortdienste aktivieren'}</button>
-        <button type="button" className="cancel" disabled={clockBusy} onClick={()=>{setClockIntent('');setNotice('');}}>Abbrechen</button>
-      </div>
-    </div>}
   </>;
 }

@@ -9,7 +9,7 @@ import {
   IonTextarea,
   IonToast,
 } from '@ionic/react';
-import { api, apiBlob, clockLocationRequired, User } from './api';
+import { api, apiBlob, User } from './api';
 import { saveSchedulePdf } from './saveSchedulePdf';
 import Phase8MobileAttendance from './Phase8MobileAttendance';
 import './attendance-v3.css';
@@ -78,16 +78,6 @@ function minuteDurationLabel(value?: number) {
   return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`;
 }
 
-async function currentPosition() {
-  try {
-    return await new Promise<GeolocationPosition>((resolve, reject) =>
-      navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 12000 }),
-    );
-  } catch {
-    return undefined;
-  }
-}
-
 export default function AttendanceV3({ user }: { user: User }) {
   const [data, setData] = useState<any>();
   const [absences, setAbsences] = useState<any[]>([]);
@@ -105,16 +95,6 @@ export default function AttendanceV3({ user }: { user: User }) {
   const [report, setReport] = useState<any>(() => {
     const today = berlinDateKey();
     return { date_from: today.slice(0, 8) + '01', date_to: today, workers: [], groups: [] };
-  });
-  const [mobileClockMode] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    try {
-      const requested = sessionStorage.getItem('phase8:attendance-clock') === '1';
-      if (requested) sessionStorage.removeItem('phase8:attendance-clock');
-      return requested;
-    } catch {
-      return false;
-    }
   });
 
   const load = async () => {
@@ -152,30 +132,6 @@ export default function AttendanceV3({ user }: { user: User }) {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
-
-  async function clock(kind: 'in' | 'out') {
-    setBusy(true);
-    try {
-      const shiftId = kind === 'in' ? data?.eligible_shift?.id : data?.active_entry?.shift;
-      const requireLocation = await clockLocationRequired(shiftId);
-      const payload: any = {};
-      if (requireLocation) {
-        const position = await currentPosition();
-        payload.lat = position?.coords.latitude;
-        payload.lng = position?.coords.longitude;
-      } else {
-        payload.skip_location = true;
-      }
-      if (kind === 'in' && data?.eligible_shift?.id) payload.shift = data.eligible_shift.id;
-      await api(`time-entries/clock_${kind}/`, { method: 'POST', body: JSON.stringify(payload) });
-      setToast(kind === 'in' ? 'Arbeitszeit läuft.' : 'Arbeitszeit wurde beendet.');
-      await load();
-    } catch (error: any) {
-      setToast(error.message);
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function submitCorrection() {
     if (!correction?.entry?.id) return;
@@ -329,7 +285,7 @@ export default function AttendanceV3({ user }: { user: User }) {
 
   if (!data) return <div className="attendance-loading"><IonSpinner /></div>;
 
-  if ((user.role === 'worker' || isManager(user)) && !mobileClockMode && typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches) {
+  if ((user.role === 'worker' || isManager(user)) && typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches) {
     return <Phase8MobileAttendance data={data} showWorker={isManager(user)} />;
   }
 
@@ -481,18 +437,14 @@ export default function AttendanceV3({ user }: { user: User }) {
     );
   }
 
-  const active = data.active_entry;
   return (
     <>
       <section className="attendance-head worker-attendance-head">
         <div>
           <small>MEINE ARBEITSZEIT</small>
-          <h1>{active ? 'Du bist eingestempelt.' : 'Bereit für deinen Einsatz?'}</h1>
-          <p>{active ? 'Der Timer läuft nur für dich sichtbar. Beim Ausstempeln wird der Eintrag zur Prüfung gespeichert.' : data.eligible_shift ? `${data.eligible_shift.position_name || 'Einsatz'} · ${data.eligible_shift.location_name}` : 'Aktuell ist keine passende bestätigte Schicht im Zeitfenster.'}</p>
+          <h1>Arbeitszeiten & Korrekturen</h1>
+          <p>Die tatsächliche Arbeitszeit für deine zuletzt beendete Schicht trägst du direkt auf der Startseite ein.</p>
         </div>
-        {active ? (
-          <div className="live-clock"><small>SEIT {dateTime(active.clock_in)}</small><strong>{durationLabel(active.clock_in, undefined, now)}</strong><span>Std.</span></div>
-        ) : null}
       </section>
 
       <div className="attendance-stats worker-stats">
@@ -503,15 +455,10 @@ export default function AttendanceV3({ user }: { user: User }) {
 
       <section className="clock-card">
         <div>
-          <small>{active ? 'AKTIVE ZEITERFASSUNG' : 'NÄCHSTE MÖGLICHE SCHICHT'}</small>
-          <h2>{active ? active.shift_title || 'Arbeitszeit läuft' : data.eligible_shift?.position_name || 'Keine Schicht verfügbar'}</h2>
-          <p>{active ? `Beginn ${dateTime(active.clock_in)}` : data.eligible_shift ? `${dateTime(data.eligible_shift.starts_at)} · ${data.eligible_shift.location_name}` : 'Clock-in wird erst freigeschaltet, wenn eine deiner bestätigten Schichten im zulässigen Zeitfenster liegt.'}</p>
+          <small>MANUELLE ZEITERFASSUNG</small>
+          <h2>Arbeitszeit nach der Schicht eintragen</h2>
+          <p>Die Standort-Zeiterfassung wird Mitarbeitern aktuell nicht angezeigt. Die Eingabe erfolgt über die letzte beendete Schicht auf der Startseite.</p>
         </div>
-        {active ? (
-          <IonButton color="danger" disabled={busy} onClick={() => clock('out')}>Ausstempeln</IonButton>
-        ) : (
-          <IonButton disabled={busy || !data.eligible_shift} onClick={() => clock('in')}>Einstempeln</IonButton>
-        )}
       </section>
 
       <section className="attendance-panel">
