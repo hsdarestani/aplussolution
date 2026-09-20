@@ -164,13 +164,10 @@ jobs:
           # Full production PostgreSQL backups: restore-grade custom format plus
           # schema-only SQL. This captures all imported WIW payloads and legacy
           # WordPress migration records, plus all A+ state linked to them.
-          DB_USER="$(docker compose exec -T db printenv POSTGRES_USER | tr -d '\r')"
-          DB_NAME="$(docker compose exec -T db printenv POSTGRES_DB | tr -d '\r')"
-          : "${DB_USER:?POSTGRES_USER missing}"
-          : "${DB_NAME:?POSTGRES_DB missing}"
-          docker compose exec -T db pg_dump -U "$DB_USER" -d "$DB_NAME" -Fc > "$OUT/database/full-production.dump"
+          docker compose exec -T db sh -lc 'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$OUT/database/full-production.dump"
           test -s "$OUT/database/full-production.dump"
-          docker compose exec -T db pg_dump -U "$DB_USER" -d "$DB_NAME" --schema-only | gzip -9 > "$OUT/database/schema.sql.gz"
+          docker compose exec -T db sh -lc 'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --schema-only' | gzip -9 > "$OUT/database/schema.sql.gz"
+          test -s "$OUT/database/schema.sql.gz"
           echo "CHECKPOINT database" >&2
 
           # Human-readable full core dataset as an independent representation.
