@@ -1,20 +1,24 @@
-/* Keep the final Dienstplan rows fully reachable above the persistent mobile nav. */
+/* Keep the final Dienstplan rows reachable above the persistent mobile nav,
+   without stretching short weeks into a tall empty canvas. */
 @media (max-width: 900px) {
   body.wiw-native-schedule-active .wiw-schedule-mobile {
-    padding-bottom: calc(138px + env(safe-area-inset-bottom)) !important;
+    padding-bottom: calc(70px + env(safe-area-inset-bottom)) !important;
   }
 
-  body.wiw-native-schedule-active .wiw-week-scroll {
-    padding-bottom: calc(118px + env(safe-area-inset-bottom));
+  /* One small breathing space is enough. Older layers reserved 118–132px here,
+     which produced the large white block visible on short weeks. */
+  body.wiw-native-schedule-active .wiw-week-scroll,
+  body.wiw-native-schedule-active .wiw-week-swipe-viewport {
+    padding-bottom: 0 !important;
+    margin-bottom: 0 !important;
   }
 
   body.wiw-native-schedule-active .wiw-day-section:last-child {
-    margin-bottom: 18px;
+    margin-bottom: 0 !important;
+    border-bottom: 0 !important;
   }
 
-  /* Do not establish a containing block around the compact schedule. `contain`
-     made position:fixed descendants behave like content-footer elements, so the
-     Gesamtstunden bar and + button only appeared after scrolling to the end. */
+  /* Do not establish a containing block around the compact schedule. */
   body.wiw-native-schedule-active .app-main,
   body.wiw-native-schedule-active .app-main > .wiw-schedule-mobile {
     contain: none !important;
@@ -23,21 +27,24 @@
     perspective: none !important;
   }
 
-  /* Gesamtstunden is a persistent control, not part of the scrolling week.
-     Keep it visible directly above the fixed mobile navigation on web and native. */
+  /* Keep Gesamtstunden directly after the week when the week is short.
+     On long weeks it still behaves as a bottom-sticky summary above navigation. */
   body.wiw-native-schedule-active .wiw-week-total {
-    position: fixed !important;
-    left: 0 !important;
-    right: 0 !important;
+    position: sticky !important;
+    left: auto !important;
+    right: auto !important;
     bottom: calc(62px + env(safe-area-inset-bottom)) !important;
     z-index: 2147482000 !important;
     width: 100% !important;
-    min-height: 39px !important;
+    height: 42px !important;
+    min-height: 42px !important;
     box-sizing: border-box !important;
     margin: 0 !important;
+    padding: 0 14px !important;
+    box-shadow: 0 -1px 5px rgba(15,23,42,.12) !important;
   }
 
-  /* Keep the create action visible at every scroll position and above the total bar. */
+  /* Keep the create action above the total/nav without reserving layout space. */
   body.wiw-native-schedule-active .wiw-create-fab {
     position: fixed !important;
     right: 16px !important;
