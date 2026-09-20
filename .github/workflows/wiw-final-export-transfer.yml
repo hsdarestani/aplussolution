@@ -1,0 +1,127 @@
+name: Transfer final WIW archive
+
+on:
+  push:
+    branches:
+      - wiw-final-export-20260920
+    paths:
+      - '.github/workflows/wiw-final-export-transfer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  transfer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Locate and verify production archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          REMOTE_PATH="$(ssh \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$STRATO_HOST" \
+            'set -euo pipefail; f="$(ls -1t /root/aplussolution-backups/final-wiw-account-export-*.tar.gz 2>/dev/null | head -n1)"; test -n "$f"; test -s "$f"; test -s "$f.sha256"; sha256sum -c "$f.sha256" >/dev/null; printf "%s" "$f"')"
+          test -n "$REMOTE_PATH"
+          printf '%s\n' "$REMOTE_PATH" > remote_path.txt
+          echo "Found verified production archive."
+
+      - name: Download archive from production
+        shell: bash
+        run: |
+          set -euo pipefail
+          REMOTE_PATH="$(cat remote_path.txt)"
+          scp \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$STRATO_HOST":"$REMOTE_PATH" ./wiw-final-account-archive.tar.gz
+          scp \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$STRATO_HOST":"$REMOTE_PATH.sha256" ./wiw-final-account-archive.remote.sha256
+          test -s ./wiw-final-account-archive.tar.gz
+          REMOTE_HASH="$(awk '{print $1}' ./wiw-final-account-archive.remote.sha256)"
+          LOCAL_HASH="$(sha256sum ./wiw-final-account-archive.tar.gz | awk '{print $1}')"
+          test "$REMOTE_HASH" = "$LOCAL_HASH"
+          printf '%s  %s\n' "$LOCAL_HASH" 'wiw-final-account-archive.tar.gz' > ./wiw-final-account-archive.sha256
+          echo "Archive verified: $LOCAL_HASH"
+          echo "Archive size: $(du -h ./wiw-final-account-archive.tar.gz | cut -f1)"
+
+      - name: Validate archive contents and print summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== CORE WIW COUNTS ==="
+          tar -xOzf ./wiw-final-account-archive.tar.gz ./live/core-snapshot.json.gz \
+            | gzip -dc \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({"counts": d.get("counts", {}), "errors": d.get("errors", {})}, ensure_ascii=False, sort_keys=True))'
+
+          echo "=== RECONCILIATION ==="
+          tar -xOzf ./wiw-final-account-archive.tar.gz ./meta/wiw-reconciliation.json \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({"cutover_ready": d.get("cutover_ready"), "resources": {k: {"remote_count": v.get("remote_count"), "local_count": v.get("local_count"), "missing_count": len(v.get("missing", [])), "extra_count": len(v.get("extra", [])), "complete": v.get("complete")} for k,v in d.get("resources", {}).items()}}, ensure_ascii=False, sort_keys=True))'
+
+          echo "=== ADDITIONAL WIW PROBES ==="
+          tar -xOzf ./wiw-final-account-archive.tar.gz ./live/additional-readonly-probes.json.gz \
+            | gzip -dc \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({k: {"supported": bool(v.get("success")), "path": (v.get("success") or {}).get("path"), "attempt_errors": [a.get("error") for a in v.get("attempts", []) if not a.get("ok")]} for k,v in d.items()}, ensure_ascii=False, sort_keys=True))'
+
+          echo "=== TOP-LEVEL INVENTORY ==="
+          tar -tzf ./wiw-final-account-archive.tar.gz | sed -n '1,120p'
+
+          echo "=== INTERNAL CHECKSUMS ==="
+          mkdir -p verify
+          tar -xzf ./wiw-final-account-archive.tar.gz -C verify
+          (
+            cd verify
+            sha256sum -c meta/checksums.sha256
+          )
+
+      - name: Split large archive if needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          size="$(stat -c %s ./wiw-final-account-archive.tar.gz)"
+          if [ "$size" -gt 1800000000 ]; then
+            split -b 1700M -d -a 3 ./wiw-final-account-archive.tar.gz artifact/wiw-final-account-archive.tar.gz.part-
+            printf '%s\n' 'Restore: cat wiw-final-account-archive.tar.gz.part-* > wiw-final-account-archive.tar.gz' > artifact/RESTORE_PARTS.txt
+          else
+            mv ./wiw-final-account-archive.tar.gz artifact/
+          fi
+          cp ./wiw-final-account-archive.sha256 artifact/
+          cp ./wiw-final-account-archive.remote.sha256 artifact/
+
+      - name: Upload final WIW archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: wiw-final-account-archive-20260920
+          path: artifact/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
