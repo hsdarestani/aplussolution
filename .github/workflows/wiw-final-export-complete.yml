@@ -276,14 +276,20 @@ jobs:
               except Exception:
                   return False
 
-          absence_candidates = []
-          if isinstance(notices, dict):
-              for key, value in notices.items():
-                  if isinstance(value, list):
-                      absence_candidates.extend([item for item in value if mentions_absence(item)])
-          elif isinstance(notices, list):
-              absence_candidates = [item for item in notices if mentions_absence(item)]
+          notice_rows = notices.get("notices", []) if isinstance(notices, dict) else (notices if isinstance(notices, list) else [])
+          absence_candidates = [
+              item for item in notice_rows
+              if isinstance(item, dict) and (
+                  item.get("absence_id") not in (None, 0, "0", "")
+                  or "absence" in str(item.get("title", "")).lower()
+              )
+          ]
+          no_show_candidates = [
+              item for item in notice_rows
+              if isinstance(item, dict) and "no show" in str(item.get("title", "")).lower()
+          ]
           out["resources"]["absence_related_attendance_notices"] = absence_candidates
+          out["resources"]["no_show_attendance_notices"] = no_show_candidates
 
           # Completeness assertions for documented endpoints that must exist.
           required = [
@@ -340,6 +346,8 @@ jobs:
                   row[prefix or "value"] = value
               return row
 
+          row_counts = {}
+
           def write_csv(filename, rows):
               path = outdir / filename
               flat_rows = [flatten(r) if isinstance(r, dict) else {"value": r} for r in (rows or [])]
@@ -357,6 +365,7 @@ jobs:
                   w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
                   w.writeheader()
                   w.writerows(flat_rows)
+              row_counts[filename] = len(flat_rows)
 
           def list_payload(payload, key):
               return payload.get(key, []) if isinstance(payload, dict) and isinstance(payload.get(key, []), list) else []
@@ -391,27 +400,48 @@ jobs:
                   payhours.append(item)
           write_csv("pay-period-hours-closed.csv", payhours)
 
-          hourstats = []
+          employee_hours = []
+          daily_hours = []
+          location_hours = []
+          position_hours = []
           for pid, payload in (payroll.get("stats") or {}).items():
               if not isinstance(payload, dict):
                   continue
-              p = payload.get("payroll")
-              if isinstance(p, dict):
-                  stats = p.get("hourstats")
-                  if isinstance(stats, list):
-                      for item in stats:
-                          if isinstance(item, dict):
-                              item = dict(item)
-                              item.setdefault("_payroll_id", pid)
-                          hourstats.append(item)
-                  elif isinstance(stats, dict):
-                      for key, item in stats.items():
-                          if isinstance(item, dict):
-                              item = dict(item)
-                              item.setdefault("_payroll_id", pid)
-                              item.setdefault("_hourstat_key", key)
-                          hourstats.append(item)
-          write_csv("pay-period-hours-open-stats.csv", hourstats)
+              paymeta = payload.get("payroll") if isinstance(payload.get("payroll"), dict) else {}
+              stats = payload.get("stats") if isinstance(payload.get("stats"), dict) else {}
+
+              for uid, item in (stats.get("employees") or {}).items():
+                  row = dict(item) if isinstance(item, dict) else {"value": item}
+                  row["_payroll_id"] = pid
+                  row["_user_id"] = uid
+                  row["_period_start"] = paymeta.get("start_date")
+                  row["_period_end"] = paymeta.get("end_date")
+                  employee_hours.append(row)
+
+              for day, item in (stats.get("days") or {}).items():
+                  row = dict(item) if isinstance(item, dict) else {"value": item}
+                  row["_payroll_id"] = pid
+                  row["_day"] = day
+                  row["_period_start"] = paymeta.get("start_date")
+                  row["_period_end"] = paymeta.get("end_date")
+                  daily_hours.append(row)
+
+              for location_id, item in (stats.get("locations") or {}).items():
+                  row = dict(item) if isinstance(item, dict) else {"value": item}
+                  row["_payroll_id"] = pid
+                  row["_location_id"] = location_id
+                  location_hours.append(row)
+
+              for position_id, item in (stats.get("positions") or {}).items():
+                  row = dict(item) if isinstance(item, dict) else {"value": item}
+                  row["_payroll_id"] = pid
+                  row["_position_id"] = position_id
+                  position_hours.append(row)
+
+          write_csv("pay-period-hours-by-employee.csv", employee_hours)
+          write_csv("pay-period-hours-by-day.csv", daily_hours)
+          write_csv("pay-period-hours-by-location.csv", location_hours)
+          write_csv("pay-period-hours-by-position.csv", position_hours)
 
           notices = payroll.get("notices")
           notice_rows = []
@@ -427,11 +457,9 @@ jobs:
               notice_rows = notices
           write_csv("attendance-notices.csv", notice_rows)
           write_csv("absence-related-notices.csv", doc.get("absence_related_attendance_notices", []))
+          write_csv("no-show-notices.csv", doc.get("no_show_attendance_notices", []))
 
-          manifest = {
-              p.name: sum(1 for _ in p.open("r", encoding="utf-8-sig")) - 1
-              for p in sorted(outdir.glob("*.csv"))
-          }
+          manifest = dict(sorted(row_counts.items()))
           (outdir / "CSV-MANIFEST.json").write_text(
               json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True),
               encoding="utf-8",
@@ -611,7 +639,8 @@ jobs:
             CSV equivalents of the exports WIW recommends before cancellation:
             users (including archived), job sites, schedules/shifts, shift
             requests, shift templates, timesheets, time-off requests, payroll
-            hours, attendance/absence notices, plus supporting lookup data.
+            hours (by employee/day/location/position), attendance notices,
+            reported-absence notices, no-show notices, plus supporting lookup data.
 
           database/full-production.dump
             Full restore-grade PostgreSQL custom-format production backup.
@@ -681,7 +710,7 @@ jobs:
           gzip -dc archive/live/additional-readonly-probes.json.gz | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({k:{"supported":bool(v.get("success")),"path":(v.get("success") or {}).get("path"),"attempt_errors":[a.get("error") for a in v.get("attempts",[]) if not a.get("ok")]} for k,v in d.items()},ensure_ascii=False,sort_keys=True))'
 
           echo "=== DOCUMENTED WIW RESOURCE SUMMARY ==="
-          gzip -dc archive/live/documented/documented-resources.json.gz | python3 -c 'import json,sys; d=json.load(sys.stdin); r=d.get("resources",{}); p=r.get("payrolls") or {}; print(json.dumps({"required_status":d.get("required_resource_status",{}),"errors":d.get("errors",{}),"users_all":len((r.get("users_all_including_archived") or {}).get("users",[])),"users_archived":len((r.get("users_archived_only") or {}).get("users",[])),"shift_templates":len((r.get("shift_templates_blocks") or {}).get("blocks",[])),"schedule_templates":len((r.get("schedule_templates") or {}).get("templates",[])),"shift_requests":(r.get("shift_requests_swaps") or {}).get("count"),"openshift_requests":(r.get("openshift_approval_requests") or {}).get("count"),"payroll_periods":p.get("count"),"absence_related_notices":len(r.get("absence_related_attendance_notices") or [])},ensure_ascii=False,sort_keys=True))'
+          gzip -dc archive/live/documented/documented-resources.json.gz | python3 -c 'import json,sys; d=json.load(sys.stdin); r=d.get("resources",{}); p=r.get("payrolls") or {}; print(json.dumps({"required_status":d.get("required_resource_status",{}),"errors":d.get("errors",{}),"users_all":len((r.get("users_all_including_archived") or {}).get("users",[])),"users_archived":len((r.get("users_archived_only") or {}).get("users",[])),"shift_templates":len((r.get("shift_templates_blocks") or {}).get("blocks",[])),"schedule_templates":len((r.get("schedule_templates") or {}).get("templates",[])),"shift_requests":(r.get("shift_requests_swaps") or {}).get("count"),"openshift_requests":(r.get("openshift_approval_requests") or {}).get("count"),"payroll_periods":p.get("count"),"absence_related_notices":len(r.get("absence_related_attendance_notices") or []),"no_show_notices":len(r.get("no_show_attendance_notices") or [])},ensure_ascii=False,sort_keys=True))'
 
           echo "=== UI-EQUIVALENT CSV MANIFEST ==="
           cat archive/ui-equivalents/CSV-MANIFEST.json
