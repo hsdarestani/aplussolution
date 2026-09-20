@@ -39,7 +39,7 @@ jobs:
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
             root@"$STRATO_HOST" \
-            'set -euo pipefail; f="$(ls -1t /root/aplussolution-backups/final-wiw-account-export-*.tar.gz 2>/dev/null | head -n1)"; test -n "$f"; test -s "$f"; test -s "$f.sha256"; sha256sum -c "$f.sha256" >/dev/null; printf "%s" "$f"')"
+            'set -eu; echo "=== backup inventory ===" >&2; find /root/aplussolution-backups -maxdepth 1 -type f -printf "%TY-%Tm-%TdT%TH:%TM:%TSZ %s %p\\n" 2>/dev/null | sort -r | head -n 40 >&2 || true; f="$(find /root/aplussolution-backups -maxdepth 1 -type f -name "final-wiw-account-export-*.tar.gz" -printf "%T@ %p\\n" 2>/dev/null | sort -nr | head -n1 | sed "s/^[^ ]* //")"; test -n "$f"; test -s "$f"; test -s "$f.sha256"; echo "Selected: $f" >&2; sha256sum -c "$f.sha256" >&2; printf "%s" "$f"')"
           test -n "$REMOTE_PATH"
           printf '%s\n' "$REMOTE_PATH" > remote_path.txt
           echo "Found verified production archive."
