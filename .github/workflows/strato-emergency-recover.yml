@@ -1,0 +1,139 @@
+name: Emergency recover production
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-emergency-recover.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aplus-emergency-recover
+  cancel-in-progress: true
+
+env:
+  PRODUCTION_DOMAIN: app.aplus-solution.de
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure Strato SSH key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Wait for host and recover existing production containers
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          connected=0
+          for i in $(seq 1 30); do
+            if ssh \
+              -i "$HOME/.ssh/strato_ed25519" \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=8 \
+              -o ServerAliveInterval=10 \
+              -o ServerAliveCountMax=3 \
+              root@"$STRATO_HOST" 'echo RECOVERY_SSH_OK' >/tmp/recovery-ssh.out 2>&1; then
+              connected=1
+              break
+            fi
+            echo "Host not reachable yet (attempt $i/30); retrying in 15s..."
+            sleep 15
+          done
+
+          if [ "$connected" -ne 1 ]; then
+            echo "Production host did not become reachable during recovery window." >&2
+            exit 1
+          fi
+
+          ssh \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=12 \
+            -o ServerAliveInterval=10 \
+            -o ServerAliveCountMax=6 \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          echo "=== emergency recovery started ==="
+          uptime || true
+          free -m || true
+
+          # If the Docker daemon became unresponsive during the interrupted image
+          # build, restart only Docker. Named volumes and production data remain intact.
+          if ! timeout 15 docker info >/dev/null 2>&1; then
+            echo "Docker daemon is not responding; restarting Docker."
+            systemctl restart docker
+            sleep 12
+          fi
+
+          cd /opt/aplussolution
+          test -f .env
+          test -f docker-compose.yml
+
+          # Do NOT rebuild on the production VPS during recovery. Reuse the last
+          # available images so the gateway can come back with minimal resource use.
+          docker compose up -d --no-build db redis
+          docker compose up -d --no-build backend frontend
+          docker compose up -d --no-build celery celery-beat || true
+          docker compose up -d --no-build --force-recreate --no-deps caddy
+
+          backend_ready=0
+          for i in $(seq 1 40); do
+            if docker compose exec -T backend curl -fsS --max-time 5 http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
+              backend_ready=1
+              break
+            fi
+            sleep 3
+          done
+
+          if [ "$backend_ready" -ne 1 ]; then
+            docker compose ps -a >&2 || true
+            docker compose logs --no-color --tail=160 backend caddy frontend >&2 || true
+            exit 1
+          fi
+
+          curl -fsS --max-time 12 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/
+          docker compose ps
+          echo "=== emergency recovery completed ==="
+          REMOTE
+
+      - name: Verify public production
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 24); do
+            if curl -fsS --max-time 12 "https://$PRODUCTION_DOMAIN/health/" >/tmp/health.out; then
+              ok=1
+              cat /tmp/health.out
+              break
+            fi
+            echo "Public health check not ready yet (attempt $i/24); retrying in 10s..."
+            sleep 10
+          done
+          test "$ok" -eq 1
+
+      - name: Cleanup runner key
+        if: always()
+        shell: bash
+        run: rm -f "$HOME/.ssh/strato_ed25519" /tmp/health.out /tmp/recovery-ssh.out
