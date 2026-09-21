@@ -1,0 +1,593 @@
+/* Admin desktop polish — deliberately scoped to desktop admin only.
+   Mobile layouts and manager/client/worker roles are untouched. */
+@media (min-width: 901px) {
+  .mobile-first-app-shell-v1[data-role="admin"] {
+    --admin-desktop-navy: #06283f;
+    --admin-desktop-navy-2: #0a4059;
+    --admin-desktop-blue: #0c5e7c;
+    --admin-desktop-gold: #d7a62f;
+    --admin-desktop-bg: #f3f6f8;
+    --admin-desktop-card: #ffffff;
+    --admin-desktop-line: #dfe7eb;
+    --admin-desktop-ink: #17303f;
+    --admin-desktop-muted: #71808a;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app-content {
+    --background: var(--admin-desktop-bg) !important;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app {
+    grid-template-columns: 286px minmax(0, 1fr);
+    background:
+      radial-gradient(circle at 96% 7%, rgba(6, 40, 63, .065), transparent 30rem),
+      radial-gradient(circle at 16% 92%, rgba(215, 166, 47, .045), transparent 24rem),
+      linear-gradient(180deg, #f8fafb 0%, var(--admin-desktop-bg) 100%);
+  }
+
+  /* Premium desktop navigation */
+  .mobile-first-app-shell-v1[data-role="admin"] .app > aside {
+    padding: 24px 18px 22px;
+    border-right: 0 !important;
+    background:
+      radial-gradient(circle at 18% 0, rgba(255, 255, 255, .09), transparent 18rem),
+      linear-gradient(180deg, #05283d 0%, #07344a 52%, #0a4059 100%) !important;
+    box-shadow: 18px 0 48px rgba(4, 31, 45, .12) !important;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app > aside .menu-logo {
+    width: 190px;
+    height: 80px;
+    margin: 0 auto 20px;
+    padding: 0;
+    background-position: center !important;
+    color: #fff;
+    filter: drop-shadow(0 6px 14px rgba(0, 0, 0, .11));
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app > aside .user {
+    margin: 0 0 18px;
+    padding: 14px;
+    border: 1px solid rgba(255, 255, 255, .13);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, .085) !important;
+    color: #fff;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app > aside .user small {
+    margin-top: 2px;
+    color: rgba(230, 241, 246, .68) !important;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app > aside .avatar {
+    background: linear-gradient(145deg, #dce9ef, #ffffff) !important;
+    color: var(--admin-desktop-navy) !important;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, .12);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app > aside ion-list {
+    margin: 0 !important;
+    padding: 4px 0 8px !important;
+    border: 0 !important;
+    background: transparent !important;
+    --background: transparent !important;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app > aside ion-item {
+    width: 100%;
+    min-height: 46px;
+    margin: 4px 0;
+    overflow: hidden;
+    border-radius: 14px;
+    --background: transparent !important;
+    --background-hover: rgba(255, 255, 255, .075) !important;
+    --background-activated: rgba(255, 255, 255, .11) !important;
+    --background-focused: rgba(255, 255, 255, .08) !important;
+    --color: #dbe8ee !important;
+    --color-hover: #fff !important;
+    --border-color: transparent !important;
+    --inner-border-width: 0 !important;
+    --padding-start: 13px !important;
+    --inner-padding-end: 12px !important;
+    --min-height: 46px !important;
+    color: #dbe8ee !important;
+    opacity: 1 !important;
+    font-weight: 650;
+    transition: transform .18s ease, background .18s ease;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app > aside ion-item::part(native) {
+    min-height: 46px;
+    border: 0 !important;
+    border-radius: 14px;
+    background: transparent !important;
+    color: inherit !important;
+    box-shadow: none !important;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app > aside ion-item ion-label {
+    margin: 0 !important;
+    color: inherit !important;
+    opacity: 1 !important;
+    font-size: 13.5px !important;
+    font-weight: 650 !important;
+    letter-spacing: -.01em;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app > aside ion-item ion-icon {
+    margin-inline-end: 13px !important;
+    color: #9fbdca !important;
+    opacity: 1 !important;
+    font-size: 19px !important;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app > aside ion-item:hover {
+    --background: rgba(255, 255, 255, .075) !important;
+    --color: #fff !important;
+    color: #fff !important;
+    transform: translateX(2px);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app > aside ion-item.active {
+    --background: rgba(255, 255, 255, .13) !important;
+    --color: #fff !important;
+    color: #fff !important;
+    box-shadow:
+      inset 3px 0 0 var(--admin-desktop-gold),
+      0 8px 18px rgba(0, 0, 0, .10) !important;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app > aside ion-item.active::part(native) {
+    background: rgba(255, 255, 255, .13) !important;
+    color: #fff !important;
+    box-shadow: inset 3px 0 0 var(--admin-desktop-gold) !important;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app > aside ion-item.active ion-icon {
+    color: #f2d782 !important;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app > aside > ion-button {
+    width: 100%;
+    min-height: 42px;
+    margin: 10px 0 0;
+    --background: transparent !important;
+    --background-hover: rgba(255, 255, 255, .07) !important;
+    --box-shadow: none !important;
+    --color: #d6e4ea !important;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app > aside > ion-button ion-icon {
+    color: #a9c3ce !important;
+  }
+
+  /* Main desktop canvas */
+  .mobile-first-app-shell-v1[data-role="admin"] .app-main {
+    position: relative;
+    width: 100%;
+    max-width: none;
+    min-height: calc(100vh - 56px);
+    margin: 0;
+    padding: 32px clamp(34px, 4vw, 66px) 56px;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 98% 14%, rgba(6, 40, 63, .04), transparent 25rem),
+      transparent;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .app-main > .global-search-trigger,
+  .mobile-first-app-shell-v1[data-role="admin"] .app-main > .admin-home-v4,
+  .mobile-first-app-shell-v1[data-role="admin"]:not([data-view="schedule"]):not([data-view="time"]) .app-main > .title,
+  .mobile-first-app-shell-v1[data-role="admin"]:not([data-view="schedule"]):not([data-view="time"]) .app-main > .panel,
+  .mobile-first-app-shell-v1[data-role="admin"]:not([data-view="schedule"]):not([data-view="time"]) .app-main > .list-toolbar-v4,
+  .mobile-first-app-shell-v1[data-role="admin"]:not([data-view="schedule"]):not([data-view="time"]) .app-main > .columns,
+  .mobile-first-app-shell-v1[data-role="admin"]:not([data-view="schedule"]):not([data-view="time"]) .app-main > .profile-grid {
+    max-width: 1280px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .global-search-trigger {
+    min-height: 50px;
+    margin-bottom: 16px;
+    padding: 0 16px;
+    border: 1px solid #dce6eb;
+    border-radius: 17px;
+    background: rgba(255, 255, 255, .94);
+    color: #254657;
+    box-shadow: 0 9px 28px rgba(17, 39, 56, .045);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .global-search-trigger > ion-icon {
+    color: #0b5877;
+    opacity: .75;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .global-search-trigger span {
+    color: #7a8992;
+    opacity: 1;
+    font-size: 12.5px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"] .global-search-trigger kbd {
+    border-color: #dbe4e8;
+    background: #f6f9fa;
+    color: #526a77;
+    opacity: 1;
+  }
+
+  /* Dashboard */
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-home-v4 {
+    gap: 18px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-attention-hero {
+    position: relative;
+    overflow: hidden;
+    min-height: 210px;
+    align-items: center;
+    padding: 34px 36px;
+    border: 1px solid rgba(255, 255, 255, .13);
+    border-radius: 28px;
+    background:
+      radial-gradient(circle at 92% -8%, rgba(215, 166, 47, .28), transparent 18rem),
+      radial-gradient(circle at 72% 125%, rgba(48, 147, 181, .24), transparent 22rem),
+      linear-gradient(125deg, #05283d 0%, #08384f 58%, #0d5873 118%);
+    color: #fff;
+    box-shadow: 0 24px 54px rgba(5, 40, 61, .18);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-attention-hero::after {
+    content: "A+";
+    position: absolute;
+    right: 30px;
+    top: -42px;
+    color: rgba(255, 255, 255, .052);
+    font-size: 190px;
+    line-height: 1;
+    font-weight: 950;
+    letter-spacing: -12px;
+    pointer-events: none;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-attention-hero > div {
+    position: relative;
+    z-index: 1;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-attention-hero small {
+    color: #b9dbe7;
+    opacity: 1;
+    font-size: 10px;
+    letter-spacing: .15em;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-attention-hero h1 {
+    max-width: 780px;
+    margin: 8px 0 10px;
+    color: #fff;
+    font-size: clamp(34px, 3.7vw, 52px);
+    line-height: 1.02;
+    letter-spacing: -1.4px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-attention-hero p {
+    max-width: 830px;
+    color: #d4e5ec;
+    opacity: 1;
+    font-size: 13.5px;
+    line-height: 1.6;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-attention-hero ion-button {
+    position: relative;
+    z-index: 1;
+    min-height: 44px;
+    --border-radius: 13px;
+    --border-color: rgba(255, 255, 255, .58);
+    --background: #fff;
+    --color: var(--admin-desktop-navy);
+    --box-shadow: 0 11px 26px rgba(0, 0, 0, .13);
+    font-weight: 800;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-priority-section,
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-toolbar {
+    border: 1px solid var(--admin-desktop-line);
+    background: rgba(255, 255, 255, .97);
+    box-shadow: 0 12px 34px rgba(17, 39, 56, .05);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-priority-section {
+    padding: 20px;
+    border-radius: 24px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-priority-heading {
+    margin-bottom: 14px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-priority-heading small {
+    color: #0b5877;
+    opacity: 1;
+    font-size: 9px;
+    letter-spacing: .14em;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-priority-heading h2 {
+    margin-top: 4px;
+    color: var(--admin-desktop-ink);
+    font-size: 19px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-priority-heading > span {
+    color: #83919a;
+    opacity: 1;
+    font-size: 10.5px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-priority-actions {
+    gap: 10px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-priority-actions button {
+    min-height: 76px;
+    padding: 13px;
+    border: 1px solid #e2e9ed;
+    border-radius: 17px;
+    background: linear-gradient(145deg, #f8fbfc, #ffffff);
+    box-shadow: 0 5px 16px rgba(17, 39, 56, .025);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-priority-actions button:hover {
+    transform: translateY(-2px);
+    border-color: #d2e0e6;
+    box-shadow: 0 10px 24px rgba(17, 39, 56, .065);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-priority-actions button > ion-icon {
+    width: 34px;
+    height: 34px;
+    padding: 8px;
+    border-radius: 11px;
+    background: #eaf2f5;
+    color: #0b5877;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-priority-actions button > strong {
+    color: #173342;
+    font-size: 12px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-priority-actions button > small {
+    color: #7c8c95;
+    opacity: 1;
+    font-size: 9px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .admin-priority-index {
+    color: #8fa0a9;
+    opacity: .56;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-summary {
+    gap: 10px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-summary-card {
+    position: relative;
+    overflow: hidden;
+    min-height: 86px;
+    padding: 17px 18px;
+    border: 1px solid #e1e8ec;
+    border-radius: 19px;
+    background: #fff;
+    box-shadow: 0 7px 22px rgba(17, 39, 56, .035);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-summary-card::after {
+    content: "";
+    position: absolute;
+    right: -22px;
+    bottom: -28px;
+    width: 70px;
+    height: 70px;
+    border: 14px solid rgba(7, 54, 77, .035);
+    border-radius: 50%;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-summary-card small {
+    color: #72828c;
+    opacity: 1;
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-summary-card strong {
+    color: #17303f;
+    font-size: 27px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-summary-card.critical {
+    border-color: #f1c7c5;
+    background: linear-gradient(145deg, #fff7f6, #fff);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-summary-card.warning {
+    border-color: #f0d7aa;
+    background: linear-gradient(145deg, #fffaf2, #fff);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-toolbar {
+    padding: 14px;
+    border-radius: 21px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-categories {
+    gap: 6px;
+    padding-bottom: 11px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-categories button,
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .severity-switch button {
+    border-color: #dfe7eb;
+    background: #f9fbfc;
+    color: #496370;
+    font-size: 11px;
+    font-weight: 750;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-categories button.active,
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .severity-switch button.active {
+    border-color: transparent;
+    background: var(--admin-desktop-navy);
+    color: #fff;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-query {
+    min-height: 46px;
+    --background: #fafcfd;
+    --border-color: #dce5e9;
+    --border-radius: 13px;
+    --highlight-color-focused: #0b5877;
+    font-size: 12px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .critical-strip {
+    border-color: #f0c9c6;
+    border-radius: 18px;
+    background: linear-gradient(90deg, #fff5f4, #fff9f8);
+    box-shadow: 0 7px 18px rgba(150, 32, 24, .025);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-list {
+    gap: 8px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-item {
+    min-height: 82px;
+    padding: 15px 16px 15px 0;
+    border-color: #e2e9ed;
+    border-radius: 18px;
+    background: #fff;
+    box-shadow: 0 7px 20px rgba(17, 39, 56, .03);
+    transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-item:hover {
+    transform: translateY(-1px);
+    border-color: #d5e1e6;
+    box-shadow: 0 11px 26px rgba(17, 39, 56, .055);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-item-icon {
+    background: #edf4f6;
+    color: #0b5877;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-item-copy h3 {
+    color: #173342;
+    font-size: 14.5px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-item-copy p {
+    color: #72818a;
+    opacity: 1;
+    font-size: 11.5px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"][data-view="dashboard"] .attention-item > ion-button {
+    --border-radius: 11px;
+    font-size: 10.5px;
+    font-weight: 800;
+  }
+
+  /* Ordinary admin pages: give headings, filters and panels the same visual language.
+     Schedule and time tracking keep their purpose-built desktop layouts. */
+  .mobile-first-app-shell-v1[data-role="admin"]:not([data-view="dashboard"]):not([data-view="schedule"]):not([data-view="time"]) .app-main > .title {
+    position: relative;
+    overflow: hidden;
+    min-height: 108px;
+    margin-bottom: 15px;
+    padding: 23px 25px;
+    align-items: center;
+    border: 1px solid var(--admin-desktop-line);
+    border-radius: 23px;
+    background:
+      radial-gradient(circle at 94% 12%, rgba(215, 166, 47, .10), transparent 13rem),
+      linear-gradient(135deg, #fff 0%, #fbfdfe 64%, #f2f7f9 100%);
+    box-shadow: 0 13px 34px rgba(17, 39, 56, .05);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"]:not([data-view="dashboard"]):not([data-view="schedule"]):not([data-view="time"]) .app-main > .title::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 22px;
+    bottom: 22px;
+    width: 4px;
+    border-radius: 0 8px 8px 0;
+    background: linear-gradient(180deg, #0b5877, #d7a62f);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"]:not([data-view="dashboard"]):not([data-view="schedule"]):not([data-view="time"]) .app-main > .title h1 {
+    color: var(--admin-desktop-ink);
+    font-size: 29px;
+    letter-spacing: -.7px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"]:not([data-view="dashboard"]):not([data-view="schedule"]):not([data-view="time"]) .app-main > .title p {
+    color: var(--admin-desktop-muted);
+    font-size: 13px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"]:not([data-view="dashboard"]):not([data-view="schedule"]):not([data-view="time"]) .app-main > .title ion-button {
+    min-height: 42px;
+    margin: 0;
+    --border-radius: 12px;
+    --box-shadow: 0 8px 18px rgba(6, 40, 63, .08);
+    font-size: 11.5px;
+    font-weight: 800;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"]:not([data-view="dashboard"]):not([data-view="schedule"]):not([data-view="time"]) .list-toolbar-v4 {
+    padding: 10px;
+    border: 1px solid var(--admin-desktop-line);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, .95);
+    box-shadow: 0 8px 24px rgba(17, 39, 56, .04);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"]:not([data-view="dashboard"]):not([data-view="schedule"]):not([data-view="time"]) .list-toolbar-v4 ion-input,
+  .mobile-first-app-shell-v1[data-role="admin"]:not([data-view="dashboard"]):not([data-view="schedule"]):not([data-view="time"]) .list-toolbar-v4 ion-select {
+    min-height: 44px;
+    --background: #f8fafb;
+    --border-color: #dce5e9;
+    --border-radius: 12px;
+    --highlight-color-focused: #0b5877;
+    color: #183441;
+    font-size: 12px;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"]:not([data-view="dashboard"]):not([data-view="schedule"]):not([data-view="time"]) .panel {
+    border-color: var(--admin-desktop-line);
+    border-radius: 21px;
+    background: rgba(255, 255, 255, .97);
+    box-shadow: 0 11px 30px rgba(17, 39, 56, .045);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"]:not([data-view="dashboard"]):not([data-view="schedule"]):not([data-view="time"]) .panel > .row {
+    border-bottom-color: #edf1f3;
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"]:not([data-view="dashboard"]):not([data-view="schedule"]):not([data-view="time"]) .section-head h3 {
+    color: var(--admin-desktop-ink);
+  }
+
+  .mobile-first-app-shell-v1[data-role="admin"]:not([data-view="dashboard"]):not([data-view="schedule"]):not([data-view="time"]) .section-head p {
+    color: var(--admin-desktop-muted);
+  }
+}
