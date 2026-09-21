@@ -1,0 +1,116 @@
+name: Hot deploy frontend only
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-frontend-hotdeploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aplus-frontend-hotdeploy
+  cancel-in-progress: true
+
+env:
+  PRODUCTION_DOMAIN: app.aplus-solution.de
+
+jobs:
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build frontend on GitHub runner
+        working-directory: frontend
+        env:
+          VITE_API_URL: https://app.aplus-solution.de/api
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+          test -f dist/index.html
+
+      - name: Package frontend dist
+        run: |
+          set -euo pipefail
+          tar -C frontend/dist -czf /tmp/aplus-frontend-dist.tgz .
+
+      - name: Configure Strato SSH key
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Upload frontend bundle
+        run: |
+          set -euo pipefail
+          scp -q \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            /tmp/aplus-frontend-dist.tgz root@"$STRATO_HOST":/tmp/aplus-frontend-dist.tgz
+
+      - name: Replace live frontend files without rebuilding containers
+        run: |
+          set -euo pipefail
+          ssh \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=10 \
+            -o ServerAliveCountMax=6 \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+
+          cid=$(docker compose ps -q frontend)
+          test -n "$cid"
+          test "$(docker inspect -f '{{.State.Running}}' "$cid")" = "true"
+
+          rm -rf /tmp/aplus-frontend-dist
+          mkdir -p /tmp/aplus-frontend-dist
+          tar -xzf /tmp/aplus-frontend-dist.tgz -C /tmp/aplus-frontend-dist
+          rm -f /tmp/aplus-frontend-dist.tgz
+
+          docker exec "$cid" sh -lc 'rm -rf /usr/share/nginx/html/*'
+          docker cp /tmp/aplus-frontend-dist/. "$cid":/usr/share/nginx/html/
+          docker exec "$cid" nginx -t
+          docker exec "$cid" nginx -s reload
+
+          rm -rf /tmp/aplus-frontend-dist
+          curl -fsS --max-time 12 http://127.0.0.1/ >/dev/null || true
+          REMOTE
+
+      - name: Verify public production
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 18); do
+            if curl -fsS --max-time 12 "https://$PRODUCTION_DOMAIN/" >/tmp/home.html; then
+              ok=1
+              break
+            fi
+            sleep 8
+          done
+          test "$ok" -eq 1
+          grep -q '<div id="root"' /tmp/home.html
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519" /tmp/aplus-frontend-dist.tgz /tmp/home.html
