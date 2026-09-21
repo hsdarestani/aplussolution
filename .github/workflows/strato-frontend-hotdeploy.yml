@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'frontend/**'
       - '.github/workflows/strato-frontend-hotdeploy.yml'
   workflow_dispatch:
 
