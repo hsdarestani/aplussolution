@@ -3224,6 +3224,11 @@ export default function App() {
   if (!user) return <IonApp><Login done={setUser} /></IonApp>;
 
   const items = nav[user.role] || nav.worker;
+  // Desktop customer sidebar intentionally stays simpler than the mobile navigation.
+  // Keep `items` untouched so the existing mobile client portal is not changed.
+  const desktopItems = user.role === 'client'
+    ? items.filter(([key]) => key !== 'operations' && key !== 'contracts')
+    : items;
   const primaryViews: View[] = ['dashboard', 'schedule', 'time'];
   const mobilePrimaryItems = items.filter(([key]) => primaryViews.includes(key));
   const mobileMoreItems = items.filter(([key]) => !primaryViews.includes(key));
@@ -3308,7 +3313,7 @@ export default function App() {
                 </div>
               </div>
               <IonList lines="none">
-                {items.map((item) => (
+                {desktopItems.map((item) => (
                   <IonItem
                     button
                     detail={false}
