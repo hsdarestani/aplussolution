@@ -174,6 +174,10 @@ export default function ClientPortalV2() {
       setView(nextView);
       setHost(document.querySelector<HTMLElement>('.app-main'));
       document.body.classList.toggle('client-portal-v2-dashboard', nextView === 'dashboard');
+      Array.from(document.body.classList)
+        .filter((name) => name.startsWith('client-portal-view-'))
+        .forEach((name) => document.body.classList.remove(name));
+      document.body.classList.add(`client-portal-view-${nextView}`);
     };
     sync();
     const root = document.getElementById('root');
@@ -182,6 +186,9 @@ export default function ClientPortalV2() {
     return () => {
       observer.disconnect();
       document.body.classList.remove('client-portal-v2-active', 'client-portal-v2-dashboard', 'client-portal-read-only');
+      Array.from(document.body.classList)
+        .filter((name) => name.startsWith('client-portal-view-'))
+        .forEach((name) => document.body.classList.remove(name));
     };
   }, [user, access?.read_only]);
 
