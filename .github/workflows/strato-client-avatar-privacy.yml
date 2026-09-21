@@ -1,0 +1,92 @@
+name: Apply customer avatar privacy hotfix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-client-avatar-privacy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aplus-client-avatar-privacy
+  cancel-in-progress: true
+
+env:
+  PRODUCTION_DOMAIN: app.aplus-solution.de
+
+jobs:
+  patch-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure Strato SSH key
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Upload serializer privacy patch
+        run: |
+          set -euo pipefail
+          scp -q \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            backend/core/shift_api.py root@"$STRATO_HOST":/tmp/aplus-shift_api.py
+
+      - name: Apply patch and restart backend only
+        run: |
+          set -euo pipefail
+          ssh \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=10 \
+            -o ServerAliveCountMax=6 \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          test -f .env
+          test -f /tmp/aplus-shift_api.py
+
+          install -m 0644 /tmp/aplus-shift_api.py /opt/aplussolution/backend/core/shift_api.py
+          cid=$(docker compose ps -q backend)
+          test -n "$cid"
+          test "$(docker inspect -f '{{.State.Running}}' "$cid")" = "true"
+
+          docker cp /tmp/aplus-shift_api.py "$cid":/app/core/shift_api.py
+          rm -f /tmp/aplus-shift_api.py
+          docker restart "$cid" >/dev/null
+
+          ready=0
+          for i in $(seq 1 30); do
+            if docker exec "$cid" curl -fsS --max-time 5 http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 3
+          done
+          test "$ready" -eq 1
+          REMOTE
+
+      - name: Verify public production
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 12 --retry-delay 5 --max-time 15 "https://$PRODUCTION_DOMAIN/health/"
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"

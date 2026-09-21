@@ -105,7 +105,13 @@ class ShiftApiSerializer(serializers.ModelSerializer):
             slot for slot in self._schedule_slots(obj)
             if slot.status == ShiftSlot.Status.CLAIMED and slot.worker_id is not None
         ]
-        return [self._worker_payload(slot, include_avatar=True) for slot in slots]
+        request = self.context.get('request')
+        include_avatar = not (
+            request
+            and request.user.is_authenticated
+            and getattr(request.user, 'role', None) == User.Role.CLIENT
+        )
+        return [self._worker_payload(slot, include_avatar=include_avatar) for slot in slots]
 
     def get_slot_cards(self, obj):
         """Expose capacity as first-class cards without duplicating Shift rows.

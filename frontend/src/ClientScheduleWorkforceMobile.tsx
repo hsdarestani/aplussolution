@@ -108,9 +108,9 @@ function normalizeWorker(worker: any) {
 function WorkerAvatar({ worker }: { worker?: any }) {
   const normalized = normalizeWorker(worker);
   if (!normalized) return null;
+  // Customer portal privacy: never render employee profile photos.
   return <span className="wiw-worker-avatar-shell" aria-hidden="true">
     <span className="wiw-worker-avatar wiw-worker-avatar-fallback">{workerInitials(normalized.name)}</span>
-    {normalized.avatar ? <img className="wiw-worker-avatar wiw-worker-avatar-image" src={normalized.avatar} alt="" onError={(event) => event.currentTarget.remove()} /> : null}
   </span>;
 }
 function positionShortLabel(name?: string) {

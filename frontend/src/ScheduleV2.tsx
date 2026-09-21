@@ -128,7 +128,7 @@ export default function ScheduleV2({user}:{user:User}) {
     setRows(unpack(s)); setClients(sortClients(unpack(c).filter(item=>item.active!==false))); setLocations(unpack(l).filter((item:any)=>item.active!==false)); setPositions(unpack(p).filter((item:any)=>item.active!==false)); setWorkers(unpack(w).filter((item:any)=>item.active!==false&&!isSyntheticWorker(item)));
   }
   useEffect(()=>{void load();},[tab]);
-  const avatarUrls=useMemo(()=>Array.from(new Set(rows.flatMap((row:any)=>(row.assigned_workers||[]).map((worker:any)=>worker.avatar).filter(Boolean)))) as string[],[rows]);
+  const avatarUrls=useMemo(()=>user.role==='client'?[]:Array.from(new Set(rows.flatMap((row:any)=>(row.assigned_workers||[]).map((worker:any)=>worker.avatar).filter(Boolean)))) as string[],[rows,user.role]);
   useEffect(()=>{
     if(typeof Image==='undefined') return;
     avatarUrls.forEach(url=>{
@@ -288,7 +288,7 @@ export default function ScheduleV2({user}:{user:User}) {
     const limit=compact?4:8;
     return <div className={`sv2-worker-avatars ${compact?'compact':''}`} aria-label="Profilbilder der zugewiesenen Mitarbeiter">
       {assigned.slice(0,limit).map((worker:any)=>{
-        const content=<><span>{workerInitials(worker)}</span>{worker.avatar&&<img src={worker.avatar} alt="" loading="eager" decoding="async" onError={e=>{e.currentTarget.style.display='none';}}/>}</>;
+        const content=<><span>{workerInitials(worker)}</span>{user.role!=='client'&&worker.avatar&&<img src={worker.avatar} alt="" loading="eager" decoding="async" onError={e=>{e.currentTarget.style.display='none';}}/>}</>;
         return isManager(user)&&worker.id?<a className="sv2-worker-avatar" href={akteHref('worker',worker.id)} key={worker.id||worker.name} title={worker.name} aria-label={`${worker.name} · Akte öffnen`} onClick={event=>{event.preventDefault();event.stopPropagation();openAkte('worker',worker.id);}}>{content}</a>:<span className="sv2-worker-avatar" key={worker.id||worker.name} title={worker.name} aria-label={worker.name}>{content}</span>;
       })}
       {assigned.length>limit&&<span className="sv2-worker-more" title={`${assigned.length-limit} weitere Mitarbeiter`}>+{assigned.length-limit}</span>}
