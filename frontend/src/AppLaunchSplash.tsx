@@ -6,10 +6,32 @@ export function isSplashPreviewMode() {
   return new URLSearchParams(window.location.search).get('splash-preview') === '1';
 }
 
+const NATIVE_SPLASH_SESSION_KEY = 'aplus-native-launch-splash-shown-v1';
+let nativeSplashAllowedForDocument: boolean | null = null;
+
+function shouldShowNativeLaunchSplash(preview: boolean) {
+  if (preview) return true;
+  if (typeof window === 'undefined' || !Boolean((window as any).Capacitor?.isNativePlatform?.())) return false;
+  if (nativeSplashAllowedForDocument !== null) return nativeSplashAllowedForDocument;
+
+  try {
+    if (window.sessionStorage.getItem(NATIVE_SPLASH_SESSION_KEY) === '1') {
+      nativeSplashAllowedForDocument = false;
+      return false;
+    }
+    window.sessionStorage.setItem(NATIVE_SPLASH_SESSION_KEY, '1');
+  } catch {
+    // If sessionStorage is unavailable, keep the launch animation functional.
+  }
+
+  nativeSplashAllowedForDocument = true;
+  return true;
+}
+
 export default function AppLaunchSplash() {
   const [phase, setPhase] = useState<'show' | 'hide' | 'done'>('show');
   const preview = isSplashPreviewMode();
-  const native = preview || (typeof window !== 'undefined' && Boolean((window as any).Capacitor?.isNativePlatform?.()));
+  const native = shouldShowNativeLaunchSplash(preview);
 
   useEffect(() => {
     if (!native) {
