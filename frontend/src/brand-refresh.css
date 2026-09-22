@@ -59,6 +59,13 @@ body {
   font-size: 0 !important;
 }
 
+@media (max-width: 900px) {
+  .mobile-brand {
+    transform: scale(1.08);
+    transform-origin: left center;
+  }
+}
+
 .mobile-brand > * {
   opacity: 0 !important;
 }
