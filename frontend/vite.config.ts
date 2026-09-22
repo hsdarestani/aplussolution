@@ -218,11 +218,12 @@ export default defineConfig({
     productionUiPolish(),
     react(),
     VitePWA({
-      // Temporarily retire the service worker. Existing mobile clients can keep an
-      // old Workbox navigation fallback alive and serve the SPA for /api/oauth
-      // navigations. selfDestroying publishes a replacement worker that removes
-      // the old registration/caches and reloads controlled clients.
-      selfDestroying: true,
+      // Keep the web manifest, but do not publish the plugin's self-destroying
+      // worker at /sw.js: that worker navigates controlled clients during
+      // retirement, which can reload an active iOS WebView. Existing /sw.js
+      // registrations are retired by public/sw.js without navigating clients.
+      filename: 'service-worker-retired.js',
+      selfDestroying: false,
       injectRegister: false,
       includeAssets: ['favicon.svg'],
       manifest: {
