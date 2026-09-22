@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { setupIonicReact } from '@ionic/react';
+import { Capacitor } from '@capacitor/core';
 import '@ionic/react/css/core.css';
 import '@ionic/react/css/normalize.css';
 import '@ionic/react/css/structure.css';
@@ -191,9 +192,10 @@ async function retireLegacyPwa() {
       await Promise.all(keys.map((key) => caches.delete(key)));
     }
 
-    // unregister() does not release the controller from the current page. Reload
-    // exactly once after clearing caches so the next navigation is network-only.
-    if ((registrations.length > 0 || hadController) && sessionStorage.getItem('legacy-sw-cleanup-reload') !== '1') {
+    // A browser page may reload once to release an old controller. Never force
+    // that reload inside the native Capacitor WebView: on iOS it looks like an
+    // unexpected app restart and replays all document-level startup work.
+    if (!Capacitor.isNativePlatform() && (registrations.length > 0 || hadController) && sessionStorage.getItem('legacy-sw-cleanup-reload') !== '1') {
       sessionStorage.setItem('legacy-sw-cleanup-reload', '1');
       window.location.reload();
       return true;
