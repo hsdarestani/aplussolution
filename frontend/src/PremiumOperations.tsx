@@ -114,7 +114,6 @@ export default function PremiumOperations({ user }: { user: User }) {
         <SwitchControl label="Zeitzonenumschaltung" description="Alternative Zeitzonen in der Planung verfügbar machen." checked={!!policy.timezone_toggle_enabled} onChange={checked=>setPolicy({...policy,timezone_toggle_enabled:checked})}/>
       </div>
       <div className="premium-rule-grid">
-        <NumberControl label="Ruhezeit zwischen Schichten am selben Tag" suffix="Std." value={policy.min_hours_same_day} onChange={value=>setPolicy({...policy,min_hours_same_day:value})}/>
         <NumberControl label="Ruhezeit zwischen Tagen" suffix="Std." value={policy.min_hours_between_days} onChange={value=>setPolicy({...policy,min_hours_between_days:value})}/>
         <NumberControl label="Maximale Stunden pro Tag" suffix="Std." value={policy.max_hours_per_day} onChange={value=>setPolicy({...policy,max_hours_per_day:value})}/>
         <NumberControl label="Maximale Stunden pro Woche" suffix="Std." value={policy.max_hours_per_week} onChange={value=>setPolicy({...policy,max_hours_per_week:value})}/>
