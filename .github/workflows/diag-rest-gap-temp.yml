@@ -1,0 +1,124 @@
+name: Temporary production rest-gap diagnostic
+
+on:
+  push:
+    branches: [diag-rest-gap-20260925]
+    paths:
+      - '.github/workflows/diag-rest-gap-temp.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Inspect policy and adjacent shifts safely
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          from django.utils import timezone
+          from core.models import Shift
+          from core.shift_slots import ShiftSlot
+          from core.premium_services import get_policy, violations
+
+          berlin = ZoneInfo("Europe/Berlin")
+          p = get_policy()
+          print("POLICY same_day=%s between_days=%s multiple=%s" % (
+              p.min_hours_same_day, p.min_hours_between_days, p.allow_multiple_shifts_per_day
+          ))
+
+          start = datetime(2026, 9, 25, 0, 0, tzinfo=berlin).astimezone(ZoneInfo("UTC"))
+          end = datetime(2026, 9, 26, 0, 0, tzinfo=berlin).astimezone(ZoneInfo("UTC"))
+          day = list(Shift.objects.filter(starts_at__gte=start, starts_at__lt=end)
+                     .select_related("client","location","position")
+                     .order_by("starts_at"))
+
+          def local_hm(dt):
+              return timezone.localtime(dt, berlin).strftime("%Y-%m-%d %H:%M:%S")
+
+          morning = [s for s in day
+                     if timezone.localtime(s.starts_at, berlin).strftime("%H:%M") == "07:30"
+                     and timezone.localtime(s.ends_at, berlin).strftime("%H:%M") == "14:00"
+                     and "stadthaus" in (s.client.name or "").lower()]
+          target = [s for s in day
+                    if timezone.localtime(s.starts_at, berlin).strftime("%H:%M") == "14:30"
+                    and timezone.localtime(s.ends_at, berlin).strftime("%H:%M") == "22:00"
+                    and "höfel" in (s.client.name or "").lower()]
+
+          print("MATCH morning=%d target=%d" % (len(morning), len(target)))
+          if not morning or not target:
+              for s in day:
+                  print("DAYSHIFT %s -> %s client=%s pos=%s loc=%s" % (
+                      local_hm(s.starts_at), local_hm(s.ends_at),
+                      s.client.name, s.position.name, s.location.name
+                  ))
+              raise SystemExit(0)
+
+          workers = []
+          for s in morning:
+              for slot in ShiftSlot.objects.filter(shift=s, status=ShiftSlot.Status.CLAIMED, worker__isnull=False).select_related("worker"):
+                  if slot.worker_id not in [w.id for w in workers]:
+                      workers.append(slot.worker)
+          print("MORNING claimed_workers=%d" % len(workers))
+
+          t = target[0]
+          for index, worker in enumerate(workers, start=1):
+              print("WORKER %d violations=%s" % (index, ",".join(violations(worker, t)) or "none"))
+              slots = (ShiftSlot.objects.filter(worker=worker, status=ShiftSlot.Status.CLAIMED)
+                       .select_related("shift__client","shift__location","shift__position")
+                       .order_by("shift__starts_at"))
+              for slot in slots:
+                  s = slot.shift
+                  local_start = timezone.localtime(s.starts_at, berlin)
+                  if local_start.date().isoformat() not in {"2026-09-24","2026-09-25","2026-09-26"}:
+                      continue
+                  if s.id == t.id:
+                      marker = " TARGET"
+                  elif s in morning:
+                      marker = " MORNING"
+                  else:
+                      marker = ""
+                  print("ADJ%s %s -> %s client=%s pos=%s" % (
+                      marker, local_hm(s.starts_at), local_hm(s.ends_at),
+                      s.client.name, s.position.name
+                  ))
+                  if s.ends_at <= t.starts_at:
+                      gap = (t.starts_at - s.ends_at).total_seconds()/3600
+                      same = s.ends_at.date() == t.starts_at.date()
+                      req = p.min_hours_same_day if same else p.min_hours_between_days
+                      print("GAP before target=%.6f required=%s same_day=%s" % (gap, req, same))
+                  elif t.ends_at <= s.starts_at:
+                      gap = (s.starts_at - t.ends_at).total_seconds()/3600
+                      same = t.ends_at.date() == s.starts_at.date()
+                      req = p.min_hours_same_day if same else p.min_hours_between_days
+                      print("GAP after target=%.6f required=%s same_day=%s" % (gap, req, same))
+          PY
+          REMOTE
+
+      - name: Cleanup key
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
