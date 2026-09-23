@@ -1,0 +1,68 @@
+name: Temporary PDF OpenShift diagnostic
+
+on:
+  push:
+    branches: [diag-pdf-openshift-20261006]
+    paths:
+      - '.github/workflows/diag-pdf-openshift-temp.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Inspect Spenerhaus HK capacity on 2026-10-06
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          from django.utils import timezone
+          from core.models import Shift
+          from core.shift_slots import ShiftSlot
+
+          berlin=ZoneInfo("Europe/Berlin")
+          start=datetime(2026,10,6,0,0,tzinfo=berlin).astimezone(ZoneInfo("UTC"))
+          end=datetime(2026,10,7,0,0,tzinfo=berlin).astimezone(ZoneInfo("UTC"))
+          qs=(Shift.objects.filter(starts_at__gte=start,starts_at__lt=end)
+              .exclude(status=Shift.Status.CANCELLED)
+              .select_related("client","location","position")
+              .order_by("starts_at","id"))
+          for s in qs:
+              if "spenerhaus" not in ((s.location.name or "")+" "+(s.client.name or "")).lower():
+                  continue
+              if "house" not in (s.position.name or "").lower() and "hk" not in (s.position.name or "").lower():
+                  continue
+              slots=list(ShiftSlot.objects.filter(shift=s).order_by("created_at"))
+              open_count=sum(1 for x in slots if x.status==ShiftSlot.Status.OPEN and not x.worker_id)
+              claimed_count=sum(1 for x in slots if x.status==ShiftSlot.Status.CLAIMED and x.worker_id)
+              print("SHIFT",s.id,
+                    timezone.localtime(s.starts_at,berlin).strftime("%H:%M"),
+                    timezone.localtime(s.ends_at,berlin).strftime("%H:%M"),
+                    "required",s.required_count,
+                    "status",s.status,
+                    "open_slots",open_count,
+                    "claimed_slots",claimed_count,
+                    "slot_total",len(slots))
+          PY
+          REMOTE
