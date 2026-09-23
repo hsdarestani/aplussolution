@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import time
+from datetime import timedelta
 from typing import Any
 
 import httpx
@@ -12,7 +13,7 @@ from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import service_account
 
 from .models import Notification
-from .notification_settings import render_push_notification
+from .notification_settings import notification_rule_key, render_push_notification
 from .push_models import PushDelivery, PushDevice
 
 FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging'
@@ -20,6 +21,56 @@ DEFAULT_BUNDLE_ID = 'de.aplussolution.workforce'
 ANDROID_NOTIFICATION_CHANNEL_ID = 'aplus_updates_signature_v1'
 ANDROID_NOTIFICATION_SOUND = 'solution_signature'
 ANDROID_NOTIFICATION_ICON = 'ic_stat_aplus'
+PUSH_AGGREGATION_WINDOW_SECONDS = max(5, int(os.getenv('PUSH_AGGREGATION_WINDOW_SECONDS', '15')))
+AGGREGATABLE_PUSH_RULES = {
+    'open_shift',
+    'admin_open_shift',
+    'shift_assignment',
+    'shift_updated',
+    'shift_deleted',
+    'shift_confirmation',
+    'shift_24h_reminder',
+    'attendance_status',
+    'contract',
+}
+AGGREGATE_PUSH_COPY = {
+    'open_shift': (
+        '{count} neue OpenShifts verfügbar',
+        '{count} neue Schichten wurden veröffentlicht. Für Details bitte die App öffnen.',
+    ),
+    'admin_open_shift': (
+        '{count} OpenShifts veröffentlicht',
+        '{count} Schichten wurden veröffentlicht. Details findest du in der App.',
+    ),
+    'shift_assignment': (
+        '{count} neue Schichten zugeteilt',
+        'Dir wurden {count} Schichten zugeteilt. Für Details bitte die App öffnen.',
+    ),
+    'shift_updated': (
+        '{count} Schichten aktualisiert',
+        '{count} deiner Schichten wurden aktualisiert. Details findest du in der App.',
+    ),
+    'shift_deleted': (
+        '{count} Schichten entfernt',
+        '{count} Schichten wurden aus deinem Dienstplan entfernt. Details findest du in der App.',
+    ),
+    'shift_confirmation': (
+        '{count} Schichten zu bestätigen',
+        'Für {count} Schichten ist eine Bestätigung erforderlich. Details findest du in der App.',
+    ),
+    'shift_24h_reminder': (
+        '{count} Einsätze beginnen morgen',
+        'Du hast morgen {count} geplante Einsätze. Details findest du in der App.',
+    ),
+    'attendance_status': (
+        '{count} neue Zeiterfassungsereignisse',
+        '{count} Check-in/Check-out-Ereignisse wurden erfasst. Details findest du in der App.',
+    ),
+    'contract': (
+        '{count} neue Vertragsereignisse',
+        '{count} Vertragsereignisse benötigen Aufmerksamkeit. Details findest du in der App.',
+    ),
+}
 _FCM_CACHE: dict[str, Any] = {'token': '', 'expires_at': 0.0}
 _APNS_CACHE: dict[str, Any] = {'token': '', 'expires_at': 0.0, 'key_id': '', 'team_id': ''}
 
@@ -208,9 +259,13 @@ def _send_ios(
     return False, f'APNs {response.status_code}: {reason}', invalid
 
 
-def deliver_notification(notification: Notification) -> dict[str, int]:
+def deliver_notification(notification: Notification, *, title_override: str | None = None, body_override: str | None = None) -> dict[str, int]:
     result = {'sent': 0, 'failed': 0, 'deactivated': 0, 'skipped': 0}
     enabled, title, body, _rule_key = render_push_notification(notification)
+    if title_override is not None:
+        title = str(title_override)[:240]
+    if body_override is not None:
+        body = str(body_override)[:4000]
     devices = PushDevice.objects.filter(user=notification.user, active=True).order_by('-last_seen_at')
     if not enabled:
         result['skipped'] = devices.count()
@@ -266,9 +321,79 @@ def deliver_notification(notification: Notification) -> dict[str, int]:
     return result
 
 
+def should_aggregate_push(notification: Notification) -> bool:
+    return notification_rule_key(notification) in AGGREGATABLE_PUSH_RULES
+
+
+def _same_rule_notifications(user_id, rule_key: str, start, end, limit: int = 250) -> list[Notification]:
+    rows = (
+        Notification.objects.filter(user_id=user_id, created_at__gte=start, created_at__lte=end)
+        .select_related('user')
+        .order_by('-created_at')[:limit]
+    )
+    return [item for item in rows if notification_rule_key(item) == rule_key]
+
+
+def _burst_for_notification(notification: Notification, rule_key: str) -> list[Notification]:
+    window = timedelta(seconds=PUSH_AGGREGATION_WINDOW_SECONDS)
+    rows = _same_rule_notifications(
+        notification.user_id,
+        rule_key,
+        notification.created_at - (window * 250),
+        notification.created_at,
+    )
+    burst: list[Notification] = []
+    cursor = notification.created_at
+    for item in rows:
+        if cursor - item.created_at > window:
+            break
+        burst.append(item)
+        cursor = item.created_at
+    return burst
+
+
+def _aggregate_copy(rule_key: str, count: int) -> tuple[str, str]:
+    title_template, body_template = AGGREGATE_PUSH_COPY.get(
+        rule_key,
+        ('{count} neue Benachrichtigungen', '{count} neue Ereignisse. Für Details bitte die App öffnen.'),
+    )
+    return title_template.format(count=count), body_template.format(count=count)
+
+
 @shared_task
 def send_notification_push(notification_id: str):
     notification = Notification.objects.select_related('user').filter(pk=notification_id).first()
     if not notification:
         return {'missing': 1}
     return deliver_notification(notification)
+
+
+@shared_task
+def send_coalesced_notification_push(notification_id: str):
+    notification = Notification.objects.select_related('user').filter(pk=notification_id).first()
+    if not notification:
+        return {'missing': 1}
+
+    enabled, _title, _body, rule_key = render_push_notification(notification)
+    if not enabled:
+        return {'skipped': 1}
+    if rule_key not in AGGREGATABLE_PUSH_RULES:
+        return deliver_notification(notification)
+
+    window = timedelta(seconds=PUSH_AGGREGATION_WINDOW_SECONDS)
+    newer = _same_rule_notifications(
+        notification.user_id,
+        rule_key,
+        notification.created_at,
+        notification.created_at + window,
+    )
+    if any(item.id != notification.id and item.created_at > notification.created_at for item in newer):
+        return {'coalesced': 1, 'sent': 0}
+
+    burst = _burst_for_notification(notification, rule_key)
+    if len(burst) <= 1:
+        return deliver_notification(notification)
+
+    title, body = _aggregate_copy(rule_key, len(burst))
+    result = deliver_notification(notification, title_override=title, body_override=body)
+    return {**result, 'coalesced': len(burst)}
