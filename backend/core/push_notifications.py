@@ -30,6 +30,8 @@ AGGREGATABLE_PUSH_RULES = {
     'shift_deleted',
     'shift_confirmation',
     'shift_24h_reminder',
+    'time_report_prompt',
+    'shift_claimed',
     'attendance_status',
     'contract',
 }
@@ -61,6 +63,14 @@ AGGREGATE_PUSH_COPY = {
     'shift_24h_reminder': (
         '{count} Einsätze beginnen morgen',
         'Du hast morgen {count} geplante Einsätze. Details findest du in der App.',
+    ),
+    'time_report_prompt': (
+        'Arbeitszeiten für {count} Schichten eintragen',
+        'Für {count} Schichten fehlen noch die tatsächlichen Arbeitszeiten. Details findest du in der App.',
+    ),
+    'shift_claimed': (
+        '{count} OpenShift-Übernahmen',
+        '{count} OpenShift-Übernahmen wurden erfasst. Details findest du in der App.',
     ),
     'attendance_status': (
         '{count} neue Zeiterfassungsereignisse',
