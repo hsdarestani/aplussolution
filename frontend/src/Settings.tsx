@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { IonButton, IonIcon, IonInput, IonModal, IonSelect, IonSelectOption, IonTextarea, IonToast } from '@ionic/react';
 import { addOutline, locationOutline, trashOutline } from 'ionicons/icons';
 import { api, User } from './api';
@@ -14,6 +15,8 @@ export default function Settings({user}:{user:User}){
   const [modal,setModal]=useState(''),[busy,setBusy]=useState(false),[toast,setToast]=useState('');
   const [locationForm,setLocationForm]=useState<any>({geofence_radius_m:250}),[positionForm,setPositionForm]=useState<any>({color:'#155eef'});
   const [csvFile,setCsvFile]=useState<File>(),[csvType,setCsvType]=useState('workers');
+  const [policy,setPolicy]=useState<any>();
+  const webOnly=!Capacitor.isNativePlatform();
 
   async function load(){
     const [c,l,p]=await Promise.all([api('clients/?ordering=name'),api('locations/'),api('positions/')]);
@@ -22,6 +25,10 @@ export default function Settings({user}:{user:User}){
     setPositions(unpack(p).filter((item:any)=>item.active!==false));
   }
   useEffect(()=>{void load();},[]);
+  useEffect(()=>{
+    if(!webOnly||!['admin','manager'].includes(user.role))return;
+    api('premium/scheduling-policy/').then(setPolicy).catch((e:any)=>setToast(e.message));
+  },[user.role,webOnly]);
 
   async function submit(path:string,payload:any,done:()=>void){
     setBusy(true);try{const finalPayload=path==='locations/'?await enrichLocationPayload(payload):payload;await api(path,{method:'POST',body:JSON.stringify(finalPayload)});done();setModal('');await load();setToast('Einstellung wurde gespeichert.');}catch(e:any){setToast(e.message);}finally{setBusy(false);}
@@ -34,9 +41,41 @@ export default function Settings({user}:{user:User}){
     if(!csvFile)return;setBusy(true);const form=new FormData();form.append('file',csvFile);
     try{const result:any=await api(`${csvType}/import_csv/`,{method:'POST',body:form});setToast(`${result.created} Datensätze importiert. ${result.errors?.length||0} Fehler.`);setModal('');setCsvFile(undefined);await load();}catch(e:any){setToast(e.message);}finally{setBusy(false);}
   }
+  async function saveSameDayRules(){
+    if(!policy)return;
+    setBusy(true);
+    try{
+      const saved:any=await api('premium/scheduling-policy/',{method:'PATCH',body:JSON.stringify({
+        min_hours_same_day:policy.min_hours_same_day,
+        allow_multiple_shifts_per_day:!!policy.allow_multiple_shifts_per_day,
+      })});
+      setPolicy(saved);setToast('Planungsregeln wurden gespeichert.');
+    }catch(e:any){setToast(e.message);}finally{setBusy(false);}
+  }
 
   return <>
     <div className="title"><div><h1>Einstellungen</h1><p>Stammdaten, Portalzugänge und administrative Imports.</p></div><IonButton fill="outline" onClick={()=>setModal('csv')}>CSV-Import</IonButton></div>
+    {webOnly&&policy&&['admin','manager'].includes(user.role)&&<section className="panel" style={{marginBottom:18}}>
+      <div className="section-head">
+        <div>
+          <h3>Planungsregeln</h3>
+          <p>Regeln für mehrere Einsätze eines Mitarbeiters am selben Kalendertag.</p>
+        </div>
+        <IonButton size="small" disabled={busy} onClick={()=>void saveSameDayRules()}>Speichern</IonButton>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:14,alignItems:'end'}}>
+        <label>
+          <span style={{display:'block',fontSize:12,fontWeight:700,marginBottom:6}}>Ruhezeit zwischen Schichten am selben Tag</span>
+          <IonInput fill="outline" type="number" min="0" step="0.5" value={policy.min_hours_same_day} onIonInput={e=>setPolicy({...policy,min_hours_same_day:value(e)})}>
+            <div slot="end" style={{paddingRight:10,color:'#667085'}}>Std.</div>
+          </IonInput>
+        </label>
+        <label style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:16,minHeight:56,padding:'0 14px',border:'1px solid #d0d5dd',borderRadius:12}}>
+          <div><b style={{display:'block'}}>Mehrere Schichten pro Tag</b><small style={{color:'#667085'}}>Mehr als einen Einsatz pro Mitarbeiter erlauben.</small></div>
+          <input type="checkbox" checked={!!policy.allow_multiple_shifts_per_day} onChange={e=>setPolicy({...policy,allow_multiple_shifts_per_day:e.currentTarget.checked})}/>
+        </label>
+      </div>
+    </section>}
     <PortalAccessPanel />
     <NotificationPushSettings role={user.role} />
     <div className="columns master-data">
