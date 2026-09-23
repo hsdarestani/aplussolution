@@ -25,6 +25,7 @@ PUSH_RULE_CATALOG = (
     PushRuleDefinition('shift_deleted', 'Schicht gelöscht'),
     PushRuleDefinition('shift_manual_reminder', 'Manuelle Schichterinnerung'),
     PushRuleDefinition('shift_24h_reminder', '24-Stunden-Schichterinnerung'),
+    PushRuleDefinition('time_report_prompt', 'Arbeitszeit nach Schicht eintragen'),
     PushRuleDefinition('shift_claimed', 'OpenShift übernommen'),
     PushRuleDefinition('shift_confirmation', 'Schichtbestätigung angefordert'),
     PushRuleDefinition('shift_confirmation_response', 'Schichtbestätigung beantwortet', enabled=False),
@@ -78,7 +79,9 @@ def notification_rule_key(notification) -> str:
         return 'shift_updated'
     if kind.startswith('shift-24h-'):
         return 'shift_24h_reminder'
-    if kind.startswith('shift-claimed-'):
+    if kind.startswith('shift-time-report-'):
+        return 'time_report_prompt'
+    if kind.startswith(('shift-claimed-', 'admin-direct-shift-claim-')):
         return 'shift_claimed'
     if kind.startswith(('shift-confirmation-response-', 'shift-confirmation-admin-')):
         return 'shift_confirmation_response'
@@ -162,6 +165,10 @@ COPY_EXAMPLES = {
     "shift_24h_reminder": [
         "Erinnerung:",
         "Dein Einsatz beginnt morgen um [Beginn] Uhr"
+    ],
+    "time_report_prompt": [
+        "Arbeitszeit eintragen",
+        "Bitte tatsächliche Beginn- und Endzeit für deine Schicht ergänzen"
     ],
     "shift_claimed": [
         "Schicht übernommen am",
