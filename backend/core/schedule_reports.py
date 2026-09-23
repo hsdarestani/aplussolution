@@ -132,8 +132,17 @@ def _report_rows(filters):
             seen.add(str(shift.worker_id))
 
         # Historical/direct assignments can have fewer active slot rows than the
-        # requested capacity. Treat the remaining capacity as OpenShift as well.
-        has_open_capacity = has_open_slot or max(1, int(shift.required_count or 1)) > len(seen)
+        # requested capacity. Count every free place, not just whether a shift has
+        # any free capacity. A shift with required_count=2 and two empty slots must
+        # therefore render two OpenShift entries in the PDF.
+        explicit_open_count = sum(
+            1
+            for slot in active_slots
+            if slot.status == ShiftSlot.Status.OPEN and not slot.worker_id
+        )
+        requested_capacity = max(1, int(shift.required_count or 1))
+        inferred_open_count = max(0, requested_capacity - len(seen))
+        open_capacity_count = max(explicit_open_count, inferred_open_count)
 
         if selected_workers and not selected_workers.intersection(seen):
             continue
@@ -142,10 +151,11 @@ def _report_rows(filters):
 
         worker_labels = [_worker_label(worker) for worker in workers]
         # "Alle Mitarbeiter" is represented by an empty worker filter. In that
-        # mode the PDF must also contain open capacity, including partially
-        # staffed shifts. With explicit employee filters OpenShift stays hidden.
-        if not selected_workers and has_open_capacity:
-            worker_labels.append('OpenShift')
+        # mode the PDF must contain one OpenShift entry for every free place,
+        # including partially staffed shifts. With explicit employee filters
+        # OpenShift stays hidden.
+        if not selected_workers and open_capacity_count:
+            worker_labels.extend(['OpenShift'] * open_capacity_count)
 
         start = timezone.localtime(shift.starts_at)
         end = timezone.localtime(shift.ends_at)
