@@ -4,7 +4,13 @@ from django.dispatch import receiver
 
 from .models import Notification
 from .notification_settings import render_push_notification
-from .push_notifications import push_provider_configured, send_notification_push
+from .push_notifications import (
+    PUSH_AGGREGATION_WINDOW_SECONDS,
+    push_provider_configured,
+    send_coalesced_notification_push,
+    send_notification_push,
+    should_aggregate_push,
+)
 
 
 def native_push_suppressed(instance: Notification) -> bool:
@@ -36,10 +42,17 @@ def dispatch_native_push(sender, instance: Notification, created: bool, **kwargs
         return
 
     notification_id = str(instance.id)
+    aggregate = should_aggregate_push(instance)
 
     def enqueue():
         try:
-            send_notification_push.delay(notification_id)
+            if aggregate:
+                send_coalesced_notification_push.apply_async(
+                    args=[notification_id],
+                    countdown=PUSH_AGGREGATION_WINDOW_SECONDS,
+                )
+            else:
+                send_notification_push.delay(notification_id)
         except Exception:
             # Native push is an enhancement. A temporary broker/provider issue must
             # never roll back the operational action that created the notification.
