@@ -30,7 +30,7 @@ def _future_shift(company, location, push_position, status=Shift.Status.DRAFT):
 @pytest.mark.django_db
 def test_direct_publish_notifies_open_shift_workers(auth_admin, company, location, push_position):
     shift = _future_shift(company, location, push_position)
-    with patch('core.shift_views.notify_open_shift_available') as notify:
+    with patch('core.shift_views._notify_open_shift_available_async') as notify:
         response = auth_admin.post(f'/api/shifts/{shift.id}/publish/', {}, format='json')
     assert response.status_code == 200
     notify.assert_called_once()
@@ -50,7 +50,7 @@ def test_create_published_shift_notifies_open_shift_workers(auth_admin, company,
         'status': Shift.Status.PUBLISHED,
         'required_count': 1,
     }
-    with patch('core.shift_views.notify_open_shift_available') as notify:
+    with patch('core.shift_views._notify_open_shift_available_async') as notify:
         response = auth_admin.post('/api/shifts/', payload, format='json')
     assert response.status_code == 201, response.data
     notify.assert_called_once()
