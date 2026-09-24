@@ -501,11 +501,10 @@ function TimeFrameWheel({ start, end, onChange }: { start: number; end: number; 
   const endMinute = ((end % 1440) + 1440) % 1440;
 
   const selectEnd = (next: number) => {
-    const currentDayOffset = Math.max(0, Math.floor(end / 1440));
-    let nextAbsolute = next + currentDayOffset * 1440;
+    let nextAbsolute = next;
     // An earlier visible end time means the following day. Equal times stay
     // invalid instead of silently turning into a 24-hour shift.
-    if (nextAbsolute < start && currentDayOffset === 0) nextAbsolute += 1440;
+    if (nextAbsolute < start) nextAbsolute += 1440;
     onChange(start, nextAbsolute);
   };
 
