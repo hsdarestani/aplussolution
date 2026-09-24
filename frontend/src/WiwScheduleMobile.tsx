@@ -494,17 +494,26 @@ function WheelColumn({ items, value, onChange }: { items: Array<{ value: number;
 }
 
 function TimeFrameWheel({ start, end, onChange }: { start: number; end: number; onChange: (start: number, end: number) => void }) {
-  const starts = useMemo(() => Array.from({ length: 96 }, (_, index) => ({ value: index * 15, label: formatMinute(index * 15) })), []);
-  const ends = useMemo(() => Array.from({ length: 96 }, (_, index) => {
-    const value = start + (index + 1) * 15;
-    return { value, label: `${value >= 1440 ? '~' : ''}${formatMinute(value)}` };
-  }), [start]);
-  const safeEnd = ends.some((item) => item.value === end) ? end : Math.min(start + 360, start + 1440);
+  const times = useMemo(() => Array.from({ length: 96 }, (_, index) => ({
+    value: index * 15,
+    label: formatMinute(index * 15),
+  })), []);
+  const endMinute = ((end % 1440) + 1440) % 1440;
+
+  const selectEnd = (next: number) => {
+    const currentDayOffset = Math.max(0, Math.floor(end / 1440));
+    let nextAbsolute = next + currentDayOffset * 1440;
+    // An earlier visible end time means the following day. Equal times stay
+    // invalid instead of silently turning into a 24-hour shift.
+    if (nextAbsolute < start && currentDayOffset === 0) nextAbsolute += 1440;
+    onChange(start, nextAbsolute);
+  };
+
   return (
     <div className="wiw-time-wheel" data-testid="wiw-time-wheel">
       <div className="wiw-wheel-highlight" />
-      <WheelColumn items={starts} value={start} onChange={(next) => onChange(next, next + 360)} />
-      <WheelColumn items={ends} value={safeEnd} onChange={(next) => onChange(start, next)} />
+      <WheelColumn items={times} value={start} onChange={(next) => onChange(next, end)} />
+      <WheelColumn items={times} value={endMinute} onChange={selectEnd} />
     </div>
   );
 }
@@ -1153,6 +1162,10 @@ export default function WiwScheduleMobile() {
       setToast('Bitte Kunde, Zeit, Position und Jobstandort auswählen.');
       return;
     }
+    if (Number(form.endAbsolute) <= Number(form.startMinute)) {
+      setToast('Das Ende muss nach dem Beginn liegen.');
+      return;
+    }
     setBusy(true);
     let createdShiftId = '';
     try {
@@ -1429,7 +1442,7 @@ export default function WiwScheduleMobile() {
       <button type="button" className="wiw-create-fab" aria-label="Schicht anlegen" onClick={() => openCreate(anchor)}>+</button>
 
       {formOpen ? <div ref={formScreenRef} className="wiw-shift-form-screen" data-testid="wiw-shift-form">
-        <header className="wiw-form-topbar"><button type="button" onClick={() => { noteRef.current?.blur(); setTimeEditorDateOpen(false); setTimeEditor(undefined); setTimeLogOpen(false); setFormOpen(false); }}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null} onClick={() => void save()}>Sichern</button></header>
+        <header className="wiw-form-topbar"><button type="button" onClick={() => { noteRef.current?.blur(); setTimeEditorDateOpen(false); setTimeEditor(undefined); setTimeLogOpen(false); setFormOpen(false); }}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null || (form.startMinute != null && form.endAbsolute != null && form.endAbsolute <= form.startMinute)} onClick={() => void save()}>Sichern</button></header>
         {dateOpen ? <ScheduleDatePicker value={form.date} onSelect={(date) => { setForm((current) => ({ ...current, date })); setDateOpen(false); }} onClose={() => setDateOpen(false)} /> : null}
         <div ref={formScrollRef} className="wiw-form-scroll">
           <Row icon={calendarOutline} label={formatDateRow(form.date)} field="date" onClick={() => setDateOpen(true)} />

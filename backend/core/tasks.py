@@ -130,6 +130,22 @@ def send_attendance_reminders():
 
 
 @shared_task
+def send_open_shift_notifications(shift_id, reason='available'):
+    """Create OpenShift notifications outside the API request path.
+
+    A publication can target many workers. Keeping that fanout in the request
+    made the mobile Sichern action wait for many database writes and push-enqueue
+    callbacks before the API could return.
+    """
+    from .operational_notifications import notify_open_shift_available
+
+    shift = Shift.objects.filter(pk=shift_id).first()
+    if not shift:
+        return 0
+    return notify_open_shift_available(shift, reason)
+
+
+@shared_task
 def send_shift_reminders():
     now = timezone.now()
     slots = ShiftSlot.objects.filter(

@@ -30,6 +30,21 @@ from .shift_rules import shift_visible_to_worker
 SYNTHETIC_MIGRATION_EMAIL_SUFFIX = '@sync.invalid'
 
 
+def _notify_open_shift_available_async(shift, reason):
+    """Keep OpenShift publication responsive while preserving delivery."""
+    shift_id = str(shift.pk)
+
+    def enqueue():
+        try:
+            from .tasks import send_open_shift_notifications
+            send_open_shift_notifications.delay(shift_id, reason)
+        except Exception:
+            # Broker problems must not drop an operational notification.
+            notify_open_shift_available(shift, reason)
+
+    transaction.on_commit(enqueue)
+
+
 class StaffingShiftViewSet(viewsets.ModelViewSet):
     queryset = Shift.objects.all()
     serializer_class = ShiftApiSerializer
@@ -69,7 +84,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                 refresh_shift_state(obj)
             audit(self.request, 'staffing_demand.created', obj, {'required_count': obj.required_count})
         if obj.status == Shift.Status.PUBLISHED:
-            notify_open_shift_available(obj, 'created')
+            _notify_open_shift_available_async(obj, 'created')
 
     def perform_update(self, serializer):
         previous_status = serializer.instance.status
@@ -110,7 +125,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
             })
             notify_claimed_workers_shift_changed(obj)
         if previous_status != Shift.Status.PUBLISHED and obj.status == Shift.Status.PUBLISHED:
-            notify_open_shift_available(obj, 'updated-published')
+            _notify_open_shift_available_async(obj, 'updated-published')
 
     def perform_destroy(self, instance):
         notify_claimed_workers_shift_changed(instance, title='Schicht entfernt', reason='deleted')
@@ -155,7 +170,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
             refresh_shift_state(shift)
         audit(request, 'staffing_demand.published', shift)
         if not was_published:
-            notify_open_shift_available(shift, 'publish')
+            _notify_open_shift_available_async(shift, 'publish')
         return Response(self.get_serializer(self.base_queryset().get(pk=shift.pk)).data)
 
     @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
@@ -282,7 +297,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
             # Already-published OpenShifts have already notified eligible workers.
             # Legacy clients may still POST an empty assignment after create; do not fan out again.
             if not was_published and free_count > 0 and shift.status == Shift.Status.PUBLISHED:
-                notify_open_shift_available(shift, 'assignment')
+                _notify_open_shift_available_async(shift, 'assignment')
 
         return Response(self.get_serializer(self.base_queryset().get(pk=shift.pk)).data)
 
