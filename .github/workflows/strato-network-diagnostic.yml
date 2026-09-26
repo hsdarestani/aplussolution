@@ -36,3 +36,5 @@ jobs:
           echo "=== ping ==="
           ping -c 3 -W 3 "$HOST"
           echo "exit=$?"
+
+# probe refresh 2026-09-26
