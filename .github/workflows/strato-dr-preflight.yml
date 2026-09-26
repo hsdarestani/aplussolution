@@ -79,6 +79,16 @@ jobs:
               docker compose logs --no-color --tail=120 caddy || true
               echo "--- local HTTPS ---"
               curl -skv --max-time 12 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/ -o /dev/null 2>&1 | tail -80 || true
+              echo "--- push providers ---"
+              docker compose exec -T backend python manage.py shell -c "from core.push_notifications import push_provider_status; from core.push_models import PushDevice; print('provider_status='+str(push_provider_status())); print('active_android='+str(PushDevice.objects.filter(active=True,platform='android').count())); print('active_ios='+str(PushDevice.objects.filter(active=True,platform='ios').count()))" </dev/null || true
+              echo "--- firebase auth ---"
+              docker compose exec -T backend python manage.py shell -c "from core.push_notifications import _fcm_access_token; print('fcm_auth_ok='+str(bool(_fcm_access_token())))" </dev/null || echo FCM_AUTH_FAILED
+              echo "--- apns signing ---"
+              docker compose exec -T backend python manage.py shell -c "from core.push_notifications import _apns_provider_token; print('apns_signing_ok='+str(bool(_apns_provider_token())))" </dev/null || echo APNS_SIGNING_FAILED
+              echo "--- celery status ---"
+              docker compose ps celery celery-beat || true
+              echo "--- recent celery errors ---"
+              docker compose logs --no-color --tail=120 celery celery-beat 2>&1 | grep -Ei "error|exception|traceback" | tail -40 || true
             '
 
       - name: Check whether backup host has IPv6
