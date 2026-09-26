@@ -11,7 +11,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from . import admin_center_views as admin_base
-from .models import IntegrationSyncRun, Location, Position, Shift, ShiftSwapRequest, TimeOffRequest, User
+from .models import IntegrationSyncRun, Location, Position, Shift, ShiftSwapRequest, TimeEntry, TimeOffRequest, User
 from .premium_approval_models import ShiftPickupRequest
 from .shift_slots import ShiftSlot
 from .wiw import WhenIWorkClient, WhenIWorkError
@@ -232,10 +232,76 @@ def _local_open_shift_count(now, *, native_only=False):
     return rows.count()
 
 
+def _missing_time_snapshot(now):
+    """Return the same post-shift gaps that trigger employee time-report prompts.
+
+    Keep this intentionally aligned with send_shift_time_report_prompts: a shift
+    becomes due 30 minutes after its end and stays visible for 48 hours.
+    """
+    shifts = (
+        Shift.objects.filter(
+            ends_at__lte=now - timedelta(minutes=30),
+            ends_at__gte=now - timedelta(hours=48),
+            status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED, Shift.Status.COMPLETED],
+        )
+        .select_related('worker__user', 'location', 'position')
+        .prefetch_related('slots__worker__user')
+        .order_by('ends_at')
+    )
+
+    rows = []
+    seen = set()
+    worker_ids = set()
+    for shift in shifts:
+        workers = {}
+        if (
+            shift.worker_id
+            and shift.worker
+            and shift.worker.active
+            and shift.worker.user.is_active
+            and not str(shift.worker.user.email or '').lower().endswith('@sync.invalid')
+        ):
+            workers[str(shift.worker_id)] = shift.worker
+        for slot in shift.slots.all():
+            if (
+                slot.status == ShiftSlot.Status.CLAIMED
+                and slot.worker_id
+                and slot.worker
+                and slot.worker.active
+                and slot.worker.user.is_active
+                and not str(slot.worker.user.email or '').lower().endswith('@sync.invalid')
+            ):
+                workers[str(slot.worker_id)] = slot.worker
+
+        for worker in workers.values():
+            key = (str(shift.id), str(worker.id))
+            if key in seen or TimeEntry.objects.filter(worker=worker, shift=shift).exists():
+                continue
+            seen.add(key)
+            worker_ids.add(str(worker.id))
+            rows.append({
+                'shift_id': str(shift.id),
+                'worker_id': str(worker.id),
+                'worker_name': worker.user.get_full_name() or worker.user.email,
+                'starts_at': shift.starts_at,
+                'ends_at': shift.ends_at,
+                'location_name': shift.location.name if shift.location_id else '',
+                'position_name': shift.position.name if shift.position_id else '',
+            })
+
+    return {
+        'missing_time_workers': len(worker_ids),
+        'missing_time_shift_count': len(rows),
+        'missing_time_entries': rows,
+    }
+
+
 def _local_snapshot(now):
     exceptions = admin_base._exception_center_items(now)
     attendance_notices = sum(item.get('category') == 'attendance' for item in exceptions)
+    missing_time = _missing_time_snapshot(now)
     return {
+        **missing_time,
         'attendance_notices': attendance_notices,
         'time_off_requests': TimeOffRequest.objects.filter(status=TimeOffRequest.Status.PENDING).count(),
         'shift_requests': ShiftSwapRequest.objects.filter(status=ShiftSwapRequest.Status.PENDING).count(),
