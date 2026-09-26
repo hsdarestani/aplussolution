@@ -1,0 +1,77 @@
+name: STRATO DR stage backup server
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-dr-stage.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BACKUP_HOST: ${{ secrets.BACKUP_HOST }}
+      BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Package application
+        run: |
+          set -euo pipefail
+          tar \
+            --exclude='.git' \
+            --exclude='.env' \
+            --exclude='frontend/node_modules' \
+            -czf /tmp/aplussolution-release.tgz .
+
+      - name: Upload release
+        run: |
+          set -euo pipefail
+          sshpass -p "$BACKUP_PASSWORD" scp \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 \
+            /tmp/aplussolution-release.tgz root@"$BACKUP_HOST":/tmp/aplussolution-release.tgz
+
+      - name: Prepare backup server
+        run: |
+          set -euo pipefail
+          sshpass -p "$BACKUP_PASSWORD" ssh \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 \
+            root@"$BACKUP_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+
+          if ! command -v docker >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y docker.io docker-compose-v2
+            systemctl enable --now docker
+          elif ! docker compose version >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y docker-compose-v2
+          fi
+
+          mkdir -p /opt/aplussolution
+          find /opt/aplussolution -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
+          tar -xzf /tmp/aplussolution-release.tgz -C /opt/aplussolution
+          rm -f /tmp/aplussolution-release.tgz
+
+          docker --version
+          docker compose version
+          df -h /
+          echo DR_STAGE_READY
+          REMOTE
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/aplussolution-release.tgz
