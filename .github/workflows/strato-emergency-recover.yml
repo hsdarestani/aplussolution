@@ -36,6 +36,9 @@ jobs:
           mkdir -p "$HOME/.ssh"
           printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
           chmod 600 "$HOME/.ssh/strato_ed25519"
+          ssh-keygen -y -f "$HOME/.ssh/strato_ed25519" > "$HOME/.ssh/strato_ed25519.pub"
+          echo "Configured STRATO key fingerprint:"
+          ssh-keygen -lf "$HOME/.ssh/strato_ed25519.pub"
           if ! command -v sshpass >/dev/null 2>&1; then
             sudo -n apt-get update -qq
             sudo -n apt-get install -y -qq sshpass
