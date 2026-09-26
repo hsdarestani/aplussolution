@@ -37,4 +37,4 @@ jobs:
           ping -c 3 -W 3 "$HOST"
           echo "exit=$?"
 
-# probe refresh 2026-09-26
+# probe refresh 2026-09-26 15:26 IRST
