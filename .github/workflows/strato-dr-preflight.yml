@@ -31,7 +31,8 @@ jobs:
           printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
           chmod 600 "$HOME/.ssh/strato_ed25519"
 
-      - name: Test STRATO over IPv6
+      - name: Test STRATO over IPv6 from GitHub runner
+        continue-on-error: true
         run: |
           set -euo pipefail
           ssh -6 -i "$HOME/.ssh/strato_ed25519" \
@@ -65,6 +66,16 @@ jobs:
               echo "--- ports 80/443 ---"
               ss -lntp | grep -E ":(80|443) " || true
             '
+
+      - name: Check whether backup host has IPv6
+        run: |
+          python3 - <<'PY'
+          import os, socket
+          host = os.environ["BACKUP_HOST"]
+          infos = socket.getaddrinfo(host, 22, type=socket.SOCK_STREAM)
+          has_v6 = any(item[0] == socket.AF_INET6 for item in infos)
+          print("BACKUP_HOST_IPV6=" + ("yes" if has_v6 else "no"))
+          PY
 
       - name: Cleanup
         if: always()
