@@ -1,0 +1,29 @@
+name: STRATO SSH key fingerprint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-key-fingerprint.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fingerprint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Print public key fingerprint only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+          ssh-keygen -y -f "$HOME/.ssh/strato_ed25519" > "$HOME/.ssh/strato_ed25519.pub"
+          ssh-keygen -lf "$HOME/.ssh/strato_ed25519.pub"
+          rm -f "$HOME/.ssh/strato_ed25519" "$HOME/.ssh/strato_ed25519.pub"
