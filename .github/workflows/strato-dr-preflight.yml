@@ -80,11 +80,14 @@ jobs:
               echo "--- local HTTPS ---"
               curl -skv --max-time 12 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/ -o /dev/null 2>&1 | tail -80 || true
               echo "--- push providers ---"
-              docker compose exec -T backend python manage.py shell -c "from core.push_notifications import push_provider_status; from core.push_models import PushDevice; print('provider_status='+str(push_provider_status())); print('active_android='+str(PushDevice.objects.filter(active=True,platform='android').count())); print('active_ios='+str(PushDevice.objects.filter(active=True,platform='ios').count()))" </dev/null || true
+              docker compose exec -T backend python manage.py shell -c "from core.push_notifications import push_provider_status; from core.push_models import PushDevice; print(\"provider_status=\"+str(push_provider_status())); print(\"active_android=\"+str(PushDevice.objects.filter(active=True,platform=\"android\").count())); print(\"active_ios=\"+str(PushDevice.objects.filter(active=True,platform=\"ios\").count()))" </dev/null || true
               echo "--- firebase auth ---"
-              docker compose exec -T backend python manage.py shell -c "from core.push_notifications import _fcm_access_token; print('fcm_auth_ok='+str(bool(_fcm_access_token())))" </dev/null || echo FCM_AUTH_FAILED
+              docker compose exec -T backend python manage.py shell -c "from core.push_notifications import _fcm_access_token; print(\"fcm_auth_ok=\"+str(bool(_fcm_access_token())))" </dev/null || echo FCM_AUTH_FAILED
               echo "--- apns signing ---"
-              docker compose exec -T backend python manage.py shell -c "from core.push_notifications import _apns_provider_token; print('apns_signing_ok='+str(bool(_apns_provider_token())))" </dev/null || echo APNS_SIGNING_FAILED
+              docker compose exec -T backend python manage.py shell -c "from core.push_notifications import _apns_provider_token; print(\"apns_signing_ok=\"+str(bool(_apns_provider_token())))" </dev/null || echo APNS_SIGNING_FAILED
+              echo "--- push provider connectivity ---"
+              docker compose exec -T backend python -c "import socket; socket.create_connection((\"fcm.googleapis.com\",443),8).close(); print(\"fcm_tcp_ok=True\")" </dev/null || echo FCM_TCP_FAILED
+              docker compose exec -T backend python -c "import socket; socket.create_connection((\"api.push.apple.com\",443),8).close(); print(\"apns_tcp_ok=True\")" </dev/null || echo APNS_TCP_FAILED
               echo "--- celery status ---"
               docker compose ps celery celery-beat || true
               echo "--- recent celery errors ---"
