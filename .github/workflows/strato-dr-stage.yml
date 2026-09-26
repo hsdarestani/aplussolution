@@ -66,6 +66,10 @@ jobs:
           tar -xzf /tmp/aplussolution-release.tgz -C /opt/aplussolution
           rm -f /tmp/aplussolution-release.tgz
 
+          if [ -s /root/aplus-db-final.dump ]; then
+            cp /root/aplus-db-final.dump /root/aplus-db.dump
+          fi
+
           docker --version
           docker compose version
           df -h /
