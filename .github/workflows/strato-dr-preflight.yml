@@ -69,6 +69,13 @@ jobs:
               ip -6 -o addr show scope global || true
               echo "--- IPv6 route ---"
               ip -6 route || true
+              echo "--- caddy status ---"
+              cd /opt/aplussolution
+              docker compose ps caddy || true
+              echo "--- caddy logs ---"
+              docker compose logs --no-color --tail=120 caddy || true
+              echo "--- local HTTPS ---"
+              curl -skv --max-time 12 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/ -o /dev/null 2>&1 | tail -80 || true
             '
 
       - name: Check whether backup host has IPv6
