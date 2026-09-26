@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/strato-dr-stage.yml'
+      - 'frontend/src/AdminHomeV4.tsx'
   workflow_dispatch:
 
 permissions:
@@ -69,6 +70,14 @@ jobs:
           if [ -s /root/aplus-db-final.dump ]; then
             cp /root/aplus-db-final.dump /root/aplus-db.dump
           fi
+
+          cd /opt/aplussolution
+          docker compose build frontend
+          docker compose up -d frontend
+          sleep 5
+
+          echo "=== current attendance alerts ==="
+          docker compose exec -T backend python manage.py shell -c "from django.utils import timezone; from core.admin_center_views import _exception_center_items; rows=[x for x in _exception_center_items(timezone.now()) if x.get('category')=='attendance']; print('ATTENDANCE_COUNT='+str(len(rows))); [print('ATTENDANCE_ALERT|'+str(x.get('title',''))+'|'+str(x.get('message',''))+'|'+str(x.get('due_at',''))+'|'+str(x.get('meta',{}))) for x in rows]" </dev/null
 
           docker --version
           docker compose version
