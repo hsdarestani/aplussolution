@@ -1,0 +1,71 @@
+name: STRATO DR preflight
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-dr-preflight.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BACKUP_HOST: ${{ secrets.BACKUP_HOST }}
+      BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+      STRATO_IPV6: 2a01:239:44b:d900::1
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Configure STRATO key
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Test STRATO over IPv6
+        run: |
+          set -euo pipefail
+          ssh -6 -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=12 \
+            root@"$STRATO_IPV6" \
+            'echo STRATO_IPV6_SSH_OK; test -s /root/aplus-db.dump; test -s /root/aplus-media.tgz; test -s /root/aplus.env.backup; ls -lh /root/aplus-db.dump /root/aplus-media.tgz /root/aplus.env.backup'
+
+      - name: Test backup server
+        run: |
+          set -euo pipefail
+          test -n "$BACKUP_HOST"
+          test -n "$BACKUP_PASSWORD"
+          sshpass -p "$BACKUP_PASSWORD" ssh \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=12 \
+            root@"$BACKUP_HOST" '
+              echo BACKUP_SSH_OK
+              uname -a
+              . /etc/os-release 2>/dev/null || true
+              echo "OS=${PRETTY_NAME:-unknown}"
+              echo "--- disk ---"
+              df -h /
+              echo "--- memory ---"
+              free -h
+              echo "--- docker ---"
+              if command -v docker >/dev/null 2>&1; then docker --version; docker compose version || true; else echo DOCKER_NOT_INSTALLED; fi
+              echo "--- ports 80/443 ---"
+              ss -lntp | grep -E ":(80|443) " || true
+            '
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
