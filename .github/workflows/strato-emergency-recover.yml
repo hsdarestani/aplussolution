@@ -24,36 +24,48 @@ jobs:
     env:
       STRATO_HOST: ${{ secrets.STRATO_HOST }}
       STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+      HOST: ${{ secrets.HOST }}
+      PASS: ${{ secrets.PASS }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure Strato SSH key
+      - name: Configure SSH
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.ssh"
           printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
           chmod 600 "$HOME/.ssh/strato_ed25519"
+          if ! command -v sshpass >/dev/null 2>&1; then
+            sudo -n apt-get update -qq
+            sudo -n apt-get install -y -qq sshpass
+          fi
 
       - name: Wait for host and recover existing production containers
         shell: bash
         run: |
           set -euo pipefail
 
+          TARGET_HOST="${HOST:-$STRATO_HOST}"
           connected=0
+          auth_mode=""
+
           for i in $(seq 1 30); do
-            if ssh \
-              -i "$HOME/.ssh/strato_ed25519" \
-              -o IdentitiesOnly=yes \
-              -o StrictHostKeyChecking=no \
-              -o UserKnownHostsFile=/dev/null \
-              -o ConnectTimeout=8 \
-              -o ServerAliveInterval=10 \
-              -o ServerAliveCountMax=3 \
-              root@"$STRATO_HOST" 'echo RECOVERY_SSH_OK' >/tmp/recovery-ssh.out 2>&1; then
+            if ssh               -i "$HOME/.ssh/strato_ed25519"               -o IdentitiesOnly=yes               -o StrictHostKeyChecking=no               -o UserKnownHostsFile=/dev/null               -o ConnectTimeout=8               root@"$TARGET_HOST" 'echo RECOVERY_SSH_OK' >/tmp/recovery-ssh.out 2>&1; then
               connected=1
+              auth_mode="key"
               break
             fi
+
+            if [ -n "${PASS:-}" ]; then
+              export SSHPASS="$PASS"
+              if sshpass -e ssh                 -o PubkeyAuthentication=no                 -o PreferredAuthentications=password                 -o StrictHostKeyChecking=no                 -o UserKnownHostsFile=/dev/null                 -o ConnectTimeout=8                 root@"$TARGET_HOST" 'echo RECOVERY_SSH_OK' >/tmp/recovery-ssh.out 2>&1; then
+                connected=1
+                auth_mode="password"
+                break
+              fi
+            fi
+
             echo "Host not reachable yet (attempt $i/30); retrying in 15s..."
             sleep 15
           done
@@ -63,23 +75,21 @@ jobs:
             exit 1
           fi
 
-          ssh \
-            -i "$HOME/.ssh/strato_ed25519" \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=12 \
-            -o ServerAliveInterval=10 \
-            -o ServerAliveCountMax=6 \
-            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          if [ "$auth_mode" = "key" ]; then
+            REMOTE_CMD=(ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes)
+          else
+            export SSHPASS="$PASS"
+            REMOTE_CMD=(sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password)
+          fi
+
+          "${REMOTE_CMD[@]}"             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ConnectTimeout=12             -o ServerAliveInterval=10             -o ServerAliveCountMax=6             root@"$TARGET_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
 
           echo "=== emergency recovery started ==="
           uptime || true
           free -m || true
+          systemctl enable --now ssh || true
 
-          # If the Docker daemon became unresponsive during the interrupted image
-          # build, restart only Docker. Named volumes and production data remain intact.
           if ! timeout 15 docker info >/dev/null 2>&1; then
             echo "Docker daemon is not responding; restarting Docker."
             systemctl restart docker
@@ -90,8 +100,6 @@ jobs:
           test -f .env
           test -f docker-compose.yml
 
-          # Do NOT rebuild on the production VPS during recovery. Reuse the last
-          # available images so the gateway can come back with minimal resource use.
           docker compose up -d --no-build db redis
           docker compose up -d --no-build backend frontend
           docker compose up -d --no-build celery celery-beat || true
@@ -112,7 +120,7 @@ jobs:
             exit 1
           fi
 
-          curl -fsS --max-time 12 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/
+          curl -kfsS --max-time 12 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/
           docker compose ps
           echo "=== emergency recovery completed ==="
           REMOTE
