@@ -158,11 +158,20 @@ export default function AdminHomeV4({ navigate }: { navigate: Navigate }) {
     navigate(item.view);
   }
 
+  function showAttendanceNotices() {
+    setCategory('attendance');
+    setSeverity('all');
+    setQuery('');
+    window.setTimeout(() => {
+      document.querySelector('.attention-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+  }
+
   return (
     <div className="admin-home-v4" data-testid="admin-exception-center">
       <div className="wiw-mobile-admin-dashboard" data-testid="wiw-mobile-admin-dashboard">
         <div className="wiw-section-label">Heute</div>
-        <button type="button" className="wiw-mobile-row" aria-label="Arbeitszeit-Hinweise" onClick={() => navigate('time')}><span className="wiw-count">{attendanceNotices}</span><strong>Arbeitszeit-Hinweise</strong></button>
+        <button type="button" className="wiw-mobile-row" aria-label="Arbeitszeit-Hinweise" onClick={showAttendanceNotices}><span className="wiw-count">{attendanceNotices}</span><strong>Arbeitszeit-Hinweise</strong></button>
         <button type="button" className="wiw-mobile-row" aria-label="Mitarbeiteraktivität" onClick={() => navigate('people')}><span className="wiw-row-icon"><IonIcon icon={peopleOutline}/></span><strong>Mitarbeiteraktivität</strong></button>
 
         <div className="wiw-section-label">Anfragen</div>
