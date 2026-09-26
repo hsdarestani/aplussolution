@@ -1,0 +1,38 @@
+name: STRATO network reachability diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-network-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      HOST: ${{ secrets.HOST }}
+    steps:
+      - name: Probe public ports
+        shell: bash
+        run: |
+          set +e
+          echo "HOST=$HOST"
+          echo "=== route lookup ==="
+          ip route get "$HOST" || true
+          echo "=== tcp 22 ==="
+          timeout 12 nc -vz "$HOST" 22
+          echo "exit=$?"
+          echo "=== tcp 80 ==="
+          timeout 12 nc -vz "$HOST" 80
+          echo "exit=$?"
+          echo "=== tcp 443 ==="
+          timeout 12 nc -vz "$HOST" 443
+          echo "exit=$?"
+          echo "=== ping ==="
+          ping -c 3 -W 3 "$HOST"
+          echo "exit=$?"
