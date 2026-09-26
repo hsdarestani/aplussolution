@@ -1,0 +1,39 @@
+name: Current attendance diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/current-attendance-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BACKUP_HOST: ${{ secrets.BACKUP_HOST }}
+      BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Inspect current attendance state
+        run: |
+          set -euo pipefail
+          sshpass -p "$BACKUP_PASSWORD" ssh \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 \
+            root@"$BACKUP_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+
+          echo "=== recent admin notifications ==="
+          docker compose exec -T backend python manage.py shell -c "from core.models import Notification,User; qs=Notification.objects.filter(user__role__in=[User.Role.ADMIN,User.Role.MANAGER]).select_related('user').order_by('-created_at')[:80]; [print('ADMIN_NOTIFICATION|'+str(n.created_at)+'|'+str(n.user.get_full_name() or n.user.email)+'|'+str(n.kind)+'|'+str(n.title)+'|'+str(n.body)) for n in qs if ('Arbeitszeit' in str(n.title)+' '+str(n.body) or 'Zeiterfassung' in str(n.title)+' '+str(n.body) or 'fehl' in (str(n.title)+' '+str(n.body)).lower() or 'time' in str(n.kind).lower())]" </dev/null
+
+          echo "=== missing time reports last 48h ==="
+          docker compose exec -T backend python manage.py shell -c "from django.utils import timezone; from datetime import timedelta; from core.models import Shift,TimeEntry; from core.shift_slots import ShiftSlot; now=timezone.now(); shifts=Shift.objects.filter(ends_at__lte=now-timedelta(minutes=30),ends_at__gte=now-timedelta(hours=48),status__in=['published','confirmed','completed']).select_related('worker__user','location','position').prefetch_related('slots__worker__user'); rows=[]; [(rows.append((w.user.get_full_name() or w.user.email, s.id, timezone.localtime(s.starts_at), timezone.localtime(s.ends_at), s.location.name, s.position.name)) if not TimeEntry.objects.filter(worker=w,shift=s).exists() else None) for s in shifts for w in ({str(s.worker_id):s.worker} if s.worker_id and s.worker and s.worker.active and s.worker.user.is_active else {}).values()]; claimed=[]; [claimed.append((sl.shift,sl.worker)) for sl in ShiftSlot.objects.filter(shift__in=shifts,status=ShiftSlot.Status.CLAIMED,worker__isnull=False).select_related('shift__location','shift__position','worker__user') if sl.worker.active and sl.worker.user.is_active and not TimeEntry.objects.filter(worker=sl.worker,shift=sl.shift).exists()]; [rows.append((w.user.get_full_name() or w.user.email,s.id,timezone.localtime(s.starts_at),timezone.localtime(s.ends_at),s.location.name,s.position.name)) for s,w in claimed if not any(str(r[1])==str(s.id) and r[0]==(w.user.get_full_name() or w.user.email) for r in rows)]; print('MISSING_COUNT='+str(len(rows))); [print('MISSING_TIME|'+r[0]+'|'+str(r[2])+'|'+str(r[3])+'|'+r[4]+'|'+r[5]) for r in rows]" </dev/null
+          REMOTE
