@@ -29,8 +29,21 @@ type ExceptionItem = {
   meta?: Record<string, any>;
 };
 
+type MissingTimeEntry = {
+  shift_id: string;
+  worker_id: string;
+  worker_name: string;
+  starts_at: string;
+  ends_at: string;
+  location_name?: string;
+  position_name?: string;
+};
+
 type MobileDashboard = {
   attendance_notices?: number;
+  missing_time_workers?: number;
+  missing_time_shift_count?: number;
+  missing_time_entries?: MissingTimeEntry[];
   time_off_requests?: number;
   shift_requests?: number;
   open_shift_requests?: number;
@@ -82,6 +95,26 @@ function dueText(value?: string) {
     month: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+  });
+}
+
+const BUSINESS_TIME_ZONE = 'Europe/Berlin';
+
+function missingShiftDate(value: string) {
+  return new Date(value).toLocaleDateString('de-DE', {
+    timeZone: BUSINESS_TIME_ZONE,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+
+function missingShiftTime(value: string) {
+  return new Date(value).toLocaleTimeString('de-DE', {
+    timeZone: BUSINESS_TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
   });
 }
 
@@ -148,6 +181,21 @@ export default function AdminHomeV4({ navigate }: { navigate: Navigate }) {
   };
 
   const attendanceNotices = count('attendance_notices', byCategory.attendance || 0);
+  const missingTimeWorkers = count('missing_time_workers', 0);
+  const missingTimeShiftCount = count('missing_time_shift_count', 0);
+  const missingTimeEntries: MissingTimeEntry[] = mobileDashboard?.missing_time_entries || [];
+  const missingTimeGroups = useMemo(() => {
+    const grouped = new Map<string, { workerId: string; workerName: string; rows: MissingTimeEntry[] }>();
+    missingTimeEntries.forEach((row) => {
+      const existing = grouped.get(row.worker_id);
+      if (existing) {
+        existing.rows.push(row);
+      } else {
+        grouped.set(row.worker_id, { workerId: row.worker_id, workerName: row.worker_name, rows: [row] });
+      }
+    });
+    return Array.from(grouped.values());
+  }, [missingTimeEntries]);
   const timeOffRequests = count('time_off_requests', byCategory.requests || 0);
   const shiftRequests = count('shift_requests', 0);
   const openShiftRequests = count('open_shift_requests', 0);
@@ -167,11 +215,22 @@ export default function AdminHomeV4({ navigate }: { navigate: Navigate }) {
     }, 120);
   }
 
+  function showMissingTimes() {
+    window.setTimeout(() => {
+      document.querySelector('.missing-time-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 20);
+  }
+
   return (
     <div className="admin-home-v4" data-testid="admin-exception-center">
       <div className="wiw-mobile-admin-dashboard" data-testid="wiw-mobile-admin-dashboard">
         <div className="wiw-section-label">Heute</div>
-        <button type="button" className="wiw-mobile-row" aria-label="Arbeitszeit-Hinweise" onClick={showAttendanceNotices}><span className="wiw-count">{attendanceNotices}</span><strong>Arbeitszeit-Hinweise</strong></button>
+        <button type="button" className="wiw-mobile-row missing-time-trigger" aria-label="Fehlende Arbeitszeiten" onClick={showMissingTimes}>
+          <span className="wiw-count">{missingTimeWorkers}</span>
+          <strong>Fehlende Arbeitszeiten</strong>
+          <small>{missingTimeShiftCount} {missingTimeShiftCount === 1 ? 'Schicht' : 'Schichten'}</small>
+        </button>
+        <button type="button" className="wiw-mobile-row" aria-label="Weitere Arbeitszeit Hinweise" onClick={showAttendanceNotices}><span className="wiw-count">{attendanceNotices}</span><strong>Weitere Arbeitszeit Hinweise</strong></button>
         <button type="button" className="wiw-mobile-row" aria-label="Mitarbeiteraktivität" onClick={() => navigate('people')}><span className="wiw-row-icon"><IonIcon icon={peopleOutline}/></span><strong>Mitarbeiteraktivität</strong></button>
 
         <div className="wiw-section-label">Anfragen</div>
@@ -187,6 +246,47 @@ export default function AdminHomeV4({ navigate }: { navigate: Navigate }) {
         <div className="wiw-section-label">Wichtige anstehende Termine</div>
         <div className="wiw-upcoming"><div>{(criticalFirst[0] || results[0]) ? <><strong>{(criticalFirst[0] || results[0]).title}</strong><span>{(criticalFirst[0] || results[0]).message}</span></> : <span>Keine offenen Vorgänge</span>}</div>{(criticalFirst[0] || results[0]) && <button type="button" onClick={() => open(criticalFirst[0] || results[0])}>Öffnen</button>}</div>
       </div>
+
+      {missingTimeEntries.length > 0 && (
+        <section className="missing-time-panel" aria-label="Fehlende Arbeitszeiten">
+          <div className="missing-time-panel-head">
+            <div>
+              <small>ARBEITSZEIT</small>
+              <h2>Fehlende Arbeitszeiten</h2>
+              <p>{missingTimeWorkers} {missingTimeWorkers === 1 ? 'Mitarbeiter hat' : 'Mitarbeiter haben'} für {missingTimeShiftCount} {missingTimeShiftCount === 1 ? 'beendete Schicht' : 'beendete Schichten'} noch keine tatsächliche Arbeitszeit eingetragen.</p>
+            </div>
+            <IonButton fill="outline" size="small" onClick={() => navigate('time')}>Zeiterfassung öffnen</IonButton>
+          </div>
+          <div className="missing-time-people">
+            {missingTimeGroups.map((group) => (
+              <article className="missing-time-person" key={group.workerId}>
+                <div className="missing-time-person-head">
+                  <div>
+                    <IonIcon icon={peopleOutline} />
+                    <strong>{group.workerName}</strong>
+                  </div>
+                  <IonBadge color="warning">{group.rows.length} {group.rows.length === 1 ? 'Schicht' : 'Schichten'}</IonBadge>
+                </div>
+                <div className="missing-time-shifts">
+                  {group.rows.map((row) => (
+                    <div className="missing-time-shift" key={row.shift_id}>
+                      <div>
+                        <b>{missingShiftDate(row.starts_at)}</b>
+                        <span>{missingShiftTime(row.starts_at)} bis {missingShiftTime(row.ends_at)} Uhr</span>
+                      </div>
+                      <div>
+                        <strong>{row.location_name || 'Einsatzort'}</strong>
+                        <span>{row.position_name || 'Schicht'}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="admin-attention-hero">
         <div>
           <small>ADMIN · HANDLUNGSBEDARF</small>
