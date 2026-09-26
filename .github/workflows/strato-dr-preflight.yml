@@ -65,6 +65,10 @@ jobs:
               if command -v docker >/dev/null 2>&1; then docker --version; docker compose version || true; else echo DOCKER_NOT_INSTALLED; fi
               echo "--- ports 80/443 ---"
               ss -lntp | grep -E ":(80|443) " || true
+              echo "--- global IPv6 ---"
+              ip -6 -o addr show scope global || true
+              echo "--- IPv6 route ---"
+              ip -6 route || true
             '
 
       - name: Check whether backup host has IPv6
