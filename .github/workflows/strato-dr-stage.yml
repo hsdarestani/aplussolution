@@ -5,7 +5,9 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/strato-dr-stage.yml'
+      - 'backend/core/wiw_dashboard.py'
       - 'frontend/src/AdminHomeV4.tsx'
+      - 'frontend/src/admin-home-v4.css'
   workflow_dispatch:
 
 permissions:
@@ -72,9 +74,9 @@ jobs:
           fi
 
           cd /opt/aplussolution
-          docker compose build frontend
-          docker compose up -d frontend
-          sleep 5
+          docker compose build backend celery celery-beat frontend
+          docker compose up -d backend celery celery-beat frontend
+          sleep 8
 
           echo "=== current attendance alerts ==="
           docker compose exec -T backend python manage.py shell -c "from django.utils import timezone; from core.admin_center_views import _exception_center_items; rows=[x for x in _exception_center_items(timezone.now()) if x.get('category')=='attendance']; print('ATTENDANCE_COUNT='+str(len(rows))); [print('ATTENDANCE_ALERT|'+str(x.get('title',''))+'|'+str(x.get('message',''))+'|'+str(x.get('due_at',''))+'|'+str(x.get('meta',{}))) for x in rows]" </dev/null
