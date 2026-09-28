@@ -39,6 +39,17 @@ jobs:
           docker compose exec -T backend python manage.py shell -c "import inspect, core.schedule_reports as s; print('HAS_DETAILS', hasattr(s,'export_attendance_details_pdf')); print(inspect.getsource(s.export_attendance_details_pdf)[:1200] if hasattr(s,'export_attendance_details_pdf') else '')" </dev/null
           echo "=== reproduce ==="
           docker compose exec -T backend python manage.py shell -c "from rest_framework.test import APIClient; from core.models import User; u=User.objects.filter(role=User.Role.ADMIN,is_active=True).first(); print('ADMIN', bool(u)); client=APIClient(); client.force_authenticate(user=u); resp=client.get('/api/reports/attendance-details.pdf', {'date_from':'2026-09-01','date_to':'2026-09-28','approval':'all'}, HTTP_HOST='app.aplus-solution.de', secure=True); print('APP_STATUS', resp.status_code, resp.get('Content-Type','')); resp2=client.get('/api/reports/attendance-details.pdf', {'date_from':'2026-09-01','date_to':'2026-09-28','approval':'all'}, HTTP_HOST='solution.smarbiz.sbs', secure=True); print('SMARBIZ_STATUS', resp2.status_code, resp2.get('Content-Type','')); print('SMARBIZ_BODY', (resp2.content[:300] if hasattr(resp2,'content') else getattr(resp2,'data',None)))" </dev/null
+          echo "=== frontend build API target ==="
+          frontend_id=$(docker compose ps -q frontend)
+          docker exec "$frontend_id" sh -lc "grep -RaoE 'https://[^\" ]+/api|reports/attendance-details\\.pdf' /usr/share/nginx/html/assets/*.js | sort -u | head -n 30" || true
+          echo "=== production API_URL host ==="
+          python3 - <<'PY'
+          from pathlib import Path
+          for line in Path('.env').read_text().splitlines():
+              if line.startswith('API_URL='):
+                  value=line.split('=',1)[1].strip()
+                  print('API_URL_HOST=' + value.split('/')[2] if '://' in value else 'API_URL_HOST=relative')
+          PY
           echo "=== recent backend errors ==="
           docker compose logs --no-color --since=45m backend | tail -n 300
           REMOTE
