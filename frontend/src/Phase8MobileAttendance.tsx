@@ -101,7 +101,7 @@ type EditForm = {
   edit_reason: string;
 };
 
-export default function Phase8MobileAttendance({ data, showWorker = false }: { data: any; showWorker?: boolean }) {
+export default function Phase8MobileAttendance({ data, showWorker = false, isAdmin = false }: { data: any; showWorker?: boolean; isAdmin?: boolean }) {
   const [history, setHistory] = useState<any[]>(() => Array.isArray(data.history) ? data.history : []);
   const [workers, setWorkers] = useState<any[]>([]);
   const [selected, setSelected] = useState<string>();
@@ -580,7 +580,7 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
     </div>
     {showWorker && <div className="wiw-attendance-admin-tools">
       <button type="button" onClick={() => { setReportMode('summary'); setReportOpen(true); }}><IonIcon icon={documentTextOutline} /><span><b>Arbeitszeit PDF</b><small>Summen nach Mitarbeiter</small></span></button>
-      <button type="button" onClick={() => { setReportMode('details'); setReportOpen(true); }}><IonIcon icon={documentTextOutline} /><span><b>Zeiteinträge PDF</b><small>Einzelne Zeiten mit Status und Einsatzort</small></span></button>
+      {isAdmin ? <button type="button" onClick={() => { setReportMode('details'); setReportOpen(true); }}><IonIcon icon={documentTextOutline} /><span><b>Zeiteinträge PDF</b><small>Einzelne Zeiten mit Status und Einsatzort</small></span></button> : null}
     </div>}
     {showWorker && pendingApprovals.length > 0 && <section className="wiw-pending-approvals">
       <header><b>Offene Freigaben</b><span>{pendingApprovals.length}</span></header>
