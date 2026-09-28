@@ -6,6 +6,7 @@ import {
   chevronBackOutline,
   locationOutline,
   personOutline,
+  documentTextOutline,
   star,
   starOutline,
   timeOutline,
@@ -189,6 +190,7 @@ export function ClientScheduleMobile() {
         <div><IonIcon icon={briefcaseOutline}/><span><small>Position</small><b>{selected.shift.position_name || 'Einsatz'}</b></span></div>
         <div><IonIcon icon={locationOutline}/><span><small>Einsatzort</small><b>{selected.shift.location_name || '–'}</b></span></div>
         <div><IonIcon icon={personOutline}/><span><small>Mitarbeiter</small><b>{workerName}</b></span></div>
+        <div><IonIcon icon={documentTextOutline}/><span><small>Notiz</small><b>{selected.shift.notes || 'Keine Notiz hinterlegt.'}</b></span></div>
       </div>
     </section>;
   }
