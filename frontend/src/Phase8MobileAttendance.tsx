@@ -456,7 +456,7 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
 
             <div className="attendance-pdf-summary">
               <b>Im Bericht</b>
-              <span>{detailReport ? 'Datum · Mitarbeiter · Kunde · Einsatzort · Bereich · Beginn · Ende · Pause · Netto · Freigabestatus' : 'Nettoarbeitszeit · Nachtzuschlag 23:00–06:00 · Sonntagszuschlag · abgezogene Pause'}</span>
+              <span>{detailReport ? 'Datum · Mitarbeiter · Kunde · Einsatzort · Bereich · Beginn · Ende · Pause · Netto · Notiz · Freigabestatus' : 'Nettoarbeitszeit · Nachtzuschlag 23:00–06:00 · Sonntagszuschlag · abgezogene Pause'}</span>
             </div>
           </div>
           {reportError ? <p className="wiw-pdf-error" role="alert">{reportError}</p> : null}

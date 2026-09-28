@@ -90,6 +90,12 @@ export default function SchedulePdfLocationFilter() {
 
       void loadMeta();
       const blocks = Array.from(scroll.querySelectorAll<HTMLElement>('.wiw-pdf-filter-block'));
+      const hasNativeLocationFilter = blocks.some((block) => block.querySelector('b')?.textContent?.trim() === 'Einsatzorte');
+      if (hasNativeLocationFilter) {
+        setHost(null);
+        if (selectedLocationsRef.current.length) setLocationSelection([]);
+        return;
+      }
       const clientBlock = blocks.find((block) => block.querySelector('b')?.textContent?.trim() === 'Kunden');
       if (!clientBlock) return;
 

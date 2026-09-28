@@ -5,7 +5,16 @@ import { installSignaturePad } from './signaturePad';
 const PRODUCTION_API = 'https://app.aplus-solution.de/api';
 const DEVELOPMENT_API = 'http://localhost:8000/api';
 const DEFAULT_API = Capacitor.isNativePlatform() ? PRODUCTION_API : DEVELOPMENT_API;
-const API = (import.meta.env.VITE_API_URL || DEFAULT_API).replace(/\/$/, '');
+const WEB_PRODUCTION_HOSTS = new Set(['app.aplus-solution.de', 'solution.smarbiz.sbs']);
+const SAME_ORIGIN_WEB_API = typeof window !== 'undefined'
+  && WEB_PRODUCTION_HOSTS.has(window.location.hostname)
+  ? `${window.location.origin}/api`
+  : '';
+const API = (
+  Capacitor.isNativePlatform()
+    ? PRODUCTION_API
+    : SAME_ORIGIN_WEB_API || import.meta.env.VITE_API_URL || DEFAULT_API
+).replace(/\/$/, '');
 
 installLocationPicker();
 installSignaturePad();
@@ -118,7 +127,7 @@ function headers(options: RequestInit, tokenOverride?: string) {
 }
 
 async function parseError(response: Response) {
-  let message = 'Ein Fehler ist aufgetreten.';
+  let message = `Anfrage fehlgeschlagen (${response.status}).`;
   try {
     const body = await response.json();
     message = body.detail || body.message || JSON.stringify(body);
