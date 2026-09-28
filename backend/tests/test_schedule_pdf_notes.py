@@ -5,7 +5,7 @@ import pytest
 from django.utils import timezone
 from pypdf import PdfReader
 
-from core.models import Shift
+from core.models import Shift, TimeEntry
 from core.schedule_reports import _report_rows
 
 
@@ -54,3 +54,31 @@ def test_schedule_pdf_rows_repeat_openshift_for_every_free_capacity(company, loc
 
     row = next(item for item in rows if item['date'] == timezone.localtime(shift.starts_at).date())
     assert row['worker_labels'].count('OpenShift') == 2
+
+
+@pytest.mark.django_db
+def test_attendance_details_pdf_includes_shift_note_and_pending_entry(auth_admin, worker_user, shift):
+    shift.notes = 'PDF Detail Notiz 67890\nEingang ueber Hof'
+    shift.save(update_fields=['notes', 'updated_at'])
+
+    TimeEntry.objects.create(
+        worker=worker_user.worker_profile,
+        shift=shift,
+        clock_in=shift.starts_at,
+        clock_out=shift.ends_at,
+        approved=False,
+    )
+    day = timezone.localtime(shift.starts_at).date().isoformat()
+    response = auth_admin.get(
+        f'/api/reports/attendance-details.pdf?date_from={day}&date_to={day}&approval=all'
+    )
+
+    assert response.status_code == 200
+    assert response['Content-Type'] == 'application/pdf'
+
+    reader = PdfReader(BytesIO(response.content))
+    text = '\n'.join(page.extract_text() or '' for page in reader.pages)
+
+    assert 'PDF Detail Notiz 67890' in text
+    assert 'Eingang ueber Hof' in text
+    assert 'Offen' in text

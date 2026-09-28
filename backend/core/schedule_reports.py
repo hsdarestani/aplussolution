@@ -704,6 +704,7 @@ def export_attendance_details_pdf(request):
             'clock_out': local_out.strftime('%H:%M'),
             'pause': int(metrics['pause']),
             'net': int(metrics['net']),
+            'note': str(shift.notes or '').strip() if shift else '',
             'approved': effective_approved,
             'status': 'Freigegeben' if effective_approved else 'Offen',
         })
@@ -780,6 +781,7 @@ def export_attendance_details_pdf(request):
             Paragraph('Ende', head_style),
             Paragraph('Pause', head_style),
             Paragraph('Netto', head_style),
+            Paragraph('Notiz', head_style),
             Paragraph('Status', head_style),
         ]]
         for row in rows:
@@ -793,12 +795,13 @@ def export_attendance_details_pdf(request):
                 Paragraph(row['clock_out'], cell_style),
                 Paragraph(_minutes_hhmm(row['pause']), cell_style),
                 Paragraph(_minutes_hhmm(row['net']), cell_style),
+                Paragraph(escape(row['note']).replace('\\r\\n', '\\n').replace('\\r', '\\n').replace('\\n', '<br/>'), cell_style),
                 Paragraph(row['status'], cell_bold),
             ])
         table = Table(
             table_data,
             repeatRows=1,
-            colWidths=[20 * mm, 37 * mm, 34 * mm, 37 * mm, 25 * mm, 18 * mm, 18 * mm, 18 * mm, 20 * mm, 25 * mm],
+            colWidths=[18 * mm, 31 * mm, 28 * mm, 31 * mm, 21 * mm, 16 * mm, 16 * mm, 16 * mm, 18 * mm, 45 * mm, 22 * mm],
             hAlign='LEFT',
         )
         style = TableStyle([
@@ -806,7 +809,8 @@ def export_attendance_details_pdf(request):
             ('GRID', (0, 0), (-1, -1), 0.35, colors.HexColor('#D0D5DD')),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8FAFC')]),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('ALIGN', (5, 1), (-1, -1), 'CENTER'),
+            ('ALIGN', (5, 1), (8, -1), 'CENTER'),
+            ('ALIGN', (10, 1), (10, -1), 'CENTER'),
             ('LEFTPADDING', (0, 0), (-1, -1), 4),
             ('RIGHTPADDING', (0, 0), (-1, -1), 4),
             ('TOPPADDING', (0, 0), (-1, -1), 5),
@@ -814,7 +818,7 @@ def export_attendance_details_pdf(request):
         ])
         for row_index, row in enumerate(rows, start=1):
             status_color = colors.HexColor('#E9F4E4') if row['approved'] else colors.HexColor('#FFF4CC')
-            style.add('BACKGROUND', (9, row_index), (9, row_index), status_color)
+            style.add('BACKGROUND', (10, row_index), (10, row_index), status_color)
         table.setStyle(style)
         story.append(table)
 
