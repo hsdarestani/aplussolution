@@ -795,7 +795,7 @@ def export_attendance_details_pdf(request):
                 Paragraph(row['clock_out'], cell_style),
                 Paragraph(_minutes_hhmm(row['pause']), cell_style),
                 Paragraph(_minutes_hhmm(row['net']), cell_style),
-                Paragraph(escape(row['note']).replace('\\r\\n', '\\n').replace('\\r', '\\n').replace('\\n', '<br/>'), cell_style),
+                Paragraph(escape(row['note']).replace('\r\n', '\n').replace('\r', '\n').replace('\n', '<br/>'), cell_style),
                 Paragraph(row['status'], cell_bold),
             ])
         table = Table(
