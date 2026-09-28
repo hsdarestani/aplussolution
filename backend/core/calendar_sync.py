@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import timedelta, timezone as datetime_timezone
 from urllib.parse import quote
 
 from django.core import signing
@@ -47,7 +47,7 @@ def _ics_escape(value) -> str:
 
 
 def _utc_stamp(value) -> str:
-    return value.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    return value.astimezone(datetime_timezone.utc).strftime('%Y%m%dT%H%M%SZ')
 
 
 def _assigned_shifts(worker: WorkerProfile):
