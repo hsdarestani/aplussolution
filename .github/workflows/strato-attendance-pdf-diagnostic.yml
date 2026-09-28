@@ -1,0 +1,50 @@
+name: Strato attendance PDF diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/strato-attendance-pdf-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+      - name: Reproduce detailed attendance PDF on production
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          echo "=== git/source signature ==="
+          docker compose exec -T backend python - <<'PY'
+          import inspect
+          import core.schedule_reports as s
+          print("HAS_DETAILS", hasattr(s, "export_attendance_details_pdf"))
+          if hasattr(s, "export_attendance_details_pdf"):
+              print(inspect.getsource(s.export_attendance_details_pdf)[:1200])
+          PY
+          echo "=== reproduce ==="
+          docker compose exec -T backend python manage.py shell -c "from django.test import RequestFactory; from core.models import User; from core.schedule_reports import export_attendance_details_pdf; u=User.objects.filter(role=User.Role.ADMIN,is_active=True).first(); print('ADMIN', bool(u)); req=RequestFactory().get('/api/reports/attendance-details.pdf', {'date_from':'2026-09-01','date_to':'2026-09-28','approval':'all'}); req.user=u; resp=export_attendance_details_pdf(req); print('STATUS', resp.status_code, 'BYTES', len(resp.content), 'CD', resp.get('Content-Disposition',''))" </dev/null
+          echo "=== recent backend errors ==="
+          docker compose logs --no-color --since=45m backend | tail -n 250
+          REMOTE
