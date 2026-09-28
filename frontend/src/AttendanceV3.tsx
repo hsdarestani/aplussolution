@@ -286,7 +286,7 @@ export default function AttendanceV3({ user }: { user: User }) {
   if (!data) return <div className="attendance-loading"><IonSpinner /></div>;
 
   if ((user.role === 'worker' || isManager(user)) && typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches) {
-    return <Phase8MobileAttendance data={data} showWorker={isManager(user)} />;
+    return <Phase8MobileAttendance data={data} showWorker={isManager(user)} isAdmin={user.role === 'admin'} />;
   }
 
   if (isManager(user)) {
