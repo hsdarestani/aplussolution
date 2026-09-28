@@ -2969,6 +2969,30 @@ function Profile({ user }: { user: User }) {
   const [passwords, setPasswords] = useState<any>({});
   const [avatar, setAvatar] = useState((user as any).avatar || '');
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [calendarSync, setCalendarSync] = useState<any>();
+  const [calendarLoading, setCalendarLoading] = useState(false);
+
+  useEffect(() => {
+    if (user.role !== 'worker') return;
+    let cancelled = false;
+    setCalendarLoading(true);
+    void api('calendar/subscription/').then((payload) => {
+      if (!cancelled) setCalendarSync(payload);
+    }).catch((reason: any) => {
+      if (!cancelled) setToast(reason?.message || 'Kalenderlink konnte nicht geladen werden.');
+    }).finally(() => { if (!cancelled) setCalendarLoading(false); });
+    return () => { cancelled = true; };
+  }, [user.role]);
+
+  async function copyCalendarLink() {
+    if (!calendarSync?.feed_url) return;
+    try {
+      await navigator.clipboard.writeText(calendarSync.feed_url);
+      setToast('Kalenderlink wurde kopiert.');
+    } catch {
+      setToast('Kalenderlink konnte nicht kopiert werden.');
+    }
+  }
 
   async function uploadAvatar(file?: File) {
     if (!file) return;
@@ -3025,6 +3049,17 @@ function Profile({ user }: { user: User }) {
             Kontolöschung anfragen
           </IonButton>
         </div>
+        {user.role === 'worker' && <div className="panel form profile-calendar-sync">
+          <h3>Dienstplan mit Kalender synchronisieren</h3>
+          <p>Einmal abonnieren. Danach werden deine zugewiesenen Schichten sowie spätere Änderungen und Löschungen automatisch über das Kalenderabo aktualisiert.</p>
+          {calendarLoading ? <p>Kalenderlink wird geladen …</p> : calendarSync ? <>
+            <IonButton href={calendarSync.webcal_url} expand="block">iPhone / Apple Kalender</IonButton>
+            <IonButton href={calendarSync.google_url} target="_blank" fill="outline" expand="block">Google Kalender</IonButton>
+            <IonButton href={calendarSync.outlook_url} target="_blank" fill="outline" expand="block">Outlook Kalender</IonButton>
+            <IonButton type="button" fill="clear" expand="block" onClick={() => void copyCalendarLink()}>Kalenderlink kopieren</IonButton>
+            <small>Der Link ist persönlich und darf nicht weitergegeben werden. Änderungen erscheinen automatisch, sobald der jeweilige Kalenderanbieter das Abo erneut abruft.</small>
+          </> : <p>Kalendersynchronisierung ist momentan nicht verfügbar.</p>}
+        </div>}
         <div className="panel form">
           <h3>Passwort ändern</h3>
           <IonInput
