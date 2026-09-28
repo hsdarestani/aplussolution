@@ -206,8 +206,8 @@ function cardRecordedEntry(card: CardRow) {
     .sort((left: any, right: any) => new Date(right.updated_at || right.clock_in || 0).getTime() - new Date(left.updated_at || left.clock_in || 0).getTime())[0];
 }
 
-function CardTimeMeta({ card }: { card: CardRow }) {
-  const entry = cardRecordedEntry(card);
+function CardTimeMeta({ card, showRecordedTime = false }: { card: CardRow; showRecordedTime?: boolean }) {
+  const entry = showRecordedTime ? cardRecordedEntry(card) : undefined;
   return <span className="wiw-card-meta">
     <b>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</b>
     {entry?.clock_in ? <small className={`wiw-card-entered-time ${entry.approved ? 'approved' : 'pending'}`} aria-label={entry.approved ? 'Erfasste Arbeitszeit freigegeben' : 'Erfasste Arbeitszeit offen'}>{formatTimeIso(entry.clock_in)}–{entry.clock_out ? formatTimeIso(entry.clock_out) : 'offen'}</small> : null}
@@ -237,7 +237,7 @@ function sortPreviewCards(left: CardRow, right: CardRow) {
   return new Date(left.shift.starts_at).getTime() - new Date(right.shift.starts_at).getTime();
 }
 
-function AdjacentWeekPreview({ weekStart, groupFilter, query, side }: { weekStart: string; groupFilter: string[]; query: string; side: 'prev' | 'next' }) {
+function AdjacentWeekPreview({ weekStart, groupFilter, query, side, showRecordedTime = false }: { weekStart: string; groupFilter: string[]; query: string; side: 'prev' | 'next'; showRecordedTime?: boolean }) {
   const [shifts, setShifts] = useState<any[]>(() => {
     const cached = safeSessionGet(`${WEEK_CACHE_PREFIX}${weekStart}`);
     if (!cached) return [];
@@ -306,7 +306,7 @@ function AdjacentWeekPreview({ weekStart, groupFilter, query, side }: { weekStar
           <div className="wiw-card-main">
             <CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} />
             <span className="wiw-card-copy"><b>{cardWorkerShortName(card.worker?.name) || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}</b><small>{cardPositionShortLabel(card.shift.position_name)}</small></span>
-            <CardTimeMeta card={card} />
+            <CardTimeMeta card={card} showRecordedTime={showRecordedTime} />
           </div>
         </button></React.Fragment>)}
         {!dayCards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
@@ -1420,7 +1420,7 @@ export default function WiwScheduleMobile() {
             window.setTimeout(() => event.currentTarget.classList.remove('is-settling'), 180);
           }}
         >
-          <AdjacentWeekPreview weekStart={addDays(weekStart, -7)} groupFilter={groupFilter} query={query} side="prev" />
+          <AdjacentWeekPreview weekStart={addDays(weekStart, -7)} groupFilter={groupFilter} query={query} side="prev" showRecordedTime={isAdmin} />
           <div key={weekStart} className="wiw-week-scroll wiw-week-pane wiw-week-pane-center">
             {visibleDays.map((day) => {
               const header = formatDayHeader(day);
@@ -1431,14 +1431,14 @@ export default function WiwScheduleMobile() {
                   <div className="wiw-card-main">
                     <CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} />
                     <span className="wiw-card-copy"><b>{cardWorkerShortName(card.worker?.name) || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}{card.isOpen && card.shift.status !== 'draft' ? <span className="wiw-open-alert">!</span> : null}</b><small>{cardPositionShortLabel(card.shift.position_name)}</small></span>
-                    <CardTimeMeta card={card} />
+                    <CardTimeMeta card={card} showRecordedTime={isAdmin} />
                   </div>
                 </button></React.Fragment>)}
                 {!dayCards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
               </section>;
             })}
           </div>
-          <AdjacentWeekPreview weekStart={addDays(weekStart, 7)} groupFilter={groupFilter} query={query} side="next" />
+          <AdjacentWeekPreview weekStart={addDays(weekStart, 7)} groupFilter={groupFilter} query={query} side="next" showRecordedTime={isAdmin} />
         </div>
       </div> : <div className="wiw-week-scroll">
         {visibleDays.map((day) => {
