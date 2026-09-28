@@ -31,6 +31,9 @@ jobs:
           set -euo pipefail
           cd /opt/aplussolution
 
+          echo "=== detailed attendance PDF smoke test ==="
+          docker compose exec -T backend python manage.py shell -c "from django.test import RequestFactory; from core.models import User; from core.schedule_reports import export_attendance_details_pdf; u=User.objects.filter(role=User.Role.ADMIN,is_active=True).first(); assert u, 'NO_ADMIN_USER'; req=RequestFactory().get('/api/reports/attendance-details.pdf', {'date_from':'2026-09-01','date_to':'2026-09-28','approval':'all'}); req.user=u; resp=export_attendance_details_pdf(req); print('DETAIL_PDF_STATUS='+str(resp.status_code)); print('DETAIL_PDF_BYTES='+str(len(resp.content))); print('DETAIL_PDF_DISPOSITION='+str(resp.get('Content-Disposition','')))" </dev/null
+
           echo "=== recent admin notifications ==="
           docker compose exec -T backend python manage.py shell -c "from core.models import Notification,User; qs=Notification.objects.filter(user__role__in=[User.Role.ADMIN,User.Role.MANAGER]).select_related('user').order_by('-created_at')[:80]; [print('ADMIN_NOTIFICATION|'+str(n.created_at)+'|'+str(n.user.get_full_name() or n.user.email)+'|'+str(n.kind)+'|'+str(n.title)+'|'+str(n.body)) for n in qs if ('Arbeitszeit' in str(n.title)+' '+str(n.body) or 'Zeiterfassung' in str(n.title)+' '+str(n.body) or 'fehl' in (str(n.title)+' '+str(n.body)).lower() or 'time' in str(n.kind).lower())]" </dev/null
 
