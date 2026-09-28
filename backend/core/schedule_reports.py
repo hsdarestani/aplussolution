@@ -639,7 +639,7 @@ def export_attendance_pdf(request):
 
 @api_view(['GET'])
 def export_attendance_details_pdf(request):
-    if not _manager_required(request):
+    if getattr(request.user, 'role', '') != User.Role.ADMIN:
         return JsonResponse({'detail': 'Keine Berechtigung.'}, status=403)
 
     today = timezone.localdate()
