@@ -18,7 +18,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from rest_framework.decorators import api_view
 
-from .models import ClientCompany, Shift, TimeEntry, User, WorkerProfile
+from .models import ClientCompany, Location, Shift, TimeEntry, User, WorkerProfile
 from .shift_rules import normalized_groups
 from .shift_slots import ShiftSlot
 
@@ -634,4 +634,197 @@ def export_attendance_pdf(request):
     document.build(story)
     response = HttpResponse(output.getvalue(), content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="arbeitszeit-{start:%Y%m%d}-{end:%Y%m%d}.pdf"'
+    return response
+
+
+@api_view(['GET'])
+def export_attendance_details_pdf(request):
+    if not _manager_required(request):
+        return JsonResponse({'detail': 'Keine Berechtigung.'}, status=403)
+
+    today = timezone.localdate()
+    month_start = today.replace(day=1)
+    start = parse_date(str(request.query_params.get('date_from') or '')) or month_start
+    end = parse_date(str(request.query_params.get('date_to') or '')) or today
+    if end < start:
+        start, end = end, start
+    if (end - start).days > 366:
+        end = start + timedelta(days=366)
+
+    worker_ids = _uuid_list(request.query_params.get('workers', ''))
+    client_ids = _uuid_list(request.query_params.get('clients', ''))
+    location_ids = _uuid_list(request.query_params.get('locations', ''))
+    selected_groups = set(_group_list(request.query_params.get('groups', '')))
+    approval_mode = str(request.query_params.get('approval') or 'all').strip().lower()
+    if approval_mode not in {'all', 'approved', 'pending'}:
+        approval_mode = 'all'
+
+    range_start = _local_boundary(start, 0)
+    range_end = _local_boundary(end + timedelta(days=1), 0)
+    qs = TimeEntry.objects.filter(
+        clock_out__isnull=False,
+        clock_in__lt=range_end,
+        clock_out__gt=range_start,
+    ).exclude(
+        worker__user__email__iendswith='@sync.invalid'
+    ).select_related(
+        'worker__user', 'shift__client', 'shift__location', 'shift__position'
+    ).order_by('clock_in', 'worker__user__last_name', 'worker__user__first_name')
+
+    if worker_ids:
+        qs = qs.filter(worker_id__in=worker_ids)
+    if client_ids:
+        qs = qs.filter(shift__client_id__in=client_ids)
+    if location_ids:
+        qs = qs.filter(shift__location_id__in=location_ids)
+    if approval_mode == 'approved':
+        qs = qs.filter(Q(approved=True) | Q(wiw_time_id__isnull=False))
+    elif approval_mode == 'pending':
+        qs = qs.filter(approved=False, wiw_time_id__isnull=True)
+
+    rows = []
+    for entry in qs:
+        group = _attendance_group(entry)
+        if selected_groups and group not in selected_groups:
+            continue
+        metrics = _attendance_metrics(entry, range_start, range_end)
+        if not metrics:
+            continue
+        shift = entry.shift
+        local_in = timezone.localtime(entry.clock_in)
+        local_out = timezone.localtime(entry.clock_out)
+        effective_approved = bool(entry.approved or entry.wiw_time_id)
+        rows.append({
+            'date': local_in.strftime('%d.%m.%Y'),
+            'worker': _worker_label(entry.worker),
+            'client': shift.client.name if shift and shift.client_id else 'Ohne Kunde',
+            'location': shift.location.name if shift and shift.location_id else 'Ohne Einsatzort',
+            'group': GROUP_LABELS.get(group, group),
+            'clock_in': local_in.strftime('%H:%M'),
+            'clock_out': local_out.strftime('%H:%M'),
+            'pause': int(metrics['pause']),
+            'net': int(metrics['net']),
+            'approved': effective_approved,
+            'status': 'Freigegeben' if effective_approved else 'Offen',
+        })
+
+    output = BytesIO()
+    document = SimpleDocTemplate(
+        output,
+        pagesize=landscape(A4),
+        leftMargin=9 * mm,
+        rightMargin=9 * mm,
+        topMargin=9 * mm,
+        bottomMargin=9 * mm,
+        title='Zeiteinträge',
+        author='A+ Solution GmbH',
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'AttendanceDetailsTitle', parent=styles['Heading1'], fontName='Helvetica-Bold',
+        fontSize=17, leading=21, textColor=colors.HexColor('#10253F'), spaceAfter=2,
+    )
+    subtitle_style = ParagraphStyle(
+        'AttendanceDetailsSubtitle', parent=styles['Normal'], fontName='Helvetica',
+        fontSize=8.3, leading=11, textColor=colors.HexColor('#667085'),
+    )
+    head_style = ParagraphStyle(
+        'AttendanceDetailsHead', parent=styles['Normal'], fontName='Helvetica-Bold',
+        fontSize=7, leading=9, textColor=colors.white, alignment=TA_CENTER,
+    )
+    cell_style = ParagraphStyle(
+        'AttendanceDetailsCell', parent=styles['Normal'], fontName='Helvetica',
+        fontSize=7, leading=9, textColor=colors.HexColor('#344054'),
+    )
+    cell_bold = ParagraphStyle(
+        'AttendanceDetailsCellBold', parent=cell_style, fontName='Helvetica-Bold',
+    )
+    note_style = ParagraphStyle(
+        'AttendanceDetailsNote', parent=styles['Normal'], fontName='Helvetica',
+        fontSize=7.3, leading=10, textColor=colors.HexColor('#667085'),
+    )
+
+    story = [
+        Paragraph('A+ Solution · Zeiteinträge', title_style),
+        Paragraph(f'Zeitraum: {start:%d.%m.%Y} – {end:%d.%m.%Y}', subtitle_style),
+    ]
+
+    if worker_ids:
+        names = WorkerProfile.objects.filter(pk__in=worker_ids).select_related('user').order_by('user__last_name', 'user__first_name')
+        story.append(Paragraph('Mitarbeiter: ' + escape(', '.join(_worker_label(worker) for worker in names)), subtitle_style))
+    if client_ids:
+        names = ClientCompany.objects.filter(pk__in=client_ids).order_by('name').values_list('name', flat=True)
+        story.append(Paragraph('Kunden: ' + escape(', '.join(names)), subtitle_style))
+    if location_ids:
+        names = Location.objects.filter(pk__in=location_ids).order_by('name').values_list('name', flat=True)
+        story.append(Paragraph('Einsatzorte: ' + escape(', '.join(names)), subtitle_style))
+    if selected_groups:
+        story.append(Paragraph('Bereiche: ' + escape(', '.join(GROUP_LABELS.get(group, group) for group in sorted(selected_groups))), subtitle_style))
+    approval_label = {'all': 'Alle erfassten', 'approved': 'Nur freigegeben', 'pending': 'Nur offen'}[approval_mode]
+    story.append(Paragraph('Freigabestatus: ' + approval_label, subtitle_style))
+    story.append(Spacer(1, 3 * mm))
+
+    if not rows:
+        story.append(Paragraph('Keine Zeiteinträge für die gewählten Filter gefunden.', note_style))
+    else:
+        total_net = sum(row['net'] for row in rows)
+        story.append(Paragraph(f'{len(rows)} Einträge · Netto gesamt: {_minutes_hhmm(total_net)} Std.', subtitle_style))
+        story.append(Spacer(1, 2 * mm))
+        table_data = [[
+            Paragraph('Datum', head_style),
+            Paragraph('Mitarbeiter', head_style),
+            Paragraph('Kunde', head_style),
+            Paragraph('Einsatzort', head_style),
+            Paragraph('Bereich', head_style),
+            Paragraph('Beginn', head_style),
+            Paragraph('Ende', head_style),
+            Paragraph('Pause', head_style),
+            Paragraph('Netto', head_style),
+            Paragraph('Status', head_style),
+        ]]
+        for row in rows:
+            table_data.append([
+                Paragraph(row['date'], cell_style),
+                Paragraph(escape(row['worker']), cell_bold),
+                Paragraph(escape(row['client']), cell_style),
+                Paragraph(escape(row['location']), cell_style),
+                Paragraph(escape(row['group']), cell_style),
+                Paragraph(row['clock_in'], cell_style),
+                Paragraph(row['clock_out'], cell_style),
+                Paragraph(_minutes_hhmm(row['pause']), cell_style),
+                Paragraph(_minutes_hhmm(row['net']), cell_style),
+                Paragraph(row['status'], cell_bold),
+            ])
+        table = Table(
+            table_data,
+            repeatRows=1,
+            colWidths=[20 * mm, 37 * mm, 34 * mm, 37 * mm, 25 * mm, 18 * mm, 18 * mm, 18 * mm, 20 * mm, 25 * mm],
+            hAlign='LEFT',
+        )
+        style = TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#10253F')),
+            ('GRID', (0, 0), (-1, -1), 0.35, colors.HexColor('#D0D5DD')),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8FAFC')]),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (5, 1), (-1, -1), 'CENTER'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ])
+        for row_index, row in enumerate(rows, start=1):
+            status_color = colors.HexColor('#E9F4E4') if row['approved'] else colors.HexColor('#FFF4CC')
+            style.add('BACKGROUND', (9, row_index), (9, row_index), status_color)
+        table.setStyle(style)
+        story.append(table)
+
+    story.append(Spacer(1, 2 * mm))
+    story.append(Paragraph(
+        'Gelb markierte Einträge warten auf Freigabe. Grün markierte Einträge sind freigegeben oder stammen aus dem historischen WIW Nachweis.',
+        note_style,
+    ))
+    document.build(story)
+
+    response = HttpResponse(output.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="zeiteintraege-{start:%Y%m%d}-{end:%Y%m%d}.pdf"'
     return response

@@ -408,3 +408,12 @@
 
   .wiw-card-avatar img{backface-visibility:hidden;transform:translateZ(0)}
 }
+
+/* 2026 09 28 actual recorded time on admin shift cards */
+@media(max-width:900px){
+  .wiw-card-entered-time{display:inline-flex!important;align-items:center;justify-content:flex-end;gap:5px;max-width:none!important;overflow:visible!important;text-overflow:clip!important;white-space:nowrap!important;font-size:10px!important;font-weight:800!important;line-height:1.15;color:#6b7280!important}
+  .wiw-card-entered-time:before{content:'';width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:#f3b51b;box-shadow:0 0 0 1px rgba(17,24,39,.08)}
+  .wiw-card-entered-time.approved:before{background:#43a047}
+  .wiw-card-entered-time.pending:before{background:#f3b51b}
+  .wiw-card-location{max-width:120px}
+}

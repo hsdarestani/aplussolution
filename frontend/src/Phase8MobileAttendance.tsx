@@ -117,10 +117,13 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
   const [reportOpen, setReportOpen] = useState(false);
   const [reportBusy, setReportBusy] = useState(false);
   const [reportError, setReportError] = useState('');
+  const [reportClients, setReportClients] = useState<any[]>([]);
+  const [reportLocations, setReportLocations] = useState<any[]>([]);
+  const [reportMode, setReportMode] = useState<'summary' | 'details'>('summary');
   const [reportDateField, setReportDateField] = useState<'date_from' | 'date_to' | ''>('');
   const [report, setReport] = useState<any>(() => {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-    return { date_from: today.slice(0, 8) + '01', date_to: today, workers: [], groups: [] };
+    return { date_from: today.slice(0, 8) + '01', date_to: today, workers: [], groups: [], clients: [], locations: [], approval: 'all' };
   });
 
   useEffect(() => {
@@ -142,7 +145,16 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
   useEffect(() => {
     if (!showWorker) return;
     let cancelled = false;
-    void fetchWorkers().then((rows) => { if (!cancelled) setWorkers(rows); }).catch(() => undefined);
+    void Promise.all([
+      fetchWorkers(),
+      api('clients/?ordering=name'),
+      api('locations/'),
+    ]).then(([rows, clientPayload, locationPayload]) => {
+      if (cancelled) return;
+      setWorkers(rows);
+      setReportClients(unpack(clientPayload).filter((client: any) => client.active !== false));
+      setReportLocations(unpack(locationPayload).filter((location: any) => location.active !== false));
+    }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [showWorker]);
 
@@ -252,11 +264,17 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
       const params = new URLSearchParams({ date_from: report.date_from, date_to: report.date_to });
       if (report.workers?.length) params.set('workers', report.workers.join(','));
       if (report.groups?.length) params.set('groups', report.groups.join(','));
-      const result = await apiBlob(`reports/attendance.pdf?${params.toString()}`);
-      await saveSchedulePdf(result.blob, result.filename, 'Arbeitszeitbericht');
+      if (reportMode === 'details') {
+        if (report.clients?.length) params.set('clients', report.clients.join(','));
+        if (report.locations?.length) params.set('locations', report.locations.join(','));
+        params.set('approval', report.approval || 'all');
+      }
+      const endpoint = reportMode === 'details' ? 'reports/attendance-details.pdf' : 'reports/attendance.pdf';
+      const result = await apiBlob(`${endpoint}?${params.toString()}`);
+      await saveSchedulePdf(result.blob, result.filename, reportMode === 'details' ? 'Zeiteinträge' : 'Arbeitszeitbericht');
       setReportOpen(false);
     } catch (error: any) {
-      setReportError(error?.message || 'Arbeitszeit-PDF konnte nicht erstellt werden.');
+      setReportError(error?.message || 'Arbeitszeit PDF konnte nicht erstellt werden.');
     } finally {
       setReportBusy(false);
     }
@@ -353,11 +371,14 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
       { value: 'housekeeping', label: 'Housekeeping' },
       { value: 'front_office', label: 'Front Office' },
     ];
+    const detailReport = reportMode === 'details';
+    const selectedClientIds = new Set((report.clients || []).map(String));
+    const visibleLocations = reportLocations.filter((location: any) => !selectedClientIds.size || selectedClientIds.has(String(location.client || '')));
     return createPortal(<div className="attendance-pdf-screen" data-testid="phase8-attendance-report">
       <section className="wiw-pdf-sheet attendance-pdf-sheet">
         <header className="attendance-pdf-topbar">
           <button type="button" className="attendance-pdf-back" disabled={reportBusy} onClick={() => setReportOpen(false)}>‹ Zurück</button>
-          <div><b>Arbeitszeit als PDF</b><small>Filter auswählen und exportieren</small></div>
+          <div><b>{detailReport ? 'Zeiteinträge als PDF' : 'Arbeitszeit als PDF'}</b><small>{detailReport ? 'Einzelne erfasste Zeiten exportieren' : 'Summen nach Mitarbeiter exportieren'}</small></div>
           <button type="button" className="attendance-pdf-finish" disabled={reportBusy} onClick={() => void downloadAttendanceReport()}>{reportBusy ? '…' : 'Fertig'}</button>
         </header>
           <div className="wiw-pdf-scroll">
@@ -379,6 +400,49 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
               <small>Nichts ausgewählt = alle Mitarbeiter</small>
             </div>
 
+            {detailReport ? <>
+              <div className="wiw-pdf-filter-block">
+                <b>Kunden</b>
+                <div className="wiw-pdf-chip-grid">
+                  <button type="button" className={(report.clients || []).length === 0 ? 'active' : ''} aria-pressed={(report.clients || []).length === 0} onClick={() => setReport((current: any) => ({ ...current, clients: [], locations: [] }))}>Alle Kunden</button>
+                  {reportClients.map((client: any) => {
+                    const clientId = String(client.id);
+                    const selected = (report.clients || []).includes(clientId);
+                    return <button type="button" key={clientId} className={selected ? 'active' : ''} aria-pressed={selected} onClick={() => setReport((current: any) => {
+                      const nextClients = selected ? current.clients.filter((item: string) => item !== clientId) : [...current.clients, clientId];
+                      const allowedLocationIds = new Set(reportLocations.filter((location: any) => !nextClients.length || nextClients.includes(String(location.client || ''))).map((location: any) => String(location.id)));
+                      return { ...current, clients: nextClients, locations: (current.locations || []).filter((item: string) => allowedLocationIds.has(item)) };
+                    })}>{client.name || 'Kunde'}</button>;
+                  })}
+                </div>
+                <small>Nichts ausgewählt = alle Kunden</small>
+              </div>
+
+              <div className="wiw-pdf-filter-block">
+                <b>Einsatzorte</b>
+                <div className="wiw-pdf-chip-grid">
+                  <button type="button" className={(report.locations || []).length === 0 ? 'active' : ''} aria-pressed={(report.locations || []).length === 0} onClick={() => setReport((current: any) => ({ ...current, locations: [] }))}>Alle Einsatzorte</button>
+                  {visibleLocations.map((location: any) => {
+                    const locationId = String(location.id);
+                    const selected = (report.locations || []).includes(locationId);
+                    return <button type="button" key={locationId} className={selected ? 'active' : ''} aria-pressed={selected} onClick={() => setReport((current: any) => ({ ...current, locations: selected ? current.locations.filter((item: string) => item !== locationId) : [...current.locations, locationId] }))}>{location.name || 'Einsatzort'}</button>;
+                  })}
+                </div>
+                <small>{selectedClientIds.size ? 'Einsatzorte passend zu den gewählten Kunden' : 'Nichts ausgewählt = alle Einsatzorte'}</small>
+              </div>
+
+              <div className="wiw-pdf-filter-block">
+                <b>Freigabestatus</b>
+                <div className="wiw-pdf-chip-grid compact">
+                  {[
+                    ['all', 'Alle erfassten'],
+                    ['approved', 'Nur freigegeben'],
+                    ['pending', 'Nur offen'],
+                  ].map(([value, label]) => <button type="button" key={value} className={report.approval === value ? 'active' : ''} aria-pressed={report.approval === value} onClick={() => setReport((current: any) => ({ ...current, approval: value }))}>{label}</button>)}
+                </div>
+              </div>
+            </> : null}
+
             <div className="wiw-pdf-filter-block">
               <b>Bereiche</b>
               <div className="wiw-pdf-chip-grid compact">
@@ -392,7 +456,7 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
 
             <div className="attendance-pdf-summary">
               <b>Im Bericht</b>
-              <span>Nettoarbeitszeit · Nachtzuschlag 23:00–06:00 · Sonntagszuschlag · abgezogene Pause</span>
+              <span>{detailReport ? 'Datum · Mitarbeiter · Kunde · Einsatzort · Bereich · Beginn · Ende · Pause · Netto · Freigabestatus' : 'Nettoarbeitszeit · Nachtzuschlag 23:00–06:00 · Sonntagszuschlag · abgezogene Pause'}</span>
             </div>
           </div>
           {reportError ? <p className="wiw-pdf-error" role="alert">{reportError}</p> : null}
@@ -515,7 +579,8 @@ export default function Phase8MobileAttendance({ data, showWorker = false }: { d
       <span>{showWorker ? 'Einträge, Mitarbeiter und Gesamtstunden pro Monat auf einen Blick.' : 'Monate ohne erfasste Arbeitszeit sind deutlich als leer markiert.'}</span>
     </div>
     {showWorker && <div className="wiw-attendance-admin-tools">
-      <button type="button" onClick={() => setReportOpen(true)}><IonIcon icon={documentTextOutline} /><span><b>Arbeitszeit-PDF</b><small>Mitarbeiter & Zeitraum filtern</small></span></button>
+      <button type="button" onClick={() => { setReportMode('summary'); setReportOpen(true); }}><IonIcon icon={documentTextOutline} /><span><b>Arbeitszeit PDF</b><small>Summen nach Mitarbeiter</small></span></button>
+      <button type="button" onClick={() => { setReportMode('details'); setReportOpen(true); }}><IonIcon icon={documentTextOutline} /><span><b>Zeiteinträge PDF</b><small>Einzelne Zeiten mit Status und Einsatzort</small></span></button>
     </div>}
     {showWorker && pendingApprovals.length > 0 && <section className="wiw-pending-approvals">
       <header><b>Offene Freigaben</b><span>{pendingApprovals.length}</span></header>
