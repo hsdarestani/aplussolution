@@ -35,24 +35,22 @@ jobs:
 
       - name: Configure legacy host as proxy only
         env:
-          OLD_HOST: ${{ secrets.HOST }}
-          OLD_PASSWORD: ${{ secrets.PASS }}
+          STRATO_HOST: ${{ secrets.STRATO_HOST }}
+          STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$OLD_HOST" && test -n "$OLD_PASSWORD"
-          cat >/tmp/askpass.sh <<'EOF'
-          #!/bin/sh
-          printf '%s\n' "$OLD_PASSWORD"
-          EOF
-          chmod 700 /tmp/askpass.sh
-          export SSH_ASKPASS=/tmp/askpass.sh SSH_ASKPASS_REQUIRE=force DISPLAY=:0 OLD_PASSWORD
+          test -n "$STRATO_HOST" && test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
 
-          setsid -w ssh -qT \
+          ssh -i "$HOME/.ssh/strato_ed25519" -qT \
+            -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=20 \
-            root@"$OLD_HOST" 'bash -s' <<'REMOTE'
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
           test -f docker-compose.yml
@@ -119,23 +117,22 @@ jobs:
 
       - name: Stop duplicate application and database services on legacy host
         env:
-          OLD_HOST: ${{ secrets.HOST }}
-          OLD_PASSWORD: ${{ secrets.PASS }}
+          STRATO_HOST: ${{ secrets.STRATO_HOST }}
+          STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
         shell: bash
         run: |
           set -euo pipefail
-          cat >/tmp/askpass.sh <<'EOF'
-          #!/bin/sh
-          printf '%s\n' "$OLD_PASSWORD"
-          EOF
-          chmod 700 /tmp/askpass.sh
-          export SSH_ASKPASS=/tmp/askpass.sh SSH_ASKPASS_REQUIRE=force DISPLAY=:0 OLD_PASSWORD
+          test -n "$STRATO_HOST" && test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
 
-          setsid -w ssh -qT \
+          ssh -i "$HOME/.ssh/strato_ed25519" -qT \
+            -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=20 \
-            root@"$OLD_HOST" 'bash -s' <<'REMOTE'
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
 
@@ -181,4 +178,4 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: rm -f /tmp/askpass.sh /tmp/new-h /tmp/new-b /tmp/old-h /tmp/old-b /tmp/final-h /tmp/final-b
+        run: rm -f "$HOME/.ssh/strato_ed25519" /tmp/new-h /tmp/new-b /tmp/old-h /tmp/old-b /tmp/final-h /tmp/final-b
