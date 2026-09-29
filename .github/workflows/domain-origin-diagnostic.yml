@@ -50,3 +50,5 @@ jobs:
 # rerun after Caddy recreate
 
 # final verification after profile deploy
+
+# verify after manual DNS change
