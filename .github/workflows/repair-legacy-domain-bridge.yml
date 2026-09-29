@@ -37,10 +37,11 @@ jobs:
         env:
           STRATO_HOST: ${{ secrets.STRATO_HOST }}
           STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+          BACKUP_HOST: ${{ secrets.BACKUP_HOST }}
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$STRATO_HOST" && test -n "$STRATO_SSH_PRIVATE_KEY"
+          test -n "$STRATO_HOST" && test -n "$STRATO_SSH_PRIVATE_KEY" && test -n "$BACKUP_HOST"
           mkdir -p "$HOME/.ssh"
           printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
           chmod 600 "$HOME/.ssh/strato_ed25519"
@@ -50,7 +51,7 @@ jobs:
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=20 \
-            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+            root@"$STRATO_HOST" "BACKUP_HOST='$BACKUP_HOST' bash -s" <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
           test -f docker-compose.yml
@@ -64,7 +65,7 @@ jobs:
           solution.smarbiz.sbs {
               encode zstd gzip
 
-              reverse_proxy https://app.aplus-solution.de {
+              reverse_proxy https://${BACKUP_HOST} {
                   header_up Host app.aplus-solution.de
                   transport http {
                       tls_server_name app.aplus-solution.de
