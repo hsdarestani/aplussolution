@@ -1,0 +1,53 @@
+name: Diagnose STRATO Cloudflare path
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-strato-cloudflare-path.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Inspect Cloudflare routing on STRATO
+        env:
+          STRATO_HOST: ${{ secrets.STRATO_HOST }}
+          STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+          ssh -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          echo "cloudflared_binary=$(command -v cloudflared >/dev/null 2>&1 && echo true || echo false)"
+          echo "cloudflared_service=$(systemctl is-active cloudflared 2>/dev/null || true)"
+          echo "cloudflared_processes:"
+          ps -eo pid,comm,args | grep -E '[c]loudflared' | sed -E 's/token [^ ]+/token REDACTED/g' || true
+          echo "cloudflared_containers:"
+          docker ps --format '{{.Names}}|{{.Image}}' | grep -Ei 'cloudflared|cloudflare' || true
+
+          for file in /etc/cloudflared/config.yml /etc/cloudflared/config.yaml /root/.cloudflared/config.yml /root/.cloudflared/config.yaml; do
+            if [ -f "$file" ]; then
+              echo "config_file=$file"
+              grep -E '^[[:space:]]*(hostname|service):' "$file" || true
+            fi
+          done
+          REMOTE
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
