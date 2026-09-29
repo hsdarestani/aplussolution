@@ -1,4 +1,5 @@
 name: Diagnose production domain origins
+# rerun after legacy bridge repair
 
 on:
   push:
