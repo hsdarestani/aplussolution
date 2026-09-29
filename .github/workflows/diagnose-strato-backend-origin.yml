@@ -1,0 +1,40 @@
+name: Diagnose STRATO backend origin marker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-strato-backend-origin.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Inspect backend direct response
+        env:
+          STRATO_HOST: ${{ secrets.STRATO_HOST }}
+          STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+          ssh -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend sh -lc "curl -sS -D /tmp/h -o /tmp/b http://127.0.0.1:8000/health/; grep -Ei '^(HTTP/|server:|x-aplus-origin:|x-aplus-legacy-bridge:)' /tmp/h || true; cat /tmp/b"
+          REMOTE
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
