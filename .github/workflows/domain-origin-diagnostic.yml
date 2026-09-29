@@ -46,3 +46,5 @@ jobs:
               "https://$domain/api/auth/login/?origin_post=${GITHUB_RUN_ID}"
             grep -Ei '^(HTTP/|x-aplus-origin:|x-aplus-legacy-bridge:|server:|cf-cache-status:|age:|cf-ray:)' /tmp/ph || true
           done
+
+# rerun after Caddy recreate
