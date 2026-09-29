@@ -1,0 +1,60 @@
+name: Diagnose STRATO edge path
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-strato-edge-path.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Inspect edge path safely
+        env:
+          STRATO_HOST: ${{ secrets.STRATO_HOST }}
+          STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+          ssh -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+
+          caddy_id="$(docker compose ps -q caddy)"
+          test -n "$caddy_id"
+          echo "caddy_running=$(docker inspect -f '{{.State.Running}}' "$caddy_id")"
+          docker inspect -f '{{json .NetworkSettings.Ports}}' "$caddy_id"
+
+          for target in 127.0.0.1 ::1; do
+            rm -f /tmp/h /tmp/b
+            if [ "$target" = "::1" ]; then
+              resolve='solution.smarbiz.sbs:443:[::1]'
+            else
+              resolve="solution.smarbiz.sbs:443:$target"
+            fi
+            if curl -gksS --resolve "$resolve" -D /tmp/h -o /tmp/b --max-time 15 https://solution.smarbiz.sbs/health/; then
+              echo "target=$target"
+              grep -Ei '^(HTTP/|server:|x-aplus-origin:|x-aplus-legacy-bridge:)' /tmp/h || true
+            else
+              echo "target=$target unavailable"
+            fi
+          done
+          REMOTE
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
