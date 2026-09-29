@@ -1,0 +1,31 @@
+name: Diagnose production domain origins
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/domain-origin-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Compare public domain origins
+        shell: bash
+        run: |
+          set -euo pipefail
+          for domain in app.aplus-solution.de solution.smarbiz.sbs; do
+            echo "=== $domain ==="
+            rm -f /tmp/h /tmp/b
+            curl -fsS -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+              -D /tmp/h -o /tmp/b --max-time 20 \
+              "https://$domain/health/?origin_diag=${GITHUB_RUN_ID}"
+            grep -Ei '^(HTTP/|x-aplus-origin:|x-aplus-legacy-bridge:|server:|cf-ray:)' /tmp/h || true
+            cat /tmp/b
+            echo
+          done
