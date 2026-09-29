@@ -30,3 +30,19 @@ jobs:
             cat /tmp/b
             echo
           done
+
+      - name: Compare non-cacheable API origin
+        shell: bash
+        run: |
+          set -euo pipefail
+          for domain in app.aplus-solution.de solution.smarbiz.sbs; do
+            echo "=== POST $domain ==="
+            rm -f /tmp/ph /tmp/pb
+            curl -sS -X POST \
+              -H 'Content-Type: application/json' \
+              -H 'Cache-Control: no-store' \
+              -D /tmp/ph -o /tmp/pb --max-time 20 \
+              --data '{"email":"origin-diagnostic-invalid@example.invalid","password":"not-a-real-password"}' \
+              "https://$domain/api/auth/login/?origin_post=${GITHUB_RUN_ID}"
+            grep -Ei '^(HTTP/|x-aplus-origin:|x-aplus-legacy-bridge:|server:|cf-cache-status:|age:|cf-ray:)' /tmp/ph || true
+          done
