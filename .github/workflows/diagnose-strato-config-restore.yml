@@ -1,0 +1,55 @@
+name: Diagnose STRATO config restore
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-strato-config-restore.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Inspect managed config state
+        env:
+          STRATO_HOST: ${{ secrets.STRATO_HOST }}
+          STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+          ssh -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          echo "caddy_is_symlink=$([ -L Caddyfile ] && echo true || echo false)"
+          stat -c 'caddy_mtime=%y caddy_size=%s' Caddyfile
+          if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            echo "git_repo=true"
+            git diff --quiet -- Caddyfile && echo "caddy_matches_git=true" || echo "caddy_matches_git=false"
+          else
+            echo "git_repo=false"
+          fi
+          echo "bridge_backup_exists=$([ -f Caddyfile.pre-backup-primary-bridge ] && echo true || echo false)"
+          echo "strato_backup_exists=$([ -f Caddyfile.pre-strato-bridge ] && echo true || echo false)"
+          echo "systemd_matches:"
+          systemctl list-timers --all --no-legend 2>/dev/null | grep -Ei 'aplus|deploy|sync|git|docker|caddy' | sed -E 's/[[:space:]]+/ /g' || true
+          echo "root_cron_matches:"
+          crontab -l 2>/dev/null | grep -Ei 'aplus|deploy|sync|git|docker|caddy' || true
+          echo "current_markers:"
+          grep -E 'reverse_proxy https://app.aplus-solution.de|X-Aplus-Origin|X-Aplus-Legacy-Bridge' Caddyfile || true
+          REMOTE
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
