@@ -61,7 +61,7 @@ jobs:
             cp -f Caddyfile Caddyfile.pre-backup-primary-bridge
           fi
 
-          cat > Caddyfile <<'CADDY'
+          cat > Caddyfile <<CADDY
           solution.smarbiz.sbs {
               encode zstd gzip
 
