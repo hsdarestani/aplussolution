@@ -138,8 +138,8 @@ function productionUiPolish(): Plugin {
         next = replaceRequired(
           this,
           next,
-          `  const navigateTo = (next: View) => {\n    setView(next);\n    setMobileMenuOpen(false);\n    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));\n  };`,
-          `  const navigateTo = (next: View) => {\n    setView(next);\n    setMobileMenuOpen(false);\n    window.requestAnimationFrame(() => {\n      const content = document.querySelector('ion-content.app-content') as any;\n      if (content?.scrollToTop) void content.scrollToTop(0);\n      else window.scrollTo({ top: 0, behavior: 'auto' });\n    });\n  };`,
+          `  const navigateTo = (next: View) => {\n    setView(next);\n    setMobileMenuOpen(false);\n    const url = new URL(window.location.href);\n    url.searchParams.set('view', next);\n    if (next !== 'akte') {\n      url.searchParams.delete('akte_kind');\n      url.searchParams.delete('akte_id');\n    }\n    window.history.replaceState({ ...(window.history.state || {}), view: next }, '', \`\${url.pathname}\${url.search}\`);\n    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));\n  };`,
+          `  const navigateTo = (next: View) => {\n    setView(next);\n    setMobileMenuOpen(false);\n    const url = new URL(window.location.href);\n    url.searchParams.set('view', next);\n    if (next !== 'akte') {\n      url.searchParams.delete('akte_kind');\n      url.searchParams.delete('akte_id');\n    }\n    window.history.replaceState({ ...(window.history.state || {}), view: next }, '', \`\${url.pathname}\${url.search}\`);\n    window.requestAnimationFrame(() => {\n      const content = document.querySelector('ion-content.app-content') as any;\n      if (content?.scrollToTop) void content.scrollToTop(0);\n      else window.scrollTo({ top: 0, behavior: 'auto' });\n    });\n  };`,
           'Ionic scroll reset',
         );
         return { code: next, map: null };
