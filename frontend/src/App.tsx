@@ -600,6 +600,28 @@ function People({ user }: { user: User }) {
     }
   }
 
+  async function resetWorkerPassword(worker: any) {
+    if (!isManager(user) || !worker?.id) return;
+    if (!window.confirm(`Passwort für ${worker.user_detail?.name || worker.user_detail?.email || 'diesen Mitarbeiter'} zurücksetzen?`)) return;
+    setBusy(true);
+    try {
+      const result: any = await api(`workers/${worker.id}/reset-password/`, { method: 'POST', body: '{}' });
+      setCredentials({
+        credentials: [
+          {
+            email: result.email || worker.user_detail?.email,
+            password: result.temporary_password,
+          },
+        ],
+      });
+      setToast('Mitarbeiterpasswort wurde zurückgesetzt.');
+    } catch (reason: any) {
+      setToast(reason.message || 'Passwort konnte nicht zurückgesetzt werden.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function archive(kind: 'workers' | 'clients', id: string) {
     if (!window.confirm('Diesen Datensatz deaktivieren?')) return;
     try {
@@ -684,6 +706,7 @@ function People({ user }: { user: User }) {
             <div className="avatar">{worker.user_detail?.name?.[0] || 'M'}</div>
             <div className="grow"><a className="entity-name-link" href={akteHref('worker', worker.id)} onClick={(event) => { event.preventDefault(); openAkte('worker', worker.id); }}>{worker.user_detail?.name || worker.user_detail?.email}</a><p>{worker.employee_number} · {worker.employment_type} · {worker.user_detail?.email}</p></div>
             <strong>{worker.ranking_points} P.</strong>
+            {isManager(user) && worker.active && <IonButton fill="clear" color="warning" disabled={busy} onClick={() => void resetWorkerPassword(worker)}>Passwort zurücksetzen</IonButton>}
             {isManager(user) && worker.active && <IonButton fill="clear" color="danger" onClick={() => archive('workers', worker.id)}>Deaktivieren</IonButton>}
           </div>) : <Empty>Noch keine Mitarbeiter. Über „Mitarbeiter“ legst du das erste Profil an.</Empty>}
         </div> : <div className="panel" data-testid="people-clients-list">
