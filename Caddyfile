@@ -51,3 +51,5 @@ staging.app.aplus-solution.de {
         X-Aplus-Gateway "staging"
     }
 }
+
+# Legacy domain is intentionally served by the same production origin.
