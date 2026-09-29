@@ -1,0 +1,68 @@
+name: Refresh primary Caddy for legacy domain
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/refresh-primary-caddy-legacy.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      PRIMARY_HOST: ${{ secrets.BACKUP_HOST }}
+      PRIMARY_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Recreate primary Caddy with current config
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh \
+            -o PubkeyAuthentication=no \
+            -o PreferredAuthentications=password \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            root@"$PRIMARY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          grep -q 'solution.smarbiz.sbs' Caddyfile
+          docker compose up -d --force-recreate --no-deps caddy
+          sleep 8
+          docker compose ps caddy
+          docker compose logs --no-color --tail=120 caddy
+          REMOTE
+
+      - name: Verify both public domains
+        shell: bash
+        run: |
+          set -euo pipefail
+          for domain in app.aplus-solution.de solution.smarbiz.sbs; do
+            ok=0
+            for i in $(seq 1 18); do
+              rm -f /tmp/h /tmp/b
+              if curl -fsS -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+                -D /tmp/h -o /tmp/b --max-time 20 \
+                "https://$domain/health/?caddy_refresh=${GITHUB_RUN_ID}-$i" \
+                && grep -qi '^x-aplus-origin: backup-primary' /tmp/h \
+                && grep -q '"status"' /tmp/b; then
+                ok=1
+                break
+              fi
+              sleep 5
+            done
+            test "$ok" -eq 1
+          done
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/h /tmp/b
