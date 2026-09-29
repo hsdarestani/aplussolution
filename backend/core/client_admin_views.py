@@ -5,13 +5,13 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from .credential_reset import generated_worker_password
-from .models import ClientCompany, User
-from .permissions import IsAdmin
+from .models import ClientCompany, User, WorkerProfile
+from .permissions import IsAdminOrManager
 from .services import audit
 
 
 @api_view(['POST'])
-@permission_classes([IsAdmin])
+@permission_classes([IsAdminOrManager])
 def reset_client_password(request, pk):
     """Reset or create the portal password for one client contact.
 
@@ -113,5 +113,48 @@ def reset_client_password(request, pk):
         'email': contact.email,
         'temporary_password': password,
         'portal_access_created': created,
+        'portal_access_reactivated': reactivated,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminOrManager])
+def reset_worker_password(request, pk):
+    """Reset one worker portal password and reactivate the linked user if needed."""
+    worker = WorkerProfile.objects.select_related('user').filter(pk=pk).first()
+    if not worker:
+        return Response({'detail': 'Mitarbeiter wurde nicht gefunden.'}, status=404)
+
+    user = worker.user
+    if user.role != User.Role.WORKER:
+        return Response({'detail': 'Der verknüpfte Benutzer ist kein Mitarbeiterkonto.'}, status=400)
+
+    password = generated_worker_password()
+    reactivated = not user.is_active or not worker.active
+
+    with transaction.atomic():
+        user.set_password(password)
+        user.is_active = True
+        user.is_onboarded = True
+        user.save(update_fields=['password', 'is_active', 'is_onboarded'])
+        if not worker.active:
+            worker.active = True
+            worker.save(update_fields=['active', 'updated_at'])
+
+        audit(
+            request,
+            'worker.portal_password_reset',
+            worker,
+            {
+                'worker_user_id': str(user.id),
+                'portal_access_reactivated': reactivated,
+            },
+        )
+
+    return Response({
+        'detail': 'Das Mitarbeiterpasswort wurde zurückgesetzt.',
+        'email': user.email,
+        'temporary_password': password,
+        'portal_access_created': False,
         'portal_access_reactivated': reactivated,
     })
