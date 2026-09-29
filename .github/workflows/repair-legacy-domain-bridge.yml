@@ -1,0 +1,184 @@
+name: Repair legacy domain bridge to backup primary
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/repair-legacy-domain-bridge.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aplus-repair-legacy-domain-bridge
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OLD_DOMAIN: solution.smarbiz.sbs
+      NEW_DOMAIN: app.aplus-solution.de
+    steps:
+      - name: Verify current primary
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f /tmp/new-h /tmp/new-b
+          curl -fsS -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+            -D /tmp/new-h -o /tmp/new-b --max-time 20 \
+            "https://${NEW_DOMAIN}/health/?bridge_primary=${GITHUB_RUN_ID}"
+          grep -qi '^x-aplus-origin: backup-primary' /tmp/new-h
+          grep -q '"status"' /tmp/new-b
+
+      - name: Configure legacy host as proxy only
+        env:
+          OLD_HOST: ${{ secrets.HOST }}
+          OLD_PASSWORD: ${{ secrets.PASS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OLD_HOST" && test -n "$OLD_PASSWORD"
+          cat >/tmp/askpass.sh <<'EOF'
+          #!/bin/sh
+          printf '%s\n' "$OLD_PASSWORD"
+          EOF
+          chmod 700 /tmp/askpass.sh
+          export SSH_ASKPASS=/tmp/askpass.sh SSH_ASKPASS_REQUIRE=force DISPLAY=:0 OLD_PASSWORD
+
+          setsid -w ssh -qT \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            root@"$OLD_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          test -f docker-compose.yml
+          test -f Caddyfile
+
+          if [ ! -f Caddyfile.pre-backup-primary-bridge ]; then
+            cp -f Caddyfile Caddyfile.pre-backup-primary-bridge
+          fi
+
+          cat > Caddyfile <<'CADDY'
+          solution.smarbiz.sbs {
+              encode zstd gzip
+
+              reverse_proxy https://app.aplus-solution.de {
+                  header_up Host app.aplus-solution.de
+                  transport http {
+                      tls_server_name app.aplus-solution.de
+                  }
+              }
+
+              header {
+                  Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+                  X-Content-Type-Options "nosniff"
+                  X-Frame-Options "SAMEORIGIN"
+                  Referrer-Policy "strict-origin-when-cross-origin"
+                  Permissions-Policy "camera=(self), geolocation=(self), microphone=()"
+                  X-Aplus-Legacy-Bridge "backup-primary"
+              }
+          }
+          CADDY
+
+          docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          docker compose restart caddy >/dev/null
+          sleep 3
+
+          rm -f /tmp/local-h /tmp/local-b
+          curl -ksS --resolve solution.smarbiz.sbs:443:127.0.0.1 \
+            -D /tmp/local-h -o /tmp/local-b --max-time 20 \
+            'https://solution.smarbiz.sbs/health/?bridge-local=1'
+          grep -qi '^x-aplus-origin: backup-primary' /tmp/local-h
+          grep -qi '^x-aplus-legacy-bridge: backup-primary' /tmp/local-h
+          grep -q '"status"' /tmp/local-b
+          REMOTE
+
+      - name: Verify public bridge before stopping old writers
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 30); do
+            rm -f /tmp/old-h /tmp/old-b
+            if curl -fsS -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+              -D /tmp/old-h -o /tmp/old-b --max-time 20 \
+              "https://${OLD_DOMAIN}/health/?bridge_public=${GITHUB_RUN_ID}-${i}" \
+              && grep -qi '^x-aplus-origin: backup-primary' /tmp/old-h \
+              && grep -qi '^x-aplus-legacy-bridge: backup-primary' /tmp/old-h \
+              && grep -q '"status"' /tmp/old-b; then
+              ok=1
+              break
+            fi
+            sleep 4
+          done
+          test "$ok" -eq 1
+
+      - name: Stop duplicate application and database services on legacy host
+        env:
+          OLD_HOST: ${{ secrets.HOST }}
+          OLD_PASSWORD: ${{ secrets.PASS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/askpass.sh <<'EOF'
+          #!/bin/sh
+          printf '%s\n' "$OLD_PASSWORD"
+          EOF
+          chmod 700 /tmp/askpass.sh
+          export SSH_ASKPASS=/tmp/askpass.sh SSH_ASKPASS_REQUIRE=force DISPLAY=:0 OLD_PASSWORD
+
+          setsid -w ssh -qT \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            root@"$OLD_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+
+          for service in celery celery-beat backend frontend redis db; do
+            cid="$(docker compose ps -q "$service" 2>/dev/null || true)"
+            if [ -n "$cid" ]; then
+              docker update --restart=no "$cid" >/dev/null || true
+              docker stop "$cid" >/dev/null || true
+            fi
+          done
+
+          caddy_id="$(docker compose ps -q caddy)"
+          test -n "$caddy_id"
+          test "$(docker inspect -f '{{.State.Running}}' "$caddy_id")" = 'true'
+
+          rm -f /tmp/post-h /tmp/post-b
+          curl -ksS --resolve solution.smarbiz.sbs:443:127.0.0.1 \
+            -D /tmp/post-h -o /tmp/post-b --max-time 20 \
+            'https://solution.smarbiz.sbs/health/?bridge-post-stop=1'
+          grep -qi '^x-aplus-origin: backup-primary' /tmp/post-h
+          grep -qi '^x-aplus-legacy-bridge: backup-primary' /tmp/post-h
+          grep -q '"status"' /tmp/post-b
+
+          echo 'LEGACY_HOST_PROXY_ONLY_OK'
+          REMOTE
+
+      - name: Final public consistency check
+        shell: bash
+        run: |
+          set -euo pipefail
+          for domain in "$NEW_DOMAIN" "$OLD_DOMAIN"; do
+            rm -f /tmp/final-h /tmp/final-b
+            curl -fsS -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+              -D /tmp/final-h -o /tmp/final-b --max-time 20 \
+              "https://$domain/health/?bridge_final=${GITHUB_RUN_ID}"
+            grep -qi '^x-aplus-origin: backup-primary' /tmp/final-h
+            grep -q '"status"' /tmp/final-b
+            if [ "$domain" = "$OLD_DOMAIN" ]; then
+              grep -qi '^x-aplus-legacy-bridge: backup-primary' /tmp/final-h
+            fi
+          done
+          echo 'PUBLIC_DOMAINS_CONSISTENT_BACKUP_PRIMARY'
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/askpass.sh /tmp/new-h /tmp/new-b /tmp/old-h /tmp/old-b /tmp/final-h /tmp/final-b
