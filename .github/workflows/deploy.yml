@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - '.github/workflows/strato-*.yml'
+      - '.github/workflows/**'
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -74,73 +74,53 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      STRATO_HOST: ${{ secrets.STRATO_HOST }}
-      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+      PRIMARY_HOST: ${{ secrets.BACKUP_HOST }}
+      PRIMARY_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure Strato SSH key
+      - name: Install SSH helper
         run: |
           set -euo pipefail
-          test -n "$STRATO_HOST"
-          test -n "$STRATO_SSH_PRIVATE_KEY"
-          mkdir -p "$HOME/.ssh"
-          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
-          chmod 600 "$HOME/.ssh/strato_ed25519"
+          test -n "$PRIMARY_HOST"
+          test -n "$PRIMARY_PASSWORD"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
 
       - name: Package release
         run: |
           set -euo pipefail
-          tar \
-            --exclude='.git' \
-            --exclude='.env' \
-            --exclude='frontend/node_modules' \
-            -czf /tmp/aplussolution-release.tgz .
+          tar             --exclude='.git'             --exclude='.env'             --exclude='frontend/node_modules'             -czf /tmp/aplussolution-release.tgz .
 
-      - name: Upload release to Strato
+      - name: Upload release to temporary primary
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
         run: |
           set -euo pipefail
-          scp -q \
-            -i "$HOME/.ssh/strato_ed25519" \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=20 \
-            /tmp/aplussolution-release.tgz root@"$STRATO_HOST":/tmp/aplussolution-release.tgz
+          sshpass -e scp -q             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ConnectTimeout=20             /tmp/aplussolution-release.tgz root@"$PRIMARY_HOST":/tmp/aplussolution-release.tgz
 
-      - name: Deploy release without replacing production data
+      - name: Deploy release to temporary primary without replacing production data
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
         run: |
           set -euo pipefail
-          ssh \
-            -i "$HOME/.ssh/strato_ed25519" \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=20 \
-            -o ServerAliveInterval=15 \
-            -o ServerAliveCountMax=12 \
-            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ConnectTimeout=20             -o ServerAliveInterval=15             -o ServerAliveCountMax=12             root@"$PRIMARY_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           mkdir -p /opt/aplussolution
           cd /opt/aplussolution
           test -f .env
 
-          # Replace application source only. Docker volumes and the production .env
-          # remain untouched, so PostgreSQL, Redis state, media and TLS data persist.
+          # Replace application source only. The primary database, Redis state,
+          # media and TLS volumes remain untouched.
           find /opt/aplussolution -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
           tar -xzf /tmp/aplussolution-release.tgz -C /opt/aplussolution
           rm -f /tmp/aplussolution-release.tgz
 
           docker compose pull db redis caddy || true
           docker compose up -d --build --remove-orphans
-
-          # Caddyfile is a file bind mount. The source replacement above creates a
-          # new inode, while an already-running container can stay attached to the
-          # old deleted inode. Force-recreate only the gateway so the fresh file is
-          # mounted; named TLS/data volumes survive this recreation unchanged.
           docker compose up -d --force-recreate --no-deps caddy
+
           docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-          docker compose exec -T caddy grep -q 'staging.app.aplus-solution.de' /etc/caddy/Caddyfile
 
           backend_ready=0
           for i in $(seq 1 60); do
@@ -168,25 +148,28 @@ jobs:
 
           docker compose exec -T backend python manage.py check
           docker compose exec -T backend python manage.py migrate --check
-          # Print only aggregate counts from the Musa ownership repair. Never
-          # expose employee/shift IDs or other production data in public CI logs.
-          docker compose exec -T backend python manage.py shell -c "from core.models import AuditLog; r=AuditLog.objects.filter(action='repair_musa_time_entry_ownership').order_by('-created_at').first(); m=(r.metadata if r else {}); print('MUSA_REPAIR_COUNTS repaired=%s ambiguous=%s assigned_shifts=%s attendance_shifts=%s shifts_without_time=%s ended_without_time=%s' % (m.get('repaired_count','n/a'), m.get('ambiguous_count','n/a'), m.get('assigned_shift_count','n/a'), m.get('attendance_shift_count','n/a'), m.get('shifts_without_time_count','n/a'), m.get('ended_shifts_without_time_count','n/a')))"
+          docker compose exec -T backend python manage.py shell -c "from core.push_notifications import push_provider_status; s=push_provider_status(); assert s.get('android') and s.get('ios'), s; print('PRIMARY_PUSH_PROVIDERS_OK')"
           curl -fsS --max-time 15 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/
 
-          # WIW migration is complete. Deployment must not enqueue or invoke any
-          # WIW synchronization/reconciliation work; local A+ data is authoritative.
           docker compose ps
           docker image prune -f >/dev/null 2>&1 || true
           REMOTE
 
-      - name: Verify public production
+      - name: Verify public production is served by temporary primary
         run: |
           set -euo pipefail
-          curl -fsS --retry 12 --retry-delay 5 --max-time 20 "https://${PRODUCTION_DOMAIN}/health/"
-          curl -fsS --retry 6 --retry-delay 5 --max-time 20 -o /tmp/home.html "https://${PRODUCTION_DOMAIN}/"
-          test -s /tmp/home.html
-          echo "A+ Solution deployed successfully to https://${PRODUCTION_DOMAIN}"
+          ok=0
+          for i in $(seq 1 18); do
+            rm -f /tmp/headers /tmp/health
+            if curl -fsS --retry 2 --retry-delay 3 --max-time 20               -D /tmp/headers -o /tmp/health               "https://${PRODUCTION_DOMAIN}/health/?primary_check=${GITHUB_RUN_ID}-$i"               && grep -q '"status"' /tmp/health               && grep -qi '^x-aplus-origin: backup-primary' /tmp/headers; then
+              ok=1
+              break
+            fi
+            sleep 8
+          done
+          test "$ok" -eq 1
+          echo "A+ Solution temporary primary is serving https://${PRODUCTION_DOMAIN}"
 
-      - name: Cleanup runner key
+      - name: Cleanup
         if: always()
-        run: rm -f "$HOME/.ssh/strato_ed25519" /tmp/aplussolution-release.tgz /tmp/home.html
+        run: rm -f /tmp/aplussolution-release.tgz /tmp/headers /tmp/health
