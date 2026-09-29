@@ -1,0 +1,28 @@
+name: Diagnose STRATO IPv6 origin
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-strato-ipv6-origin.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      STRATO_IPV6: 2a01:239:44b:d900::1
+    steps:
+      - name: Check direct IPv6 origin
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f /tmp/h /tmp/b
+          curl -gksS --resolve "solution.smarbiz.sbs:443:[${STRATO_IPV6}]" \
+            -D /tmp/h -o /tmp/b --max-time 20 \
+            "https://solution.smarbiz.sbs/health/?ipv6_diag=${GITHUB_RUN_ID}"
+          grep -Ei '^(HTTP/|server:|x-aplus-origin:|x-aplus-legacy-bridge:)' /tmp/h || true
+          grep -q '"status"' /tmp/b
