@@ -1,0 +1,43 @@
+name: Diagnose primary and Strato identity
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-primary-strato-identity.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Compare hosts and direct health markers
+        env:
+          BACKUP_HOST: ${{ secrets.BACKUP_HOST }}
+          STRATO_HOST: ${{ secrets.STRATO_HOST }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$BACKUP_HOST"
+          test -n "$STRATO_HOST"
+          if [ "$BACKUP_HOST" = "$STRATO_HOST" ]; then
+            echo "backup_equals_strato=true"
+          else
+            echo "backup_equals_strato=false"
+          fi
+
+          for pair in "backup app.aplus-solution.de $BACKUP_HOST" "backup solution.smarbiz.sbs $BACKUP_HOST" "strato app.aplus-solution.de $STRATO_HOST" "strato solution.smarbiz.sbs $STRATO_HOST"; do
+            set -- $pair
+            label="$1"; domain="$2"; host="$3"
+            echo "=== $label $domain ==="
+            rm -f /tmp/h /tmp/b
+            if curl -ksS --resolve "$domain:443:$host" -D /tmp/h -o /tmp/b --max-time 15 "https://$domain/health/?identity=${GITHUB_RUN_ID}"; then
+              grep -Ei '^(HTTP/|server:|x-aplus-origin:|x-aplus-legacy-bridge:)' /tmp/h || true
+              grep -q '"status"' /tmp/b && echo "health=true" || echo "health=false"
+            else
+              echo "https=false"
+            fi
+          done
