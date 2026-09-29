@@ -3170,6 +3170,22 @@ export default function App() {
     return () => media.removeEventListener?.('change', sync);
   }, []);
 
+
+  useEffect(() => {
+    const syncViewFromUrl = () => {
+      const requested = new URLSearchParams(window.location.search).get('view') as View | null;
+      const allowed: View[] = ['dashboard', 'schedule', 'time', 'contracts', 'documents', 'orders', 'people', 'messages', 'ranking', 'ratings', 'profile', 'operations', 'settings', 'akte'];
+      if (requested && allowed.includes(requested)) {
+        setView(requested);
+        setMobileMenuOpen(false);
+      }
+    };
+
+    syncViewFromUrl();
+    window.addEventListener('popstate', syncViewFromUrl);
+    return () => window.removeEventListener('popstate', syncViewFromUrl);
+  }, []);
+
   useEffect(() => {
     consumeOAuth();
     const lost = () => setUser(null);
@@ -3309,6 +3325,13 @@ export default function App() {
   const navigateTo = (next: View) => {
     setView(next);
     setMobileMenuOpen(false);
+    const url = new URL(window.location.href);
+    url.searchParams.set('view', next);
+    if (next !== 'akte') {
+      url.searchParams.delete('akte_kind');
+      url.searchParams.delete('akte_id');
+    }
+    window.history.replaceState({ ...(window.history.state || {}), view: next }, '', `${url.pathname}${url.search}`);
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
 
