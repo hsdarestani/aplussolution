@@ -21,7 +21,7 @@ type AkteData = {
   locations?: any[];
 };
 
-type ClientPasswordResetResult = {
+type PasswordResetResult = {
   email: string;
   temporary_password: string;
 };
@@ -65,7 +65,7 @@ export default function AktePage({ user }: { user: User }) {
   const [clients,setClients]=useState<any[]>([]);
   const [confirmPasswordReset, setConfirmPasswordReset] = useState(false);
   const [resettingPassword, setResettingPassword] = useState(false);
-  const [passwordResetResult, setPasswordResetResult] = useState<ClientPasswordResetResult>();
+  const [passwordResetResult, setPasswordResetResult] = useState<PasswordResetResult>();
 
   const load = async () => {
     if (!id) { setMessage('Keine Akte ausgewählt.'); setLoading(false); return; }
@@ -110,20 +110,21 @@ export default function AktePage({ user }: { user: User }) {
     finally { setSaving(false); }
   }
 
-  async function resetClientPassword() {
-    if (user.role !== 'admin' || kind !== 'client' || !id) return;
+  async function resetPortalPassword() {
+    if (!manager(user) || !id) return;
     setResettingPassword(true);
     setMessage('');
     try {
       const contactId = data?.profile?.contacts_detail?.[0]?.id;
-      const result = await api<ClientPasswordResetResult>(`clients/${id}/reset-password/`, {
+      const endpoint = kind === 'worker' ? `workers/${id}/reset-password/` : `clients/${id}/reset-password/`;
+      const result = await api<PasswordResetResult>(endpoint, {
         method: 'POST',
-        body: JSON.stringify(contactId ? { contact_id: contactId } : {}),
+        body: JSON.stringify(kind === 'client' && contactId ? { contact_id: contactId } : {}),
       });
       setPasswordResetResult(result);
-      setMessage('Kundenpasswort wurde zurückgesetzt. Bitte das temporäre Passwort sicher übermitteln.');
+      setMessage('Passwort wurde zurückgesetzt. Bitte das temporäre Passwort sicher übermitteln.');
     } catch (error: any) {
-      setMessage(error?.message || 'Kundenpasswort konnte nicht zurückgesetzt werden.');
+      setMessage(error?.message || 'Passwort konnte nicht zurückgesetzt werden.');
     } finally {
       setResettingPassword(false);
     }
@@ -139,7 +140,7 @@ export default function AktePage({ user }: { user: User }) {
   if (!data) return <div className="akte-page"><button className="akte-back" onClick={back}>← Zurück</button><div className="akte-message">{message || 'Akte nicht gefunden.'}</div></div>;
 
   return <div className="akte-page" data-testid="akte-page">
-    <div className="akte-toolbar"><button className="akte-back" onClick={back}>← Personal & Kunden</button><div className="akte-actions">{manager(user) && (editing ? <><IonButton fill="outline" onClick={() => { setEditing(false); void load(); }}>Abbrechen</IonButton><IonButton disabled={saving} onClick={() => void save()}>{saving ? 'Speichert …' : 'Änderungen speichern'}</IonButton></> : <>{user.role === 'admin' && kind === 'client' && <IonButton fill="outline" color="warning" disabled={resettingPassword} onClick={() => setConfirmPasswordReset(true)}>{resettingPassword ? 'Wird zurückgesetzt …' : 'Passwort zurücksetzen'}</IonButton>}<IonButton onClick={() => setEditing(true)}>Profil bearbeiten</IonButton></>)}</div></div>
+    <div className="akte-toolbar"><button className="akte-back" onClick={back}>← Personal & Kunden</button><div className="akte-actions">{manager(user) && (editing ? <><IonButton fill="outline" onClick={() => { setEditing(false); void load(); }}>Abbrechen</IonButton><IonButton disabled={saving} onClick={() => void save()}>{saving ? 'Speichert …' : 'Änderungen speichern'}</IonButton></> : <>{manager(user) && <IonButton fill="outline" color="warning" disabled={resettingPassword} onClick={() => setConfirmPasswordReset(true)}>{resettingPassword ? 'Wird zurückgesetzt …' : 'Passwort zurücksetzen'}</IonButton>}<IonButton onClick={() => setEditing(true)}>Profil bearbeiten</IonButton></>)}</div></div>
     <header className="akte-hero">
       <div className={`akte-avatar ${data.kind}`}><IonIcon icon={data.kind === 'worker' ? peopleOutline : briefcaseOutline} /></div>
       <div className="akte-hero-copy"><small>DIGITALE AKTE · {data.kind === 'worker' ? 'MITARBEITER' : 'KUNDE'}</small><h1>{data.title}</h1><p>{data.number || 'Ohne Nummer'}{data.kind === 'worker' && data.profile?.user_detail?.email ? ` · ${data.profile.user_detail.email}` : ''}</p></div>
@@ -214,11 +215,11 @@ export default function AktePage({ user }: { user: User }) {
     <IonAlert
       isOpen={confirmPasswordReset}
       onDidDismiss={() => setConfirmPasswordReset(false)}
-      header="Kundenpasswort zurücksetzen?"
+      header="Passwort zurücksetzen?"
       message="Das bisherige Passwort funktioniert danach sofort nicht mehr. Das neue temporäre Passwort wird einmalig angezeigt."
       buttons={[
         { text: 'Abbrechen', role: 'cancel' },
-        { text: 'Zurücksetzen', role: 'destructive', handler: () => { setConfirmPasswordReset(false); void resetClientPassword(); } },
+        { text: 'Zurücksetzen', role: 'destructive', handler: () => { setConfirmPasswordReset(false); void resetPortalPassword(); } },
       ]}
     />
     <IonAlert
