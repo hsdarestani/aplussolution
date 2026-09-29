@@ -28,7 +28,7 @@ def test_admin_can_reset_client_portal_password(auth_admin, client_user, company
 
 
 @pytest.mark.django_db
-def test_manager_cannot_reset_client_portal_password(api_client, manager_user, client_user, company):
+def test_manager_can_reset_client_portal_password(api_client, manager_user, client_user, company):
     api_client.force_authenticate(manager_user)
     old_password_hash = client_user.password
 
@@ -38,9 +38,11 @@ def test_manager_cannot_reset_client_portal_password(api_client, manager_user, c
         format='json',
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 200
+    temporary_password = response.data['temporary_password']
     client_user.refresh_from_db()
-    assert client_user.password == old_password_hash
+    assert client_user.password != old_password_hash
+    assert client_user.check_password(temporary_password)
 
 
 @pytest.mark.django_db
@@ -146,3 +148,25 @@ def test_reset_does_not_attach_email_that_is_already_registered(auth_admin):
     assert 'bereits registriert' in response.data['detail']
     assert company.contacts.count() == 0
     assert existing.check_password('StrongPass123!')
+
+
+@pytest.mark.django_db
+def test_manager_can_reset_worker_portal_password(api_client, manager_user, worker_user):
+    api_client.force_authenticate(manager_user)
+    worker = worker_user.worker_profile
+    old_password_hash = worker_user.password
+
+    response = api_client.post(
+        f'/api/workers/{worker.id}/reset-password/',
+        {},
+        format='json',
+    )
+
+    assert response.status_code == 200
+    assert response.data['email'] == worker_user.email
+    temporary_password = response.data['temporary_password']
+    assert temporary_password
+
+    worker_user.refresh_from_db()
+    assert worker_user.password != old_password_hash
+    assert worker_user.check_password(temporary_password)
