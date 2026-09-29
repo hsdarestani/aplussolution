@@ -82,6 +82,7 @@ urlpatterns = [
     path('workers/portal-status/', portal_views.portal_statuses),
     path('workers/<uuid:pk>/invite/', portal_views.invite_worker),
     path('workers/<uuid:pk>/akte/', akten_views.worker_akte),
+    path('workers/<uuid:pk>/reset-password/', client_admin_views.reset_worker_password),
     path('workers/bulk-invite/', portal_views.bulk_invite_workers),
     path('clients/<uuid:pk>/akte/', akten_views.client_akte),
     path('clients/<uuid:pk>/reset-password/', client_admin_views.reset_client_password),
