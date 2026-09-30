@@ -61,6 +61,15 @@ def test_new_notification_enqueues_native_push_after_commit(monkeypatch, worker_
     monkeypatch.setattr(push_signals, 'push_provider_configured', lambda: True)
     monkeypatch.setattr(push_signals.send_notification_push, 'delay', lambda notification_id: calls.append(notification_id))
 
+    class InlineThread:
+        def __init__(self, *, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(push_signals, 'Thread', InlineThread)
+
     Notification.objects.create(user=worker_user, title='Vertrag bereit', action_url='/contracts')
     assert len(calls) == 1
     assert not Notification.objects.filter(user=admin_user, kind__startswith='admin-worker-copy-').exists()
