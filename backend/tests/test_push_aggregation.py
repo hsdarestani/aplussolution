@@ -10,6 +10,15 @@ def test_open_shift_push_is_debounced_for_aggregation(monkeypatch, worker_user):
     immediate_calls = []
 
     monkeypatch.setattr(push_signals, 'push_provider_configured', lambda: True)
+
+    class InlineThread:
+        def __init__(self, *, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(push_signals, 'Thread', InlineThread)
     monkeypatch.setattr(
         push_signals.send_coalesced_notification_push,
         'apply_async',
