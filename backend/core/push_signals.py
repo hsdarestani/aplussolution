@@ -1,3 +1,5 @@
+from threading import Thread
+
 from django.db import transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
@@ -58,4 +60,11 @@ def dispatch_native_push(sender, instance: Notification, created: bool, **kwargs
             # never roll back the operational action that created the notification.
             return
 
-    transaction.on_commit(enqueue)
+    # on_commit callbacks run synchronously in the request thread. Celery's
+    # broker connection can block there even though the database transaction has
+    # already committed, which made mobile assignment look frozen while the
+    # change was actually saved. Hand only the broker enqueue off to a daemon
+    # thread so push delivery can never hold the operational API response open.
+    transaction.on_commit(
+        lambda: Thread(target=enqueue, name=f'aplus-push-enqueue-{notification_id[:8]}', daemon=True).start()
+    )
