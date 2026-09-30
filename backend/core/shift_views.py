@@ -1,3 +1,5 @@
+from threading import Thread
+
 from django.db import transaction
 from django.db.models import Count, Q
 from django.utils import timezone
@@ -42,7 +44,12 @@ def _notify_open_shift_available_async(shift, reason):
             # Broker problems must not drop an operational notification.
             notify_open_shift_available(shift, reason)
 
-    transaction.on_commit(enqueue)
+    # Django executes on_commit callbacks synchronously before the request can
+    # return. A slow/unreachable Celery broker must not make publishing or
+    # assigning an OpenShift look stuck after the database change has committed.
+    transaction.on_commit(
+        lambda: Thread(target=enqueue, name=f'aplus-open-shift-enqueue-{shift_id[:8]}', daemon=True).start()
+    )
 
 
 class StaffingShiftViewSet(viewsets.ModelViewSet):
