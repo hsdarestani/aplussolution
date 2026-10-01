@@ -212,7 +212,7 @@ export function ShiftPlanBulkUpload({
             key={candidate.id}
             onClick={() => void attach(index, item.document!.id, candidate)}
             title={candidate.reason || ''}
-          >{shiftLabel(candidate)}{candidate.score ? ` · ${candidate.score}%` : ''}</button>)}
+          >{shiftLabel(candidate)}{candidate.score ? ` · Treffer ${candidate.score}` : ''}</button>)}
         </div> : null}
       </div>)}
     </div> : null}
