@@ -18,6 +18,7 @@ import {
   timeOutline,
 } from 'ionicons/icons';
 import { api } from './api';
+import { ShiftPlanAttachments, ShiftPlanBulkUpload } from './ShiftPlanAttachments';
 import './client-portal-v4.css';
 
 type ClientAccess = {
@@ -245,6 +246,7 @@ export function ClientOrdersMobile({ access }: { access: ClientAccess }) {
         <label><span>Anzahl Mitarbeiter *</span><input type="number" min="1" max="99" inputMode="numeric" value={form.requested_staff || 1} onChange={(event) => setForm({ ...form, requested_staff: event.target.value })} /></label>
         <label className="client-v4-note"><span>Notiz</span><textarea rows={7} placeholder="Alles, was die Disposition für diesen Einsatz wissen soll …" value={form.description || ''} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
       </div>
+      <ShiftPlanAttachments shift={selected} canUpload={!access.read_only} />
       {message ? <div className="client-v4-message">{message}</div> : null}
     </Modal> : null}
   </div>;
@@ -348,6 +350,7 @@ export function ClientScheduleMobileV4({ access }: { access: ClientAccess }) {
   }
 
   return <div className="client-v2-custom-screen client-v4-screen client-v4-schedule">
+    {!access.read_only ? <ShiftPlanBulkUpload onChanged={()=>void load()} label="Einsatzpläne hochladen" /> : null}
     <div className="client-v4-weekbar">
       <button type="button" onClick={() => setAnchor(dateKey(addDay(weekStart, -7)))}>‹</button>
       {days.map((day) => {
