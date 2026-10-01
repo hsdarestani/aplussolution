@@ -92,10 +92,16 @@ def test_bulk_plan_matches_all_event_days_but_stays_with_same_customer():
     # The third day intentionally has no event number in the shift note and no
     # Servicekraft block in the PDF. It should still inherit the established
     # event customer and position context.
+    placeholder_location = Location.objects.create(
+        client=client,
+        name='Siehe Notiz',
+        address='',
+    )
+    alternate_position = Position.objects.create(name='SK')
     shift3 = Shift.objects.create(
         client=client,
-        location=shift1.location,
-        position=shift1.position,
+        location=placeholder_location,
+        position=alternate_position,
         starts_at=datetime(2026, 10, 2, 9, 30, tzinfo=berlin),
         ends_at=datetime(2026, 10, 2, 16, 30, tzinfo=berlin),
         notes='Siehe Notiz',

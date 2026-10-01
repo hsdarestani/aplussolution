@@ -514,6 +514,13 @@ def rank_document_matches(user, payload):
             item['auto_eligible'] = False
     elif anchor_client_id:
         can_complete_event_days = len(payload.get('event_numbers') or []) == 1
+        anchor_date_counts = {}
+        for item in ranked:
+            shift = item['shift']
+            if shift.client_id == anchor_client_id and item.get('date_match'):
+                shift_day = timezone.localtime(shift.starts_at).date()
+                anchor_date_counts[shift_day] = anchor_date_counts.get(shift_day, 0) + 1
+
         for item in ranked:
             shift = item['shift']
 
@@ -530,10 +537,13 @@ def rank_document_matches(user, payload):
             # still agrees. This covers cases such as a shift whose location is
             # only "Siehe Notiz".
             same_position = bool(shift.position_id and shift.position_id in anchor_positions)
+            shift_day = timezone.localtime(shift.starts_at).date()
+            only_customer_shift_on_date = anchor_date_counts.get(shift_day, 0) == 1
             contextual_match = bool(
                 item.get('location_match')
                 or same_position
                 or int(item.get('note_points') or 0) >= 25
+                or only_customer_shift_on_date
             )
             if (
                 can_complete_event_days
