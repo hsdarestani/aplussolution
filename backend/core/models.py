@@ -575,3 +575,9 @@ class WorkingTimeSyncLog(TimestampedModel):
 
     class Meta:
         ordering = ['-created_at']
+
+
+# Event-plan PDFs are stored in a dedicated module but imported here so Django
+# registers them as models of the core app and existing `from core.models import *`
+# call sites keep working.
+from .shift_plan_models import ShiftPlanAttachment, ShiftPlanDocument  # noqa: E402,F401
