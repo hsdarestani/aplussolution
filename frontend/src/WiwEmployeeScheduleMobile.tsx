@@ -11,6 +11,7 @@ import {
   timeOutline,
 } from 'ionicons/icons';
 import { api } from './api';
+import { ShiftPlanAttachments } from './ShiftPlanAttachments';
 import GermanTimeField from './GermanTimeField';
 import TimeReportLegalConfirmation from './TimeReportLegalConfirmation';
 import { schedulePalette } from './scheduleClientPalette';
@@ -422,6 +423,7 @@ export default function WiwEmployeeScheduleMobile() {
         <DetailRow icon={personOutline}>{mode === 'mine' ? (assignedNames(selected) || worker.name || worker.email || 'Mitarbeiter') : 'OpenShift'}</DetailRow>
         <DetailRow icon={colorPaletteOutline}>Standardfarbe</DetailRow>
       </div>
+      <ShiftPlanAttachments shift={selected} />
       <div className="wiw-employee-detail-actions">
         {mode === 'open' ? (
           <button type="button" className="primary" disabled={busy} onClick={() => void claim(selected)}>{busy ? 'Bitte warten …' : 'Schicht übernehmen'}</button>
