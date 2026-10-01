@@ -246,7 +246,6 @@ export function ClientOrdersMobile({ access }: { access: ClientAccess }) {
         <label><span>Anzahl Mitarbeiter *</span><input type="number" min="1" max="99" inputMode="numeric" value={form.requested_staff || 1} onChange={(event) => setForm({ ...form, requested_staff: event.target.value })} /></label>
         <label className="client-v4-note"><span>Notiz</span><textarea rows={7} placeholder="Alles, was die Disposition für diesen Einsatz wissen soll …" value={form.description || ''} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
       </div>
-      <ShiftPlanAttachments shift={selected} canUpload={!access.read_only} />
       {message ? <div className="client-v4-message">{message}</div> : null}
     </Modal> : null}
   </div>;
@@ -334,6 +333,7 @@ export function ClientScheduleMobileV4({ access }: { access: ClientAccess }) {
         <div><IonIcon icon={personOutline} /><span><small>Personal</small><b>{workers.length ? workers.map((worker: any) => worker.name).join(', ') : `${selected.filled_count || 0}/${selected.required_count || 1} besetzt`}</b></span></div>
         <div className="notes"><IonIcon icon={documentTextOutline} /><span><small>Notiz</small><b>{selected.notes || 'Keine Notiz hinterlegt.'}</b></span></div>
       </div>
+      <ShiftPlanAttachments shift={selected} canUpload={!access.read_only} />
       {message ? <div className="client-v4-message">{message}</div> : null}
       {!access.read_only ? <div className="client-v4-shift-actions">
         <button type="button" onClick={() => { setForm({ starts_at: inputDateTime(selected.starts_at), ends_at: inputDateTime(selected.ends_at), note: '' }); setModal('change'); }}><IonIcon icon={timeOutline} /><span><b>Zeit / Datum ändern</b><small>Anfrage an die Disposition</small></span></button>
