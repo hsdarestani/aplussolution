@@ -28,10 +28,10 @@
 
 .anu-sync-controls {
   display: grid;
-  grid-template-columns: minmax(140px, 170px) minmax(140px, 170px) auto;
+  grid-template-columns: minmax(140px, 170px) minmax(140px, 170px) auto auto;
   align-items: center;
   gap: 10px;
-  min-width: min(100%, 520px);
+  min-width: min(100%, 720px);
 }
 
 .anu-sync-controls ion-input {
