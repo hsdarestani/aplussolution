@@ -1,8 +1,5 @@
 import hashlib
 import io
-from pathlib import Path
-
-import fitz
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
@@ -18,6 +15,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.pdfgen import canvas
 
 from .models import (
     AuevSetting,
@@ -294,7 +292,6 @@ def _claimed_workers(shift):
     return [shift.worker] if shift.worker_id else []
 
 
-AUEV_TEMPLATE_PATH = Path(__file__).resolve().parent / 'assets' / 'muster_einzelarbeitnehmerueberlassungsvertrag.pdf'
 AUEV_FALLBACKS = {
     'permit_date': date(2024, 4, 15),
     'framework_date': date(2024, 8, 26),
@@ -363,13 +360,32 @@ def _auev_values(package: ShiftImportPackage):
     }
 
 
-def _insert_fitted_line(page, rect, text, max_size=8.5, min_size=5.2):
-    rect = fitz.Rect(*rect)
-    value = str(text or '').replace('\n', ', ').strip()
-    size = max_size
-    while size > min_size and fitz.get_text_length(value, fontname='helv', fontsize=size) > rect.width:
+def _fit_font_size(text, width, preferred=8.5, minimum=5.0, font='Helvetica'):
+    size = preferred
+    value = str(text or '')
+    while size > minimum and pdfmetrics.stringWidth(value, font, size) > width:
         size -= 0.25
-    page.insert_text((rect.x0, rect.y1 - 2), value, fontname='helv', fontsize=max(size, min_size), color=(0, 0, 0))
+    return max(size, minimum)
+
+
+def _draw_top(c, x, top_baseline, text, size=8.5, font='Helvetica'):
+    c.setFont(font, size)
+    c.setFillColor(colors.black)
+    c.drawString(x, A4[1] - top_baseline, str(text))
+
+
+def _draw_fitted_top(c, x, top_baseline, width, text, preferred=8.5, minimum=5.0, font='Helvetica'):
+    value = str(text or '').replace('\n', ', ').strip()
+    size = _fit_font_size(value, width, preferred, minimum, font)
+    _draw_top(c, x, top_baseline, value, size=size, font=font)
+
+
+def _draw_underlined(c, x, top_baseline, text, size=8.5):
+    _draw_top(c, x, top_baseline, text, size=size)
+    width = pdfmetrics.stringWidth(text, 'Helvetica', size)
+    y = A4[1] - top_baseline - 1.6
+    c.setLineWidth(0.45)
+    c.line(x, y, x + width, y)
 
 
 def build_client_contract_pdf(package: ShiftImportPackage) -> bytes:
@@ -378,57 +394,118 @@ def build_client_contract_pdf(package: ShiftImportPackage) -> bytes:
         raise ValueError('Für die Vertragsgenerierung muss mindestens ein Mitarbeiter einer Schicht zugeteilt sein.')
     if len(rows) > 10:
         raise ValueError('Die aktuelle ANÜ Vorlage bietet Platz für maximal 10 Mitarbeiter pro Vertrag.')
-    if not AUEV_TEMPLATE_PATH.exists():
-        raise ValueError('Die ANÜ PDF Vorlage ist auf dem Server nicht installiert.')
 
     values = _auev_values(package)
-    document = fitz.open(AUEV_TEMPLATE_PATH)
-    try:
-        page = document[0]
-        for rect in (
-            (76, 275, 214, 290),
-            (349.8, 307.5, 401.2, 321.5),
-            (311.0, 354.5, 362.6, 369.0),
-            (286, 388, 558, 403.2),
-            (286, 414, 558, 429.2),
-        ):
-            page.add_redact_annot(fitz.Rect(*rect), fill=(1, 1, 1))
-        page.apply_redactions()
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4, pageCompression=1)
+    c.setTitle(f'Einzelarbeitnehmerüberlassungsvertrag {package.request_id}')
 
-        client_line = package.client.name if package.client_id else package.site_name
-        client_address = package.client.address if package.client_id else package.site_address
-        if client_address:
-            client_line = f'{client_line}, {client_address}'
-        _insert_fitted_line(page, (78, 162, 558, 175), f'{client_line} (Auftraggeber)', max_size=8.5, min_size=5.4)
-        _insert_fitted_line(page, (78, 275, 214, 290), f"{values['permit_date']} in Düsseldorf.", max_size=8.5)
-        _insert_fitted_line(page, (350.2, 307.5, 400.8, 321.5), values['framework_date'], max_size=8.5)
-        _insert_fitted_line(page, (311.4, 354.5, 362.2, 369.0), values['effective_date'], max_size=8.5)
-        _insert_fitted_line(page, (290, 388, 558, 403.2), values['required_qualification'], max_size=8.5, min_size=5.5)
-        _insert_fitted_line(page, (290, 414, 558, 429.2), values['intended_activity'], max_size=8.5, min_size=5.5)
+    client_line = package.client.name if package.client_id else package.site_name
+    client_address = package.client.address if package.client_id else package.site_address
+    if client_address:
+        client_line = f'{client_line}, {client_address}'
+    client_line = f'{client_line} (Auftraggeber)'
 
-        row_tops = [546.96, 565.92, 585.36, 605.04, 624.48, 643.92, 663.36, 683.04, 702.48, 721.92]
-        row_bottoms = [565.92, 585.36, 605.04, 624.48, 643.92, 663.36, 683.04, 702.48, 721.92, 741.60]
-        for index, row in enumerate(rows):
-            top, bottom = row_tops[index], row_bottoms[index]
-            _insert_fitted_line(page, (82, top + 2, 295, bottom - 2), row['employee'], max_size=6.8, min_size=5.0)
-            _insert_fitted_line(page, (301, top + 2, 338, bottom - 2), row['start'], max_size=6.8, min_size=5.5)
-            _insert_fitted_line(page, (343, top + 2, 381, bottom - 2), row['end'], max_size=6.8, min_size=5.5)
-            _insert_fitted_line(page, (386, top + 2, 445, bottom - 2), row['date'], max_size=6.4, min_size=5.0)
-            _insert_fitted_line(page, (449, top + 2, 501, bottom - 2), row['activity'], max_size=6.2, min_size=4.6)
+    # Page 1 follows the supplied legal sample in wording, spacing and table geometry.
+    _draw_top(c, 78, 142, 'Anhang 1: Einzelarbeitnehmerüberlassungsvertrag', size=11.2, font='Helvetica-Bold')
+    _draw_top(c, 78, 164, 'Zwischen', size=8.5)
+    _draw_fitted_top(c, 78, 174, 480, client_line, preferred=8.5, minimum=5.4)
+    _draw_top(c, 78, 185, 'und', size=8.5)
+    _draw_top(c, 78, 206, 'A+ Solution GmbH, Carl-Sonnenschein Straße 57, 65936 Frankfurt am Main (Personaldienstleister)', size=8.5)
+    _draw_top(c, 78, 227, 'wird folgender Arbeitnehmerüberlassungsvertrag geschlossen:', size=8.5)
 
-        second_page = document[1]
-        second_page.add_redact_annot(fitz.Rect(426.5, 470.0, 491.0, 484.0), fill=(1, 1, 1))
-        second_page.apply_redactions()
-        contract_end = package.first_shift_end_time or package.first_shift_time
-        _insert_fitted_line(
-            second_page,
-            (429, 470, 491, 484),
-            timezone.localtime(contract_end).strftime('%d.%m.%Y'),
-            max_size=8.5,
-        )
-        return document.tobytes(garbage=4, deflate=True)
-    finally:
-        document.close()
+    _draw_top(c, 78, 248, '§ 1 Erlaubnis zur Arbeitnehmerüberlassung', size=8.5, font='Helvetica-Bold')
+    _draw_top(c, 78, 261, 'Der Personaldienstleister erklärt, im Besitz einer befristeten Erlaubnis zur Arbeitnehmerüberlassung zu sein,', size=8.5)
+    _draw_top(c, 78, 274, 'zuletzt erteilt und nicht widerrufen von der Bundesagentur für Arbeit, Agentur für Arbeit Düsseldorf am', size=8.5)
+    _draw_top(c, 78, 287, f"{values['permit_date']} in Düsseldorf.", size=8.5)
+
+    _draw_top(c, 78, 306, '§ 2 Rahmenvereinbarung', size=8.5, font='Helvetica-Bold')
+    _draw_top(c, 78, 319, 'Die Rahmenvereinbarung zur Arbeitnehmerüberlassung vom', size=8.5)
+    _draw_top(c, 350, 319, values['framework_date'], size=8.5)
+    _draw_top(c, 403, 319, 'zwischen Auftraggeber und Perso-', size=8.5)
+    _draw_top(c, 78, 332, 'naldienstleister findet auf diesen Arbeitnehmerüberlassungsvertrag Anwendung.', size=8.5)
+
+    _draw_top(c, 78, 353, '§ 3 Gegenstand des Vertrages / Überlassungsbedingungen', size=8.5, font='Helvetica-Bold')
+    _draw_top(c, 78, 366, 'Der Personaldienstleister überlässt mit Wirkung zum', size=8.5)
+    _draw_top(c, 311, 366, values['effective_date'], size=8.5)
+    _draw_top(c, 364, 366, 'an den Auftraggeber folgende Zeitarbeitneh-', size=8.5)
+    _draw_top(c, 78, 379, 'mer an den in § 2 Absatz 2 der Rahmenvereinbarung festgelegten Betrieb.', size=8.5)
+
+    _draw_underlined(c, 96, 400, 'Erforderliche Qualifikation:', size=8.5)
+    _draw_fitted_top(c, 290, 400, 268, values['required_qualification'], preferred=8.5, minimum=5.5)
+    _draw_underlined(c, 96, 426, 'Vorgesehene Tätigkeit:', size=8.5)
+    _draw_fitted_top(c, 290, 426, 268, values['intended_activity'], preferred=8.5, minimum=5.5)
+
+    _draw_underlined(c, 96, 517, 'Betriebliche Arbeitszeit in Stunden/MA:', size=8.5)
+    _draw_top(c, 290, 517, '(S.u.)', size=8.5)
+
+    x_lines = [78.48, 297.84, 340.32, 382.80, 446.64, 503.04, 559.68]
+    y_lines_top = [527.28, 546.72, 566.16, 585.60, 605.28, 624.72, 644.16, 663.60, 683.28, 702.72, 722.16, 741.84]
+    c.setStrokeColor(colors.black)
+    c.setLineWidth(0.45)
+    for x in x_lines:
+        c.line(x, A4[1] - y_lines_top[0], x, A4[1] - y_lines_top[-1])
+    for y in y_lines_top:
+        c.line(x_lines[0], A4[1] - y, x_lines[-1], A4[1] - y)
+
+    _draw_top(c, 83.8, 545, 'Name, Vorname, Geburtsdatum', size=8.0, font='Helvetica-Bold')
+    _draw_top(c, 303.1, 545, 'Start', size=8.0, font='Helvetica-Bold')
+    _draw_top(c, 345.6, 545, 'Ende', size=8.0, font='Helvetica-Bold')
+    _draw_top(c, 388.1, 545, 'Datum', size=8.0, font='Helvetica-Bold')
+    _draw_top(c, 451.9, 545, 'Tätigkeit', size=8.0, font='Helvetica-Bold')
+
+    row_baselines = [563, 582.5, 602, 621.5, 641, 660.5, 680, 699.5, 719, 738.5]
+    for index, row in enumerate(rows):
+        baseline = row_baselines[index]
+        _draw_fitted_top(c, 82, baseline, 212, row['employee'], preferred=6.8, minimum=5.0)
+        _draw_fitted_top(c, 301, baseline, 37, row['start'], preferred=6.8, minimum=5.5)
+        _draw_fitted_top(c, 343, baseline, 38, row['end'], preferred=6.8, minimum=5.5)
+        _draw_fitted_top(c, 386, baseline, 59, row['date'], preferred=6.4, minimum=5.0)
+        _draw_fitted_top(c, 449, baseline, 52, row['activity'], preferred=6.2, minimum=4.6)
+
+    _draw_top(c, 78, 773, '(    ) Konkretisierung zum aktuellen Zeitpunkt nicht Bekannt. Wird rechtzeitig per E-Mail mitgeteilt.', size=8.2)
+    _draw_top(c, 555, 820, '1', size=8.0)
+    c.showPage()
+
+    # Page 2 of the supplied template.
+    body = 8.4
+    _draw_top(c, 78, 139, '(1)  Die namentliche Nennung und die Angabe des Geburtsdatums erfolgt ausschließlich hinsichtlich § 1 Abs.', size=body)
+    _draw_top(c, 96, 152, '1 Satz 6 AÜG. Sollte die Person des Zeitarbeitnehmers im Zeitpunkt des Abschlusses des Einzelarbeit-', size=body)
+    _draw_top(c, 96, 165, 'nehmerüberlassungsvertrages noch unbekannt sein, so ist der Zeitarbeitnehmer von Auftraggeber und', size=body)
+    _draw_top(c, 96, 178, 'Personaldienstleister rechtzeitig vor Einsatzbeginn namentlich unter Angabe des Geburtsdatums einver-', size=body)
+    _draw_top(c, 96, 191, 'nehmlich zu benennen (Konkretisierung).', size=body)
+
+    _draw_top(c, 78, 217, '(2)  Die Überlassungsvergütung richtet sich nach der tatsächlichen Arbeitszeit der eingesetzten Arbeitnehmer,', size=body)
+    _draw_top(c, 96, 230, 'mindestens aber nach der in Absatz 1 genannten betrieblichen Arbeitszeit.', size=body)
+    _draw_top(c, 78, 264, '(4) Es werden folgende Zuschläge vereinbart:', size=body)
+
+    _draw_top(c, 78, 317, '§ 4 Arbeitsschutz', size=8.5, font='Helvetica-Bold')
+    _draw_top(c, 78, 335, '(1) Bitte Zutreffendes ankreuzen:', size=body)
+    c.rect(96, A4[1] - 356, 7, 7, stroke=1, fill=0)
+    _draw_top(c, 114, 356, 'Für den Einsatz der überlassenen Zeitarbeitnehmer sind keine arbeitsmedizinischen Vorsorgeunter-', size=body)
+    _draw_top(c, 114, 369, 'suchungen erforderlich. (X)', size=body)
+    c.rect(96, A4[1] - 388, 7, 7, stroke=1, fill=0)
+    _draw_top(c, 114, 388, 'Für den Einsatz der überlassenen Zeitarbeitnehmer sind folgende arbeitsmedizinischen Vorsorgeun-', size=body)
+    _draw_top(c, 114, 401, 'tersuchungen erforderlich:', size=body)
+    _draw_top(c, 503, 401, '[Angabe]', size=body)
+    _draw_top(c, 114, 414, 'Diese werden vom Personaldienstleister vor Überlassungsbeginn durchgeführt und dem Auftraggeber', size=body)
+    _draw_top(c, 114, 427, 'nachgewiesen.', size=body)
+
+    _draw_top(c, 78, 461, '§ 5 Befristung', size=8.5, font='Helvetica-Bold')
+    contract_end = package.first_shift_end_time or package.first_shift_time
+    end_date = timezone.localtime(contract_end).strftime('%d.%m.%Y')
+    _draw_top(c, 78, 482, 'Dieser Einzelarbeitnehmerüberlassungsvertrag wird zunächst befristet bis zum', size=body)
+    _draw_top(c, 429, 482, end_date, size=body)
+
+    c.setLineWidth(0.55)
+    c.line(78, A4[1] - 545, 242, A4[1] - 545)
+    c.line(290, A4[1] - 545, 482, A4[1] - 545)
+    _draw_top(c, 78, 566, '[Datum, Unterschrift Auftraggeber]', size=8.1)
+    _draw_top(c, 290, 566, '[Datum, Unterschrift Personaldienstleister]', size=8.1)
+    _draw_top(c, 555, 820, '2', size=8.0)
+
+    c.save()
+    return buffer.getvalue()
 
 
 def generate_client_contract(package: ShiftImportPackage, actor=None) -> Contract:
