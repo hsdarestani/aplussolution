@@ -230,11 +230,32 @@ def _json_text(value):
         return str(value or '')
 
 
+def _relevant_wiw_payload_text(value, parent_key=''):
+    """Keep matching focused on descriptive/event fields, not arbitrary IDs."""
+    if isinstance(value, dict):
+        parts = []
+        for key, item in value.items():
+            key_norm = normalize_text(key).replace(' ', '')
+            relevant = any(token in key_norm for token in (
+                'event', 'veranst', 'auftrag', 'order', 'job', 'note', 'notiz',
+                'description', 'comment', 'title', 'name', 'memo', 'remark',
+            ))
+            if relevant:
+                parts.append(_json_text(item) if isinstance(item, (dict, list)) else str(item or ''))
+            elif isinstance(item, (dict, list)):
+                nested = _relevant_wiw_payload_text(item, key_norm)
+                if nested:
+                    parts.append(nested)
+        return '\n'.join(part for part in parts if part)
+    if isinstance(value, list):
+        return '\n'.join(_relevant_wiw_payload_text(item, parent_key) for item in value)
+    return str(value or '') if parent_key else ''
+
+
 def shift_match_source(shift):
     parts = [
         shift.notes,
-        shift.wiw_shift_id,
-        _json_text(shift.wiw_payload),
+        _relevant_wiw_payload_text(shift.wiw_payload),
         getattr(shift.order, 'title', '') if shift.order_id else '',
         getattr(shift.order, 'description', '') if shift.order_id else '',
         shift.client.name if shift.client_id else '',
