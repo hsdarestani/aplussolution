@@ -460,18 +460,19 @@ def approve_order(parsed: dict, raw_text: str, actor=None, client_id=None, wiw_c
 
 
 def seed_client_contract_template() -> ContractTemplate:
-    template, _ = ContractTemplate.objects.get_or_create(
+    template, _ = ContractTemplate.objects.update_or_create(
         slug='einzelarbeitnehmerueberlassung',
         defaults={
             'name': 'Einzelarbeitnehmerüberlassungsvertrag',
             'kind': ContractTemplate.Kind.CLIENT_AUEV,
             'audience': ContractTemplate.Audience.CLIENT,
-            'version': 'A+ 2026.1',
-            'schema': {'signature_roles': ['client', 'employer']},
-            'html_template': CLIENT_CONTRACT_HTML,
-            'source_format': ContractTemplate.SourceFormat.HTML,
-            'requires_signature': True,
+            'version': 'A+ 2026.2',
+            'schema': {'signature_roles': []},
+            'html_template': '',
+            'source_format': ContractTemplate.SourceFormat.STATIC_PDF,
+            'requires_signature': False,
             'required_document': False,
+            'active': True,
         },
     )
     return template
