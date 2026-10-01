@@ -10,6 +10,7 @@ import '@ionic/react/css/padding.css';
 import './theme.css';
 import './brand-refresh.css';
 import './people-lists.css';
+import './anu-contracts.css';
 import './steuerzentrale-hardening.css';
 import './header-quick-access.css';
 import './mobile-header-actions-fix.css';
