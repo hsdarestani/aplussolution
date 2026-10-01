@@ -1712,6 +1712,10 @@ function Contracts({ user }: { user: User }) {
     date.setDate(date.getDate() + 180);
     return dateInputValue(date);
   });
+  const [anuSettingsOpen, setAnuSettingsOpen] = useState(false);
+  const [anuSettingsClient, setAnuSettingsClient] = useState('');
+  const [anuSettingsForm, setAnuSettingsForm] = useState<any>({});
+  const [anuSettingsDefaults, setAnuSettingsDefaults] = useState<any>({});
 
   const load = async () => {
     const params = new URLSearchParams();
@@ -1807,6 +1811,46 @@ function Contracts({ user }: { user: User }) {
     }
   }
 
+  async function loadAnuSettings(clientId = '') {
+    const query = clientId ? `?client_id=${encodeURIComponent(clientId)}` : '';
+    const result: any = await api(`automation/auev-settings/${query}`);
+    setAnuSettingsDefaults(result.defaults || {});
+    setAnuSettingsForm(result.overrides || {});
+  }
+
+  async function openAnuSettings() {
+    setAnuSettingsClient('');
+    setAnuSettingsOpen(true);
+    try {
+      await loadAnuSettings('');
+    } catch (reason: any) {
+      setToast(reason.message);
+    }
+  }
+
+  async function saveAnuSettings() {
+    setBusy(true);
+    try {
+      await api('automation/auev-settings/', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          client_id: anuSettingsClient || null,
+          permit_date: anuSettingsForm.permit_date || '',
+          framework_date: anuSettingsForm.framework_date || '',
+          effective_date: anuSettingsForm.effective_date || '',
+          required_qualification: anuSettingsForm.required_qualification || '',
+          intended_activity: anuSettingsForm.intended_activity || '',
+        }),
+      });
+      setAnuSettingsOpen(false);
+      setToast(anuSettingsClient ? 'ANÜ Werte für den Kunden gespeichert.' : 'ANÜ Standardwerte gespeichert.');
+    } catch (reason: any) {
+      setToast(reason.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function contractAction(id: string, type: 'generate_pdf' | 'send') {
     try {
       await api(`contracts/${id}/${type}/`, { method: 'POST', body: '{}' });
@@ -1882,6 +1926,7 @@ function Contracts({ user }: { user: User }) {
               <small>ANÜ VERTRÄGE</small>
               <h3>Verträge aus dem A+ Dienstplan</h3>
               <p>Quelle sind ausschließlich Kunden, Einsätze und Mitarbeiter aus A+ Workforce. WIW wird dafür nicht verwendet.</p>
+              <p><b>Nur Administration.</b> Diese ANÜ Verträge erscheinen nicht im Kundenportal.</p>
             </div>
             <div className="anu-sync-controls">
               <IonInput
@@ -1900,6 +1945,10 @@ function Contracts({ user }: { user: User }) {
                 value={anuEnd}
                 onIonInput={(event) => setAnuEnd(String(value(event)))}
               />
+              <IonButton fill="outline" disabled={!!anuBusy} onClick={() => void openAnuSettings()}>
+                <IonIcon slot="start" icon={settingsOutline} />
+                ANÜ Einstellungen
+              </IonButton>
               <IonButton disabled={!!anuBusy} onClick={() => void syncAnuPackages()}>
                 <IonIcon slot="start" icon={refreshOutline} />
                 {anuBusy === 'sync' ? <IonSpinner name="dots" /> : 'Einsätze synchronisieren'}
@@ -2028,6 +2077,92 @@ function Contracts({ user }: { user: User }) {
         ))}
         {!rows.length && <Empty>Noch keine Verträge.</Empty>}
       </div>
+
+      <FormModal
+        open={anuSettingsOpen}
+        title="ANÜ Einstellungen"
+        onClose={() => setAnuSettingsOpen(false)}
+        onSave={saveAnuSettings}
+        busy={busy}
+        saveLabel="Speichern"
+      >
+        <IonSelect
+          fill="outline"
+          label="Gültig für"
+          labelPlacement="floating"
+          value={anuSettingsClient}
+          onIonChange={(event) => {
+            const clientId = String(value(event) || '');
+            setAnuSettingsClient(clientId);
+            void loadAnuSettings(clientId).catch((reason: any) => setToast(reason.message));
+          }}
+        >
+          <IonSelectOption value="">Standard für alle Kunden</IonSelectOption>
+          {clients.map((client) => (
+            <IonSelectOption value={client.id} key={client.id}>
+              {client.name}
+            </IonSelectOption>
+          ))}
+        </IonSelect>
+
+        {anuSettingsClient && (
+          <div className="notice full">
+            Leere Felder übernehmen den jeweiligen Standardwert für alle Kunden.
+          </div>
+        )}
+
+        <IonInput
+          fill="outline"
+          type="date"
+          label="Erlaubnisdatum"
+          labelPlacement="floating"
+          value={anuSettingsForm.permit_date || ''}
+          onIonInput={(event) => setAnuSettingsForm({ ...anuSettingsForm, permit_date: value(event) })}
+        />
+        {anuSettingsClient && anuSettingsDefaults.permit_date && <small>Standard: {dateOnly(anuSettingsDefaults.permit_date)}</small>}
+
+        <IonInput
+          fill="outline"
+          type="date"
+          label="Datum der Rahmenvereinbarung"
+          labelPlacement="floating"
+          value={anuSettingsForm.framework_date || ''}
+          onIonInput={(event) => setAnuSettingsForm({ ...anuSettingsForm, framework_date: value(event) })}
+        />
+        {anuSettingsClient && anuSettingsDefaults.framework_date && <small>Standard: {dateOnly(anuSettingsDefaults.framework_date)}</small>}
+
+        <IonInput
+          fill="outline"
+          type="date"
+          label="Wirkung zum"
+          labelPlacement="floating"
+          value={anuSettingsForm.effective_date || ''}
+          onIonInput={(event) => setAnuSettingsForm({ ...anuSettingsForm, effective_date: value(event) })}
+        />
+        <small>
+          {anuSettingsClient
+            ? `Standard: ${anuSettingsDefaults.effective_date ? dateOnly(anuSettingsDefaults.effective_date) : 'erster Einsatztag'}`
+            : 'Leer lassen, wenn automatisch der erste Einsatztag verwendet werden soll.'}
+        </small>
+
+        <IonInput
+          fill="outline"
+          label="Erforderliche Qualifikation"
+          labelPlacement="floating"
+          value={anuSettingsForm.required_qualification || ''}
+          placeholder={anuSettingsClient ? anuSettingsDefaults.required_qualification || '' : ''}
+          onIonInput={(event) => setAnuSettingsForm({ ...anuSettingsForm, required_qualification: value(event) })}
+        />
+
+        <IonInput
+          fill="outline"
+          label="Vorgesehene Tätigkeit"
+          labelPlacement="floating"
+          value={anuSettingsForm.intended_activity || ''}
+          placeholder={anuSettingsClient ? anuSettingsDefaults.intended_activity || '' : ''}
+          onIonInput={(event) => setAnuSettingsForm({ ...anuSettingsForm, intended_activity: value(event) })}
+        />
+      </FormModal>
 
       <FormModal
         open={modal === 'contract'}
