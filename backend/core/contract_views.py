@@ -6,7 +6,7 @@ from rest_framework.response import Response
 
 from .document_center import contract_readiness
 from .document_engine import DocumentGenerationError, generate_contract_files
-from .models import Contract, ContractSignature, Notification, User
+from .models import Contract, ContractSignature, ContractTemplate, Notification, User
 from .permissions import IsAdminOrManager
 from .searchable_views import ContractViewSet as SearchableContractViewSet
 from .serializers import ContractSerializer
@@ -19,7 +19,10 @@ class ContractLifecycleSerializer(ContractSerializer):
     readiness = serializers.SerializerMethodField()
 
     def get_readiness(self, obj):
-        return contract_readiness(obj)
+        readiness = contract_readiness(obj)
+        if obj.template.kind == ContractTemplate.Kind.CLIENT_AUEV:
+            readiness = {**readiness, 'send_allowed': False, 'pending_signature_roles': []}
+        return readiness
 
 
 class ContractViewSet(SearchableContractViewSet):
@@ -61,6 +64,18 @@ class ContractViewSet(SearchableContractViewSet):
     @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
     def generate_pdf(self, request, pk=None):
         contract = self.get_object()
+        if contract.template.kind == ContractTemplate.Kind.CLIENT_AUEV:
+            package = contract.shift_import_packages.order_by('-updated_at').first()
+            if not package:
+                return Response({'detail': 'Zu diesem ANÜ Vertrag wurde kein Einsatzpaket gefunden.'}, status=400)
+            from .native_cutover import generate_client_contract
+            try:
+                generate_client_contract(package, actor=request.user)
+            except ValueError as exc:
+                return Response({'detail': str(exc)}, status=400)
+            contract.refresh_from_db()
+            audit(request, 'contract.document_generated', contract, {'source': 'aplus_anue'})
+            return Response(self.get_serializer(contract).data)
         readiness = contract_readiness(contract)
         if not readiness['generation_allowed']:
             return Response({
@@ -78,6 +93,11 @@ class ContractViewSet(SearchableContractViewSet):
     @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
     def send(self, request, pk=None):
         contract = self.get_object()
+        if contract.template.kind == ContractTemplate.Kind.CLIENT_AUEV:
+            return Response(
+                {'detail': 'ANÜ Verträge bleiben ausschließlich im Adminbereich und werden nicht in das Kundenportal gestellt.'},
+                status=400,
+            )
         readiness = contract_readiness(contract)
         if not readiness['send_allowed']:
             return Response({
