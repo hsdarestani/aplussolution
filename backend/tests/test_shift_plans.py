@@ -32,6 +32,12 @@ def pdf_upload(name='10719 30_09_2026.pdf'):
     pdf.drawString(40, 700, 'Personal')
     pdf.drawString(40, 680, '1x8,5 Servicekraft')
     pdf.drawString(40, 660, '09:00 Uhr bis 17:30 Uhr')
+    pdf.showPage()
+    pdf.drawString(40, 800, 'Fr, 2. Oktober 2026 09:30-16:30 Uhr')
+    pdf.drawString(40, 780, 'Goethe-Universität Frankfurt Campus Westend PEG-Gebäude')
+    pdf.drawString(40, 760, 'Konferenz 10719')
+    pdf.drawString(40, 700, 'Logistik')
+    pdf.drawString(40, 680, '1x2,5 Logistiker')
     pdf.save()
     raw = buffer.getvalue()
     return SimpleUploadedFile(name, raw, content_type='application/pdf')
@@ -79,18 +85,53 @@ def setup_schedule():
     return admin, client_user, client, shift1, shift2, other
 
 
-def test_bulk_plan_matches_all_event_days_but_not_unrelated_shift():
-    admin, _, _, shift1, shift2, other = setup_schedule()
+def test_bulk_plan_matches_all_event_days_but_stays_with_same_customer():
+    admin, _, client, shift1, shift2, other = setup_schedule()
+    berlin = ZoneInfo('Europe/Berlin')
+
+    # The third day intentionally has no event number in the shift note and no
+    # Servicekraft block in the PDF. It should still inherit the established
+    # event customer and position context.
+    shift3 = Shift.objects.create(
+        client=client,
+        location=shift1.location,
+        position=shift1.position,
+        starts_at=datetime(2026, 10, 2, 9, 30, tzinfo=berlin),
+        ends_at=datetime(2026, 10, 2, 16, 30, tzinfo=berlin),
+        notes='Siehe Notiz',
+        status=Shift.Status.CONFIRMED,
+    )
+
+    # Even an identical event number on another customer must not receive the
+    # document when the PDF context points more strongly to the established
+    # customer.
+    foreign_client = ClientCompany.objects.create(name='Andere Firma', customer_number='O-2')
+    foreign_location = Location.objects.create(
+        client=foreign_client,
+        name='Andere Location',
+        address='Andere Straße 1, Frankfurt am Main',
+    )
+    foreign_shift = Shift.objects.create(
+        client=foreign_client,
+        location=foreign_location,
+        position=shift1.position,
+        starts_at=datetime(2026, 9, 30, 8, 30, tzinfo=berlin),
+        ends_at=datetime(2026, 9, 30, 19, 0, tzinfo=berlin),
+        notes='Konferenz / VA Nr. 10719',
+        status=Shift.Status.CONFIRMED,
+    )
+
     api = APIClient()
     api.force_authenticate(admin)
-
     response = api.post('/api/shift-plans/bulk-upload/', {'files': [pdf_upload()]}, format='multipart')
 
     assert response.status_code == 200
-    assert response.data['matched_attachments'] == 2
+    assert response.data['matched_attachments'] == 3
     assert ShiftPlanDocument.objects.count() == 1
     assert ShiftPlanAttachment.objects.filter(shift=shift1).count() == 1
     assert ShiftPlanAttachment.objects.filter(shift=shift2).count() == 1
+    assert ShiftPlanAttachment.objects.filter(shift=shift3).count() == 1
+    assert ShiftPlanAttachment.objects.filter(shift=foreign_shift).count() == 0
     assert ShiftPlanAttachment.objects.filter(shift=other).count() == 0
 
 

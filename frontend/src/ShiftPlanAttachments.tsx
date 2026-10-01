@@ -53,11 +53,37 @@ function shortDate(value?: string) {
   }
 }
 
+function shortTime(value?: string) {
+  if (!value) return '';
+  try {
+    return new Intl.DateTimeFormat('de-DE', {
+      timeZone: TZ,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date(value));
+  } catch {
+    return '';
+  }
+}
+
+function usefulPlace(candidate: BulkCandidate) {
+  const location = String(candidate.location_name || '').trim();
+  const normalized = location.toLocaleLowerCase('de-DE').replace(/[.]/g, '').trim();
+  const placeholders = new Set(['siehe notiz', 's notiz', 'notiz', 'siehe bemerkung']);
+  if (location && !placeholders.has(normalized)) return location;
+  return candidate.client_name || 'Einsatz';
+}
+
 function shiftLabel(candidate: BulkCandidate) {
   const date = shortDate(candidate.starts_at);
-  const place = candidate.location_name || candidate.client_name || 'Einsatz';
+  const start = shortTime(candidate.starts_at);
+  const end = shortTime(candidate.ends_at);
+  const time = start && end ? start + ' bis ' + end : start;
+  const place = usefulPlace(candidate);
+  const customer = candidate.client_name && candidate.client_name !== place ? candidate.client_name : '';
   const position = candidate.position_name || '';
-  return [date, place, position].filter(Boolean).join(' · ');
+  return [date, time, customer, place, position].filter(Boolean).join(' · ');
 }
 
 async function downloadPlan(plan: Plan) {
@@ -145,6 +171,7 @@ export function ShiftPlanBulkUpload({
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<BulkResult[]>([]);
   const [message, setMessage] = useState('');
+  const [expanded, setExpanded] = useState(false);
 
   async function upload(files?: FileList | null) {
     if (!files?.length || busy) return;
@@ -155,12 +182,18 @@ export function ShiftPlanBulkUpload({
       const form = new FormData();
       Array.from(files).forEach((file) => form.append('files', file));
       const response: any = await api('shift-plans/bulk-upload/', { method: 'POST', body: form });
-      setResults(Array.isArray(response?.files) ? response.files : []);
+      const nextResults: BulkResult[] = Array.isArray(response?.files) ? response.files : [];
+      setResults(nextResults);
       const matched = Number(response?.matched_attachments || 0);
       const review = Number(response?.needs_review || 0);
-      setMessage(review
-        ? `${matched} Zuordnung(en) automatisch erkannt · ${review} Datei(en) bitte prüfen.`
-        : `${matched} Zuordnung(en) automatisch erkannt.`);
+      const errors = Number(response?.errors || 0);
+      const parts = [
+        matched === 1 ? '1 Schicht automatisch zugeordnet.' : matched > 1 ? matched + ' Schichten automatisch zugeordnet.' : 'Noch keine Schicht automatisch zugeordnet.',
+        review ? (review === 1 ? '1 Datei bitte prüfen.' : review + ' Dateien bitte prüfen.') : '',
+        errors ? (errors === 1 ? '1 Datei konnte nicht verarbeitet werden.' : errors + ' Dateien konnten nicht verarbeitet werden.') : '',
+      ].filter(Boolean);
+      setMessage(parts.join(' '));
+      setExpanded(review > 0 || errors > 0);
       await onChanged?.();
     } catch (error: any) {
       setMessage(error?.message || 'Einsatzpläne konnten nicht verarbeitet werden.');
@@ -182,6 +215,7 @@ export function ShiftPlanBulkUpload({
         ? { ...item, status: 'matched', matched: [...(item.matched || []), candidate] }
         : item));
       setMessage('Plan wurde der Schicht zugeordnet.');
+      setExpanded(true);
       await onChanged?.();
     } catch (error: any) {
       setMessage(error?.message || 'Plan konnte nicht zugeordnet werden.');
@@ -190,31 +224,71 @@ export function ShiftPlanBulkUpload({
     }
   }
 
-  return <div className="shift-plan-bulk" onClick={(event) => event.stopPropagation()}>
-    <button type="button" className="shift-plan-bulk-button" disabled={busy} onClick={() => input.current?.click()}>
-      {busy ? 'Pläne werden geprüft…' : label}
-    </button>
+  const needsAttention = results.some((item) => item.status !== 'matched');
+  const uploadLabel = label === 'Einsatzpläne' || label === 'Pläne' ? 'PDFs hochladen' : label;
+
+  return <section className="shift-plan-bulk" onClick={(event) => event.stopPropagation()}>
+    <div className="shift-plan-bulk-head">
+      <div className="shift-plan-bulk-heading">
+        <span className="shift-plan-bulk-doc" aria-hidden="true">PDF</span>
+        <span>
+          <b>Einsatzpläne</b>
+          <small>PDFs automatisch den passenden Schichten zuordnen</small>
+        </span>
+      </div>
+      <button type="button" className="shift-plan-bulk-button" disabled={busy} onClick={() => input.current?.click()}>
+        {busy ? 'Prüfung läuft…' : uploadLabel}
+      </button>
+    </div>
+
     <input ref={input} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => void upload(event.target.files)} />
-    {message ? <div className="shift-plan-bulk-message">{message}</div> : null}
-    {results.length ? <div className="shift-plan-bulk-results">
-      {results.map((item, index) => <div className={`shift-plan-result ${item.status}`} key={`${item.name}-${index}`}>
+
+    {message ? <div className={'shift-plan-bulk-message ' + (needsAttention ? 'attention' : 'success')}>
+      <span className="shift-plan-bulk-state" aria-hidden="true">{needsAttention ? '!' : '✓'}</span>
+      <span>{message}</span>
+      {results.length ? <button type="button" className="shift-plan-details-toggle" onClick={() => setExpanded((value) => !value)}>
+        {expanded ? 'Weniger' : 'Details'}
+      </button> : null}
+    </div> : null}
+
+    {expanded && results.length ? <div className="shift-plan-bulk-results">
+      {results.map((item, index) => <div className={'shift-plan-result ' + item.status} key={item.name + '-' + index}>
         <div className="shift-plan-result-head">
-          <b>{item.name}</b>
-          <span>{item.status === 'matched' ? 'Zugeordnet' : item.status === 'error' ? 'Fehler' : 'Prüfen'}</span>
+          <div className="shift-plan-result-file">
+            <span className="shift-plan-result-file-icon">PDF</span>
+            <span>
+              <b title={item.name}>{item.name}</b>
+              <small>{item.document?.event_numbers?.length ? 'Event ' + item.document.event_numbers.join(', ') : 'Einsatzplan'}</small>
+            </span>
+          </div>
+          <span className="shift-plan-result-status">
+            {item.status === 'matched' ? 'Zugeordnet' : item.status === 'error' ? 'Fehler' : 'Prüfen'}
+          </span>
         </div>
-        {item.detail ? <small>{item.detail}</small> : null}
-        {item.matched?.length ? <small>{item.matched.map(shiftLabel).join(' · ')}</small> : null}
+
+        {item.matched?.length ? <div className="shift-plan-result-shifts">
+          {item.matched.map((candidate) => <span key={candidate.id}>
+            <i aria-hidden="true">✓</i>
+            {shiftLabel(candidate)}
+          </span>)}
+        </div> : null}
+
+        {item.detail ? <small className="shift-plan-result-detail">{item.detail}</small> : null}
+
         {item.status === 'needs_review' && item.document?.id && item.candidates?.length ? <div className="shift-plan-candidates">
-          <small>Vorschlag auswählen:</small>
+          <small>Passende Schicht auswählen</small>
           {item.candidates.map((candidate) => <button
             type="button"
             disabled={busy}
             key={candidate.id}
             onClick={() => void attach(index, item.document!.id, candidate)}
             title={candidate.reason || ''}
-          >{shiftLabel(candidate)}{candidate.score ? ` · Treffer ${candidate.score}` : ''}</button>)}
+          >
+            <span>{shiftLabel(candidate)}</span>
+            {candidate.score ? <em>Treffer {candidate.score}</em> : null}
+          </button>)}
         </div> : null}
       </div>)}
     </div> : null}
-  </div>;
+  </section>;
 }

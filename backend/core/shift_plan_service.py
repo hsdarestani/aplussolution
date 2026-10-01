@@ -320,6 +320,8 @@ def score_shift_match(payload, shift):
     event_match = False
     date_match = False
     time_match = False
+    location_match = False
+    note_points = 0
 
     for event_number in payload.get('event_numbers') or []:
         if _identifier_present(source, event_number):
@@ -360,11 +362,13 @@ def score_shift_match(payload, shift):
     normalized_pdf = normalize_text(pdf_text)
     if location_name and len(location_name) >= 5 and location_name in normalized_pdf:
         score += 15
+        location_match = True
         reasons.append('Einsatzort wurde im Plan gefunden')
     elif location_address and len(location_address) >= 8:
         address_tokens = [token for token in location_address.split() if len(token) >= 4]
         if address_tokens and sum(1 for token in address_tokens if token in normalized_pdf) / len(address_tokens) >= 0.6:
             score += 12
+            location_match = True
             reasons.append('Adresse passt zum Plan')
 
     note_points, note_reason = _note_similarity(shift.notes, pdf_text)
@@ -386,6 +390,8 @@ def score_shift_match(payload, shift):
         'event_match': event_match,
         'date_match': date_match,
         'time_match': time_match,
+        'location_match': location_match,
+        'note_points': note_points,
         'auto_eligible': auto_eligible,
     }
 
@@ -458,8 +464,89 @@ def _candidate_queryset_for_payload(user, payload):
     return qs[:1500]
 
 
+def _infer_event_client_context(ranked):
+    """Infer one customer from the strongest explicit event matches.
+
+    Event numbers can repeat between customers, so an admin upload must never
+    spread a plan across customers just because the numeric event ID matches.
+    """
+    per_client = {}
+    for item in ranked:
+        shift = item['shift']
+        if not (item.get('event_match') and item.get('date_match')) or not shift.client_id:
+            continue
+        bucket = per_client.setdefault(shift.client_id, {
+            'best': 0,
+            'count': 0,
+            'positions': set(),
+        })
+        bucket['best'] = max(bucket['best'], int(item.get('score') or 0))
+        bucket['count'] += 1
+        if shift.position_id:
+            bucket['positions'].add(shift.position_id)
+
+    if not per_client:
+        return None, set(), False
+
+    ordered = sorted(
+        per_client.items(),
+        key=lambda pair: (-pair[1]['best'], -pair[1]['count'], str(pair[0])),
+    )
+    if len(ordered) == 1:
+        client_id, info = ordered[0]
+        return client_id, info['positions'], False
+
+    (top_client, top), (_, second) = ordered[:2]
+    if top['best'] >= second['best'] + 15:
+        return top_client, top['positions'], False
+
+    # Two customers are equally plausible. In that case require manual review
+    # instead of attaching the same plan across customer boundaries.
+    return None, set(), True
+
+
 def rank_document_matches(user, payload):
     ranked = [score_shift_match(payload, shift) for shift in _candidate_queryset_for_payload(user, payload)]
+    anchor_client_id, anchor_positions, ambiguous_client = _infer_event_client_context(ranked)
+
+    if ambiguous_client:
+        for item in ranked:
+            item['auto_eligible'] = False
+    elif anchor_client_id:
+        can_complete_event_days = len(payload.get('event_numbers') or []) == 1
+        for item in ranked:
+            shift = item['shift']
+
+            # Once the customer has been established by explicit event matches,
+            # automatic assignments stay inside that customer.
+            if shift.client_id != anchor_client_id:
+                item['auto_eligible'] = False
+                continue
+
+            # Some Bankettprofi plans list the event on every day but omit a
+            # Servicekraft time block on a later day. If an earlier day already
+            # established the event and customer, complete the remaining PDF
+            # dates for the same customer when location, position or note context
+            # still agrees. This covers cases such as a shift whose location is
+            # only "Siehe Notiz".
+            same_position = bool(shift.position_id and shift.position_id in anchor_positions)
+            contextual_match = bool(
+                item.get('location_match')
+                or same_position
+                or int(item.get('note_points') or 0) >= 25
+            )
+            if (
+                can_complete_event_days
+                and item.get('date_match')
+                and not item.get('event_match')
+                and contextual_match
+            ):
+                item['score'] += 70
+                reason = 'Kunde und Einsatz passen zu den bereits erkannten Eventschichten'
+                item['reason'] = ' · '.join(filter(None, [item.get('reason'), reason]))[:500]
+                item['auto_eligible'] = item['score'] >= AUTO_MATCH_THRESHOLD
+                item['customer_inferred'] = True
+
     ranked.sort(key=lambda item: (-item['score'], item['shift'].starts_at, str(item['shift'].id)))
     return ranked
 
