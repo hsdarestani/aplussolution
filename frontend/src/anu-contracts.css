@@ -1,0 +1,157 @@
+.anu-contracts-panel {
+  margin-bottom: 22px;
+  overflow: hidden;
+}
+
+.anu-contracts-head {
+  align-items: flex-end;
+  gap: 18px;
+}
+
+.anu-contracts-head small {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  opacity: .58;
+}
+
+.anu-contracts-head h3 {
+  margin: 0 0 4px;
+}
+
+.anu-contracts-head p {
+  margin: 0;
+  max-width: 720px;
+}
+
+.anu-sync-controls {
+  display: grid;
+  grid-template-columns: minmax(140px, 170px) minmax(140px, 170px) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: min(100%, 520px);
+}
+
+.anu-sync-controls ion-input {
+  min-height: 48px;
+}
+
+.anu-package-table {
+  margin-top: 18px;
+  border: 1px solid var(--ion-color-light-shade, #d8dee8);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.anu-package-row {
+  display: grid;
+  grid-template-columns: minmax(250px, 2fr) 110px 80px 80px 110px minmax(190px, auto);
+  gap: 12px;
+  align-items: center;
+  min-height: 64px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--ion-color-light-shade, #e2e6ed);
+}
+
+.anu-package-row:first-child {
+  border-top: 0;
+}
+
+.anu-package-header {
+  min-height: 42px;
+  background: rgba(16, 42, 99, .045);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .025em;
+}
+
+.anu-package-client {
+  min-width: 0;
+}
+
+.anu-package-client b,
+.anu-package-client small {
+  display: block;
+}
+
+.anu-package-client b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.anu-package-client small {
+  margin-top: 4px;
+  opacity: .64;
+}
+
+.anu-package-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 980px) {
+  .anu-contracts-head {
+    display: block;
+  }
+
+  .anu-sync-controls {
+    margin-top: 14px;
+    grid-template-columns: 1fr 1fr;
+    min-width: 0;
+  }
+
+  .anu-sync-controls ion-button {
+    grid-column: 1 / -1;
+  }
+
+  .anu-package-header {
+    display: none;
+  }
+
+  .anu-package-table {
+    border: 0;
+    overflow: visible;
+  }
+
+  .anu-package-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 14px;
+    margin-top: 10px;
+    padding: 14px;
+    border: 1px solid var(--ion-color-light-shade, #d8dee8);
+    border-radius: 12px;
+  }
+
+  .anu-package-client,
+  .anu-package-actions {
+    grid-column: 1 / -1;
+  }
+
+  .anu-package-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 560px) {
+  .anu-sync-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .anu-sync-controls ion-button {
+    grid-column: auto;
+  }
+
+  .anu-package-row {
+    grid-template-columns: 1fr;
+  }
+
+  .anu-package-client,
+  .anu-package-actions {
+    grid-column: auto;
+  }
+}
