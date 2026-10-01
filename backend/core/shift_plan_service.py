@@ -3,7 +3,7 @@ import io
 import json
 import re
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -433,7 +433,7 @@ def _candidate_queryset_for_payload(user, payload):
         qs = qs.filter(starts_at__date__gte=start, starts_at__date__lte=end)
     else:
         now = timezone.now()
-        qs = qs.filter(starts_at__gte=now - timezone.timedelta(days=180), starts_at__lte=now + timezone.timedelta(days=365))
+        qs = qs.filter(starts_at__gte=now - timedelta(days=180), starts_at__lte=now + timedelta(days=365))
     return qs[:1500]
 
 
