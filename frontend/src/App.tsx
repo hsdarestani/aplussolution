@@ -150,6 +150,17 @@ const BUSINESS_TIME_ZONE = 'Europe/Berlin';
 const dateTime = (input?: string) =>
   input ? new Date(input).toLocaleString('de-DE', { timeZone: BUSINESS_TIME_ZONE }) : '–';
 const dateOnly = (input?: string) => (input ? new Date(input).toLocaleDateString('de-DE') : '–');
+const timeOnly = (input?: string) =>
+  input
+    ? new Date(input).toLocaleTimeString('de-DE', { timeZone: BUSINESS_TIME_ZONE, hour: '2-digit', minute: '2-digit' })
+    : '–';
+const dateInputValue = (date: Date) =>
+  new Intl.DateTimeFormat('sv-SE', {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
 const portalGreeting = () => {
   const hour = Number(new Intl.DateTimeFormat('de-DE', {
     timeZone: BUSINESS_TIME_ZONE,
@@ -174,6 +185,9 @@ const statusText: Record<string, string> = {
   sent: 'Versendet',
   signed: 'Unterzeichnet',
   expired: 'Abgelaufen',
+  generated: 'Erstellt',
+  failed: 'Fehlgeschlagen',
+  archived: 'Archiviert',
 };
 
 function Login({ done }: { done: (user: User) => void }) {
@@ -1686,6 +1700,18 @@ function Contracts({ user }: { user: User }) {
   const [listQuery, setListQuery] = useState('');
   const [listStatus, setListStatus] = useState('');
   const [listSort, setListSort] = useState('-updated_at');
+  const [anuPackages, setAnuPackages] = useState<any[]>([]);
+  const [anuBusy, setAnuBusy] = useState('');
+  const [anuStart, setAnuStart] = useState(() => {
+    const date = new Date();
+    date.setDate(date.getDate() - 31);
+    return dateInputValue(date);
+  });
+  const [anuEnd, setAnuEnd] = useState(() => {
+    const date = new Date();
+    date.setDate(date.getDate() + 180);
+    return dateInputValue(date);
+  });
 
   const load = async () => {
     const params = new URLSearchParams();
@@ -1703,6 +1729,12 @@ function Contracts({ user }: { user: User }) {
       setTemplates(unpack(templateData).filter((template: any) => template.active));
       setWorkers(unpack(workerData).filter((worker: any) => worker.active));
       setClients(unpack(clientData).filter((client: any) => client.active));
+      try {
+        const packageData = await api('automation/orders/packages/');
+        setAnuPackages(unpack(packageData));
+      } catch {
+        setAnuPackages([]);
+      }
     }
   };
 
@@ -1742,6 +1774,36 @@ function Contracts({ user }: { user: User }) {
       setToast(reason.message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function syncAnuPackages() {
+    setAnuBusy('sync');
+    try {
+      const result: any = await api('automation/orders/sync-packages/', {
+        method: 'POST',
+        body: JSON.stringify({ start: anuStart, end: anuEnd }),
+      });
+      await load();
+      const created = Number(result?.created || 0);
+      setToast(created ? `${created} ANÜ Paket${created === 1 ? '' : 'e'} aus dem A+ Dienstplan angelegt.` : 'ANÜ Pakete sind aktuell.');
+    } catch (reason: any) {
+      setToast(reason.message);
+    } finally {
+      setAnuBusy('');
+    }
+  }
+
+  async function generateAnuPackage(packageId: string) {
+    setAnuBusy(packageId);
+    try {
+      await api(`automation/orders/packages/${packageId}/generate/`, { method: 'POST', body: '{}' });
+      await load();
+      setToast('ANÜ Vertrag wurde aus dem A+ Dienstplan erstellt.');
+    } catch (reason: any) {
+      setToast(reason.message);
+    } finally {
+      setAnuBusy('');
     }
   }
 
@@ -1813,6 +1875,83 @@ function Contracts({ user }: { user: User }) {
         }
       />
       {isManager(user) && <DocumentCenterV5 onChanged={load} />}
+      {isManager(user) && (
+        <section className="panel anu-contracts-panel" data-testid="anu-contracts-panel">
+          <div className="section-head anu-contracts-head">
+            <div>
+              <small>ANÜ VERTRÄGE</small>
+              <h3>Verträge aus dem A+ Dienstplan</h3>
+              <p>Quelle sind ausschließlich Kunden, Einsätze und Mitarbeiter aus A+ Workforce. WIW wird dafür nicht verwendet.</p>
+            </div>
+            <div className="anu-sync-controls">
+              <IonInput
+                fill="outline"
+                type="date"
+                label="Von"
+                labelPlacement="floating"
+                value={anuStart}
+                onIonInput={(event) => setAnuStart(String(value(event)))}
+              />
+              <IonInput
+                fill="outline"
+                type="date"
+                label="Bis"
+                labelPlacement="floating"
+                value={anuEnd}
+                onIonInput={(event) => setAnuEnd(String(value(event)))}
+              />
+              <IonButton disabled={!!anuBusy} onClick={() => void syncAnuPackages()}>
+                <IonIcon slot="start" icon={refreshOutline} />
+                {anuBusy === 'sync' ? <IonSpinner name="dots" /> : 'Einsätze synchronisieren'}
+              </IonButton>
+            </div>
+          </div>
+
+          <div className="anu-package-table">
+            <div className="anu-package-row anu-package-header">
+              <span>Kunde</span>
+              <span>Datum</span>
+              <span>Start</span>
+              <span>Ende</span>
+              <span>Status</span>
+              <span>Aktionen</span>
+            </div>
+            {anuPackages.map((item) => {
+              const locked = ['sent', 'signed'].includes(item.contract_status);
+              return (
+                <div className="anu-package-row" key={item.id}>
+                  <div className="anu-package-client">
+                    <b>{item.client_name || item.site_name}</b>
+                    <small>{item.request_id} · {item.shift_count || 0} Einsätze</small>
+                  </div>
+                  <span>{dateOnly(item.first_shift_time)}</span>
+                  <span>{timeOnly(item.first_shift_time)}</span>
+                  <span>{timeOnly(item.first_shift_end_time)}</span>
+                  <IonBadge>{locked ? statusText[item.contract_status] : statusText[item.status] || item.status}</IonBadge>
+                  <div className="anu-package-actions">
+                    {item.pdf_url && (
+                      <IonButton fill="outline" size="small" href={item.pdf_url} target="_blank">
+                        PDF
+                      </IonButton>
+                    )}
+                    <IonButton
+                      size="small"
+                      disabled={!!anuBusy || locked}
+                      title={locked ? 'Versendete oder unterzeichnete Verträge bleiben unverändert.' : ''}
+                      onClick={() => void generateAnuPackage(item.id)}
+                    >
+                      {anuBusy === item.id ? <IonSpinner name="dots" /> : item.pdf_url ? 'Neu erzeugen' : 'Erstellen'}
+                    </IonButton>
+                  </div>
+                </div>
+              );
+            })}
+            {!anuPackages.length && (
+              <Empty>Noch keine ANÜ Pakete aus dem A+ Dienstplan. Zeitraum wählen und Einsätze synchronisieren.</Empty>
+            )}
+          </div>
+        </section>
+      )}
       <ListToolbar
         query={listQuery}
         onQuery={setListQuery}
