@@ -1,5 +1,8 @@
 import hashlib
 import io
+from pathlib import Path
+
+import fitz
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
@@ -17,6 +20,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from .models import (
+    AuevSetting,
     ClientOrder,
     Contract,
     Location,
@@ -290,71 +294,141 @@ def _claimed_workers(shift):
     return [shift.worker] if shift.worker_id else []
 
 
+AUEV_TEMPLATE_PATH = Path(__file__).resolve().parent / 'assets' / 'muster_einzelarbeitnehmerueberlassungsvertrag.pdf'
+AUEV_FALLBACKS = {
+    'permit_date': date(2024, 4, 15),
+    'framework_date': date(2024, 8, 26),
+    'effective_date': None,
+    'required_qualification': 'Serviceerfahrung in der Gastronomie',
+    'intended_activity': 'Servicetätigkeiten – Eventcatering',
+}
+
+
+def _format_person_date(value):
+    if not value:
+        return '–'
+    if hasattr(value, 'strftime'):
+        return value.strftime('%d.%m.%Y')
+    raw = str(value).strip()
+    for fmt in ('%d.%m.%Y', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(raw[:10], fmt).strftime('%d.%m.%Y')
+        except ValueError:
+            pass
+    return raw
+
+
 def _employee_rows(package: ShiftImportPackage):
     rows = []
-    for shift in package_shifts(package).select_related('position', 'worker__user').order_by('starts_at'):
+    for shift in package_shifts(package).select_related('position', 'worker__user').prefetch_related('slots__worker__user').order_by('starts_at'):
         for worker in _claimed_workers(shift):
             master = getattr(worker, 'master_data', None)
-            birth_date = (master.data or {}).get('birth_date', '') if master else ''
-            rows.append([
-                worker.user.get_full_name() or worker.user.email,
-                birth_date or '–',
-                shift.starts_at.astimezone().strftime('%d.%m.%Y %H:%M'),
-                shift.ends_at.astimezone().strftime('%d.%m.%Y %H:%M'),
-                shift.position.name,
-            ])
+            birth_date = _format_person_date((master.data or {}).get('birth_date', '') if master else '')
+            last_name = (worker.user.last_name or '').strip()
+            first_name = (worker.user.first_name or '').strip()
+            if last_name or first_name:
+                employee = ', '.join(value for value in (last_name, first_name) if value)
+            else:
+                employee = worker.user.get_full_name() or worker.user.email
+            rows.append({
+                'employee': f'{employee}, {birth_date}',
+                'start': timezone.localtime(shift.starts_at).strftime('%H:%M'),
+                'end': timezone.localtime(shift.ends_at).strftime('%H:%M'),
+                'date': timezone.localtime(shift.starts_at).strftime('%d.%m.%Y'),
+                'activity': shift.position.name,
+            })
     return rows
+
+
+def _auev_values(package: ShiftImportPackage):
+    default_row = AuevSetting.objects.filter(client__isnull=True).order_by('created_at').first()
+    client_row = AuevSetting.objects.filter(client=package.client).first() if package.client_id else None
+
+    def pick(field):
+        client_value = getattr(client_row, field, None) if client_row else None
+        if client_value not in (None, ''):
+            return client_value
+        default_value = getattr(default_row, field, None) if default_row else None
+        if default_value not in (None, ''):
+            return default_value
+        return AUEV_FALLBACKS[field]
+
+    effective_date = pick('effective_date') or timezone.localtime(package.first_shift_time).date()
+    return {
+        'permit_date': _format_person_date(pick('permit_date')),
+        'framework_date': _format_person_date(pick('framework_date')),
+        'effective_date': _format_person_date(effective_date),
+        'required_qualification': str(pick('required_qualification') or AUEV_FALLBACKS['required_qualification']),
+        'intended_activity': str(pick('intended_activity') or AUEV_FALLBACKS['intended_activity']),
+    }
+
+
+def _insert_fitted_line(page, rect, text, max_size=8.5, min_size=5.2):
+    rect = fitz.Rect(*rect)
+    value = str(text or '').replace('\n', ', ').strip()
+    size = max_size
+    while size > min_size and fitz.get_text_length(value, fontname='helv', fontsize=size) > rect.width:
+        size -= 0.25
+    page.insert_text((rect.x0, rect.y1 - 2), value, fontname='helv', fontsize=max(size, min_size), color=(0, 0, 0))
 
 
 def build_client_contract_pdf(package: ShiftImportPackage) -> bytes:
     rows = _employee_rows(package)
     if not rows:
         raise ValueError('Für die Vertragsgenerierung muss mindestens ein Mitarbeiter einer Schicht zugeteilt sein.')
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=18 * mm, leftMargin=18 * mm, topMargin=15 * mm, bottomMargin=15 * mm)
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name='CenteredTitle', parent=styles['Title'], alignment=TA_CENTER, fontSize=16, leading=20, spaceAfter=14))
-    styles.add(ParagraphStyle(name='Clause', parent=styles['BodyText'], fontSize=9, leading=13, spaceAfter=8))
-    story = [Paragraph('Einzelarbeitnehmerüberlassungsvertrag', styles['CenteredTitle'])]
-    story += [
-        Paragraph(f'<b>Auftraggeber:</b> {package.client.name}<br/>{package.client.address or package.site_address}', styles['Clause']),
-        Paragraph(f'<b>Personaldienstleister:</b> {settings.COMPANY_NAME}<br/>{settings.COMPANY_ADDRESS}', styles['Clause']),
-        Paragraph('Zwischen den Parteien wird folgender Arbeitnehmerüberlassungsvertrag geschlossen:', styles['Clause']),
-        Paragraph('<b>§ 1 Erlaubnis zur Arbeitnehmerüberlassung</b>', styles['Heading3']),
-        Paragraph(f'Der Personaldienstleister erklärt, im Besitz einer Erlaubnis zur Arbeitnehmerüberlassung zu sein, erteilt durch {settings.AUEG_LICENSE_AUTHORITY or "die zuständige Bundesagentur für Arbeit"} am {settings.AUEG_LICENSE_DATE or "–"}.', styles['Clause']),
-        Paragraph('<b>§ 2 Einsatz und Konkretisierung</b>', styles['Heading3']),
-        Paragraph(f'Der Einsatz erfolgt auf Grundlage des Auftrags {package.request_id}. Die nachfolgend genannten Arbeitnehmer werden vor Einsatzbeginn konkretisiert.', styles['Clause']),
-    ]
-    table_data = [['Mitarbeiter', 'Geburtsdatum', 'Beginn', 'Ende', 'Tätigkeit'], *rows]
-    table = Table(table_data, colWidths=[52 * mm, 25 * mm, 35 * mm, 35 * mm, 33 * mm], repeatRows=1)
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#102a63')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-        ('GRID', (0, 0), (-1, -1), 0.35, colors.grey),
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f7fb')]),
-        ('LEFTPADDING', (0, 0), (-1, -1), 4),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-    ]))
-    story += [table, PageBreak()]
-    story += [
-        Paragraph('<b>§ 3 Vergütung und Arbeitszeit</b>', styles['Heading3']),
-        Paragraph('Die Überlassungsvergütung richtet sich nach der tatsächlichen Arbeitszeit der eingesetzten Arbeitnehmer sowie den zwischen den Parteien vereinbarten Konditionen.', styles['Clause']),
-        Paragraph('<b>§ 4 Arbeitsschutz</b>', styles['Heading3']),
-        Paragraph('Auftraggeber und Personaldienstleister erfüllen ihre gesetzlichen Pflichten zum Arbeits- und Gesundheitsschutz. Der Auftraggeber unterweist die eingesetzten Arbeitnehmer vor Tätigkeitsbeginn.', styles['Clause']),
-        Paragraph('<b>§ 5 Laufzeit</b>', styles['Heading3']),
-        Paragraph(f'Dieser Einzelarbeitnehmerüberlassungsvertrag gilt für den Zeitraum {package.first_shift_time:%d.%m.%Y} bis {(package.first_shift_end_time or package.first_shift_time):%d.%m.%Y}.', styles['Clause']),
-        Spacer(1, 25 * mm),
-        Table([
-            ['_____________________________', '_____________________________'],
-            ['Auftraggeber', 'A+ Solution GmbH'],
-            ['Ort, Datum, Unterschrift', 'Ort, Datum, Unterschrift'],
-        ], colWidths=[85 * mm, 85 * mm], style=TableStyle([('FONTSIZE', (0, 0), (-1, -1), 9), ('VALIGN', (0, 0), (-1, -1), 'TOP')])),
-    ]
-    doc.build(story)
-    return buffer.getvalue()
+    if len(rows) > 10:
+        raise ValueError('Die aktuelle ANÜ Vorlage bietet Platz für maximal 10 Mitarbeiter pro Vertrag.')
+    if not AUEV_TEMPLATE_PATH.exists():
+        raise ValueError('Die ANÜ PDF Vorlage ist auf dem Server nicht installiert.')
+
+    values = _auev_values(package)
+    document = fitz.open(AUEV_TEMPLATE_PATH)
+    try:
+        page = document[0]
+        for rect in (
+            (76, 275, 214, 290),
+            (349.8, 307.5, 401.2, 321.5),
+            (311.0, 354.5, 362.6, 369.0),
+            (286, 388, 558, 403.2),
+            (286, 414, 558, 429.2),
+        ):
+            page.add_redact_annot(fitz.Rect(*rect), fill=(1, 1, 1))
+        page.apply_redactions()
+
+        client_line = package.client.name if package.client_id else package.site_name
+        client_address = package.client.address if package.client_id else package.site_address
+        if client_address:
+            client_line = f'{client_line}, {client_address}'
+        _insert_fitted_line(page, (78, 162, 558, 175), f'{client_line} (Auftraggeber)', max_size=8.5, min_size=5.4)
+        _insert_fitted_line(page, (78, 275, 214, 290), f"{values['permit_date']} in Düsseldorf.", max_size=8.5)
+        _insert_fitted_line(page, (350.2, 307.5, 400.8, 321.5), values['framework_date'], max_size=8.5)
+        _insert_fitted_line(page, (311.4, 354.5, 362.2, 369.0), values['effective_date'], max_size=8.5)
+        _insert_fitted_line(page, (290, 388, 558, 403.2), values['required_qualification'], max_size=8.5, min_size=5.5)
+        _insert_fitted_line(page, (290, 414, 558, 429.2), values['intended_activity'], max_size=8.5, min_size=5.5)
+
+        row_tops = [546.96, 565.92, 585.36, 605.04, 624.48, 643.92, 663.36, 683.04, 702.48, 721.92]
+        row_bottoms = [565.92, 585.36, 605.04, 624.48, 643.92, 663.36, 683.04, 702.48, 721.92, 741.60]
+        for index, row in enumerate(rows):
+            top, bottom = row_tops[index], row_bottoms[index]
+            _insert_fitted_line(page, (82, top + 2, 295, bottom - 2), row['employee'], max_size=6.8, min_size=5.0)
+            _insert_fitted_line(page, (301, top + 2, 338, bottom - 2), row['start'], max_size=6.8, min_size=5.5)
+            _insert_fitted_line(page, (343, top + 2, 381, bottom - 2), row['end'], max_size=6.8, min_size=5.5)
+            _insert_fitted_line(page, (386, top + 2, 445, bottom - 2), row['date'], max_size=6.4, min_size=5.0)
+            _insert_fitted_line(page, (449, top + 2, 501, bottom - 2), row['activity'], max_size=6.2, min_size=4.6)
+
+        second_page = document[1]
+        second_page.add_redact_annot(fitz.Rect(426.5, 470.0, 491.0, 484.0), fill=(1, 1, 1))
+        second_page.apply_redactions()
+        contract_end = package.first_shift_end_time or package.first_shift_time
+        _insert_fitted_line(
+            second_page,
+            (429, 470, 491, 484),
+            timezone.localtime(contract_end).strftime('%d.%m.%Y'),
+            max_size=8.5,
+        )
+        return document.tobytes(garbage=4, deflate=True)
+    finally:
+        document.close()
 
 
 def generate_client_contract(package: ShiftImportPackage, actor=None) -> Contract:
@@ -381,6 +455,8 @@ def generate_client_contract(package: ShiftImportPackage, actor=None) -> Contrac
         'start_date': contract.starts_on.isoformat(),
         'end_date': contract.ends_on.isoformat(),
         'shift_ids': local_ids,
+        'auev_settings': _auev_values(package),
+        'portal_visible': False,
     }
     contract.data_snapshot = contract.variables
     contract.generated_at = timezone.now()
@@ -392,8 +468,6 @@ def generate_client_contract(package: ShiftImportPackage, actor=None) -> Contrac
     package.status = ShiftImportPackage.Status.GENERATED
     package.save(update_fields=['contract', 'pdf', 'status', 'updated_at'])
     recipients = User.objects.filter(role__in=[User.Role.ADMIN, User.Role.MANAGER], is_active=True)
-    if package.client_id:
-        recipients = recipients | package.client.contacts.filter(is_active=True)
     for user in recipients.distinct():
         Notification.objects.get_or_create(
             user=user,
