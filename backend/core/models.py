@@ -74,6 +74,30 @@ class ClientCompany(TimestampedModel):
         return self.name
 
 
+class AuevSetting(TimestampedModel):
+    """Configurable ANÜ values.
+
+    A row without a client is the company wide default. A client row stores only
+    values that should override that default for one customer.
+    """
+
+    client = models.OneToOneField(
+        ClientCompany,
+        on_delete=models.CASCADE,
+        related_name='auev_setting',
+        blank=True,
+        null=True,
+    )
+    permit_date = models.DateField(blank=True, null=True)
+    framework_date = models.DateField(blank=True, null=True)
+    effective_date = models.DateField(blank=True, null=True)
+    required_qualification = models.CharField(max_length=255, blank=True)
+    intended_activity = models.CharField(max_length=255, blank=True)
+
+    def __str__(self):
+        return f'ANÜ Einstellungen: {self.client.name if self.client_id else "Standard"}'
+
+
 class WorkerProfile(TimestampedModel):
     class EmploymentType(models.TextChoices):
         MINI = 'minijob', 'Minijob'
