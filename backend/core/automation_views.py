@@ -9,7 +9,7 @@ from django.utils.dateparse import parse_date
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
-from .models import ShiftImportPackage, WorkingTimeAccountRecord, WorkingTimeSetting, WorkerProfile
+from .models import AuevSetting, ClientCompany, ShiftImportPackage, WorkingTimeAccountRecord, WorkingTimeSetting, WorkerProfile
 from .order_automation import parse_order_text
 from .native_cutover import (
     approve_order,
@@ -128,6 +128,84 @@ def order_sync_packages(request):
     except Exception as exc:
         return Response({'detail': str(exc)}, status=400)
     return Response(result)
+
+
+def _auev_setting_dict(item):
+    if not item:
+        return {
+            'permit_date': '',
+            'framework_date': '',
+            'effective_date': '',
+            'required_qualification': '',
+            'intended_activity': '',
+        }
+    return {
+        'permit_date': item.permit_date.isoformat() if item.permit_date else '',
+        'framework_date': item.framework_date.isoformat() if item.framework_date else '',
+        'effective_date': item.effective_date.isoformat() if item.effective_date else '',
+        'required_qualification': item.required_qualification or '',
+        'intended_activity': item.intended_activity or '',
+    }
+
+
+def _auev_default_row():
+    row = AuevSetting.objects.filter(client__isnull=True).order_by('created_at').first()
+    if row:
+        return row
+    return AuevSetting.objects.create(
+        permit_date='2024-04-15',
+        framework_date='2024-08-26',
+        required_qualification='Serviceerfahrung in der Gastronomie',
+        intended_activity='Servicetätigkeiten – Eventcatering',
+    )
+
+
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAdminOrManager])
+def auev_settings(request):
+    client_id = request.query_params.get('client_id') if request.method == 'GET' else request.data.get('client_id')
+    defaults = _auev_default_row()
+    client = get_object_or_404(ClientCompany, pk=client_id) if client_id else None
+
+    if request.method == 'PATCH':
+        target = defaults
+        if client:
+            target, _ = AuevSetting.objects.get_or_create(client=client)
+        for field in ('permit_date', 'framework_date', 'effective_date'):
+            if field in request.data:
+                raw = str(request.data.get(field) or '').strip()
+                if raw:
+                    parsed = parse_date(raw)
+                    if not parsed:
+                        return Response({'detail': f'Ungültiges Datum für {field}.'}, status=400)
+                    setattr(target, field, parsed)
+                else:
+                    setattr(target, field, None)
+        for field in ('required_qualification', 'intended_activity'):
+            if field in request.data:
+                setattr(target, field, str(request.data.get(field) or '').strip())
+        target.save()
+        audit(
+            request,
+            'auev.settings_updated',
+            target,
+            {'scope': str(client.id) if client else 'global'},
+        )
+
+    override = AuevSetting.objects.filter(client=client).first() if client else defaults
+    override_values = _auev_setting_dict(override)
+    default_values = _auev_setting_dict(defaults)
+    effective = {}
+    for field in default_values:
+        effective[field] = override_values.get(field) or default_values.get(field) or ''
+
+    return Response({
+        'client_id': str(client.id) if client else None,
+        'client_name': client.name if client else 'Standard für alle Kunden',
+        'defaults': default_values,
+        'overrides': override_values,
+        'effective': effective,
+    })
 
 
 @api_view(['GET', 'POST'])
