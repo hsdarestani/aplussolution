@@ -28,13 +28,14 @@ import {
 import { api, apiBlob } from './api';
 import ScheduleDatePicker from './ScheduleDatePicker';
 import { saveSchedulePdf } from './saveSchedulePdf';
+import { ShiftPlanAttachments, ShiftPlanBulkUpload } from './ShiftPlanAttachments';
 import { isHotelClientName, schedulePalette } from './scheduleClientPalette';
 import './wiw-schedule-mobile.css';
 
 type TabKey = 'all' | 'open' | 'filled' | 'draft';
 type Choice = { value: string; label: string };
 type ColorChoice = { value: string; label: string; hue: number | null };
-type EditingCard = { shiftId: string; slotId: string; parentCount: number; workerName?: string; workerId?: string; isOpen: boolean; timeEntries?: any[] };
+type EditingCard = { shiftId: string; slotId: string; parentCount: number; workerName?: string; workerId?: string; isOpen: boolean; timeEntries?: any[]; shift?: any };
 type FormState = {
   client: string;
   date: string;
@@ -1012,6 +1013,7 @@ export default function WiwScheduleMobile() {
       workerId: card.worker?.id ? String(card.worker.id) : '',
       isOpen: card.isOpen,
       timeEntries: Array.isArray(card.shift.admin_time_entries) ? card.shift.admin_time_entries : [],
+      shift: card.shift,
     });
     setTimeEditor(undefined);
     setForm({
@@ -1330,6 +1332,7 @@ export default function WiwScheduleMobile() {
           {([['all', 'Alle'], ['open', 'OpenShifts']] as Array<[TabKey, string]>).map(([key, label]) => <button type="button" role="tab" aria-selected={tab === key} key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}</button>)}
           <button type="button" className="wiw-pdf-button" onClick={openPdfExport}><IonIcon icon={documentTextOutline} />PDF</button>
         </div>
+        <ShiftPlanBulkUpload onChanged={()=>void load()} label="Einsatzpläne" />
         <div className="wiw-group-filters" aria-label="Bereiche filtern">
           {SCHEDULE_GROUPS.map((choice) => <button type="button" key={choice.value} className={groupFilter.includes(choice.value) ? 'active' : ''} aria-pressed={groupFilter.includes(choice.value)} onClick={() => toggleGroupFilter(choice.value)}>{choice.label}</button>)}
         </div>
@@ -1529,6 +1532,7 @@ export default function WiwScheduleMobile() {
               placeholder="Hinweis für Mitarbeiter …"
             />
           </div>
+          {editing?.shift ? <ShiftPlanAttachments shift={editing.shift} canUpload onChanged={()=>void load()} /> : null}
 
           {editing ? <>
             <div className="wiw-form-separator" />
