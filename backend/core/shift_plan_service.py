@@ -52,7 +52,7 @@ FULL_GERMAN_DATE = re.compile(
 )
 FILENAME_DATE = re.compile(r'(?<!\d)(\d{1,2})[._-](\d{1,2})[._-](20\d{2})(?!\d)')
 SERVICE_WINDOW = re.compile(
-    r'(?is)\b(?:Servicekraft|Logistiker|Mitarbeiter(?:in)?)\b.{0,260}?'
+    r'(?is)\b(?:Servicekraft|Logistiker|Mitarbeiter(?:in)?)(?=\b|\d).{0,260}?'
     r'(\d{1,2}:\d{2})\s*Uhr\s*bis\s*(\d{1,2}:\d{2})\s*Uhr'
 )
 
@@ -72,10 +72,10 @@ def normalize_identifier(value):
 def _safe_event_value(value):
     raw = str(value or '').strip(' \t\r\n.,:;()[]{}')
     key = normalize_identifier(raw)
-    if len(key) < 4:
+    if len(key) < 4 or not any(character.isdigit() for character in key):
         return ''
-    # Avoid interpreting dates and times as event numbers.
-    if re.fullmatch(r'\d{8}', key) or re.fullmatch(r'\d{4}', key):
+    # Avoid interpreting dates and years as event numbers.
+    if re.fullmatch(r'\d{8}', key) or (re.fullmatch(r'\d{4}', key) and key.startswith('20')):
         return ''
     return raw[:80]
 
