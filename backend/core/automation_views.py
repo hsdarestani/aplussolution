@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from django.http import HttpResponse
@@ -153,8 +153,8 @@ def _auev_default_row():
     if row:
         return row
     return AuevSetting.objects.create(
-        permit_date='2024-04-15',
-        framework_date='2024-08-26',
+        permit_date=date(2024, 4, 15),
+        framework_date=date(2024, 8, 26),
         required_qualification='Serviceerfahrung in der Gastronomie',
         intended_activity='Servicetätigkeiten – Eventcatering',
     )
