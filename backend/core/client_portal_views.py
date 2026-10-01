@@ -14,6 +14,7 @@ from .models import (
     ClientCompany,
     ClientOrder,
     Contract,
+    ContractTemplate,
     Document,
     Location,
     Notification,
@@ -203,7 +204,7 @@ def client_dashboard(request):
             client=company,
             client__contract_visibility_enabled=True,
             status__in=[Contract.Status.READY, Contract.Status.SENT],
-        ).count(),
+        ).exclude(template__kind=ContractTemplate.Kind.CLIENT_AUEV).count(),
         'read_only': False,
     })
 
