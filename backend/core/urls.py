@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import admin_center_views, advanced_views, akten_views, announcement_api, attendance_actions, attendance_views, automation_ai_views, automation_views, availability_admin, avatar_views, calendar_sync, client_admin_views, client_order_planning, client_portal_auth, client_portal_views, contract_views, document_catalog_views, document_center_views, employee_schedule, global_search_views, integration_views, live_admin_center, live_operations, mobile_schedule, native_operations, oauth_views, one_time_ops, payroll_views, portal_views, push_views, schedule_reports, searchable_views, semantic_ai_views, shift_card_admin, shift_slot_actions, shift_views, store_review_views, time_views, views, wiw_dashboard, worker_portal_views
+from . import admin_center_views, advanced_views, akten_views, announcement_api, attendance_actions, attendance_views, automation_ai_views, automation_views, availability_admin, avatar_views, calendar_sync, client_admin_views, client_order_planning, client_portal_auth, client_portal_views, contract_views, document_catalog_views, document_center_views, employee_schedule, global_search_views, integration_views, live_admin_center, live_operations, mobile_schedule, native_operations, oauth_views, one_time_ops, payroll_views, portal_views, push_views, schedule_reports, searchable_views, semantic_ai_views, shift_card_admin, shift_plan_views, shift_slot_actions, shift_views, store_review_views, time_views, views, wiw_dashboard, worker_portal_views
 
 router = DefaultRouter()
 for prefix, view in [
@@ -76,6 +76,10 @@ urlpatterns = [
     path('attendance/corrections/<uuid:pk>/cancel/', attendance_views.cancel_time_correction),
     path('attendance/corrections/<uuid:pk>/decide/', attendance_views.decide_time_correction),
     path('attendance/exceptions/', attendance_views.attendance_exceptions),
+    path('shifts/<uuid:shift_id>/plans/', shift_plan_views.shift_plans),
+    path('shift-plans/bulk-upload/', shift_plan_views.bulk_upload),
+    path('shift-plans/documents/<uuid:document_id>/attach/', shift_plan_views.manual_attach_document),
+    path('shift-plans/attachments/<uuid:attachment_id>/download/', shift_plan_views.download_attachment),
     path('shifts/<uuid:shift_id>/cards/<uuid:slot_id>/', shift_slot_actions.edit_shift_slot),
     path('shifts/<uuid:shift_id>/cards/<uuid:slot_id>/delete/', shift_card_admin.delete_shift_card),
     path('shifts/<uuid:shift_id>/cards/<uuid:slot_id>/remind/', shift_card_admin.remind_shift_card),
