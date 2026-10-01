@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import AuditLog, Shift, TimeEntry, User
 from .premium_approval_models import ShiftReleaseRequest
 from .shift_slots import ShiftSlot
+from .shift_plan_models import ShiftPlanAttachment
 from .shift_rules import automatic_break_minutes, normalized_groups
 
 
@@ -18,6 +19,7 @@ class ShiftApiSerializer(serializers.ModelSerializer):
     my_release_request = serializers.SerializerMethodField()
     my_time_entry = serializers.SerializerMethodField()
     admin_time_entries = serializers.SerializerMethodField()
+    plans = serializers.SerializerMethodField()
 
     def get_geofence_required(self, obj):
         return obj.location.latitude is not None and obj.location.longitude is not None
@@ -133,6 +135,56 @@ class ShiftApiSerializer(serializers.ModelSerializer):
                 'source': slot.source,
             }
             for slot in slots
+        ]
+
+    def get_plans(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated and getattr(request.user, 'role', None) == User.Role.WORKER:
+            try:
+                worker_id = request.user.worker_profile.id
+            except Exception:
+                return []
+            if not any(
+                slot.status == ShiftSlot.Status.CLAIMED and slot.worker_id == worker_id
+                for slot in self._schedule_slots(obj)
+            ):
+                return []
+
+        rows = self._list_instances()
+        attachment_map = getattr(self, '_bulk_plan_attachment_map', None)
+        if attachment_map is None:
+            shift_ids = [item.pk for item in rows if getattr(item, 'pk', None)]
+            attachment_map = {shift_id: [] for shift_id in shift_ids}
+            if shift_ids:
+                attachments = (
+                    ShiftPlanAttachment.objects.filter(shift_id__in=shift_ids)
+                    .select_related('document')
+                    .order_by('shift_id', '-created_at')
+                )
+                for attachment in attachments:
+                    attachment_map.setdefault(attachment.shift_id, []).append(attachment)
+            self._bulk_plan_attachment_map = attachment_map
+
+        if obj.pk in attachment_map:
+            attachments = attachment_map[obj.pk]
+        else:
+            attachments = list(
+                ShiftPlanAttachment.objects.filter(shift=obj)
+                .select_related('document')
+                .order_by('-created_at')
+            )
+
+        return [
+            {
+                'id': str(attachment.id),
+                'document_id': str(attachment.document_id),
+                'name': attachment.document.original_name,
+                'event_numbers': attachment.document.extracted_event_numbers,
+                'event_dates': attachment.document.extracted_event_dates,
+                'created_at': attachment.created_at,
+                'download_url': f'/api/shift-plans/attachments/{attachment.id}/download/',
+            }
+            for attachment in attachments
         ]
 
     def get_my_release_request(self, obj):
@@ -328,5 +380,5 @@ class ShiftApiSerializer(serializers.ModelSerializer):
             'id', 'order', 'order_title', 'client', 'client_name', 'location', 'location_name', 'geofence_required',
             'position', 'position_name', 'starts_at', 'ends_at', 'break_minutes', 'status', 'notes',
             'required_count', 'confirmation_required', 'schedule_groups', 'color_hue', 'open_count', 'filled_count',
-            'assigned_workers', 'slot_cards', 'my_release_request', 'my_time_entry', 'admin_time_entries',
+            'assigned_workers', 'slot_cards', 'my_release_request', 'my_time_entry', 'admin_time_entries', 'plans',
         ]
