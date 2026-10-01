@@ -53,7 +53,9 @@ def _package_dict(item):
         'status': item.status,
         'shift_count': len((item.payload or {}).get('shifts', [])),
         'payload': item.payload,
+        'source_system': (item.payload or {}).get('source_system') or '',
         'contract_id': str(item.contract_id) if item.contract_id else None,
+        'contract_status': item.contract.status if item.contract_id else '',
         'pdf_url': item.pdf.url if item.pdf else '',
         'created_at': item.created_at,
         'updated_at': item.updated_at,
@@ -90,7 +92,13 @@ def order_approve(request):
 @api_view(['GET'])
 @permission_classes([IsAdminOrManager])
 def order_packages(request):
-    queryset = ShiftImportPackage.objects.select_related('client', 'contract').exclude(status=ShiftImportPackage.Status.PLACE)
+    queryset = (
+        ShiftImportPackage.objects
+        .select_related('client', 'contract')
+        .exclude(status=ShiftImportPackage.Status.PLACE)
+        .filter(payload__source_system='aplus')
+        .order_by('-first_shift_time', '-created_at')
+    )
     status_filter = request.query_params.get('status')
     if status_filter:
         queryset = queryset.filter(status=status_filter)
