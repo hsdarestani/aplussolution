@@ -1,0 +1,26 @@
+name: Check STRATO IPv6 origin now
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/check-strato-ipv6-now.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      STRATO_IPV6: 2a01:239:44b:d900::1
+    steps:
+      - name: Probe direct STRATO IPv6
+        run: |
+          set -euo pipefail
+          curl -gksS --connect-timeout 10 --max-time 25             --resolve "app.aplus-solution.de:443:[${STRATO_IPV6}]"             -D /tmp/h -o /tmp/b             "https://app.aplus-solution.de/health/?ipv6_now=${GITHUB_RUN_ID}"
+          grep -q '"status"' /tmp/b
+          grep -qi '^x-aplus-origin: strato-primary' /tmp/h
+          echo STRATO_IPV6_ORIGIN_OK
