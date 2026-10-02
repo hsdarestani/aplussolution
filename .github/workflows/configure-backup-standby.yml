@@ -91,7 +91,44 @@ jobs:
           '
 
           docker rm -f aplus-pg-repl-proxy >/dev/null 2>&1 || true
-          docker run -d             --name aplus-pg-repl-proxy             --restart unless-stopped             --network aplussolution_default             -p 127.0.0.1:15432:5432             alpine/socat             TCP-LISTEN:5432,reuseaddr,fork TCP:db:5432 >/dev/null
+
+          export DEBIAN_FRONTEND=noninteractive
+          if ! command -v socat >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y -qq socat
+          fi
+
+          cat >/usr/local/sbin/aplus-postgres-loopback <<'SCRIPT'
+          #!/bin/sh
+          set -eu
+          cd /opt/aplussolution
+          DB_CID="$(docker compose ps -q db)"
+          test -n "$DB_CID"
+          DB_IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$DB_CID")"
+          test -n "$DB_IP"
+          exec /usr/bin/socat TCP-LISTEN:15432,bind=127.0.0.1,reuseaddr,fork TCP:"$DB_IP":5432
+          SCRIPT
+          chmod 755 /usr/local/sbin/aplus-postgres-loopback
+
+          cat >/etc/systemd/system/aplus-postgres-loopback.service <<'EOF'
+          [Unit]
+          Description=A+ Solution loopback bridge to STRATO PostgreSQL
+          After=docker.service
+          Requires=docker.service
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/sbin/aplus-postgres-loopback
+          Restart=always
+          RestartSec=2
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          systemctl daemon-reload
+          systemctl enable --now aplus-postgres-loopback.service
+          systemctl restart aplus-postgres-loopback.service
 
           id -u aplusrepl >/dev/null 2>&1 || useradd -m -s /bin/bash aplusrepl
           usermod -s /bin/bash aplusrepl
