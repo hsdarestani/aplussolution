@@ -131,6 +131,12 @@ jobs:
           docker compose up -d --build --remove-orphans
           docker compose up -d --force-recreate --no-deps caddy
 
+          # If HA replication is configured, refresh its loopback bridge after
+          # any deploy so it always targets the current PostgreSQL container IP.
+          if systemctl list-unit-files | grep -q '^aplus-postgres-loopback.service'; then
+            systemctl restart aplus-postgres-loopback.service
+          fi
+
           docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
           backend_ready=0
