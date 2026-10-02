@@ -9,8 +9,9 @@ from django.utils.dateparse import parse_date
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
-from .models import AuevSetting, ClientCompany, ShiftImportPackage, WorkingTimeAccountRecord, WorkingTimeSetting, WorkerProfile
+from .models import AuevExport, AuevSetting, ClientCompany, ShiftImportPackage, WorkingTimeAccountRecord, WorkingTimeSetting, WorkerProfile
 from .order_automation import parse_order_text
+from .auev_builder import export_dict as auev_export_dict, generate_export as generate_auev_export, preview as preview_auev
 from .native_cutover import (
     approve_order,
     generate_client_contract,
@@ -138,6 +139,9 @@ def _auev_setting_dict(item):
             'effective_date': '',
             'required_qualification': '',
             'intended_activity': '',
+            'client_contract_text': '',
+            'file_label': '',
+            'last_sequence_number': 0,
         }
     return {
         'permit_date': item.permit_date.isoformat() if item.permit_date else '',
@@ -145,6 +149,9 @@ def _auev_setting_dict(item):
         'effective_date': item.effective_date.isoformat() if item.effective_date else '',
         'required_qualification': item.required_qualification or '',
         'intended_activity': item.intended_activity or '',
+        'client_contract_text': item.client_contract_text or '',
+        'file_label': item.file_label or '',
+        'last_sequence_number': int(item.last_sequence_number or 0),
     }
 
 
@@ -181,9 +188,14 @@ def auev_settings(request):
                     setattr(target, field, parsed)
                 else:
                     setattr(target, field, None)
-        for field in ('required_qualification', 'intended_activity'):
+        for field in ('required_qualification', 'intended_activity', 'client_contract_text', 'file_label'):
             if field in request.data:
                 setattr(target, field, str(request.data.get(field) or '').strip())
+        if 'last_sequence_number' in request.data and client:
+            try:
+                target.last_sequence_number = max(0, int(request.data.get('last_sequence_number') or 0))
+            except (TypeError, ValueError):
+                return Response({'detail': 'Ungültige ANÜ Nummer.'}, status=400)
         target.save()
         audit(
             request,
@@ -206,6 +218,66 @@ def auev_settings(request):
         'overrides': override_values,
         'effective': effective,
     })
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminOrManager])
+def auev_builder_preview(request):
+    client = get_object_or_404(ClientCompany, pk=request.query_params.get('client_id'))
+    try:
+        start = _date(request.query_params.get('start'), timezone.localdate())
+        end = _date(request.query_params.get('end'), start)
+        if end < start:
+            raise ValueError('Bis Datum darf nicht vor Von Datum liegen.')
+        return Response(preview_auev(client, start, end))
+    except ValueError as exc:
+        return Response({'detail': str(exc)}, status=400)
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminOrManager])
+def auev_builder_generate(request):
+    client = get_object_or_404(ClientCompany, pk=request.data.get('client_id'))
+    try:
+        start = _date(request.data.get('start'), timezone.localdate())
+        end = _date(request.data.get('end'), start)
+        if end < start:
+            raise ValueError('Bis Datum darf nicht vor Von Datum liegen.')
+        signature_date = _date(request.data.get('signature_date'), start - timedelta(days=2))
+        sequence = request.data.get('sequence_number')
+        export = generate_auev_export(
+            client=client,
+            start=start,
+            end=end,
+            template_key=str(request.data.get('template_key') or AuevExport.Template.CLASSIC),
+            signature_date=signature_date,
+            actor=request.user,
+            sequence_number=int(sequence) if str(sequence or '').strip() else None,
+        )
+        audit(
+            request,
+            'auev.export_generated',
+            export,
+            {
+                'client': str(client.id),
+                'template': export.template_key,
+                'sequence_number': export.sequence_number,
+                'weeks': export.calendar_weeks,
+            },
+        )
+        return Response(auev_export_dict(export), status=201)
+    except (TypeError, ValueError) as exc:
+        return Response({'detail': str(exc)}, status=400)
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminOrManager])
+def auev_exports(request):
+    queryset = AuevExport.objects.select_related('client').order_by('-created_at')
+    client_id = request.query_params.get('client_id')
+    if client_id:
+        queryset = queryset.filter(client_id=client_id)
+    return Response({'count': queryset.count(), 'results': [auev_export_dict(item) for item in queryset[:150]]})
 
 
 @api_view(['GET', 'POST'])
