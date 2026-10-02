@@ -204,7 +204,7 @@ def client_dashboard(request):
             client=company,
             client__contract_visibility_enabled=True,
             status__in=[Contract.Status.READY, Contract.Status.SENT],
-        ).exclude(template__kind=ContractTemplate.Kind.CLIENT_AUEV).count(),
+        ).exclude(template__slug='einzelarbeitnehmerueberlassung').count(),
         'read_only': False,
     })
 
