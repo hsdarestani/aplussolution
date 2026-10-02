@@ -95,13 +95,41 @@ jobs:
           '
 
           docker rm -f aplus-pg-repl-bridge >/dev/null 2>&1 || true
-          docker run -d \
-            --name aplus-pg-repl-bridge \
-            --restart unless-stopped \
-            --network aplussolution_default \
-            -p 127.0.0.1:5432:5432 \
-            alpine:3.20 \
-            sh -c 'apk add --no-cache socat >/dev/null && exec socat TCP-LISTEN:5432,reuseaddr,fork TCP:db:5432' >/dev/null
+          if ! command -v socat >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y -qq socat
+          fi
+
+          cat >/usr/local/sbin/aplus-postgres-loopback <<'SCRIPT'
+          #!/bin/sh
+          set -eu
+          cd /opt/aplussolution
+          DB_CID="$(docker compose ps -q db)"
+          test -n "$DB_CID"
+          DB_IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$DB_CID")"
+          test -n "$DB_IP"
+          exec socat TCP-LISTEN:5432,bind=127.0.0.1,reuseaddr,fork TCP:"$DB_IP":5432
+          SCRIPT
+          chmod 700 /usr/local/sbin/aplus-postgres-loopback
+
+          cat >/etc/systemd/system/aplus-postgres-loopback.service <<'EOF'
+          [Unit]
+          Description=A+ Solution private PostgreSQL loopback bridge
+          After=docker.service
+          Requires=docker.service
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/sbin/aplus-postgres-loopback
+          Restart=always
+          RestartSec=2
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          systemctl daemon-reload
+          systemctl enable --now aplus-postgres-loopback.service
+          systemctl restart aplus-postgres-loopback.service
 
           ready=0
           for i in $(seq 1 30); do
@@ -112,17 +140,6 @@ jobs:
             sleep 2
           done
           test "$ready" -eq 1
-
-          # Clean up the temporary public replication-port experiment.
-          STRATO_IP="$(getent ahostsv4 "$STRATO_HOST" | awk 'NR==1 {print $1}')"
-          if [ -n "$STRATO_IP" ]; then
-            while iptables -C INPUT -p tcp -s "$STRATO_IP" --dport 55432 -j ACCEPT 2>/dev/null; do
-              iptables -D INPUT -p tcp -s "$STRATO_IP" --dport 55432 -j ACCEPT
-            done
-          fi
-          while iptables -C INPUT -p tcp --dport 55432 -j DROP 2>/dev/null; do
-            iptables -D INPUT -p tcp --dport 55432 -j DROP
-          done
 
           echo BACKUP_LOOPBACK_REPLICATION_READY
           REMOTE
