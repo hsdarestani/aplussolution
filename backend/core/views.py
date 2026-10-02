@@ -434,7 +434,7 @@ class ShiftViewSet(ManagerMutationMixin, BaseModelViewSet):
     def get_queryset(self):
         user = self.request.user
         if user.role in {'admin', 'manager'}:
-            return self.queryset
+            return self.queryset.exclude(template__kind=ContractTemplate.Kind.CLIENT_AUEV)
         if user.role == 'worker':
             return self.queryset.filter(Q(worker__user=user) | Q(is_open=True, status=Shift.Status.PUBLISHED)).distinct()
         return self.queryset.filter(client__contacts=user)
