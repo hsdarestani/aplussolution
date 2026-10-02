@@ -1,0 +1,77 @@
+name: Diagnose STRATO public web path
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-strato-web-path.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Compare SSH path and web path without exposing addresses
+        shell: bash
+        run: |
+          set +e
+          timeout 8 nc -vz "$STRATO_HOST" 22 >/tmp/nc22 2>&1
+          echo "SSH22_REACHABLE=$([ $? -eq 0 ] && echo true || echo false)"
+          timeout 8 nc -vz "$STRATO_HOST" 80 >/tmp/nc80 2>&1
+          echo "HTTP80_REACHABLE=$([ $? -eq 0 ] && echo true || echo false)"
+          timeout 8 nc -vz "$STRATO_HOST" 443 >/tmp/nc443 2>&1
+          echo "HTTPS443_REACHABLE=$([ $? -eq 0 ] && echo true || echo false)"
+
+      - name: Inspect and repair host forwarding rules
+        run: |
+          set -euo pipefail
+          ssh             -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+
+          echo "CADDY_RUNNING=$(docker compose ps -q caddy --status running | grep -q . && echo true || echo false)"
+          echo "BACKEND_RUNNING=$(docker compose ps -q backend --status running | grep -q . && echo true || echo false)"
+          echo "PORT80_LISTEN=$(ss -ltn | grep -q ':80 ' && echo true || echo false)"
+          echo "PORT443_LISTEN=$(ss -ltn | grep -q ':443 ' && echo true || echo false)"
+
+          # Ensure local firewall accepts web traffic before Docker forwarding.
+          iptables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport 80 -j ACCEPT
+          iptables -C INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport 443 -j ACCEPT
+          iptables -C DOCKER-USER -p tcp --dport 80 -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER 1 -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
+          iptables -C DOCKER-USER -p tcp --dport 443 -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER 1 -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
+
+          if command -v ip6tables >/dev/null 2>&1; then
+            ip6tables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || ip6tables -I INPUT 1 -p tcp --dport 80 -j ACCEPT || true
+            ip6tables -C INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || ip6tables -I INPUT 1 -p tcp --dport 443 -j ACCEPT || true
+          fi
+
+          # Confirm Docker has published both ports.
+          docker inspect "$(docker compose ps -q caddy)"             --format '{{json .NetworkSettings.Ports}}' | grep -q '"443/tcp"'
+
+          curl -fsS --max-time 10             --resolve app.aplus-solution.de:443:127.0.0.1             https://app.aplus-solution.de/health/ >/dev/null
+          echo LOCAL_HTTPS_OK=true
+          REMOTE
+
+      - name: Recheck same STRATO endpoint externally
+        shell: bash
+        run: |
+          set +e
+          sleep 2
+          timeout 10 nc -vz "$STRATO_HOST" 443 >/tmp/recheck 2>&1
+          rc=$?
+          echo "HTTPS443_AFTER_REPAIR=$([ $rc -eq 0 ] && echo true || echo false)"
+          exit $rc
