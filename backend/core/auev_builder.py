@@ -749,6 +749,88 @@ def generate_export(*, client, start, end, template_key, signature_date, actor=N
     return export
 
 
+@transaction.atomic
+def update_export(*, export, client, start, end, template_key, signature_date, actor=None, sequence_number=None):
+    if template_key not in {AuevExport.Template.CLASSIC, AuevExport.Template.NEW}:
+        raise ValueError('Unbekannte ANÜ Vorlage.')
+
+    locked = AuevExport.objects.select_for_update().select_related('client').get(pk=export.pk)
+    setting, _ = AuevSetting.objects.select_for_update().get_or_create(client=client)
+
+    sequence = int(sequence_number or locked.sequence_number)
+    if sequence < 1:
+        raise ValueError('Die Dokumentnummer muss mindestens 1 sein.')
+    if AuevExport.objects.filter(client=client, sequence_number=sequence).exclude(pk=locked.pk).exists():
+        raise ValueError(f'Die ANÜ Nummer {sequence} existiert für diesen Kunden bereits.')
+
+    data = _document_data(client, start, end, signature_date, sequence)
+    if template_key == AuevExport.Template.NEW:
+        docx_bytes = _new_docx(data)
+    else:
+        docx_bytes = _classic_docx(data)
+    pdf_bytes = convert_docx_to_pdf(docx_bytes)
+
+    weeks = data['weeks']
+    stem = f'ANÜ - {data["settings"]["file_label"]} ({sequence}) KW{"-".join(str(item) for item in weeks)}'
+    stem = _normalise_filename(stem)
+
+    old_docx = locked.docx.name if locked.docx else ''
+    old_pdf = locked.pdf.name if locked.pdf else ''
+
+    locked.client = client
+    locked.template_key = template_key
+    locked.date_from = start
+    locked.date_to = end
+    locked.first_shift_date = data['first_shift_date']
+    locked.last_shift_date = data['last_shift_date']
+    locked.signature_date = signature_date
+    locked.sequence_number = sequence
+    locked.calendar_weeks = weeks
+    locked.settings_snapshot = {
+        'permit_date': _iso(data['settings']['permit_date']),
+        'framework_date': _iso(data['settings']['framework_date']),
+        'effective_date': _iso(data['settings']['effective_date']),
+        'required_qualification': data['settings']['required_qualification'],
+        'intended_activity': data['settings']['intended_activity'],
+        'client_contract_text': data['settings']['client_contract_text'],
+        'file_label': data['settings']['file_label'],
+    }
+    locked.shift_ids = data['shift_ids']
+    locked.row_count = len(data['rows'])
+    locked.file_stem = stem
+    locked.docx.save(f'{stem}.docx', ContentFile(docx_bytes), save=False)
+    locked.pdf.save(f'{stem}.pdf', ContentFile(pdf_bytes), save=False)
+    locked.save()
+
+    # Remove replaced storage objects after the new files have been saved.
+    storage = locked.docx.storage
+    for old_name, new_name in ((old_docx, locked.docx.name), (old_pdf, locked.pdf.name)):
+        if old_name and old_name != new_name:
+            try:
+                storage.delete(old_name)
+            except Exception:
+                pass
+
+    if sequence > setting.last_sequence_number:
+        setting.last_sequence_number = sequence
+        setting.save(update_fields=['last_sequence_number', 'updated_at'])
+
+    return locked
+
+
+def delete_export(export):
+    docx = export.docx
+    pdf = export.pdf
+    export.delete()
+    for file_field in (docx, pdf):
+        if not file_field:
+            continue
+        try:
+            file_field.delete(save=False)
+        except Exception:
+            pass
+
+
 def export_dict(item):
     return {
         'id': str(item.id),
