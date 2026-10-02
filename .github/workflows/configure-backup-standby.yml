@@ -56,10 +56,10 @@ jobs:
               set -e
               mkdir -p /root/.ssh
               chmod 700 /root/.ssh
-              if [ ! -s /root/.ssh/aplus_repl_from_strato ]; then
-                ssh-keygen -q -t ed25519 -N "" -f /root/.ssh/aplus_repl_from_strato
+              if [ ! -s /root/.ssh/aplus_standby_from_strato ]; then
+                ssh-keygen -q -t ed25519 -N "" -f /root/.ssh/aplus_standby_from_strato
               fi
-              cat /root/.ssh/aplus_repl_from_strato.pub
+              cat /root/.ssh/aplus_standby_from_strato.pub
             ' > /tmp/backup-repl.pub
           test -s /tmp/backup-repl.pub
 
@@ -130,24 +130,24 @@ jobs:
           WantedBy=multi-user.target
           EOF
 
-          id -u aplusrepl >/dev/null 2>&1 || useradd -m -s /bin/bash aplusrepl
-          usermod -s /bin/bash aplusrepl
-          passwd -d aplusrepl >/dev/null 2>&1 || true
+          id -u aplusstandby >/dev/null 2>&1 || useradd -m -s /bin/bash aplusstandby
+          usermod -s /bin/bash aplusstandby
+          passwd -d aplusstandby >/dev/null 2>&1 || true
           rm -f /etc/sudoers.d/aplus-replication
 
-          install -d -m 700 -o aplusrepl -g aplusrepl /home/aplusrepl/.ssh
-          touch /home/aplusrepl/.ssh/authorized_keys
+          install -d -m 700 -o aplusstandby -g aplusstandby /home/aplusstandby/.ssh
+          touch /home/aplusstandby/.ssh/authorized_keys
           PUB="$(cat /tmp/backup-repl.pub)"
-          grep -vF "$PUB" /home/aplusrepl/.ssh/authorized_keys >/tmp/aplusrepl.keys || true
-          mv /tmp/aplusrepl.keys /home/aplusrepl/.ssh/authorized_keys
-          printf 'no-agent-forwarding,no-X11-forwarding,no-pty,permitopen="127.0.0.1:55432" %s\n' "$PUB" >> /home/aplusrepl/.ssh/authorized_keys
-          chown -R aplusrepl:aplusrepl /home/aplusrepl/.ssh
-          chmod 700 /home/aplusrepl/.ssh
-          chmod 600 /home/aplusrepl/.ssh/authorized_keys
+          grep -vF "$PUB" /home/aplusstandby/.ssh/authorized_keys >/tmp/aplusstandby.keys || true
+          mv /tmp/aplusstandby.keys /home/aplusstandby/.ssh/authorized_keys
+          printf 'no-agent-forwarding,no-X11-forwarding,no-pty,permitopen="127.0.0.1:55432" %s\n' "$PUB" >> /home/aplusstandby/.ssh/authorized_keys
+          chown -R aplusstandby:aplusstandby /home/aplusstandby/.ssh
+          chmod 700 /home/aplusstandby/.ssh
+          chmod 600 /home/aplusstandby/.ssh/authorized_keys
 
           mkdir -p /etc/ssh/sshd_config.d
-          cat >/etc/ssh/sshd_config.d/99-aplus-replication.conf <<'EOF'
-          Match User aplusrepl
+          cat >/etc/ssh/sshd_config.d/98-aplus-standby.conf <<'EOF'
+          Match User aplusstandby
               PasswordAuthentication no
               PubkeyAuthentication yes
               AllowTcpForwarding local
@@ -217,9 +217,9 @@ jobs:
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
             -o IdentitiesOnly=yes \
-            -i /root/.ssh/aplus_repl_from_strato \
+            -i /root/.ssh/aplus_standby_from_strato \
             -L $GW:55432:127.0.0.1:55432 \
-            aplusrepl@$STRATO_HOST
+            aplusstandby@$STRATO_HOST
           Restart=always
           RestartSec=3
 
