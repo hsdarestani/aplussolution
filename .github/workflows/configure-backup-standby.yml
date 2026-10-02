@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: aplus-ha-maintenance
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   configure:
@@ -95,7 +95,7 @@ jobs:
             psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_create_physical_replication_slot('"'"'aplus_backup_slot'"'"') WHERE NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name='"'"'aplus_backup_slot'"'"');" >/dev/null
           '
 
-          cat >/usr/local/sbin/aplus-repl-stream <<'SCRIPT'
+          cat >/usr/local/sbin/aplus-repl-stream-root <<'SCRIPT'
           #!/bin/sh
           set -eu
           cd /opt/aplussolution
@@ -105,7 +105,14 @@ jobs:
           test -n "$IP"
           exec /usr/bin/socat STDIO TCP:"$IP":5432
           SCRIPT
-          chmod 755 /usr/local/sbin/aplus-repl-stream
+          chown root:root /usr/local/sbin/aplus-repl-stream-root
+          chmod 755 /usr/local/sbin/aplus-repl-stream-root
+
+          cat >/etc/sudoers.d/aplus-replication <<'EOF'
+          aplusrepl ALL=(root) NOPASSWD: /usr/local/sbin/aplus-repl-stream-root
+          EOF
+          chmod 440 /etc/sudoers.d/aplus-replication
+          visudo -cf /etc/sudoers.d/aplus-replication >/dev/null
 
           id -u aplusrepl >/dev/null 2>&1 || useradd -m -s /bin/bash aplusrepl
           usermod -s /bin/bash aplusrepl
@@ -116,7 +123,7 @@ jobs:
           PUB="$(cat /tmp/backup-repl.pub)"
           grep -vF "$PUB" /home/aplusrepl/.ssh/authorized_keys >/tmp/aplusrepl.keys || true
           mv /tmp/aplusrepl.keys /home/aplusrepl/.ssh/authorized_keys
-          printf 'command="/usr/local/sbin/aplus-repl-stream",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty %s\n' "$PUB" >> /home/aplusrepl/.ssh/authorized_keys
+          printf 'command="/usr/bin/sudo -n /usr/local/sbin/aplus-repl-stream-root",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty %s\n' "$PUB" >> /home/aplusrepl/.ssh/authorized_keys
           chown -R aplusrepl:aplusrepl /home/aplusrepl/.ssh
           chmod 700 /home/aplusrepl/.ssh
           chmod 600 /home/aplusrepl/.ssh/authorized_keys
@@ -183,6 +190,7 @@ jobs:
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
             -o LogLevel=ERROR \
+            -o ConnectTimeout=10 \
             -o ServerAliveInterval=15 \
             -o ServerAliveCountMax=3 \
             aplusrepl@$STRATO_HOST
