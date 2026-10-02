@@ -35,20 +35,47 @@ jobs:
           printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
           chmod 600 "$HOME/.ssh/strato_ed25519"
 
-      - name: Verify STRATO is the promoted writable primary
+      - name: Verify STRATO primary and ensure application is running
         run: |
           set -euo pipefail
-          state="$(
-            ssh -i "$HOME/.ssh/strato_ed25519"               -o IdentitiesOnly=yes               -o StrictHostKeyChecking=no               -o UserKnownHostsFile=/dev/null               root@"$STRATO_HOST" '
-                set -e
-                cd /opt/aplussolution
-                recovery="$(docker compose exec -T db sh -lc '"'"'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"'"'"' | tr -d "[:space:]")"
-                docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null
-                printf "%s\n" "$recovery"
-              '
-          )"
-          test "$state" = "f"
-          echo STRATO_WRITABLE_PRIMARY_CONFIRMED
+          ssh -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+
+          recovery="$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"' | tr -d '[:space:]')"
+          test "$recovery" = "f"
+
+          docker compose up -d --build --remove-orphans
+          docker compose up -d --force-recreate --no-deps caddy
+
+          ready=0
+          for i in $(seq 1 90); do
+            if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker compose ps -a >&2 || true
+            docker compose logs --no-color --tail=250 backend >&2 || true
+            exit 1
+          fi
+
+          docker compose exec -T backend python manage.py check
+          docker compose exec -T backend python manage.py migrate --check
+
+          curl -fsS --retry 3 --retry-delay 2 --max-time 20 \
+            --resolve app.aplus-solution.de:443:127.0.0.1 \
+            -D /tmp/strato.headers -o /tmp/strato.health \
+            https://app.aplus-solution.de/health/
+          grep -qi '^x-aplus-origin: strato-primary' /tmp/strato.headers
+          echo STRATO_PRIMARY_APPLICATION_READY
+          REMOTE
 
       - name: Forward backup origin ports directly to STRATO
         env:
