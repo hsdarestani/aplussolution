@@ -124,6 +124,7 @@ urlpatterns = [
     path('automation/auev-builder/preview/', automation_views.auev_builder_preview),
     path('automation/auev-builder/generate/', automation_views.auev_builder_generate),
     path('automation/auev-exports/', automation_views.auev_exports),
+    path('automation/auev-exports/<uuid:pk>/', automation_views.auev_export_detail),
     path('working-time/settings/', payroll_views.worktime_settings),
     path('working-time/sync/', automation_views.worktime_sync),
     path('working-time/records/', automation_views.worktime_records),
