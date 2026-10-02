@@ -1,0 +1,52 @@
+name: Diagnose STRATO replication bridge
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-strato-repl-bridge.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/key"
+          chmod 600 "$HOME/.ssh/key"
+
+      - name: Inspect bridge
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set +e
+          cd /opt/aplussolution
+          echo "=== bridge status ==="
+          systemctl --no-pager --full status aplus-postgres-loopback.service
+          echo "=== bridge logs ==="
+          journalctl -u aplus-postgres-loopback.service -n 100 --no-pager
+          echo "=== listener ==="
+          ss -ltnp | grep 15432 || true
+          echo "=== db ==="
+          docker compose ps db
+          CID="$(docker compose ps -q db)"
+          echo "DB_CONTAINER_PRESENT=$([ -n "$CID" ] && echo true || echo false)"
+          if [ -n "$CID" ]; then
+            IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CID")"
+            echo "DB_IP_PRESENT=$([ -n "$IP" ] && echo true || echo false)"
+            timeout 3 bash -c "</dev/tcp/$IP/5432"
+            echo "DB_TCP_FROM_HOST_RC=$?"
+          fi
+          echo "=== script ==="
+          sed -n '1,120p' /usr/local/sbin/aplus-postgres-loopback 2>/dev/null || true
+          REMOTE
