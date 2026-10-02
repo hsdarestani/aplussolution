@@ -36,17 +36,33 @@ jobs:
           printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
           chmod 600 "$HOME/.ssh/strato_ed25519"
 
-      - name: Verify STRATO primary
+      - name: Verify STRATO and resolve database address
         run: |
           set -euo pipefail
-          ssh -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+
+          state="$(
+            ssh -i "$HOME/.ssh/strato_ed25519"               -o IdentitiesOnly=yes               -o StrictHostKeyChecking=no               -o UserKnownHostsFile=/dev/null               root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
+
           recovery="$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"' | tr -d '[:space:]')"
           test "$recovery" = "f"
           docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null
-          echo STRATO_PRIMARY_OK
+
+          DB_CID="$(docker compose ps -q db)"
+          test -n "$DB_CID"
+          DB_IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$DB_CID")"
+          test -n "$DB_IP"
+          timeout 3 bash -c "</dev/tcp/$DB_IP/5432"
+
+          printf '%s\n' "$DB_IP"
           REMOTE
+          )"
+
+          STRATO_DB_IP="$(printf '%s\n' "$state" | tail -n1 | tr -d '[:space:]')"
+          test -n "$STRATO_DB_IP"
+          echo "STRATO_DB_IP=$STRATO_DB_IP" >> "$GITHUB_ENV"
+          echo STRATO_PRIMARY_AND_DB_ROUTE_OK
 
       - name: Create backup replication key
         env:
@@ -64,14 +80,20 @@ jobs:
             ' > /tmp/backup-repl.pub
           test -s /tmp/backup-repl.pub
 
-      - name: Prepare STRATO replication endpoint
+      - name: Prepare STRATO replication role and restricted SSH forwarding
         run: |
           set -euo pipefail
+
           scp -q             -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             /tmp/backup-repl.pub root@"$STRATO_HOST":/tmp/backup-repl.pub
 
-          ssh -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          ssh -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" "STRATO_DB_IP='$STRATO_DB_IP' bash -s" <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
+
+          systemctl disable --now aplus-postgres-loopback.service >/dev/null 2>&1 || true
+          rm -f /etc/systemd/system/aplus-postgres-loopback.service /usr/local/sbin/aplus-postgres-loopback
+          systemctl daemon-reload || true
+          docker rm -f aplus-pg-repl-proxy >/dev/null 2>&1 || true
 
           if [ ! -s /root/aplus-replication.secret ]; then
             umask 077
@@ -90,46 +112,6 @@ jobs:
             psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_create_physical_replication_slot('"'"'aplus_backup_slot'"'"') WHERE NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name='"'"'aplus_backup_slot'"'"');" >/dev/null
           '
 
-          docker rm -f aplus-pg-repl-proxy >/dev/null 2>&1 || true
-
-          export DEBIAN_FRONTEND=noninteractive
-          if ! command -v socat >/dev/null 2>&1; then
-            apt-get update -qq
-            apt-get install -y -qq socat
-          fi
-
-          cat >/usr/local/sbin/aplus-postgres-loopback <<'SCRIPT'
-          #!/bin/sh
-          set -eu
-          cd /opt/aplussolution
-          DB_CID="$(docker compose ps -q db)"
-          test -n "$DB_CID"
-          DB_IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$DB_CID")"
-          test -n "$DB_IP"
-          exec /usr/bin/socat TCP-LISTEN:15432,bind=127.0.0.1,reuseaddr,fork TCP:"$DB_IP":5432
-          SCRIPT
-          chmod 755 /usr/local/sbin/aplus-postgres-loopback
-
-          cat >/etc/systemd/system/aplus-postgres-loopback.service <<'EOF'
-          [Unit]
-          Description=A+ Solution loopback bridge to STRATO PostgreSQL
-          After=docker.service
-          Requires=docker.service
-
-          [Service]
-          Type=simple
-          ExecStart=/usr/local/sbin/aplus-postgres-loopback
-          Restart=always
-          RestartSec=2
-
-          [Install]
-          WantedBy=multi-user.target
-          EOF
-
-          systemctl daemon-reload
-          systemctl enable --now aplus-postgres-loopback.service
-          systemctl restart aplus-postgres-loopback.service
-
           id -u aplusrepl >/dev/null 2>&1 || useradd -m -s /bin/bash aplusrepl
           usermod -s /bin/bash aplusrepl
           passwd -d aplusrepl >/dev/null 2>&1 || true
@@ -139,18 +121,18 @@ jobs:
           PUB="$(cat /tmp/backup-repl.pub)"
           grep -vF "$PUB" /home/aplusrepl/.ssh/authorized_keys >/tmp/aplusrepl.keys || true
           mv /tmp/aplusrepl.keys /home/aplusrepl/.ssh/authorized_keys
-          printf 'no-agent-forwarding,no-X11-forwarding,no-pty,permitopen="127.0.0.1:15432" %s\n' "$PUB" >> /home/aplusrepl/.ssh/authorized_keys
+          printf 'no-agent-forwarding,no-X11-forwarding,no-pty,permitopen="%s:5432" %s\n' "$STRATO_DB_IP" "$PUB" >> /home/aplusrepl/.ssh/authorized_keys
           chown -R aplusrepl:aplusrepl /home/aplusrepl/.ssh
           chmod 700 /home/aplusrepl/.ssh
           chmod 600 /home/aplusrepl/.ssh/authorized_keys
 
           mkdir -p /etc/ssh/sshd_config.d
-          cat >/etc/ssh/sshd_config.d/99-aplus-replication.conf <<'EOF'
+          cat >/etc/ssh/sshd_config.d/99-aplus-replication.conf <<EOF
           Match User aplusrepl
               PasswordAuthentication no
               PubkeyAuthentication yes
               AllowTcpForwarding local
-              PermitOpen 127.0.0.1:15432
+              PermitOpen $STRATO_DB_IP:5432
               X11Forwarding no
               AllowAgentForwarding no
               PermitTTY no
@@ -160,14 +142,8 @@ jobs:
           systemctl reload ssh 2>/dev/null || systemctl reload sshd
           rm -f /tmp/backup-repl.pub
 
-          for i in $(seq 1 20); do
-            if docker run --rm --network host postgres:16-alpine               pg_isready -h 127.0.0.1 -p 15432 -U replicator >/dev/null 2>&1; then
-              echo STRATO_REPLICATION_ENDPOINT_OK
-              exit 0
-            fi
-            sleep 1
-          done
-          exit 1
+          timeout 3 bash -c "</dev/tcp/$STRATO_DB_IP/5432"
+          echo STRATO_REPLICATION_ENDPOINT_READY
           REMOTE
 
       - name: Copy replication secret to backup
@@ -176,18 +152,20 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
+
           scp -q             -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST":/root/aplus-replication.secret /tmp/aplus-replication.secret
 
           sshpass -e scp -q             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             /tmp/aplus-replication.secret root@"$BACKUP_HOST":/root/aplus-replication.secret
 
           sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$BACKUP_HOST" 'chmod 600 /root/aplus-replication.secret'
 
-      - name: Start and prove PostgreSQL tunnel from backup
+      - name: Start and prove direct PostgreSQL tunnel
         env:
           SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
         run: |
           set -euo pipefail
-          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$BACKUP_HOST" "STRATO_HOST='$STRATO_HOST' bash -s" <<'REMOTE'
+
+          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$BACKUP_HOST" "STRATO_HOST='$STRATO_HOST' STRATO_DB_IP='$STRATO_DB_IP' bash -s" <<'REMOTE'
           set -euo pipefail
           export DEBIAN_FRONTEND=noninteractive
           cd /opt/aplussolution
@@ -211,7 +189,7 @@ jobs:
           [Service]
           Type=simple
           Environment=AUTOSSH_GATETIME=0
-          ExecStart=/usr/bin/autossh -M 0 -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /root/.ssh/aplus_repl_from_strato -L $GW:55432:127.0.0.1:15432 aplusrepl@$STRATO_HOST
+          ExecStart=/usr/bin/autossh -M 0 -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /root/.ssh/aplus_repl_from_strato -L $GW:55432:$STRATO_DB_IP:5432 aplusrepl@$STRATO_HOST
           Restart=always
           RestartSec=3
 
@@ -228,15 +206,19 @@ jobs:
 
           ok=0
           for i in $(seq 1 30); do
-            if docker run --rm               --network "$NET_NAME"               -e PGPASSWORD="$REPL_PASS"               postgres:16-alpine               psql -h "$GW" -p 55432 -U replicator -d postgres -tAc 'select 1' 2>/dev/null | grep -qx 1; then
+            result="$(
+              docker run --rm                 --network "$NET_NAME"                 -e PGPASSWORD="$REPL_PASS"                 postgres:16-alpine                 psql -h "$GW" -p 55432 -U replicator -d postgres -tAc 'select 1' 2>/dev/null                 | tr -d '[:space:]' || true
+            )"
+            if [ "$result" = "1" ]; then
               ok=1
               break
             fi
             sleep 2
           done
+
           if [ "$ok" -ne 1 ]; then
             systemctl --no-pager --full status aplus-repl-from-strato.service >&2 || true
-            journalctl -u aplus-repl-from-strato.service -n 80 --no-pager >&2 || true
+            journalctl -u aplus-repl-from-strato.service -n 60 --no-pager >&2 || true
             exit 1
           fi
 
@@ -248,6 +230,7 @@ jobs:
           SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
         run: |
           set -euo pipefail
+
           sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ServerAliveInterval=15             -o ServerAliveCountMax=12             root@"$BACKUP_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
@@ -312,27 +295,24 @@ jobs:
           echo "replay_lsn=$replay_lsn"
           REMOTE
 
-      - name: Verify streaming from STRATO side
+      - name: Verify final replication state
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
         run: |
           set -euo pipefail
+
           ssh -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
 
           active="$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select active from pg_replication_slots where slot_name='"'"'aplus_backup_slot'"'"'" | tr -d '[:space:]')"
-          test "$active" = "t"
-
           streamers="$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select count(*) from pg_stat_replication where application_name='"'"'backup_standby'"'"'" | tr -d '[:space:]')"
-          test "$streamers" -ge 1
 
+          test "$active" = "t"
+          test "$streamers" -ge 1
           echo STRATO_SEES_BACKUP_STREAMING
           REMOTE
 
-      - name: Verify backup is read only and application writers are stopped
-        env:
-          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
-        run: |
-          set -euo pipefail
           sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$BACKUP_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
