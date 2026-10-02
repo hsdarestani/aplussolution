@@ -37,6 +37,13 @@ jobs:
           journalctl -u aplus-postgres-loopback.service -n 100 --no-pager
           echo "=== listener ==="
           ss -ltnp | grep 15432 || true
+          echo "=== primary app state ==="
+          RECOVERY="$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"' 2>/dev/null | tr -d '[:space:]' || true)"
+          echo "DB_RECOVERY_VALUE=$RECOVERY"
+          echo "BACKEND_RUNNING=$(docker compose ps -q backend --status running | grep -q . && echo true || echo false)"
+          docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1
+          echo "BACKEND_HEALTH_RC=$?"
+
           echo "=== db ==="
           docker compose ps db
           CID="$(docker compose ps -q db)"
