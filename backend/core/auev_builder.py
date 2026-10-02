@@ -158,13 +158,16 @@ def collect_rows(client, start, end):
         workers = _workers_for_shift(shift)
         missing_count = max(int(shift.required_count or 1) - len(workers), 0)
         if not workers or missing_count:
+            placeholder_count = max(missing_count, 1 if not workers else 0)
             unassigned.append({
                 'shift_id': str(shift.id),
                 'date': local_start.date().isoformat(),
                 'start': local_start.strftime('%H:%M'),
                 'position': shift.position.name,
-                'missing_count': max(missing_count, 1 if not workers else 0),
+                'missing_count': placeholder_count,
             })
+        else:
+            placeholder_count = 0
 
         for worker in workers:
             birth = _birth_date(worker)
@@ -187,6 +190,22 @@ def collect_rows(client, start, end):
                 'date_iso': local_start.date().isoformat(),
                 'activity': shift.position.name,
                 'shift_id': str(shift.id),
+                'placeholder': False,
+            })
+
+        for _ in range(placeholder_count):
+            rows.append({
+                'worker_id': '',
+                'name': '',
+                'birth_date': '',
+                'name_birth': '',
+                'start': local_start.strftime('%H:%M'),
+                'end': local_end.strftime('%H:%M'),
+                'date': local_start.date().strftime('%d.%m.%Y'),
+                'date_iso': local_start.date().isoformat(),
+                'activity': shift.position.name,
+                'shift_id': str(shift.id),
+                'placeholder': True,
             })
 
     return {
@@ -637,8 +656,6 @@ def _document_data(client, start, end, signature_date, sequence_number):
     collected = collect_rows(client, start, end)
     if not collected['shifts']:
         raise ValueError('Im gewählten Zeitraum wurden für diesen Kunden keine Einsätze gefunden.')
-    if collected['unassigned']:
-        raise ValueError('Mindestens ein Einsatz ist noch nicht vollständig mit Mitarbeitern besetzt.')
     if collected['missing_birth_dates']:
         names = ', '.join(collected['missing_birth_dates'][:8])
         raise ValueError(f'Geburtsdatum fehlt für: {names}')
