@@ -71,12 +71,13 @@ jobs:
 
           scp -q             -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             /tmp/aplussolution-release.tgz             /tmp/aplussolution.env             root@"$STRATO_HOST":/tmp/
 
-      - name: Prepare replication role and loopback-only PostgreSQL bridge on backup primary
+      - name: Prepare PostgreSQL replication endpoint on backup primary
         env:
           SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
         run: |
           set -euo pipefail
-          sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 root@"$BACKUP_HOST" "STRATO_HOST='$STRATO_HOST' bash -s" <<'REMOTE'
+          cat >/tmp/aplus-prepare-replication.sh <<'SCRIPT'
+          #!/usr/bin/env bash
           set -euo pipefail
           cd /opt/aplussolution
 
@@ -94,55 +95,27 @@ jobs:
             psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_reload_conf();"
           '
 
-          docker rm -f aplus-pg-repl-bridge >/dev/null 2>&1 || true
-          if ! command -v socat >/dev/null 2>&1; then
-            apt-get update -qq
-            apt-get install -y -qq socat
-          fi
-
-          cat >/usr/local/sbin/aplus-postgres-loopback <<'SCRIPT'
-          #!/bin/sh
-          set -eu
-          cd /opt/aplussolution
           DB_CID="$(docker compose ps -q db)"
           test -n "$DB_CID"
           DB_IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$DB_CID")"
           test -n "$DB_IP"
-          exec socat TCP-LISTEN:5432,bind=127.0.0.1,reuseaddr,fork TCP:"$DB_IP":5432
+          printf '%s\n' "$DB_IP" >/root/aplus-backup-db-ip
+          chmod 600 /root/aplus-backup-db-ip
+
+          # No PostgreSQL port is exposed on the public host.
+          docker rm -f aplus-pg-repl-bridge >/dev/null 2>&1 || true
+          systemctl disable --now aplus-postgres-loopback.service >/dev/null 2>&1 || true
+          rm -f /etc/systemd/system/aplus-postgres-loopback.service /usr/local/sbin/aplus-postgres-loopback
+          systemctl daemon-reload >/dev/null 2>&1 || true
+
+          docker compose exec -T db sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+          echo BACKUP_REPLICATION_ENDPOINT_READY
           SCRIPT
-          chmod 700 /usr/local/sbin/aplus-postgres-loopback
+          chmod 700 /tmp/aplus-prepare-replication.sh
 
-          cat >/etc/systemd/system/aplus-postgres-loopback.service <<'EOF'
-          [Unit]
-          Description=A+ Solution private PostgreSQL loopback bridge
-          After=docker.service
-          Requires=docker.service
-
-          [Service]
-          Type=simple
-          ExecStart=/usr/local/sbin/aplus-postgres-loopback
-          Restart=always
-          RestartSec=2
-
-          [Install]
-          WantedBy=multi-user.target
-          EOF
-          systemctl daemon-reload
-          systemctl enable --now aplus-postgres-loopback.service
-          systemctl restart aplus-postgres-loopback.service
-
-          ready=0
-          for i in $(seq 1 30); do
-            if docker run --rm --network host postgres:16-alpine pg_isready -h 127.0.0.1 -p 5432 -U replicator >/dev/null 2>&1; then
-              ready=1
-              break
-            fi
-            sleep 2
-          done
-          test "$ready" -eq 1
-
-          echo BACKUP_LOOPBACK_REPLICATION_READY
-          REMOTE
+          sshpass -e scp -q -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /tmp/aplus-prepare-replication.sh root@"$BACKUP_HOST":/tmp/aplus-prepare-replication.sh
+          sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST" 'bash /tmp/aplus-prepare-replication.sh && rm -f /tmp/aplus-prepare-replication.sh'
+          rm -f /tmp/aplus-prepare-replication.sh
 
       - name: Create restricted replication SSH tunnel identity
         env:
@@ -161,26 +134,32 @@ jobs:
             '
           )"
           test -n "$STRATO_REPL_PUB"
-          printf '%s\n' "$STRATO_REPL_PUB" > /tmp/strato-repl.pub
+          printf '%s\n' "$STRATO_REPL_PUB" >/tmp/strato-repl.pub
 
           sshpass -e scp -q -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /tmp/strato-repl.pub root@"$BACKUP_HOST":/tmp/strato-repl.pub
 
-          sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST" 'bash -s' <<'REMOTE'
+          cat >/tmp/aplus-setup-repl-ssh.sh <<'SCRIPT'
+          #!/usr/bin/env bash
           set -euo pipefail
+          DB_IP="$(cat /root/aplus-backup-db-ip)"
+          test -n "$DB_IP"
+          PUB="$(cat /tmp/strato-repl.pub)"
+
           id -u aplusrepl >/dev/null 2>&1 || useradd -m -s /bin/bash aplusrepl
           install -d -m 700 -o aplusrepl -g aplusrepl /home/aplusrepl/.ssh
-          PUB="$(cat /tmp/strato-repl.pub)"
-          KEY_LINE="command=\"/bin/false\",no-agent-forwarding,no-X11-forwarding,no-pty,permitopen=\"127.0.0.1:5432\" $PUB"
           touch /home/aplusrepl/.ssh/authorized_keys
-          grep -Fqx "$KEY_LINE" /home/aplusrepl/.ssh/authorized_keys || printf '%s\n' "$KEY_LINE" >> /home/aplusrepl/.ssh/authorized_keys
+          grep -vF "$PUB" /home/aplusrepl/.ssh/authorized_keys >/tmp/aplus-authorized-keys.clean || true
+          mv /tmp/aplus-authorized-keys.clean /home/aplusrepl/.ssh/authorized_keys
+          printf 'command="/bin/false",no-agent-forwarding,no-X11-forwarding,no-pty,permitopen="%s:5432" %s\n' "$DB_IP" "$PUB" >>/home/aplusrepl/.ssh/authorized_keys
           chown -R aplusrepl:aplusrepl /home/aplusrepl/.ssh
+          chmod 700 /home/aplusrepl/.ssh
           chmod 600 /home/aplusrepl/.ssh/authorized_keys
 
           mkdir -p /etc/ssh/sshd_config.d
-          cat > /etc/ssh/sshd_config.d/99-aplus-replication.conf <<'EOF'
+          cat >/etc/ssh/sshd_config.d/99-aplus-replication.conf <<EOF
           Match User aplusrepl
               AllowTcpForwarding local
-              PermitOpen 127.0.0.1:5432
+              PermitOpen $DB_IP:5432
               X11Forwarding no
               AllowAgentForwarding no
               PermitTTY no
@@ -189,7 +168,15 @@ jobs:
           systemctl reload ssh 2>/dev/null || systemctl reload sshd
           rm -f /tmp/strato-repl.pub
           echo RESTRICTED_REPLICATION_SSH_READY
-          REMOTE
+          SCRIPT
+          chmod 700 /tmp/aplus-setup-repl-ssh.sh
+
+          sshpass -e scp -q -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /tmp/aplus-setup-repl-ssh.sh root@"$BACKUP_HOST":/tmp/aplus-setup-repl-ssh.sh
+          sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST" 'bash /tmp/aplus-setup-repl-ssh.sh && rm -f /tmp/aplus-setup-repl-ssh.sh'
+
+          sshpass -e scp -q -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST":/root/aplus-backup-db-ip /tmp/aplus-backup-db-ip
+          scp -q -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /tmp/aplus-backup-db-ip root@"$STRATO_HOST":/root/aplus-backup-db-ip
+          rm -f /tmp/aplus-setup-repl-ssh.sh /tmp/strato-repl.pub /tmp/aplus-backup-db-ip
 
       - name: Copy replication credential to STRATO without logging it
         env:
@@ -234,6 +221,8 @@ jobs:
           docker network inspect "$NET_NAME" >/dev/null
           GW="$(docker network inspect -f '{{(index .IPAM.Config 0).Gateway}}' "$NET_NAME")"
           test -n "$GW"
+          REMOTE_DB_IP="$(cat /root/aplus-backup-db-ip)"
+          test -n "$REMOTE_DB_IP"
 
           if ! command -v autossh >/dev/null 2>&1; then
             apt-get update -qq
@@ -249,7 +238,7 @@ jobs:
           [Service]
           Type=simple
           Environment=AUTOSSH_GATETIME=0
-          ExecStart=/usr/bin/autossh -M 0 -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /root/.ssh/aplus_repl_from_backup -L ${GW}:55432:127.0.0.1:5432 aplusrepl@${BACKUP_HOST}
+          ExecStart=/usr/bin/autossh -M 0 -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /root/.ssh/aplus_repl_from_backup -L ${GW}:55432:${REMOTE_DB_IP}:5432 aplusrepl@${BACKUP_HOST}
           Restart=always
           RestartSec=3
 
