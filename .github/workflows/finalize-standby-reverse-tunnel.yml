@@ -72,13 +72,20 @@ jobs:
 
           sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$BACKUP_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
+          cat >/usr/local/sbin/aplus-repl-hold <<'SCRIPT'
+          #!/bin/sh
+          trap 'exit 0' TERM INT HUP
+          while :; do sleep 3600; done
+          SCRIPT
+          chmod 700 /usr/local/sbin/aplus-repl-hold
+
           mkdir -p /root/.ssh
           chmod 700 /root/.ssh
           touch /root/.ssh/authorized_keys
           PUB="$(cat /tmp/strato-repl.pub)"
           grep -vF "$PUB" /root/.ssh/authorized_keys >/tmp/root.keys || true
           mv /tmp/root.keys /root/.ssh/authorized_keys
-          printf 'command="/bin/false",no-agent-forwarding,no-X11-forwarding,no-pty,permitlisten="127.0.0.1:55431" %s\n' "$PUB" >> /root/.ssh/authorized_keys
+          printf 'command="/usr/local/sbin/aplus-repl-hold",no-agent-forwarding,no-X11-forwarding,no-pty %s\n' "$PUB" >> /root/.ssh/authorized_keys
           chmod 600 /root/.ssh/authorized_keys
           rm -f /tmp/strato-repl.pub
           REMOTE
