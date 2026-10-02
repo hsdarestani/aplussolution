@@ -1,0 +1,67 @@
+name: Diagnose standby SSH authentication
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-standby-ssh-auth.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+      BACKUP_HOST: ${{ secrets.BACKUP_HOST }}
+      BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+    steps:
+      - name: Configure SSH helpers
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/key"
+          chmod 600 "$HOME/.ssh/key"
+
+      - name: Inspect both ends
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          BACKUP_FP="$(
+            sshpass -e ssh               -o PubkeyAuthentication=no               -o PreferredAuthentications=password               -o StrictHostKeyChecking=no               -o UserKnownHostsFile=/dev/null               root@"$BACKUP_HOST"               'ssh-keygen -lf /root/.ssh/aplus_standby_from_strato.pub | awk "{print \$2}"'
+          )"
+          test -n "$BACKUP_FP"
+
+          STRATO_INFO="$(
+            ssh -i "$HOME/.ssh/key"               -o IdentitiesOnly=yes               -o StrictHostKeyChecking=no               -o UserKnownHostsFile=/dev/null               root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -e
+          echo "USER_EXISTS=$(id -u aplusstandby >/dev/null 2>&1 && echo true || echo false)"
+          passwd -S aplusstandby 2>/dev/null | awk '{print "PASSWD_STATUS="$2}' || true
+          stat -c 'HOME_OWNER=%U HOME_MODE=%a' /home/aplusstandby
+          stat -c 'SSH_OWNER=%U SSH_MODE=%a' /home/aplusstandby/.ssh
+          stat -c 'AUTH_OWNER=%U AUTH_MODE=%a' /home/aplusstandby/.ssh/authorized_keys
+          sshd -T -C user=aplusstandby,host=localhost,addr=127.0.0.1             | grep -E '^(pubkeyauthentication|passwordauthentication|authorizedkeysfile|allowtcpforwarding|disableforwarding|permitopen) '
+          KEY_LINE="$(grep -v '^[[:space:]]*$' /home/aplusstandby/.ssh/authorized_keys | tail -n1)"
+          printf '%s\n' "$KEY_LINE" | sed -E 's/^.*(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp[0-9]+) ([A-Za-z0-9+\/=]+).*$/\1 \2/' >/tmp/key.pub
+          ssh-keygen -lf /tmp/key.pub | awk '{print "STRATO_FP="$2}'
+          echo "AUTH_LINES=$(grep -vc '^[[:space:]]*$' /home/aplusstandby/.ssh/authorized_keys)"
+          echo "=== SSH LOG ==="
+          journalctl -u ssh -n 80 --no-pager 2>/dev/null | grep -iE 'aplusstandby|publickey|authentication' | tail -30 || true
+          REMOTE
+          )"
+
+          printf '%s\n' "$STRATO_INFO"
+          STRATO_FP="$(printf '%s\n' "$STRATO_INFO" | sed -n 's/^STRATO_FP=//p' | tail -n1)"
+          test -n "$STRATO_FP"
+          if [ "$BACKUP_FP" = "$STRATO_FP" ]; then
+            echo KEY_FINGERPRINTS_MATCH=true
+          else
+            echo KEY_FINGERPRINTS_MATCH=false
+            exit 1
+          fi
