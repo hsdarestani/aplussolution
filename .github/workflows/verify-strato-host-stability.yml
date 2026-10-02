@@ -1,0 +1,44 @@
+name: Verify STRATO host identity stability
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-strato-host-stability.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        run: |
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/key"
+          chmod 600 "$HOME/.ssh/key"
+
+      - name: Check DNS and repeated host identity
+        run: |
+          set -euo pipefail
+          IPS="$(getent ahostsv4 "$STRATO_HOST" | awk '{print $1}' | sort -u)"
+          COUNT="$(printf '%s\n' "$IPS" | sed '/^$/d' | wc -l)"
+          echo "STRATO_IPV4_COUNT=$COUNT"
+
+          : >/tmp/ids
+          for i in 1 2 3 4 5; do
+            ID="$(
+              ssh -i "$HOME/.ssh/key"                 -o IdentitiesOnly=yes                 -o StrictHostKeyChecking=no                 -o UserKnownHostsFile=/dev/null                 -o ConnectTimeout=10                 root@"$STRATO_HOST" 'sha256sum /etc/machine-id | cut -c1-12'
+            )"
+            echo "$ID" >>/tmp/ids
+            echo "MACHINE_HASH=$ID"
+          done
+
+          UNIQUE="$(sort -u /tmp/ids | wc -l)"
+          echo "UNIQUE_MACHINE_COUNT=$UNIQUE"
+          test "$UNIQUE" -eq 1
