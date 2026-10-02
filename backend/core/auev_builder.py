@@ -562,9 +562,9 @@ def _new_docx(data):
     left.text = ''
     right.text = ''
 
-    _add_cell_paragraph(left, 'Anhang 1: Einzelarbeitnehmerüberlassungsvertrag', size=13, bold=True, after=5)
-    _add_cell_paragraph(left, 'Zwischen', size=11, after=1)
-    client_p = _add_cell_paragraph(left, data['settings']['client_contract_text'], size=10.5, after=1)
+    _add_cell_paragraph(left, 'Anhang 1: Einzelarbeitnehmerüberlassungsvertrag', size=14.5, bold=True, after=5)
+    _add_cell_paragraph(left, 'Zwischen', size=12, after=1)
+    client_p = _add_cell_paragraph(left, data['settings']['client_contract_text'], size=11.5, after=1)
     pPr = client_p._p.get_or_add_pPr()
     pBdr = OxmlElement('w:pBdr')
     bottom = OxmlElement('w:bottom')
@@ -573,23 +573,23 @@ def _new_docx(data):
     bottom.set(qn('w:color'), '777777')
     pBdr.append(bottom)
     pPr.append(pBdr)
-    _add_cell_paragraph(left, 'und', size=11, after=1)
-    _add_cell_paragraph(left, 'A+ Solution GmbH, Carl-Sonnenschein Straße 57, 65936 Frankfurt a.M.', size=10.5, after=0)
-    _add_cell_paragraph(left, '(Personaldienstleister)', size=10.5, after=0)
-    _add_cell_paragraph(left, 'wird folgender Arbeitnehmerüberlassungsvertrag geschlossen:', size=10.5, after=8)
+    _add_cell_paragraph(left, 'und', size=12, after=1)
+    _add_cell_paragraph(left, 'A+ Solution GmbH, Carl-Sonnenschein Straße 57, 65936 Frankfurt a.M.', size=11.5, after=0)
+    _add_cell_paragraph(left, '(Personaldienstleister)', size=11.5, after=0)
+    _add_cell_paragraph(left, 'wird folgender Arbeitnehmerüberlassungsvertrag geschlossen:', size=11.5, after=8)
 
-    _add_cell_paragraph(left, '§ 1 Erlaubnis zur Arbeitnehmerüberlassung', size=10.5, bold=True, after=1)
+    _add_cell_paragraph(left, '§ 1 Erlaubnis zur Arbeitnehmerüberlassung', size=11.5, bold=True, after=1)
     permit = data['settings']['permit_date_de'] or '__________'
     _add_cell_paragraph(
         left,
         'Der Personaldienstleister erklärt, im Besitz einer befristeten Erlaubnis zur Arbeitnehmerüberlassung zu sein, '
         'zuletzt erteilt und nicht widerrufen von der Bundesagentur für Arbeit, Agentur für Arbeit Düsseldorf am '
         f'{permit} in Düsseldorf.',
-        size=10.5,
+        size=11.5,
         after=7,
     )
 
-    _add_cell_paragraph(left, '§ 2 Rahmenvereinbarung', size=10.5, bold=True, after=1)
+    _add_cell_paragraph(left, '§ 2 Rahmenvereinbarung', size=11.5, bold=True, after=1)
     framework = data['settings']['framework_date_de'] or '__________'
     _add_cell_paragraph(
         left,
@@ -599,40 +599,50 @@ def _new_docx(data):
         after=7,
     )
 
-    _add_cell_paragraph(left, '§ 3 Gegenstand des Vertrages / Überlassungsbedingungen', size=10.5, bold=True, after=1)
+    _add_cell_paragraph(left, '§ 3 Gegenstand des Vertrages / Überlassungsbedingungen', size=11.5, bold=True, after=1)
     effective = data['settings']['effective_date_de'] or data['first_shift_date_de']
     _add_cell_paragraph(
         left,
         'Der Personaldienstleister überlässt mit Wirkung zum '
         f'{effective} an den Auftraggeber folgende Zeitarbeitnehmer an den in § 2 Absatz 2 der Rahmenvereinbarung festgelegten Betrieb.',
-        size=10.5,
+        size=11.5,
         after=18,
     )
 
     _add_cell_paragraph(
         left,
         f'Dieser Einzelarbeitnehmerüberlassungsvertrag wird zunächst befristet bis zum  {data["last_shift_date_de"]}',
-        size=10.5,
+        size=11.5,
         after=12,
     )
-    _add_cell_paragraph(left, data['signature_date_de'], size=10.5, after=22)
+    doc.add_paragraph().paragraph_format.space_after = Pt(14)
 
     sig = left.add_table(rows=2, cols=2)
     _no_table_borders(sig)
-    _set_cell_text(sig.cell(0, 0), '', size=9)
-    _set_cell_text(sig.cell(0, 1), '', size=9)
+    _set_table_widths(sig, [6.0, 6.0])
+    _set_cell_text(sig.cell(0, 0), data['signature_date_de'], size=10.5)
+    _set_cell_text(sig.cell(0, 1), '', size=10.5)
     _bottom_border(sig.cell(0, 0))
     _bottom_border(sig.cell(0, 1))
-    _set_cell_text(sig.cell(1, 0), '[Datum, Unterschrift Personaldienstleister]', size=8.8)
-    _set_cell_text(sig.cell(1, 1), '[Datum, Unterschrift Auftraggeber]', size=8.8)
+    _set_cell_text(sig.cell(1, 0), '[Datum, Unterschrift Personaldienstleister]', size=9.2)
+    _set_cell_text(sig.cell(1, 1), '[Datum, Unterschrift Auftraggeber]', size=9.2)
 
     employee = right.add_table(rows=26, cols=6)
     employee.alignment = WD_TABLE_ALIGNMENT.RIGHT
     employee.style = 'Table Grid'
-    widths = [0.78, 6.43, 1.37, 1.37, 2.08, 2.57]
-    headers = ['', 'Name, Vorname, Geburtsdatum', 'Start', 'Ende', 'Datum', 'Tätigkeit']
+    widths = [0.95, 6.20, 1.42, 1.42, 2.10, 2.66]
+    headers = ['Nr.', 'Name, Vorname, Geburtsdatum', 'Start', 'Ende', 'Datum', 'Tätigkeit']
     for idx, value in enumerate(headers):
-        _set_cell_text(employee.cell(0, idx), value, size=8.2, bold=True)
+        _set_cell_text(
+            employee.cell(0, idx),
+            value,
+            size=9.0,
+            bold=True,
+            align=WD_ALIGN_PARAGRAPH.CENTER if idx in {0, 2, 3, 4} else None,
+        )
+    employee.rows[0].height = Cm(0.72)
+    employee.rows[0].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+
     for index in range(25):
         cells = employee.rows[index + 1].cells
         if index < len(data['rows']):
@@ -640,10 +650,17 @@ def _new_docx(data):
             values = [str(index + 1), row['name_birth'], row['start'], row['end'], row['date'], row['activity']]
         else:
             values = ['', '', '', '', '', '']
+
         for col, value in enumerate(values):
-            _set_cell_text(cells[col], value, size=8.0)
-        employee.rows[index + 1].height = Cm(0.37)
-        employee.rows[index + 1].height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+            _set_cell_text(
+                cells[col],
+                value,
+                size=9.0 if col != 1 else 8.8,
+                bold=col == 0 and bool(value),
+                align=WD_ALIGN_PARAGRAPH.CENTER if col in {0, 2, 3, 4} else None,
+            )
+        employee.rows[index + 1].height = Cm(0.48)
+        employee.rows[index + 1].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
 
     _set_table_widths(employee, widths)
 
