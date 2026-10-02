@@ -639,7 +639,7 @@ class ContractViewSet(ManagerMutationMixin, BaseModelViewSet):
         return self.queryset.filter(
             client__contacts=user,
             client__contract_visibility_enabled=True,
-        ).exclude(template__kind=ContractTemplate.Kind.CLIENT_AUEV)
+        ).exclude(template__slug='einzelarbeitnehmerueberlassung')
 
     def perform_create(self, serializer):
         obj = serializer.save(created_by=self.request.user)
