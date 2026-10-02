@@ -116,7 +116,7 @@
 
 .auev-export-row {
   display: grid;
-  grid-template-columns: minmax(290px, 2fr) minmax(210px, 1.2fr) minmax(190px, 1fr) 110px 170px;
+  grid-template-columns: minmax(290px, 2fr) minmax(210px, 1.2fr) minmax(190px, 1fr) 110px minmax(250px, 1.2fr);
   gap: 12px;
   align-items: center;
   min-height: 62px;
@@ -151,6 +151,7 @@
   display: flex;
   gap: 6px;
   justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 @media (max-width: 1200px) {
@@ -163,7 +164,7 @@
   }
 
   .auev-export-row {
-    grid-template-columns: minmax(260px, 2fr) minmax(200px, 1.2fr) minmax(180px, 1fr) 100px 160px;
+    grid-template-columns: minmax(260px, 2fr) minmax(200px, 1.2fr) minmax(180px, 1fr) 100px minmax(230px, 1.2fr);
   }
 }
 
