@@ -76,9 +76,8 @@ jobs:
           SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
         run: |
           set -euo pipefail
-          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ConnectTimeout=20             root@"$BACKUP_HOST" "STRATO_HOST='$STRATO_HOST' bash -s" <<'REMOTE'
+          sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 root@"$BACKUP_HOST" "STRATO_HOST='$STRATO_HOST' bash -s" <<'REMOTE'
           set -euo pipefail
-          export DEBIAN_FRONTEND=noninteractive
           cd /opt/aplussolution
 
           if [ ! -s /root/aplus-replication.secret ]; then
@@ -87,76 +86,93 @@ jobs:
           fi
           REPL_PASS="$(cat /root/aplus-replication.secret)"
 
-          docker compose exec -T db sh -lc             'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '"'"'replicator'"'"') THEN CREATE ROLE replicator WITH LOGIN REPLICATION; END IF; END \$\$;"'
-          docker compose exec -T db sh -lc             "psql -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"ALTER ROLE replicator WITH LOGIN REPLICATION PASSWORD '$REPL_PASS';\""
-
+          docker compose exec -T db sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '"'"'replicator'"'"') THEN CREATE ROLE replicator WITH LOGIN REPLICATION; END IF; END \$\$;"'
+          docker compose exec -T db sh -lc "psql -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"ALTER ROLE replicator WITH LOGIN REPLICATION PASSWORD '$REPL_PASS';\""
           docker compose exec -T db sh -lc '
             grep -q "^host[[:space:]]\+replication[[:space:]]\+replicator[[:space:]]" "$PGDATA/pg_hba.conf" ||
               printf "\nhost replication replicator 0.0.0.0/0 scram-sha-256\n" >> "$PGDATA/pg_hba.conf"
             psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_reload_conf();"
           '
 
-          # Expose a dedicated replication bridge on a nonstandard port.
-          # Host firewall permits only the STRATO source IP; the live db container is not recreated.
           docker rm -f aplus-pg-repl-bridge >/dev/null 2>&1 || true
           docker run -d \
             --name aplus-pg-repl-bridge \
             --restart unless-stopped \
             --network aplussolution_default \
-            -p 55432:5432 \
+            -p 127.0.0.1:5432:5432 \
             alpine:3.20 \
             sh -c 'apk add --no-cache socat >/dev/null && exec socat TCP-LISTEN:5432,reuseaddr,fork TCP:db:5432' >/dev/null
 
-          STRATO_IP="$(getent ahostsv4 "$STRATO_HOST" | awk 'NR==1 {print $1}')"
-          test -n "$STRATO_IP"
-          iptables -C INPUT -p tcp -s "$STRATO_IP" --dport 55432 -j ACCEPT 2>/dev/null ||
-            iptables -I INPUT 1 -p tcp -s "$STRATO_IP" --dport 55432 -j ACCEPT
-          iptables -C INPUT -p tcp --dport 55432 -j DROP 2>/dev/null ||
-            iptables -I INPUT 2 -p tcp --dport 55432 -j DROP
-
-          bridge_ready=0
+          ready=0
           for i in $(seq 1 30); do
-            if docker run --rm --network aplussolution_default postgres:16-alpine pg_isready -h aplus-pg-repl-bridge -p 5432 -U replicator >/dev/null 2>&1; then
-              bridge_ready=1
+            if docker run --rm --network host postgres:16-alpine pg_isready -h 127.0.0.1 -p 5432 -U replicator >/dev/null 2>&1; then
+              ready=1
               break
             fi
             sleep 2
           done
-          test "$bridge_ready" -eq 1
-          echo BACKUP_REPLICATION_SOURCE_READY
+          test "$ready" -eq 1
+
+          # Clean up the temporary public replication-port experiment.
+          STRATO_IP="$(getent ahostsv4 "$STRATO_HOST" | awk 'NR==1 {print $1}')"
+          if [ -n "$STRATO_IP" ]; then
+            while iptables -C INPUT -p tcp -s "$STRATO_IP" --dport 55432 -j ACCEPT 2>/dev/null; do
+              iptables -D INPUT -p tcp -s "$STRATO_IP" --dport 55432 -j ACCEPT
+            done
+          fi
+          while iptables -C INPUT -p tcp --dport 55432 -j DROP 2>/dev/null; do
+            iptables -D INPUT -p tcp --dport 55432 -j DROP
+          done
+
+          echo BACKUP_LOOPBACK_REPLICATION_READY
           REMOTE
 
-      - name: Create dedicated STRATO to backup replication SSH path
+      - name: Create restricted replication SSH tunnel identity
         env:
           SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
         run: |
           set -euo pipefail
           STRATO_REPL_PUB="$(
-            ssh               -i "$HOME/.ssh/strato_ed25519"               -o IdentitiesOnly=yes               -o StrictHostKeyChecking=no               -o UserKnownHostsFile=/dev/null               root@"$STRATO_HOST" '
-                set -e
-                mkdir -p /root/.ssh
-                chmod 700 /root/.ssh
-                if [ ! -s /root/.ssh/aplus_repl_from_backup ]; then
-                  ssh-keygen -q -t ed25519 -N "" -f /root/.ssh/aplus_repl_from_backup
-                fi
-                cat /root/.ssh/aplus_repl_from_backup.pub
-              '
-          )"
-          test -n "$STRATO_REPL_PUB"
-
-          printf '%s\n' "$STRATO_REPL_PUB" > /tmp/strato-repl.pub
-          sshpass -e scp             -q             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             /tmp/strato-repl.pub root@"$BACKUP_HOST":/tmp/strato-repl.pub
-
-          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$BACKUP_HOST" '
+            ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" '
               set -e
               mkdir -p /root/.ssh
               chmod 700 /root/.ssh
-              touch /root/.ssh/authorized_keys
-              chmod 600 /root/.ssh/authorized_keys
-              PUB="$(cat /tmp/strato-repl.pub)"
-              grep -qxF "$PUB" /root/.ssh/authorized_keys || printf "%s\n" "$PUB" >> /root/.ssh/authorized_keys
-              rm -f /tmp/strato-repl.pub
+              if [ ! -s /root/.ssh/aplus_repl_from_backup ]; then
+                ssh-keygen -q -t ed25519 -N "" -f /root/.ssh/aplus_repl_from_backup
+              fi
+              cat /root/.ssh/aplus_repl_from_backup.pub
             '
+          )"
+          test -n "$STRATO_REPL_PUB"
+          printf '%s\n' "$STRATO_REPL_PUB" > /tmp/strato-repl.pub
+
+          sshpass -e scp -q -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /tmp/strato-repl.pub root@"$BACKUP_HOST":/tmp/strato-repl.pub
+
+          sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          id -u aplusrepl >/dev/null 2>&1 || useradd -m -s /bin/bash aplusrepl
+          install -d -m 700 -o aplusrepl -g aplusrepl /home/aplusrepl/.ssh
+          PUB="$(cat /tmp/strato-repl.pub)"
+          KEY_LINE="command=\"/bin/false\",no-agent-forwarding,no-X11-forwarding,no-pty,permitopen=\"127.0.0.1:5432\" $PUB"
+          touch /home/aplusrepl/.ssh/authorized_keys
+          grep -Fqx "$KEY_LINE" /home/aplusrepl/.ssh/authorized_keys || printf '%s\n' "$KEY_LINE" >> /home/aplusrepl/.ssh/authorized_keys
+          chown -R aplusrepl:aplusrepl /home/aplusrepl/.ssh
+          chmod 600 /home/aplusrepl/.ssh/authorized_keys
+
+          mkdir -p /etc/ssh/sshd_config.d
+          cat > /etc/ssh/sshd_config.d/99-aplus-replication.conf <<'EOF'
+          Match User aplusrepl
+              AllowTcpForwarding local
+              PermitOpen 127.0.0.1:5432
+              X11Forwarding no
+              AllowAgentForwarding no
+              PermitTTY no
+          EOF
+          sshd -t
+          systemctl reload ssh 2>/dev/null || systemctl reload sshd
+          rm -f /tmp/strato-repl.pub
+          echo RESTRICTED_REPLICATION_SSH_READY
+          REMOTE
 
       - name: Copy replication credential to STRATO without logging it
         env:
@@ -199,16 +215,44 @@ jobs:
 
           NET_NAME="aplussolution_default"
           docker network inspect "$NET_NAME" >/dev/null
-          REPL_SOURCE="$BACKUP_HOST"
-          test -n "$REPL_SOURCE"
+          GW="$(docker network inspect -f '{{(index .IPAM.Config 0).Gateway}}' "$NET_NAME")"
+          test -n "$GW"
 
+          if ! command -v autossh >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y -qq autossh
+          fi
+
+          cat > /etc/systemd/system/aplus-repl-from-backup.service <<EOF
+          [Unit]
+          Description=A+ Solution restricted PostgreSQL replication tunnel
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          Environment=AUTOSSH_GATETIME=0
+          ExecStart=/usr/bin/autossh -M 0 -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /root/.ssh/aplus_repl_from_backup -L ${GW}:55432:127.0.0.1:5432 aplusrepl@${BACKUP_HOST}
+          Restart=always
+          RestartSec=3
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          systemctl daemon-reload
+          systemctl enable --now aplus-repl-from-backup.service
+          systemctl restart aplus-repl-from-backup.service
+
+          tunnel_ready=0
           for i in $(seq 1 30); do
-            if timeout 2 bash -c "</dev/tcp/$REPL_SOURCE/55432" >/dev/null 2>&1; then
+            if timeout 2 bash -c "</dev/tcp/${GW}/55432" >/dev/null 2>&1; then
+              tunnel_ready=1
               break
             fi
             sleep 2
           done
-          timeout 2 bash -c "</dev/tcp/$REPL_SOURCE/55432" >/dev/null 2>&1
+          test "$tunnel_ready" -eq 1
+          REPL_SOURCE="$GW"
 
           DB_CID="$(docker compose ps -aq db)"
           test -n "$DB_CID"
