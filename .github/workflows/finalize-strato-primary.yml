@@ -1,0 +1,531 @@
+name: Finalize STRATO primary
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/finalize-strato-primary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aplus-primary-cutover
+  cancel-in-progress: false
+
+jobs:
+  cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      BACKUP_HOST: ${{ secrets.BACKUP_HOST }}
+      BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH clients
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Preflight current roles and streaming health
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 3 --retry-delay 2 --max-time 20 -D /tmp/pre.headers -o /tmp/pre.health https://app.aplus-solution.de/health/
+          grep -qi '^x-aplus-origin: backup-primary' /tmp/pre.headers
+
+          BACKUP_RECOVERY="$(
+            sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST" \
+              'cd /opt/aplussolution && docker compose exec -T db sh -lc '\''psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"'\'' | tr -d "[:space:]"'
+          )"
+          test "$BACKUP_RECOVERY" = "f"
+
+          STRATO_STATE="$(
+            ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" '
+              set -e
+              cd /opt/aplussolution
+              recovery="$(docker compose exec -T db sh -lc '\''psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"'\'' | tr -d "[:space:]")"
+              receive="$(docker compose exec -T db sh -lc '\''psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select coalesce(pg_last_wal_receive_lsn()::text, '\''\'''\'')"'\'' | tr -d "[:space:]")"
+              printf "%s|%s\n" "$recovery" "$receive"
+            '
+          )"
+          case "$STRATO_STATE" in
+            t\|?*) ;;
+            *) echo "STRATO is not a healthy streaming standby: $STRATO_STATE" >&2; exit 1 ;;
+          esac
+          echo PREFLIGHT_ROLES_OK
+
+      - name: Freeze backup writers and capture final WAL position
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          cat >/tmp/aplus-freeze-primary.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose stop celery-beat celery backend
+          test -z "$(docker compose ps -q backend --status running)"
+          test -z "$(docker compose ps -q celery --status running)"
+          test -z "$(docker compose ps -q celery-beat --status running)"
+          docker compose exec -T db sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CHECKPOINT;" >/dev/null'
+          docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_current_wal_flush_lsn()"' | tr -d '[:space:]' >/root/aplus-cutover-lsn
+          test -s /root/aplus-cutover-lsn
+          echo BACKUP_WRITES_FROZEN
+          SCRIPT
+          chmod 700 /tmp/aplus-freeze-primary.sh
+          sshpass -e scp -q -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /tmp/aplus-freeze-primary.sh root@"$BACKUP_HOST":/tmp/aplus-freeze-primary.sh
+          sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST" 'bash /tmp/aplus-freeze-primary.sh && rm -f /tmp/aplus-freeze-primary.sh'
+          sshpass -e scp -q -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST":/root/aplus-cutover-lsn /tmp/aplus-cutover-lsn
+          scp -q -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /tmp/aplus-cutover-lsn root@"$STRATO_HOST":/root/aplus-cutover-lsn
+
+      - name: Wait for exact STRATO catchup and perform final media copy
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" "BACKUP_HOST='$BACKUP_HOST' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          TARGET="$(cat /root/aplus-cutover-lsn)"
+          test -n "$TARGET"
+
+          caught=0
+          for i in $(seq 1 120); do
+            ok="$(docker compose exec -T db sh -lc "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -tAc \"select pg_wal_lsn_diff('$TARGET', coalesce(pg_last_wal_replay_lsn(),'0/0')) <= 0\"" 2>/dev/null | tr -d '[:space:]')"
+            if [ "$ok" = "t" ]; then
+              caught=1
+              break
+            fi
+            sleep 1
+          done
+          test "$caught" -eq 1
+
+          docker volume create aplussolution_media_data >/dev/null
+          ssh -i /root/.ssh/aplus_repl_from_backup -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST" \
+            'cd /opt/aplussolution && docker compose exec -T backend tar -C /app/media -cf - .' \
+            | docker run --rm -i -v aplussolution_media_data:/data alpine:3.20 tar -xf - -C /data
+
+          echo STRATO_CAUGHT_UP_AND_MEDIA_FINALIZED
+          REMOTE
+
+      - name: Promote STRATO and start full application
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+
+          docker compose exec -T db sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_promote(true, 60);"'
+          test "$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"' | tr -d '[:space:]')" = "f"
+
+          systemctl disable --now aplus-repl-from-backup.service >/dev/null 2>&1 || true
+
+          sed -i 's/X-Aplus-Origin "backup-primary"/X-Aplus-Origin "strato-primary"/g' Caddyfile
+          docker compose up -d --build --remove-orphans
+          docker compose up -d --force-recreate --no-deps caddy
+
+          ready=0
+          for i in $(seq 1 90); do
+            if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+
+          docker compose exec -T backend python manage.py check
+          docker compose exec -T backend python manage.py migrate --check
+
+          curl -fsS --retry 3 --retry-delay 2 --max-time 20 \
+            --resolve app.aplus-solution.de:443:127.0.0.1 \
+            -D /tmp/strato.headers -o /tmp/strato.health \
+            https://app.aplus-solution.de/health/
+          grep -qi '^x-aplus-origin: strato-primary' /tmp/strato.headers
+          echo STRATO_PRIMARY_READY
+          REMOTE
+
+      - name: Turn backup origin into temporary zero downtime gateway
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          cat >/tmp/aplus-start-gateway.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          cd /opt/aplussolution
+          STRATO_IP="$(getent ahostsv4 "$STRATO_HOST" | awk 'NR==1 {print $1}')"
+          test -n "$STRATO_IP"
+
+          CADDY_DATA="$(docker volume ls --format '{{.Name}}' | grep -E '(^|_)caddy_data$' | head -n1)"
+          CADDY_CONFIG="$(docker volume ls --format '{{.Name}}' | grep -E '(^|_)caddy_config$' | head -n1)"
+          test -n "$CADDY_DATA"
+          test -n "$CADDY_CONFIG"
+
+          mkdir -p /root/aplus-cutover-gateway
+          cat >/root/aplus-cutover-gateway/Caddyfile <<EOF
+          app.aplus-solution.de, solution.smarbiz.sbs {
+              reverse_proxy https://$STRATO_IP {
+                  header_up Host app.aplus-solution.de
+                  transport http {
+                      tls_server_name app.aplus-solution.de
+                  }
+              }
+              header X-Aplus-Gateway "backup-to-strato"
+          }
+          EOF
+
+          docker compose stop caddy >/dev/null 2>&1 || true
+          docker rm -f aplus-cutover-gateway >/dev/null 2>&1 || true
+          docker run -d \
+            --name aplus-cutover-gateway \
+            --restart unless-stopped \
+            -p 80:80 -p 443:443 \
+            -v "$CADDY_DATA":/data \
+            -v "$CADDY_CONFIG":/config \
+            -v /root/aplus-cutover-gateway/Caddyfile:/etc/caddy/Caddyfile:ro \
+            caddy:2-alpine >/dev/null
+
+          ready=0
+          for i in $(seq 1 45); do
+            if curl -fsS --max-time 15 --resolve app.aplus-solution.de:443:127.0.0.1 \
+              -D /tmp/gateway.headers -o /tmp/gateway.health https://app.aplus-solution.de/health/ 2>/dev/null \
+              && grep -qi '^x-aplus-origin: strato-primary' /tmp/gateway.headers \
+              && grep -qi '^x-aplus-gateway: backup-to-strato' /tmp/gateway.headers; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+          echo BACKUP_GATEWAY_TO_STRATO_READY
+          SCRIPT
+          chmod 700 /tmp/aplus-start-gateway.sh
+          sshpass -e scp -q -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /tmp/aplus-start-gateway.sh root@"$BACKUP_HOST":/tmp/aplus-start-gateway.sh
+          sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST" "STRATO_HOST='$STRATO_HOST' bash /tmp/aplus-start-gateway.sh && rm -f /tmp/aplus-start-gateway.sh"
+
+          ok=0
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 20 -D /tmp/public.headers -o /tmp/public.health "https://app.aplus-solution.de/health/?cutover=$GITHUB_RUN_ID-$i" \
+              && grep -qi '^x-aplus-origin: strato-primary' /tmp/public.headers; then
+              ok=1
+              break
+            fi
+            sleep 3
+          done
+          test "$ok" -eq 1
+          echo PUBLIC_TRAFFIC_NOW_REACHES_STRATO
+
+      - name: Create reverse replication identity from backup to STRATO
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST" '
+            set -e
+            mkdir -p /root/.ssh
+            chmod 700 /root/.ssh
+            if [ ! -s /root/.ssh/aplus_repl_from_strato ]; then
+              ssh-keygen -q -t ed25519 -N "" -f /root/.ssh/aplus_repl_from_strato
+            fi
+          '
+          sshpass -e scp -q -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST":/root/.ssh/aplus_repl_from_strato.pub /tmp/backup-repl.pub
+          scp -q -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /tmp/backup-repl.pub root@"$STRATO_HOST":/tmp/backup-repl.pub
+
+          cat >/tmp/aplus-setup-strato-repl-ssh.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          cd /opt/aplussolution
+          DB_CID="$(docker compose ps -q db)"
+          test -n "$DB_CID"
+          DB_IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$DB_CID")"
+          test -n "$DB_IP"
+          printf '%s\n' "$DB_IP" >/root/aplus-strato-db-ip
+          chmod 600 /root/aplus-strato-db-ip
+
+          PUB="$(cat /tmp/backup-repl.pub)"
+          id -u aplusrepl >/dev/null 2>&1 || useradd -m -s /bin/bash aplusrepl
+          install -d -m 700 -o aplusrepl -g aplusrepl /home/aplusrepl/.ssh
+          touch /home/aplusrepl/.ssh/authorized_keys
+          grep -vF "$PUB" /home/aplusrepl/.ssh/authorized_keys >/tmp/aplus-authorized-keys.clean || true
+          mv /tmp/aplus-authorized-keys.clean /home/aplusrepl/.ssh/authorized_keys
+          printf 'command="/bin/false",no-agent-forwarding,no-X11-forwarding,no-pty,permitopen="%s:5432" %s\n' "$DB_IP" "$PUB" >>/home/aplusrepl/.ssh/authorized_keys
+          chown -R aplusrepl:aplusrepl /home/aplusrepl/.ssh
+          chmod 600 /home/aplusrepl/.ssh/authorized_keys
+
+          mkdir -p /etc/ssh/sshd_config.d
+          cat >/etc/ssh/sshd_config.d/99-aplus-replication.conf <<EOF
+          Match User aplusrepl
+              AllowTcpForwarding local
+              PermitOpen $DB_IP:5432
+              X11Forwarding no
+              AllowAgentForwarding no
+              PermitTTY no
+          EOF
+          sshd -t
+          systemctl reload ssh 2>/dev/null || systemctl reload sshd
+          rm -f /tmp/backup-repl.pub
+          echo STRATO_REPLICATION_ENDPOINT_READY
+          SCRIPT
+          chmod 700 /tmp/aplus-setup-strato-repl-ssh.sh
+          scp -q -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /tmp/aplus-setup-strato-repl-ssh.sh root@"$STRATO_HOST":/tmp/aplus-setup-strato-repl-ssh.sh
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'bash /tmp/aplus-setup-strato-repl-ssh.sh && rm -f /tmp/aplus-setup-strato-repl-ssh.sh'
+
+          scp -q -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST":/root/aplus-strato-db-ip /tmp/aplus-strato-db-ip
+          sshpass -e scp -q -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /tmp/aplus-strato-db-ip root@"$BACKUP_HOST":/root/aplus-strato-db-ip
+
+      - name: Rebuild backup PostgreSQL as streaming standby of STRATO
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          cat >/tmp/aplus-build-backup-standby.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          cd /opt/aplussolution
+          STRATO_DB_IP="$(cat /root/aplus-strato-db-ip)"
+          test -n "$STRATO_DB_IP"
+
+          NET_NAME="aplussolution_default"
+          GW="$(docker network inspect -f '{{(index .IPAM.Config 0).Gateway}}' "$NET_NAME")"
+          test -n "$GW"
+
+          if ! command -v autossh >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y -qq autossh
+          fi
+
+          cat >/etc/systemd/system/aplus-repl-from-strato.service <<EOF
+          [Unit]
+          Description=A+ Solution PostgreSQL replication tunnel from STRATO
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          Environment=AUTOSSH_GATETIME=0
+          ExecStart=/usr/bin/autossh -M 0 -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /root/.ssh/aplus_repl_from_strato -L $GW:55432:$STRATO_DB_IP:5432 aplusrepl@$STRATO_HOST
+          Restart=always
+          RestartSec=3
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          systemctl daemon-reload
+          systemctl enable --now aplus-repl-from-strato.service
+          systemctl restart aplus-repl-from-strato.service
+
+          tunnel=0
+          for i in $(seq 1 45); do
+            if timeout 2 bash -c "</dev/tcp/$GW/55432" >/dev/null 2>&1; then tunnel=1; break; fi
+            sleep 2
+          done
+          test "$tunnel" -eq 1
+
+          DB_CID="$(docker compose ps -aq db)"
+          test -n "$DB_CID"
+          DB_VOL="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' "$DB_CID")"
+          test -n "$DB_VOL"
+
+          docker compose stop db >/dev/null 2>&1 || true
+          docker compose rm -sf db >/dev/null 2>&1 || true
+
+          REPL_PASS="$(cat /root/aplus-replication.secret)"
+          test -n "$REPL_PASS"
+          docker run --rm \
+            --network "$NET_NAME" \
+            -e PGPASSWORD="$REPL_PASS" \
+            -e REPL_HOST="$GW" \
+            -v "$DB_VOL":/var/lib/postgresql/data \
+            postgres:16-alpine \
+            sh -ceu '
+              rm -rf /var/lib/postgresql/data/*
+              pg_basebackup -h "$REPL_HOST" -p 55432 -U replicator -D /var/lib/postgresql/data -Fp -Xs -P -R
+            '
+
+          docker run --rm \
+            -e REPL_HOST="$GW" \
+            -e REPL_PASS="$REPL_PASS" \
+            -v "$DB_VOL":/var/lib/postgresql/data \
+            postgres:16-alpine \
+            sh -ceu '
+              printf "\nprimary_conninfo = '\''host=%s port=55432 user=replicator password=%s application_name=backup_standby connect_timeout=5'\''\n" "$REPL_HOST" "$REPL_PASS" >> /var/lib/postgresql/data/postgresql.auto.conf
+              touch /var/lib/postgresql/data/standby.signal
+              chown -R postgres:postgres /var/lib/postgresql/data
+            '
+
+          docker compose up -d db
+          recovery=0
+          for i in $(seq 1 90); do
+            if [ "$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"' 2>/dev/null | tr -d '[:space:]')" = "t" ]; then
+              recovery=1
+              break
+            fi
+            sleep 2
+          done
+          test "$recovery" -eq 1
+          test -n "$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select coalesce(pg_last_wal_receive_lsn()::text, '\''\'''\')"' | tr -d '[:space:]')"
+
+          docker compose stop backend celery celery-beat >/dev/null 2>&1 || true
+          echo BACKUP_STREAMING_STANDBY_READY
+          SCRIPT
+          chmod 700 /tmp/aplus-build-backup-standby.sh
+          sshpass -e scp -q -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /tmp/aplus-build-backup-standby.sh root@"$BACKUP_HOST":/tmp/aplus-build-backup-standby.sh
+          sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST" "STRATO_HOST='$STRATO_HOST' bash /tmp/aplus-build-backup-standby.sh && rm -f /tmp/aplus-build-backup-standby.sh"
+
+      - name: Configure continuous media pull on backup
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sshpass -e scp -q -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST":/root/.ssh/aplus_repl_from_strato.pub /tmp/backup-media.pub
+          scp -q -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /tmp/backup-media.pub root@"$STRATO_HOST":/tmp/backup-media.pub
+
+          cat >/tmp/aplus-setup-media-export.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          PUB="$(cat /tmp/backup-media.pub)"
+          cat >/usr/local/sbin/aplus-media-export <<'EXPORT'
+          #!/bin/sh
+          exec docker run --rm -v aplussolution_media_data:/data:ro alpine:3.20 tar -C /data -cf - .
+          EXPORT
+          chmod 700 /usr/local/sbin/aplus-media-export
+
+          mkdir -p /root/.ssh
+          touch /root/.ssh/authorized_keys
+          grep -vF "$PUB" /root/.ssh/authorized_keys >/tmp/root-authorized-keys.clean || true
+          mv /tmp/root-authorized-keys.clean /root/.ssh/authorized_keys
+          printf 'command="/usr/local/sbin/aplus-media-export",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty %s\n' "$PUB" >>/root/.ssh/authorized_keys
+          chmod 600 /root/.ssh/authorized_keys
+          rm -f /tmp/backup-media.pub
+          SCRIPT
+          chmod 700 /tmp/aplus-setup-media-export.sh
+          scp -q -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /tmp/aplus-setup-media-export.sh root@"$STRATO_HOST":/tmp/aplus-setup-media-export.sh
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'bash /tmp/aplus-setup-media-export.sh && rm -f /tmp/aplus-setup-media-export.sh'
+
+          cat >/tmp/aplus-setup-media-pull.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          cat >/usr/local/sbin/aplus-media-pull <<EOF
+          #!/bin/sh
+          set -eu
+          exec 9>/run/aplus-media-pull.lock
+          flock -n 9 || exit 0
+          ssh -i /root/.ssh/aplus_repl_from_strato -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$STRATO_HOST \
+            | docker run --rm -i -v aplussolution_media_data:/data alpine:3.20 tar -xf - -C /data
+          EOF
+          chmod 700 /usr/local/sbin/aplus-media-pull
+
+          cat >/etc/systemd/system/aplus-media-pull.service <<'EOF'
+          [Unit]
+          Description=A+ Solution pull media from STRATO primary
+          After=network-online.target docker.service
+          Wants=network-online.target
+          Requires=docker.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/aplus-media-pull
+          EOF
+
+          cat >/etc/systemd/system/aplus-media-pull.timer <<'EOF'
+          [Unit]
+          Description=Keep A+ Solution standby media current
+
+          [Timer]
+          OnBootSec=30
+          OnUnitActiveSec=60
+          Unit=aplus-media-pull.service
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+          EOF
+
+          systemctl daemon-reload
+          systemctl enable --now aplus-media-pull.timer
+          systemctl start aplus-media-pull.service
+          systemctl is-active aplus-media-pull.timer
+          echo BACKUP_MEDIA_SYNC_ACTIVE
+          SCRIPT
+          chmod 700 /tmp/aplus-setup-media-pull.sh
+          sshpass -e scp -q -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /tmp/aplus-setup-media-pull.sh root@"$BACKUP_HOST":/tmp/aplus-setup-media-pull.sh
+          sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST" "STRATO_HOST='$STRATO_HOST' bash /tmp/aplus-setup-media-pull.sh && rm -f /tmp/aplus-setup-media-pull.sh"
+
+      - name: Verify final primary standby architecture
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" '
+            set -e
+            cd /opt/aplussolution
+            test "$(docker compose exec -T db sh -lc '\''psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"'\'' | tr -d "[:space:]")" = "f"
+            for service in backend frontend caddy celery celery-beat db redis; do
+              test -n "$(docker compose ps -q "$service" --status running)"
+            done
+            echo STRATO_PRIMARY_VERIFIED
+          '
+
+          sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST" '
+            set -e
+            cd /opt/aplussolution
+            test "$(docker compose exec -T db sh -lc '\''psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"'\'' | tr -d "[:space:]")" = "t"
+            test -n "$(docker compose exec -T db sh -lc '\''psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select coalesce(pg_last_wal_receive_lsn()::text, '\''\'''\')"'\'' | tr -d "[:space:]")"
+            test -z "$(docker compose ps -q backend --status running)"
+            test -z "$(docker compose ps -q celery --status running)"
+            test -z "$(docker compose ps -q celery-beat --status running)"
+            docker ps --filter name=aplus-cutover-gateway --format "{{.Names}}" | grep -q aplus-cutover-gateway
+            systemctl is-active --quiet aplus-repl-from-strato.service
+            systemctl is-active --quiet aplus-media-pull.timer
+            echo BACKUP_STANDBY_VERIFIED
+          '
+
+          ok=0
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 20 -D /tmp/final.headers -o /tmp/final.health "https://app.aplus-solution.de/health/?final=$GITHUB_RUN_ID-$i" \
+              && grep -qi '^x-aplus-origin: strato-primary' /tmp/final.headers; then
+              ok=1
+              break
+            fi
+            sleep 3
+          done
+          test "$ok" -eq 1
+          echo FINAL_ARCHITECTURE_VERIFIED
+
+      - name: Emergency recovery if cutover fails before promotion
+        if: failure()
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set +e
+          STRATO_RECOVERY="$(
+            ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" \
+              'cd /opt/aplussolution 2>/dev/null && docker compose exec -T db sh -lc '\''psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"'\'' 2>/dev/null | tr -d "[:space:]"' 2>/dev/null
+          )"
+          if [ "$STRATO_RECOVERY" = "t" ]; then
+            echo "STRATO was not promoted; restoring backup primary writers."
+            sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST" '
+              cd /opt/aplussolution || exit 0
+              docker rm -f aplus-cutover-gateway >/dev/null 2>&1 || true
+              docker compose up -d db redis backend frontend celery celery-beat caddy
+            '
+          else
+            echo "STRATO has been promoted; refusing to restart backup writers and create split brain."
+          fi
+
+      - name: Cleanup runner
+        if: always()
+        run: |
+          rm -f "$HOME/.ssh/strato_ed25519" /tmp/*.pub /tmp/aplus-* /tmp/*.headers /tmp/*.health
