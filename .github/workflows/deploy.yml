@@ -74,37 +74,48 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      PRIMARY_HOST: ${{ secrets.BACKUP_HOST }}
-      PRIMARY_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+      PRIMARY_HOST: ${{ secrets.STRATO_HOST }}
+      PRIMARY_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install SSH helper
+      - name: Configure STRATO SSH
         run: |
           set -euo pipefail
           test -n "$PRIMARY_HOST"
-          test -n "$PRIMARY_PASSWORD"
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq sshpass
+          test -n "$PRIMARY_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$PRIMARY_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
 
       - name: Package release
         run: |
           set -euo pipefail
           tar             --exclude='.git'             --exclude='.env'             --exclude='frontend/node_modules'             -czf /tmp/aplussolution-release.tgz .
 
-      - name: Upload release to temporary primary
-        env:
-          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+      - name: Upload release to STRATO primary
         run: |
           set -euo pipefail
-          sshpass -e scp -q             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ConnectTimeout=20             /tmp/aplussolution-release.tgz root@"$PRIMARY_HOST":/tmp/aplussolution-release.tgz
+          scp -q \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            /tmp/aplussolution-release.tgz root@"$PRIMARY_HOST":/tmp/aplussolution-release.tgz
 
-      - name: Deploy release to temporary primary without replacing production data
-        env:
-          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+      - name: Deploy release to STRATO primary without replacing production data
         run: |
           set -euo pipefail
-          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ConnectTimeout=20             -o ServerAliveInterval=15             -o ServerAliveCountMax=12             root@"$PRIMARY_HOST" 'bash -s' <<'REMOTE'
+          ssh \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=12 \
+            root@"$PRIMARY_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           mkdir -p /opt/aplussolution
           cd /opt/aplussolution
@@ -155,21 +166,21 @@ jobs:
           docker image prune -f >/dev/null 2>&1 || true
           REMOTE
 
-      - name: Verify public production is served by temporary primary
+      - name: Verify public production is served by STRATO primary
         run: |
           set -euo pipefail
           ok=0
           for i in $(seq 1 18); do
             rm -f /tmp/headers /tmp/health
-            if curl -fsS --retry 2 --retry-delay 3 --max-time 20               -D /tmp/headers -o /tmp/health               "https://${PRODUCTION_DOMAIN}/health/?primary_check=${GITHUB_RUN_ID}-$i"               && grep -q '"status"' /tmp/health               && grep -qi '^x-aplus-origin: backup-primary' /tmp/headers; then
+            if curl -fsS --retry 2 --retry-delay 3 --max-time 20               -D /tmp/headers -o /tmp/health               "https://${PRODUCTION_DOMAIN}/health/?primary_check=${GITHUB_RUN_ID}-$i"               && grep -q '"status"' /tmp/health               && grep -qi '^x-aplus-origin: strato-primary' /tmp/headers; then
               ok=1
               break
             fi
             sleep 8
           done
           test "$ok" -eq 1
-          echo "A+ Solution temporary primary is serving https://${PRODUCTION_DOMAIN}"
+          echo "A+ Solution STRATO primary is serving https://${PRODUCTION_DOMAIN}"
 
       - name: Cleanup
         if: always()
-        run: rm -f /tmp/aplussolution-release.tgz /tmp/headers /tmp/health
+        run: rm -f "$HOME/.ssh/strato_ed25519" /tmp/aplussolution-release.tgz /tmp/headers /tmp/health
