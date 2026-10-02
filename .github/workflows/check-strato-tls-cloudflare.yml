@@ -1,0 +1,50 @@
+name: Check STRATO TLS versus Cloudflare
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/check-strato-tls-cloudflare.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+    steps:
+      - name: Test direct STRATO TLS using production SNI
+        shell: bash
+        run: |
+          set +e
+          curl -ksS --connect-timeout 10 --max-time 20             --connect-to "app.aplus-solution.de:443:$STRATO_HOST:443"             -D /tmp/direct.h -o /tmp/direct.b             "https://app.aplus-solution.de/health/?direct_tls=$GITHUB_RUN_ID"
+          rc=$?
+          echo "DIRECT_TLS_CURL_RC=$rc"
+          if [ -f /tmp/direct.h ]; then
+            awk 'BEGIN{IGNORECASE=1} /^(HTTP\/|server:|x-aplus-origin:|content-type:)/ {print}' /tmp/direct.h
+          fi
+          if [ -f /tmp/direct.b ]; then
+            if grep -q '"status"' /tmp/direct.b; then echo DIRECT_TLS_BODY_OK=true; else echo DIRECT_TLS_BODY_OK=false; fi
+          fi
+          test "$rc" -eq 0
+          grep -qi '^x-aplus-origin: strato-primary' /tmp/direct.h
+          grep -q '"status"' /tmp/direct.b
+
+      - name: Test Cloudflare path and print status
+        shell: bash
+        run: |
+          set +e
+          curl -ksS --connect-timeout 10 --max-time 20             -D /tmp/cf.h -o /tmp/cf.b             "https://app.aplus-solution.de/health/?cf_diag=$GITHUB_RUN_ID"
+          rc=$?
+          echo "CF_CURL_RC=$rc"
+          if [ -f /tmp/cf.h ]; then
+            awk 'BEGIN{IGNORECASE=1} /^(HTTP\/|server:|cf-ray:|x-aplus-origin:|content-type:)/ {print}' /tmp/cf.h
+          fi
+          if [ -f /tmp/cf.b ]; then
+            if grep -q '"status"' /tmp/cf.b; then echo CF_BODY_OK=true; else echo CF_BODY_OK=false; fi
+          fi
+          exit 0
