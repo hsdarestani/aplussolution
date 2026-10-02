@@ -58,6 +58,9 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
   const [settingsClient, setSettingsClient] = useState('');
   const [settingsForm, setSettingsForm] = useState<any>({});
   const [settingsDefaults, setSettingsDefaults] = useState<any>({});
+  const [editOpen, setEditOpen] = useState(false);
+  const [editItem, setEditItem] = useState<any>();
+  const [editForm, setEditForm] = useState<any>({});
 
   const loadExports = async () => {
     const data = await api('automation/auev-exports/');
@@ -123,6 +126,61 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
       setPreview(next);
       setSignatureDate(next.signature_date_default || '');
       setSequenceNumber(String(next.sequence_number || ''));
+    } catch (reason: any) {
+      setToast(reason.message);
+    } finally {
+      setBusy('');
+    }
+  }
+
+  function openEdit(item: any) {
+    setEditItem(item);
+    setEditForm({
+      client_id: item.client_id,
+      start: item.date_from,
+      end: item.date_to,
+      template_key: item.template_key,
+      signature_date: item.signature_date,
+      sequence_number: item.sequence_number,
+    });
+    setEditOpen(true);
+  }
+
+  async function saveEdit() {
+    if (!editItem) return;
+    setBusy('edit');
+    try {
+      const updated: any = await api(`automation/auev-exports/${editItem.id}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          client_id: editForm.client_id,
+          start: editForm.start,
+          end: editForm.end,
+          template_key: editForm.template_key,
+          signature_date: editForm.signature_date,
+          sequence_number: editForm.sequence_number,
+        }),
+      });
+      setEditOpen(false);
+      setEditItem(undefined);
+      setToast(`${updated.file_stem} wurde aktualisiert und neu erzeugt.`);
+      await loadExports();
+      if (onChanged) await onChanged();
+    } catch (reason: any) {
+      setToast(reason.message);
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function removeExport(item: any) {
+    if (!window.confirm(`${item.file_stem} wirklich löschen? PDF und DOCX werden ebenfalls gelöscht.`)) return;
+    setBusy(`delete-${item.id}`);
+    try {
+      await api(`automation/auev-exports/${item.id}/`, { method: 'DELETE' });
+      setToast('ANÜ Datei wurde gelöscht.');
+      await loadExports();
+      if (onChanged) await onChanged();
     } catch (reason: any) {
       setToast(reason.message);
     } finally {
@@ -291,7 +349,7 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
         </div>
         <div className="auev-export-table">
           <div className="auev-export-row auev-export-header">
-            <span>Datei</span><span>Kunde</span><span>Zeitraum</span><span>Vorlage</span><span>Dateien</span>
+            <span>Datei</span><span>Kunde</span><span>Zeitraum</span><span>Vorlage</span><span>Dateien & Aktionen</span>
           </div>
           {exports.map((item) => (
             <div className="auev-export-row" key={item.id}>
@@ -302,12 +360,102 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
               <div className="auev-file-actions">
                 <IonButton size="small" fill="outline" href={item.pdf_url} target="_blank">PDF</IonButton>
                 <IonButton size="small" fill="outline" href={item.docx_url} target="_blank">DOCX</IonButton>
+                <IonButton size="small" fill="outline" onClick={() => openEdit(item)}>Bearbeiten</IonButton>
+                <IonButton
+                  size="small"
+                  fill="outline"
+                  color="danger"
+                  disabled={busy === `delete-${item.id}`}
+                  onClick={() => void removeExport(item)}
+                >
+                  {busy === `delete-${item.id}` ? <IonSpinner name="dots" /> : 'Löschen'}
+                </IonButton>
               </div>
             </div>
           ))}
           {!exports.length && <div className="empty">Noch keine ANÜ Dateien erzeugt.</div>}
         </div>
       </section>
+
+      <IonModal isOpen={editOpen} onDidDismiss={() => setEditOpen(false)}>
+        <IonContent className="ion-padding form">
+          <div className="modal-head">
+            <div>
+              <small>ANÜ DATEI BEARBEITEN</small>
+              <h2>{editItem?.file_stem || 'ANÜ Datei'}</h2>
+              <p>Beim Speichern werden PDF und DOCX mit den neuen Werten neu erzeugt.</p>
+            </div>
+            <IonButton fill="clear" onClick={() => setEditOpen(false)}>Schließen</IonButton>
+          </div>
+
+          <div className="form-grid">
+            <IonSelect
+              fill="outline"
+              label="Kunde"
+              labelPlacement="floating"
+              value={editForm.client_id || ''}
+              onIonChange={(event) => setEditForm({ ...editForm, client_id: String(event.detail.value || '') })}
+            >
+              {clients.map((client) => <IonSelectOption value={client.id} key={client.id}>{client.name}</IonSelectOption>)}
+            </IonSelect>
+
+            <IonInput
+              fill="outline"
+              type="date"
+              label="Von"
+              labelPlacement="floating"
+              value={editForm.start || ''}
+              onIonInput={(event) => setEditForm({ ...editForm, start: String(event.detail.value || '') })}
+            />
+
+            <IonInput
+              fill="outline"
+              type="date"
+              label="Bis"
+              labelPlacement="floating"
+              value={editForm.end || ''}
+              onIonInput={(event) => setEditForm({ ...editForm, end: String(event.detail.value || '') })}
+            />
+
+            <IonSelect
+              fill="outline"
+              label="Vorlage"
+              labelPlacement="floating"
+              value={editForm.template_key || 'classic'}
+              onIonChange={(event) => setEditForm({ ...editForm, template_key: event.detail.value })}
+            >
+              <IonSelectOption value="classic">Klassisch wie bisherige ANÜ Dateien</IonSelectOption>
+              <IonSelectOption value="new">Neue Vorlage new templ</IonSelectOption>
+            </IonSelect>
+
+            <IonInput
+              fill="outline"
+              type="date"
+              label="Unterschriftsdatum"
+              labelPlacement="floating"
+              value={editForm.signature_date || ''}
+              onIonInput={(event) => setEditForm({ ...editForm, signature_date: String(event.detail.value || '') })}
+            />
+
+            <IonInput
+              fill="outline"
+              type="number"
+              min="1"
+              label="Dokumentnummer"
+              labelPlacement="floating"
+              value={editForm.sequence_number || ''}
+              onIonInput={(event) => setEditForm({ ...editForm, sequence_number: String(event.detail.value || '') })}
+            />
+          </div>
+
+          <div className="modal-actions">
+            <IonButton fill="outline" onClick={() => setEditOpen(false)}>Abbrechen</IonButton>
+            <IonButton disabled={busy === 'edit'} onClick={() => void saveEdit()}>
+              {busy === 'edit' ? <IonSpinner name="dots" /> : 'Änderungen speichern'}
+            </IonButton>
+          </div>
+        </IonContent>
+      </IonModal>
 
       <IonModal isOpen={settingsOpen} onDidDismiss={() => setSettingsOpen(false)}>
         <IonContent className="ion-padding form">
