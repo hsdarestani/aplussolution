@@ -1,0 +1,133 @@
+name: Stabilize STRATO primary
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/stabilize-strato-primary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stabilize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Inspect local automation and install primary watchdog
+        run: |
+          set -euo pipefail
+          ssh             -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+
+          echo "=== current compose state ==="
+          docker compose ps -a || true
+
+          echo "=== aplus related systemd services/timers ==="
+          systemctl list-unit-files --type=service --type=timer 2>/dev/null | grep -i aplus || true
+          systemctl list-timers --all 2>/dev/null | grep -i aplus || true
+
+          echo "=== root cron references ==="
+          crontab -l 2>/dev/null | grep -Ei 'aplus|docker compose|docker stop' || true
+          grep -R -E 'docker compose stop|docker stop.*aplus|aplussolution.*stop' /etc/cron.d /etc/cron.daily /etc/systemd/system 2>/dev/null || true
+
+          # STRATO is now primary; old inbound-replication tunnel must not control it.
+          systemctl disable --now aplus-repl-from-backup.service >/dev/null 2>&1 || true
+
+          cat >/usr/local/sbin/aplus-primary-ensure <<'SCRIPT'
+          #!/bin/sh
+          set -eu
+          cd /opt/aplussolution
+
+          # Only act when this database is a promoted primary.
+          if ! docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"' 2>/dev/null | tr -d '[:space:]' | grep -qx f; then
+            exit 0
+          fi
+
+          docker compose up -d db redis backend frontend celery celery-beat caddy >/dev/null 2>&1 || true
+          SCRIPT
+          chmod 700 /usr/local/sbin/aplus-primary-ensure
+
+          cat >/etc/systemd/system/aplus-primary-ensure.service <<'EOF'
+          [Unit]
+          Description=Ensure A+ Solution STRATO primary services are running
+          After=docker.service
+          Requires=docker.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/aplus-primary-ensure
+          EOF
+
+          cat >/etc/systemd/system/aplus-primary-ensure.timer <<'EOF'
+          [Unit]
+          Description=Keep A+ Solution STRATO primary online
+
+          [Timer]
+          OnBootSec=10
+          OnUnitActiveSec=20
+          AccuracySec=5
+          Unit=aplus-primary-ensure.service
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+          EOF
+
+          systemctl daemon-reload
+          systemctl enable --now aplus-primary-ensure.timer
+          systemctl start aplus-primary-ensure.service
+
+          # Force a clean application start now.
+          docker compose up -d --build --remove-orphans
+          docker compose up -d --force-recreate --no-deps caddy
+
+          ready=0
+          for i in $(seq 1 60); do
+            if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+
+          curl -fsS --max-time 15             --resolve app.aplus-solution.de:443:127.0.0.1             https://app.aplus-solution.de/health/ >/dev/null
+          echo STRATO_LOCAL_PRIMARY_STABILIZED
+          REMOTE
+
+      - name: Wait and confirm services stay up
+        run: |
+          set -euo pipefail
+          sleep 35
+          ssh             -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" '
+              set -e
+              cd /opt/aplussolution
+              for service in db redis backend frontend celery celery-beat caddy; do
+                cid="$(docker compose ps -q "$service" --status running)"
+                test -n "$cid" || { echo "SERVICE_DOWN=$service"; exit 1; }
+              done
+              curl -fsS --max-time 10 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/ >/dev/null
+              echo STRATO_SERVICES_STAYED_UP=true
+            '
+
+      - name: Check public port using same endpoint as SSH
+        shell: bash
+        run: |
+          set +e
+          timeout 10 nc -vz "$STRATO_HOST" 443 >/tmp/nc443 2>&1
+          rc=$?
+          echo "PUBLIC_443_REACHABLE=$([ $rc -eq 0 ] && echo true || echo false)"
+          exit $rc
