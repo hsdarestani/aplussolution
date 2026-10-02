@@ -1,0 +1,61 @@
+name: Verify single active notification worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-single-notification-worker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+      BACKUP_HOST: ${{ secrets.BACKUP_HOST }}
+      BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+
+    steps:
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Check STRATO workers
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          echo "STRATO_BACKEND_RUNNING=$([ -n "$(docker compose ps -q backend --status running)" ] && echo true || echo false)"
+          echo "STRATO_CELERY_RUNNING=$([ -n "$(docker compose ps -q celery --status running)" ] && echo true || echo false)"
+          echo "STRATO_CELERY_BEAT_RUNNING=$([ -n "$(docker compose ps -q celery-beat --status running)" ] && echo true || echo false)"
+          echo "STRATO_DB_RECOVERY=$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"' | tr -d '[:space:]')"
+          REMOTE
+
+      - name: Check BACKUP workers
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$BACKUP_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          echo "BACKUP_BACKEND_RUNNING=$([ -n "$(docker compose ps -q backend --status running)" ] && echo true || echo false)"
+          echo "BACKUP_CELERY_RUNNING=$([ -n "$(docker compose ps -q celery --status running)" ] && echo true || echo false)"
+          echo "BACKUP_CELERY_BEAT_RUNNING=$([ -n "$(docker compose ps -q celery-beat --status running)" ] && echo true || echo false)"
+          if [ -n "$(docker compose ps -q db --status running)" ]; then
+            echo "BACKUP_DB_RECOVERY=$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"' 2>/dev/null | tr -d '[:space:]' || true)"
+          else
+            echo "BACKUP_DB_RECOVERY=not_running"
+          fi
+          REMOTE
