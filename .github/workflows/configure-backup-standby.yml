@@ -227,7 +227,7 @@ jobs:
           REPL_PASS="$(cat /root/aplus-replication.secret)"
           test -n "$REPL_PASS"
 
-          docker run --rm             -e PGPASSWORD="$REPL_PASS"             -e PGCONNECT_TIMEOUT=10             -v "$DB_VOL":/var/lib/postgresql/data             postgres:16-alpine             sh -ceu '
+          docker run --rm             -e PGPASSWORD="$REPL_PASS"             -e PGCONNECT_TIMEOUT=10             -e STRATO_HOST="$STRATO_HOST"             -v "$DB_VOL":/var/lib/postgresql/data             postgres:16-alpine             sh -ceu '
               find /var/lib/postgresql/data -mindepth 1 -maxdepth 1 -exec rm -rf {} +
               pg_basebackup                 -h "$STRATO_HOST"                 -p 55432                 -U replicator                 -D /var/lib/postgresql/data                 -Fp -Xs -P -R                 -S aplus_backup_slot
             '
