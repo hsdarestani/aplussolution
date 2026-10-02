@@ -1,0 +1,88 @@
+name: Harden backup replication port
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/replication-firewall.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BACKUP_HOST: ${{ secrets.BACKUP_HOST }}
+      BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+
+    steps:
+      - name: Install SSH helper
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+
+      - name: Restrict Docker published replication port to STRATO
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ConnectTimeout=20             root@"$BACKUP_HOST" "STRATO_HOST='$STRATO_HOST' bash -s" <<'REMOTE'
+          set -euo pipefail
+          STRATO_IP="$(getent ahostsv4 "$STRATO_HOST" | awk 'NR==1 {print $1}')"
+          test -n "$STRATO_IP"
+
+          iptables -N DOCKER-USER 2>/dev/null || true
+          iptables -C DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null ||
+            iptables -I DOCKER-USER 1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+
+          iptables -C DOCKER-USER -p tcp -s "$STRATO_IP" -m conntrack --ctorigdstport 55432 -j ACCEPT 2>/dev/null ||
+            iptables -I DOCKER-USER 2 -p tcp -s "$STRATO_IP" -m conntrack --ctorigdstport 55432 -j ACCEPT
+
+          iptables -C DOCKER-USER -p tcp -m conntrack --ctorigdstport 55432 -j DROP 2>/dev/null ||
+            iptables -I DOCKER-USER 3 -p tcp -m conntrack --ctorigdstport 55432 -j DROP
+
+          cat >/usr/local/sbin/aplus-replication-firewall.sh <<'SCRIPT'
+          #!/bin/sh
+          set -eu
+          STRATO_HOST="__STRATO_HOST__"
+          STRATO_IP="$(getent ahostsv4 "$STRATO_HOST" | awk 'NR==1 {print $1}')"
+          test -n "$STRATO_IP"
+          iptables -N DOCKER-USER 2>/dev/null || true
+          iptables -C DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null ||
+            iptables -I DOCKER-USER 1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+          iptables -C DOCKER-USER -p tcp -s "$STRATO_IP" -m conntrack --ctorigdstport 55432 -j ACCEPT 2>/dev/null ||
+            iptables -I DOCKER-USER 2 -p tcp -s "$STRATO_IP" -m conntrack --ctorigdstport 55432 -j ACCEPT
+          iptables -C DOCKER-USER -p tcp -m conntrack --ctorigdstport 55432 -j DROP 2>/dev/null ||
+            iptables -I DOCKER-USER 3 -p tcp -m conntrack --ctorigdstport 55432 -j DROP
+          SCRIPT
+          sed -i "s/__STRATO_HOST__/$STRATO_HOST/g" /usr/local/sbin/aplus-replication-firewall.sh
+          chmod 700 /usr/local/sbin/aplus-replication-firewall.sh
+
+          cat >/etc/systemd/system/aplus-replication-firewall.service <<'EOF'
+          [Unit]
+          Description=A+ Solution replication firewall
+          After=docker.service network-online.target
+          Wants=network-online.target
+          Requires=docker.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/aplus-replication-firewall.sh
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          systemctl daemon-reload
+          systemctl enable aplus-replication-firewall.service
+          systemctl restart aplus-replication-firewall.service
+          iptables -C DOCKER-USER -p tcp -s "$STRATO_IP" -m conntrack --ctorigdstport 55432 -j ACCEPT
+          iptables -C DOCKER-USER -p tcp -m conntrack --ctorigdstport 55432 -j DROP
+          echo REPLICATION_PORT_RESTRICTED_TO_STRATO
+          REMOTE
