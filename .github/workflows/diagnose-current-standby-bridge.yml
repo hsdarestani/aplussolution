@@ -16,6 +16,7 @@ jobs:
     env:
       BACKUP_HOST: ${{ secrets.BACKUP_HOST }}
       BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
     steps:
       - name: Install SSH helper
         run: |
@@ -27,7 +28,7 @@ jobs:
           SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
         run: |
           set -euo pipefail
-          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$BACKUP_HOST" 'bash -s' <<'REMOTE'
+          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$BACKUP_HOST" "STRATO_HOST='$STRATO_HOST' bash -s" <<'REMOTE'
           set +e
           echo "SERVICE_ACTIVE=$(systemctl is-active aplus-repl-from-strato.service 2>/dev/null)"
           echo "LISTENER_55432=$(ss -ltn | grep -q ':55432 ' && echo true || echo false)"
