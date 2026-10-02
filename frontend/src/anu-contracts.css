@@ -69,6 +69,18 @@
   overflow-wrap: anywhere;
 }
 
+.auev-warning {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border: 1px solid rgba(160, 120, 35, .28);
+  border-radius: 12px;
+  background: rgba(160, 120, 35, .06);
+}
+
+.auev-warning p {
+  margin: 3px 0;
+}
+
 .auev-blockers {
   margin-top: 12px;
   padding: 10px 14px;
