@@ -623,7 +623,7 @@ def _new_docx(data):
             values = ['', '', '', '', '', '']
         for col, value in enumerate(values):
             _set_cell_text(cells[col], value, size=8.0)
-        employee.rows[index + 1].height = Cm(0.67)
+        employee.rows[index + 1].height = Cm(0.37)
         employee.rows[index + 1].height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
 
     _set_table_widths(employee, widths)
