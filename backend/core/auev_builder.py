@@ -276,6 +276,26 @@ def _set_cell_text(cell, text, size=9.0, bold=False, align=None):
     cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
 
 
+def _set_cell_width(cell, width_cm):
+    width = Cm(width_cm)
+    cell.width = width
+    tc_pr = cell._tc.get_or_add_tcPr()
+    tc_w = tc_pr.first_child_found_in('w:tcW')
+    if tc_w is None:
+        tc_w = OxmlElement('w:tcW')
+        tc_pr.append(tc_w)
+    tc_w.set(qn('w:w'), str(int(width.twips)))
+    tc_w.set(qn('w:type'), 'dxa')
+
+
+def _set_table_widths(table, widths):
+    table.autofit = False
+    for row in table.rows:
+        for index, width in enumerate(widths):
+            if index < len(row.cells):
+                _set_cell_width(row.cells[index], width)
+
+
 def _set_cell_border(cell, **kwargs):
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
@@ -410,8 +430,7 @@ def _classic_docx(data):
 
     meta = doc.add_table(rows=2, cols=2)
     meta.alignment = WD_TABLE_ALIGNMENT.LEFT
-    meta.columns[0].width = Cm(6.7)
-    meta.columns[1].width = Cm(10.1)
+    _set_table_widths(meta, [6.7, 10.1])
     _no_table_borders(meta)
     _set_cell_text(meta.cell(0, 0), 'Vorgesehene Tätigkeit:', size=10.5)
     _bottom_border(meta.cell(0, 0))
@@ -423,9 +442,8 @@ def _classic_docx(data):
     doc.add_paragraph().paragraph_format.space_after = Pt(2)
     table = doc.add_table(rows=1, cols=6)
     table.alignment = WD_TABLE_ALIGNMENT.LEFT
+    table.style = 'Table Grid'
     widths = [7.1, 1.45, 1.45, 2.2, 3.03, 1.57]
-    for idx, width in enumerate(widths):
-        table.columns[idx].width = Cm(width)
     headers = ['Name, Vorname, Geburtsdatum', 'Start', 'Ende', 'Datum', 'Tätigkeit', '']
     for idx, value in enumerate(headers):
         _set_cell_text(table.cell(0, idx), value, size=9.0, bold=True)
@@ -434,6 +452,7 @@ def _classic_docx(data):
         values = [row['name_birth'], row['start'], row['end'], row['date'], row['activity'], '']
         for idx, value in enumerate(values):
             _set_cell_text(cells[idx], value, size=8.8)
+    _set_table_widths(table, widths)
     for row in table.rows:
         row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
 
@@ -457,8 +476,7 @@ def _classic_docx(data):
         t = doc.add_table(rows=1, cols=2)
         t.alignment = WD_TABLE_ALIGNMENT.LEFT
         _no_table_borders(t)
-        t.columns[0].width = Cm(0.8)
-        t.columns[1].width = Cm(16.0)
+        _set_table_widths(t, [0.8, 16.0])
         _set_cell_text(t.cell(0, 0), number, size=10)
         _set_cell_text(t.cell(0, 1), text, size=10)
 
@@ -468,8 +486,7 @@ def _classic_docx(data):
     _paragraph(doc, '□  Für den Einsatz der überlassenen Zeitarbeitnehmer sind folgende arbeitsmedizinischen Vorsorgeuntersuchungen erforderlich:', after=1)
     med = doc.add_table(rows=1, cols=2)
     _no_table_borders(med)
-    med.columns[0].width = Cm(3.0)
-    med.columns[1].width = Cm(13.8)
+    _set_table_widths(med, [3.0, 13.8])
     _set_cell_text(med.cell(0, 0), 'Angabe:', size=10.5)
     _set_cell_text(med.cell(0, 1), 'hier eintragen', size=10.5)
     _bottom_border(med.cell(0, 1))
@@ -478,8 +495,7 @@ def _classic_docx(data):
     _paragraph(doc, '§ 5 Befristung', bold=True, keep=True)
     end_table = doc.add_table(rows=1, cols=2)
     _no_table_borders(end_table)
-    end_table.columns[0].width = Cm(13.0)
-    end_table.columns[1].width = Cm(3.8)
+    _set_table_widths(end_table, [13.0, 3.8])
     _set_cell_text(end_table.cell(0, 0), 'Dieser Einzelarbeitnehmerüberlassungsvertrag wird zunächst befristet bis zum', size=10.5)
     _set_cell_text(end_table.cell(0, 1), data['last_shift_date_de'], size=10.5)
     _bottom_border(end_table.cell(0, 1))
@@ -487,9 +503,7 @@ def _classic_docx(data):
     doc.add_paragraph().paragraph_format.space_after = Pt(10)
     sig = doc.add_table(rows=2, cols=3)
     _no_table_borders(sig)
-    sig.columns[0].width = Cm(7.8)
-    sig.columns[1].width = Cm(1.2)
-    sig.columns[2].width = Cm(7.8)
+    _set_table_widths(sig, [7.8, 1.2, 7.8])
     _set_cell_text(sig.cell(0, 0), '', size=10.5)
     _bottom_border(sig.cell(0, 0))
     _set_cell_text(sig.cell(0, 2), data['signature_date_de'], size=10.5)
@@ -522,9 +536,7 @@ def _new_docx(data):
 
     outer = doc.add_table(rows=1, cols=2)
     outer.alignment = WD_TABLE_ALIGNMENT.CENTER
-    outer.autofit = False
-    outer.columns[0].width = Cm(12.2)
-    outer.columns[1].width = Cm(13.9)
+    _set_table_widths(outer, [12.2, 13.9])
     _no_table_borders(outer)
     left = outer.cell(0, 0)
     right = outer.cell(0, 1)
@@ -597,10 +609,8 @@ def _new_docx(data):
 
     employee = right.add_table(rows=26, cols=6)
     employee.alignment = WD_TABLE_ALIGNMENT.RIGHT
-    employee.autofit = False
+    employee.style = 'Table Grid'
     widths = [0.78, 6.43, 1.37, 1.37, 2.08, 2.57]
-    for idx, width in enumerate(widths):
-        employee.columns[idx].width = Cm(width)
     headers = ['', 'Name, Vorname, Geburtsdatum', 'Start', 'Ende', 'Datum', 'Tätigkeit']
     for idx, value in enumerate(headers):
         _set_cell_text(employee.cell(0, idx), value, size=8.2, bold=True)
@@ -615,6 +625,8 @@ def _new_docx(data):
             _set_cell_text(cells[col], value, size=8.0)
         employee.rows[index + 1].height = Cm(0.67)
         employee.rows[index + 1].height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+
+    _set_table_widths(employee, widths)
 
     output = io.BytesIO()
     doc.save(output)
