@@ -20,7 +20,7 @@ class ContractLifecycleSerializer(ContractSerializer):
 
     def get_readiness(self, obj):
         readiness = contract_readiness(obj)
-        if obj.template.kind == ContractTemplate.Kind.CLIENT_AUEV:
+        if obj.template.slug == 'einzelarbeitnehmerueberlassung':
             readiness = {**readiness, 'send_allowed': False, 'pending_signature_roles': []}
         return readiness
 
@@ -64,7 +64,7 @@ class ContractViewSet(SearchableContractViewSet):
     @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
     def generate_pdf(self, request, pk=None):
         contract = self.get_object()
-        if contract.template.kind == ContractTemplate.Kind.CLIENT_AUEV:
+        if contract.template.slug == 'einzelarbeitnehmerueberlassung':
             package = contract.shift_import_packages.order_by('-updated_at').first()
             if not package:
                 return Response({'detail': 'Zu diesem ANÜ Vertrag wurde kein Einsatzpaket gefunden.'}, status=400)
