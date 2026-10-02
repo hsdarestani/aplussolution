@@ -11,7 +11,13 @@ from rest_framework.response import Response
 
 from .models import AuevExport, AuevSetting, ClientCompany, ShiftImportPackage, WorkingTimeAccountRecord, WorkingTimeSetting, WorkerProfile
 from .order_automation import parse_order_text
-from .auev_builder import export_dict as auev_export_dict, generate_export as generate_auev_export, preview as preview_auev
+from .auev_builder import (
+    delete_export as delete_auev_export,
+    export_dict as auev_export_dict,
+    generate_export as generate_auev_export,
+    preview as preview_auev,
+    update_export as update_auev_export,
+)
 from .native_cutover import (
     approve_order,
     generate_client_contract,
@@ -278,6 +284,55 @@ def auev_exports(request):
     if client_id:
         queryset = queryset.filter(client_id=client_id)
     return Response({'count': queryset.count(), 'results': [auev_export_dict(item) for item in queryset[:150]]})
+
+
+@api_view(['PATCH', 'DELETE'])
+@permission_classes([IsAdminOrManager])
+def auev_export_detail(request, pk):
+    export = get_object_or_404(AuevExport.objects.select_related('client'), pk=pk)
+
+    if request.method == 'DELETE':
+        payload = {
+            'client': str(export.client_id),
+            'file_stem': export.file_stem,
+            'sequence_number': export.sequence_number,
+        }
+        delete_auev_export(export)
+        audit(request, 'auev.export_deleted', None, payload)
+        return Response(status=204)
+
+    client = get_object_or_404(ClientCompany, pk=request.data.get('client_id') or export.client_id)
+    try:
+        start = _date(request.data.get('start'), export.date_from)
+        end = _date(request.data.get('end'), export.date_to)
+        if end < start:
+            raise ValueError('Bis Datum darf nicht vor Von Datum liegen.')
+        signature_date = _date(request.data.get('signature_date'), export.signature_date)
+        sequence = request.data.get('sequence_number')
+        updated = update_auev_export(
+            export=export,
+            client=client,
+            start=start,
+            end=end,
+            template_key=str(request.data.get('template_key') or export.template_key),
+            signature_date=signature_date,
+            actor=request.user,
+            sequence_number=int(sequence) if str(sequence or '').strip() else export.sequence_number,
+        )
+        audit(
+            request,
+            'auev.export_updated',
+            updated,
+            {
+                'client': str(updated.client_id),
+                'template': updated.template_key,
+                'sequence_number': updated.sequence_number,
+                'weeks': updated.calendar_weeks,
+            },
+        )
+        return Response(auev_export_dict(updated))
+    except (TypeError, ValueError) as exc:
+        return Response({'detail': str(exc)}, status=400)
 
 
 @api_view(['GET', 'POST'])
