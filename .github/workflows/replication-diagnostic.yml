@@ -37,7 +37,7 @@ jobs:
           grep -RniE '^(Match|AllowTcpForwarding|DisableForwarding|PermitOpen|ForceCommand)' /etc/ssh/sshd_config /etc/ssh/sshd_config.d 2>/dev/null || true
           echo "=== loopback bridge ==="
           docker ps --filter name=aplus-pg-repl-bridge --format '{{.Names}} {{.Status}} {{.Ports}}'
-          docker run --rm --network host postgres:16-alpine pg_isready -h 127.0.0.1 -p 5432 -U replicator
+          docker run --rm --network host postgres:16-alpine pg_isready -h 127.0.0.1 -p 5432 -U replicator || true
           REMOTE
 
       - name: Inspect STRATO tunnel service and forwarding denial
