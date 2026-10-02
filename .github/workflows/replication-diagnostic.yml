@@ -36,6 +36,8 @@ jobs:
           echo "=== matching sshd config ==="
           grep -RniE '^(Match|AllowTcpForwarding|DisableForwarding|PermitOpen|ForceCommand)' /etc/ssh/sshd_config /etc/ssh/sshd_config.d 2>/dev/null || true
           echo "=== loopback bridge ==="
+          systemctl --no-pager --full status aplus-postgres-loopback.service || true
+          journalctl -u aplus-postgres-loopback.service --no-pager -n 80 || true
           docker ps --filter name=aplus-pg-repl-bridge --format '{{.Names}} {{.Status}} {{.Ports}}'
           docker run --rm --network host postgres:16-alpine pg_isready -h 127.0.0.1 -p 5432 -U replicator || true
           REMOTE
