@@ -59,6 +59,7 @@ import AdminHomeV4 from './AdminHomeV4';
 import GlobalSearch from './GlobalSearch';
 import ListToolbar from './ListToolbar';
 import DocumentCenterV5 from './DocumentCenterV5';
+import AuevBuilderPanel from './AuevBuilderPanel';
 import AktePage from './AktePage';
 import Settings from './Settings';
 import MobileMoreMenu from './MobileMoreMenu';
@@ -1919,89 +1920,8 @@ function Contracts({ user }: { user: User }) {
         }
       />
       {isManager(user) && <DocumentCenterV5 onChanged={load} />}
-      {isManager(user) && (
-        <section className="panel anu-contracts-panel" data-testid="anu-contracts-panel">
-          <div className="section-head anu-contracts-head">
-            <div>
-              <small>ANÜ VERTRÄGE</small>
-              <h3>Verträge aus dem A+ Dienstplan</h3>
-              <p>Quelle sind ausschließlich Kunden, Einsätze und Mitarbeiter aus A+ Workforce. WIW wird dafür nicht verwendet.</p>
-              <p><b>Nur Administration.</b> Diese ANÜ Verträge erscheinen nicht im Kundenportal.</p>
-            </div>
-            <div className="anu-sync-controls">
-              <IonInput
-                fill="outline"
-                type="date"
-                label="Von"
-                labelPlacement="floating"
-                value={anuStart}
-                onIonInput={(event) => setAnuStart(String(value(event)))}
-              />
-              <IonInput
-                fill="outline"
-                type="date"
-                label="Bis"
-                labelPlacement="floating"
-                value={anuEnd}
-                onIonInput={(event) => setAnuEnd(String(value(event)))}
-              />
-              <IonButton fill="outline" disabled={!!anuBusy} onClick={() => void openAnuSettings()}>
-                <IonIcon slot="start" icon={settingsOutline} />
-                ANÜ Einstellungen
-              </IonButton>
-              <IonButton disabled={!!anuBusy} onClick={() => void syncAnuPackages()}>
-                <IonIcon slot="start" icon={refreshOutline} />
-                {anuBusy === 'sync' ? <IonSpinner name="dots" /> : 'Einsätze synchronisieren'}
-              </IonButton>
-            </div>
-          </div>
-
-          <div className="anu-package-table">
-            <div className="anu-package-row anu-package-header">
-              <span>Kunde</span>
-              <span>Datum</span>
-              <span>Start</span>
-              <span>Ende</span>
-              <span>Status</span>
-              <span>Aktionen</span>
-            </div>
-            {anuPackages.map((item) => {
-              const locked = ['sent', 'signed'].includes(item.contract_status);
-              return (
-                <div className="anu-package-row" key={item.id}>
-                  <div className="anu-package-client">
-                    <b>{item.client_name || item.site_name}</b>
-                    <small>{item.request_id} · {item.shift_count || 0} Einsätze</small>
-                  </div>
-                  <span>{dateOnly(item.first_shift_time)}</span>
-                  <span>{timeOnly(item.first_shift_time)}</span>
-                  <span>{timeOnly(item.first_shift_end_time)}</span>
-                  <IonBadge>{locked ? statusText[item.contract_status] : statusText[item.status] || item.status}</IonBadge>
-                  <div className="anu-package-actions">
-                    {item.pdf_url && (
-                      <IonButton fill="outline" size="small" href={item.pdf_url} target="_blank">
-                        PDF
-                      </IonButton>
-                    )}
-                    <IonButton
-                      size="small"
-                      disabled={!!anuBusy || locked}
-                      title={locked ? 'Versendete oder unterzeichnete Verträge bleiben unverändert.' : ''}
-                      onClick={() => void generateAnuPackage(item.id)}
-                    >
-                      {anuBusy === item.id ? <IonSpinner name="dots" /> : item.pdf_url ? 'Neu erzeugen' : 'Erstellen'}
-                    </IonButton>
-                  </div>
-                </div>
-              );
-            })}
-            {!anuPackages.length && (
-              <Empty>Noch keine ANÜ Pakete aus dem A+ Dienstplan. Zeitraum wählen und Einsätze synchronisieren.</Empty>
-            )}
-          </div>
-        </section>
-      )}
-      <ListToolbar
+      {isManager(user) && <AuevBuilderPanel clients={clients} onChanged={load} />}
+            <ListToolbar
         query={listQuery}
         onQuery={setListQuery}
         placeholder="Vertrag, Mitarbeiter oder Kunde suchen …"
@@ -2077,92 +1997,6 @@ function Contracts({ user }: { user: User }) {
         ))}
         {!rows.length && <Empty>Noch keine Verträge.</Empty>}
       </div>
-
-      <FormModal
-        open={anuSettingsOpen}
-        title="ANÜ Einstellungen"
-        onClose={() => setAnuSettingsOpen(false)}
-        onSave={saveAnuSettings}
-        busy={busy}
-        saveLabel="Speichern"
-      >
-        <IonSelect
-          fill="outline"
-          label="Gültig für"
-          labelPlacement="floating"
-          value={anuSettingsClient}
-          onIonChange={(event) => {
-            const clientId = String(value(event) || '');
-            setAnuSettingsClient(clientId);
-            void loadAnuSettings(clientId).catch((reason: any) => setToast(reason.message));
-          }}
-        >
-          <IonSelectOption value="">Standard für alle Kunden</IonSelectOption>
-          {clients.map((client) => (
-            <IonSelectOption value={client.id} key={client.id}>
-              {client.name}
-            </IonSelectOption>
-          ))}
-        </IonSelect>
-
-        {anuSettingsClient && (
-          <div className="notice full">
-            Leere Felder übernehmen den jeweiligen Standardwert für alle Kunden.
-          </div>
-        )}
-
-        <IonInput
-          fill="outline"
-          type="date"
-          label="Erlaubnisdatum"
-          labelPlacement="floating"
-          value={anuSettingsForm.permit_date || ''}
-          onIonInput={(event) => setAnuSettingsForm({ ...anuSettingsForm, permit_date: value(event) })}
-        />
-        {anuSettingsClient && anuSettingsDefaults.permit_date && <small>Standard: {dateOnly(anuSettingsDefaults.permit_date)}</small>}
-
-        <IonInput
-          fill="outline"
-          type="date"
-          label="Datum der Rahmenvereinbarung"
-          labelPlacement="floating"
-          value={anuSettingsForm.framework_date || ''}
-          onIonInput={(event) => setAnuSettingsForm({ ...anuSettingsForm, framework_date: value(event) })}
-        />
-        {anuSettingsClient && anuSettingsDefaults.framework_date && <small>Standard: {dateOnly(anuSettingsDefaults.framework_date)}</small>}
-
-        <IonInput
-          fill="outline"
-          type="date"
-          label="Wirkung zum"
-          labelPlacement="floating"
-          value={anuSettingsForm.effective_date || ''}
-          onIonInput={(event) => setAnuSettingsForm({ ...anuSettingsForm, effective_date: value(event) })}
-        />
-        <small>
-          {anuSettingsClient
-            ? `Standard: ${anuSettingsDefaults.effective_date ? dateOnly(anuSettingsDefaults.effective_date) : 'erster Einsatztag'}`
-            : 'Leer lassen, wenn automatisch der erste Einsatztag verwendet werden soll.'}
-        </small>
-
-        <IonInput
-          fill="outline"
-          label="Erforderliche Qualifikation"
-          labelPlacement="floating"
-          value={anuSettingsForm.required_qualification || ''}
-          placeholder={anuSettingsClient ? anuSettingsDefaults.required_qualification || '' : ''}
-          onIonInput={(event) => setAnuSettingsForm({ ...anuSettingsForm, required_qualification: value(event) })}
-        />
-
-        <IonInput
-          fill="outline"
-          label="Vorgesehene Tätigkeit"
-          labelPlacement="floating"
-          value={anuSettingsForm.intended_activity || ''}
-          placeholder={anuSettingsClient ? anuSettingsDefaults.intended_activity || '' : ''}
-          onIonInput={(event) => setAnuSettingsForm({ ...anuSettingsForm, intended_activity: value(event) })}
-        />
-      </FormModal>
 
       <FormModal
         open={modal === 'contract'}
