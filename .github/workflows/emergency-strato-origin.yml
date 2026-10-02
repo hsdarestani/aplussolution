@@ -1,0 +1,131 @@
+name: Emergency restore STRATO origin
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/emergency-strato-origin.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aplus-emergency-origin
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure STRATO SSH
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Repair STRATO origin services and firewall
+        run: |
+          set -euo pipefail
+          ssh             -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ConnectTimeout=20             root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          test -f .env
+          test -f docker-compose.yml
+
+          # STRATO must be the only writable primary.
+          recovery="$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"' | tr -d '[:space:]')"
+          test "$recovery" = "f"
+
+          # Remove any stale standalone listeners that could steal 80/443.
+          docker rm -f aplus-cutover-gateway aplus-gateway-http aplus-gateway-https >/dev/null 2>&1 || true
+
+          docker compose up -d --build --remove-orphans
+          docker compose up -d --force-recreate --no-deps caddy
+
+          ready=0
+          for i in $(seq 1 90); do
+            if docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+
+          docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          docker compose exec -T backend python manage.py check
+          docker compose exec -T backend python manage.py migrate --check
+
+          # Ensure host firewall is not blocking Cloudflare or direct origin traffic.
+          if command -v ufw >/dev/null 2>&1; then
+            ufw allow 80/tcp >/dev/null || true
+            ufw allow 443/tcp >/dev/null || true
+          fi
+
+          # If firewalld is present, open web services there too.
+          if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
+            firewall-cmd --permanent --add-service=http >/dev/null || true
+            firewall-cmd --permanent --add-service=https >/dev/null || true
+            firewall-cmd --reload >/dev/null || true
+          fi
+
+          ss -ltnp | grep -E ':(80|443)[[:space:]]' || {
+            echo 'Web ports are not listening' >&2
+            docker compose ps -a >&2
+            docker compose logs --no-color --tail=250 caddy >&2 || true
+            exit 1
+          }
+
+          curl -fsS --retry 3 --retry-delay 2 --max-time 20             --resolve app.aplus-solution.de:443:127.0.0.1             -D /tmp/local.headers -o /tmp/local.health             https://app.aplus-solution.de/health/
+          grep -qi '^x-aplus-origin: strato-primary' /tmp/local.headers
+          grep -q '"status"' /tmp/local.health
+
+          echo STRATO_LOCAL_ORIGIN_OK
+          docker compose ps
+          REMOTE
+
+      - name: Verify STRATO directly from public internet
+        run: |
+          set -euo pipefail
+          STRATO_IP="$(getent ahostsv4 "$STRATO_HOST" | awk 'NR==1 {print $1}')"
+          test -n "$STRATO_IP"
+
+          ok=0
+          for i in $(seq 1 15); do
+            if curl -fsS --connect-timeout 10 --max-time 20               --resolve "app.aplus-solution.de:443:$STRATO_IP"               -D /tmp/direct.headers -o /tmp/direct.health               "https://app.aplus-solution.de/health/?direct=$GITHUB_RUN_ID-$i"               && grep -qi '^x-aplus-origin: strato-primary' /tmp/direct.headers               && grep -q '"status"' /tmp/direct.health; then
+              ok=1
+              break
+            fi
+            sleep 3
+          done
+          test "$ok" -eq 1
+          echo STRATO_PUBLIC_ORIGIN_OK
+
+      - name: Verify Cloudflare path
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 20); do
+            if curl -fsS --connect-timeout 10 --max-time 20               -D /tmp/cf.headers -o /tmp/cf.health               "https://app.aplus-solution.de/health/?cf=$GITHUB_RUN_ID-$i"               && grep -qi '^x-aplus-origin: strato-primary' /tmp/cf.headers               && grep -q '"status"' /tmp/cf.health; then
+              ok=1
+              break
+            fi
+            sleep 3
+          done
+          test "$ok" -eq 1
+          echo CLOUDFLARE_TO_STRATO_OK
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519" /tmp/*.headers /tmp/*.health
