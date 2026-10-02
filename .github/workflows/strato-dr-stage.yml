@@ -76,7 +76,7 @@ jobs:
           SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
         run: |
           set -euo pipefail
-          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ConnectTimeout=20             root@"$BACKUP_HOST" 'bash -s' <<'REMOTE'
+          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ConnectTimeout=20             root@"$BACKUP_HOST" "STRATO_HOST='$STRATO_HOST' bash -s" <<'REMOTE'
           set -euo pipefail
           export DEBIAN_FRONTEND=noninteractive
           cd /opt/aplussolution
@@ -96,17 +96,27 @@ jobs:
             psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_reload_conf();"
           '
 
-          # Publish the existing database only on the host loopback interface.
-          # A tiny bridge container avoids recreating or restarting the live db.
-          systemctl disable --now aplus-postgres-loopback.service >/dev/null 2>&1 || true
-          rm -f /etc/systemd/system/aplus-postgres-loopback.service
-          systemctl daemon-reload >/dev/null 2>&1 || true
-          docker rm -f aplus-pg-loopback >/dev/null 2>&1 || true
-          docker run -d             --name aplus-pg-loopback             --restart unless-stopped             --network aplussolution_default             -p 127.0.0.1:5432:5432             alpine:3.20             sh -c 'apk add --no-cache socat >/dev/null && exec socat TCP-LISTEN:5432,reuseaddr,fork TCP:db:5432' >/dev/null
+          # Expose a dedicated replication bridge on a nonstandard port.
+          # Host firewall permits only the STRATO source IP; the live db container is not recreated.
+          docker rm -f aplus-pg-repl-bridge >/dev/null 2>&1 || true
+          docker run -d \
+            --name aplus-pg-repl-bridge \
+            --restart unless-stopped \
+            --network aplussolution_default \
+            -p 55432:5432 \
+            alpine:3.20 \
+            sh -c 'apk add --no-cache socat >/dev/null && exec socat TCP-LISTEN:5432,reuseaddr,fork TCP:db:5432' >/dev/null
+
+          STRATO_IP="$(getent ahostsv4 "$STRATO_HOST" | awk 'NR==1 {print $1}')"
+          test -n "$STRATO_IP"
+          iptables -C INPUT -p tcp -s "$STRATO_IP" --dport 55432 -j ACCEPT 2>/dev/null ||
+            iptables -I INPUT 1 -p tcp -s "$STRATO_IP" --dport 55432 -j ACCEPT
+          iptables -C INPUT -p tcp --dport 55432 -j DROP 2>/dev/null ||
+            iptables -I INPUT 2 -p tcp --dport 55432 -j DROP
 
           bridge_ready=0
           for i in $(seq 1 30); do
-            if docker run --rm --network host postgres:16-alpine pg_isready -h 127.0.0.1 -p 5432 -U replicator >/dev/null 2>&1; then
+            if docker run --rm --network aplussolution_default postgres:16-alpine pg_isready -h aplus-pg-repl-bridge -p 5432 -U replicator >/dev/null 2>&1; then
               bridge_ready=1
               break
             fi
@@ -167,11 +177,6 @@ jobs:
           if ! command -v docker >/dev/null 2>&1; then
             curl -fsSL https://get.docker.com | sh
           fi
-          if ! command -v autossh >/dev/null 2>&1; then
-            apt-get update -qq
-            apt-get install -y -qq autossh
-          fi
-
           mkdir -p /opt/aplussolution
           cd /opt/aplussolution
 
@@ -184,42 +189,26 @@ jobs:
           install -m 600 /tmp/aplussolution.env /opt/aplussolution/.env
           rm -f /tmp/aplussolution-release.tgz /tmp/aplussolution.env
 
+          systemctl disable --now aplus-repl-from-backup.service >/dev/null 2>&1 || true
+          rm -f /etc/systemd/system/aplus-repl-from-backup.service
+          systemctl daemon-reload >/dev/null 2>&1 || true
+
           docker compose pull db redis caddy || true
           docker compose create db >/dev/null
           docker volume create aplussolution_media_data >/dev/null
 
           NET_NAME="aplussolution_default"
           docker network inspect "$NET_NAME" >/dev/null
-          GW="$(docker network inspect -f '{{(index .IPAM.Config 0).Gateway}}' "$NET_NAME")"
-          test -n "$GW"
-
-          cat > /etc/systemd/system/aplus-repl-from-backup.service <<EOF
-          [Unit]
-          Description=A+ Solution PostgreSQL replication tunnel from backup primary
-          After=network-online.target
-          Wants=network-online.target
-
-          [Service]
-          Type=simple
-          Environment=AUTOSSH_GATETIME=0
-          ExecStart=/usr/bin/autossh -M 0 -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /root/.ssh/aplus_repl_from_backup -L ${GW}:55432:127.0.0.1:5432 root@${BACKUP_HOST}
-          Restart=always
-          RestartSec=3
-
-          [Install]
-          WantedBy=multi-user.target
-          EOF
-          systemctl daemon-reload
-          systemctl enable --now aplus-repl-from-backup.service
-          systemctl restart aplus-repl-from-backup.service
+          REPL_SOURCE="$BACKUP_HOST"
+          test -n "$REPL_SOURCE"
 
           for i in $(seq 1 30); do
-            if timeout 2 bash -c "</dev/tcp/${GW}/55432" >/dev/null 2>&1; then
+            if timeout 2 bash -c "</dev/tcp/$REPL_SOURCE/55432" >/dev/null 2>&1; then
               break
             fi
             sleep 2
           done
-          timeout 2 bash -c "</dev/tcp/${GW}/55432" >/dev/null 2>&1
+          timeout 2 bash -c "</dev/tcp/$REPL_SOURCE/55432" >/dev/null 2>&1
 
           DB_CID="$(docker compose ps -aq db)"
           test -n "$DB_CID"
@@ -230,12 +219,12 @@ jobs:
           REPL_PASS="$(cat /root/aplus-replication.secret)"
           test -n "$REPL_PASS"
 
-          docker run --rm             --network "$NET_NAME"             -e PGPASSWORD="$REPL_PASS"             -e REPL_HOST="$GW"             -v "$DB_VOL":/var/lib/postgresql/data             postgres:16-alpine             sh -ceu '
+          docker run --rm             --network "$NET_NAME"             -e PGPASSWORD="$REPL_PASS"             -e REPL_HOST="$REPL_SOURCE"             -v "$DB_VOL":/var/lib/postgresql/data             postgres:16-alpine             sh -ceu '
               rm -rf /var/lib/postgresql/data/*
               pg_basebackup                 -h "$REPL_HOST"                 -p 55432                 -U replicator                 -D /var/lib/postgresql/data                 -Fp -Xs -P -R
             '
 
-          docker run --rm             -e REPL_HOST="$GW"             -e REPL_PASS="$REPL_PASS"             -v "$DB_VOL":/var/lib/postgresql/data             postgres:16-alpine             sh -ceu '
+          docker run --rm             -e REPL_HOST="$REPL_SOURCE"             -e REPL_PASS="$REPL_PASS"             -v "$DB_VOL":/var/lib/postgresql/data             postgres:16-alpine             sh -ceu '
               printf "\nprimary_conninfo = '\''host=%s port=55432 user=replicator password=%s application_name=strato_stage connect_timeout=5'\''\n" "$REPL_HOST" "$REPL_PASS" >> /var/lib/postgresql/data/postgresql.auto.conf
               touch /var/lib/postgresql/data/standby.signal
               chown -R postgres:postgres /var/lib/postgresql/data
