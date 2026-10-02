@@ -93,6 +93,9 @@ class AuevSetting(TimestampedModel):
     effective_date = models.DateField(blank=True, null=True)
     required_qualification = models.CharField(max_length=255, blank=True)
     intended_activity = models.CharField(max_length=255, blank=True)
+    client_contract_text = models.TextField(blank=True)
+    file_label = models.CharField(max_length=160, blank=True)
+    last_sequence_number = models.PositiveIntegerField(default=0)
 
     def __str__(self):
         return f'ANÜ Einstellungen: {self.client.name if self.client_id else "Standard"}'
@@ -515,6 +518,35 @@ class WebhookEvent(TimestampedModel):
 
     class Meta:
         unique_together = ('provider', 'external_id')
+
+
+class AuevExport(TimestampedModel):
+    class Template(models.TextChoices):
+        CLASSIC = 'classic', 'Klassisch'
+        NEW = 'new', 'Neu'
+
+    client = models.ForeignKey(ClientCompany, on_delete=models.CASCADE, related_name='auev_exports')
+    template_key = models.CharField(max_length=20, choices=Template.choices, default=Template.CLASSIC)
+    date_from = models.DateField()
+    date_to = models.DateField()
+    first_shift_date = models.DateField()
+    last_shift_date = models.DateField()
+    signature_date = models.DateField()
+    sequence_number = models.PositiveIntegerField()
+    calendar_weeks = models.JSONField(default=list, blank=True)
+    settings_snapshot = models.JSONField(default=dict, blank=True)
+    shift_ids = models.JSONField(default=list, blank=True)
+    row_count = models.PositiveIntegerField(default=0)
+    file_stem = models.CharField(max_length=255)
+    docx = models.FileField(upload_to='auev_exports/%Y/%m/')
+    pdf = models.FileField(upload_to='auev_exports/%Y/%m/')
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_auev_exports')
+
+    class Meta:
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(fields=['client', 'sequence_number'], name='unique_auev_sequence_per_client'),
+        ]
 
 
 class ShiftImportPackage(TimestampedModel):
