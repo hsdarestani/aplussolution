@@ -1,0 +1,45 @@
+name: Diagnose STRATO replication SSH policy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-strato-ssh-policy.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+      BACKUP_HOST: ${{ secrets.BACKUP_HOST }}
+    steps:
+      - name: Configure SSH
+        run: |
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/key"
+          chmod 600 "$HOME/.ssh/key"
+
+      - name: Inspect effective forwarding policy
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/key"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" "BACKUP_HOST='$BACKUP_HOST' bash -s" <<'REMOTE'
+          set -euo pipefail
+          BACKUP_IP="$(getent ahostsv4 "$BACKUP_HOST" | awk 'NR==1 {print $1}')"
+          test -n "$BACKUP_IP"
+
+          echo "=== EFFECTIVE ==="
+          sshd -T -C user=aplusrepl,host=localhost,addr="$BACKUP_IP"             | grep -E '^(allowtcpforwarding|disableforwarding|permitopen|permitlisten|passwordauthentication|pubkeyauthentication) ' || true
+
+          echo "=== CONFIG DIRECTIVES ==="
+          grep -RniE '^[[:space:]]*(Match|AllowTcpForwarding|DisableForwarding|PermitOpen|PermitListen)'             /etc/ssh/sshd_config /etc/ssh/sshd_config.d 2>/dev/null || true
+
+          echo "=== AUTHORIZED KEY OPTIONS ==="
+          if [ -f /home/aplusrepl/.ssh/authorized_keys ]; then
+            sed -E 's/(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp[0-9]+) [A-Za-z0-9+\/=]+.*/\1 [KEY REDACTED]/'               /home/aplusrepl/.ssh/authorized_keys
+          fi
+          REMOTE
