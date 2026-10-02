@@ -2,13 +2,16 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from django.http import HttpResponse
+from django.core.files.base import ContentFile
 from django.shortcuts import get_object_or_404
 from django.conf import settings
 from django.utils import timezone
 from django.utils.dateparse import parse_date
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, parser_classes
 from rest_framework.response import Response
+from rest_framework.parsers import FormParser, MultiPartParser
 
+from .document_engine import convert_docx_to_pdf
 from .models import AuevExport, AuevSetting, ClientCompany, ShiftImportPackage, WorkingTimeAccountRecord, WorkingTimeSetting, WorkerProfile
 from .order_automation import parse_order_text
 from .auev_builder import (
@@ -333,6 +336,60 @@ def auev_export_detail(request, pk):
         return Response(auev_export_dict(updated))
     except (TypeError, ValueError) as exc:
         return Response({'detail': str(exc)}, status=400)
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminOrManager])
+@parser_classes([MultiPartParser, FormParser])
+def auev_export_replace_docx(request, pk):
+    export = get_object_or_404(AuevExport.objects.select_related('client'), pk=pk)
+    uploaded = request.FILES.get('file')
+    if not uploaded:
+        return Response({'detail': 'Bitte eine DOCX Datei auswählen.'}, status=400)
+
+    filename = str(uploaded.name or '').strip()
+    if not filename.lower().endswith('.docx'):
+        return Response({'detail': 'Es können nur DOCX Dateien hochgeladen werden.'}, status=400)
+    if uploaded.size and uploaded.size > 15 * 1024 * 1024:
+        return Response({'detail': 'Die DOCX Datei darf maximal 15 MB groß sein.'}, status=400)
+
+    docx_bytes = uploaded.read()
+    if not docx_bytes.startswith(b'PK'):
+        return Response({'detail': 'Die hochgeladene Datei ist keine gültige DOCX Datei.'}, status=400)
+
+    try:
+        pdf_bytes = convert_docx_to_pdf(docx_bytes)
+    except Exception:
+        return Response(
+            {'detail': 'Die DOCX Datei konnte nicht in PDF umgewandelt werden. Bitte die Datei prüfen und erneut versuchen.'},
+            status=400,
+        )
+
+    old_docx = export.docx.name if export.docx else ''
+    old_pdf = export.pdf.name if export.pdf else ''
+
+    export.docx.save(f'{export.file_stem}.docx', ContentFile(docx_bytes), save=False)
+    export.pdf.save(f'{export.file_stem}.pdf', ContentFile(pdf_bytes), save=False)
+    export.save(update_fields=['docx', 'pdf', 'updated_at'])
+
+    storage = export.docx.storage
+    for old_name, new_name in ((old_docx, export.docx.name), (old_pdf, export.pdf.name)):
+        if old_name and old_name != new_name:
+            try:
+                storage.delete(old_name)
+            except Exception:
+                pass
+
+    audit(
+        request,
+        'auev.export_docx_replaced',
+        export,
+        {
+            'file_stem': export.file_stem,
+            'uploaded_name': filename,
+        },
+    )
+    return Response(auev_export_dict(export))
 
 
 @api_view(['GET', 'POST'])
