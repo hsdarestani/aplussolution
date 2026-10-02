@@ -1,0 +1,61 @@
+name: Diagnose replication SSH policy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/replication-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BACKUP_HOST: ${{ secrets.BACKUP_HOST }}
+      BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Inspect effective backup sshd policy and loopback bridge
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST" "STRATO_HOST='$STRATO_HOST' bash -s" <<'REMOTE'
+          set -euo pipefail
+          STRATO_IP="$(getent ahostsv4 "$STRATO_HOST" | awk 'NR==1 {print $1}')"
+          echo "=== effective aplusrepl sshd settings ==="
+          sshd -T -C user=aplusrepl,host=strato,addr="$STRATO_IP" | grep -E '^(allowtcpforwarding|disableforwarding|permitopen|authenticationmethods|pubkeyauthentication|passwordauthentication|permittty|forcecommand)' || true
+          echo "=== matching sshd config ==="
+          grep -RniE '^(Match|AllowTcpForwarding|DisableForwarding|PermitOpen|ForceCommand)' /etc/ssh/sshd_config /etc/ssh/sshd_config.d 2>/dev/null || true
+          echo "=== loopback bridge ==="
+          docker ps --filter name=aplus-pg-repl-bridge --format '{{.Names}} {{.Status}} {{.Ports}}'
+          docker run --rm --network host postgres:16-alpine pg_isready -h 127.0.0.1 -p 5432 -U replicator
+          REMOTE
+
+      - name: Inspect STRATO tunnel service and forwarding denial
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" "BACKUP_HOST='$BACKUP_HOST' bash -s" <<'REMOTE'
+          set -euo pipefail
+          echo "=== tunnel service ==="
+          systemctl --no-pager --full status aplus-repl-from-backup.service || true
+          echo "=== tunnel journal ==="
+          journalctl -u aplus-repl-from-backup.service --no-pager -n 60 || true
+          echo "=== explicit forwarding probe ==="
+          timeout 8 ssh -vv             -N             -i /root/.ssh/aplus_repl_from_backup             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ExitOnForwardFailure=yes             -L 127.0.0.1:65432:127.0.0.1:5432             aplusrepl@"$BACKUP_HOST" 2>&1 || true
+          REMOTE
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
