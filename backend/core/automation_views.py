@@ -297,8 +297,8 @@ def auev_export_detail(request, pk):
             'file_stem': export.file_stem,
             'sequence_number': export.sequence_number,
         }
+        audit(request, 'auev.export_deleted', export, payload)
         delete_auev_export(export)
-        audit(request, 'auev.export_deleted', None, payload)
         return Response(status=204)
 
     client = get_object_or_404(ClientCompany, pk=request.data.get('client_id') or export.client_id)
