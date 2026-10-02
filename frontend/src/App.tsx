@@ -151,17 +151,6 @@ const BUSINESS_TIME_ZONE = 'Europe/Berlin';
 const dateTime = (input?: string) =>
   input ? new Date(input).toLocaleString('de-DE', { timeZone: BUSINESS_TIME_ZONE }) : '–';
 const dateOnly = (input?: string) => (input ? new Date(input).toLocaleDateString('de-DE') : '–');
-const timeOnly = (input?: string) =>
-  input
-    ? new Date(input).toLocaleTimeString('de-DE', { timeZone: BUSINESS_TIME_ZONE, hour: '2-digit', minute: '2-digit' })
-    : '–';
-const dateInputValue = (date: Date) =>
-  new Intl.DateTimeFormat('sv-SE', {
-    timeZone: BUSINESS_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date);
 const portalGreeting = () => {
   const hour = Number(new Intl.DateTimeFormat('de-DE', {
     timeZone: BUSINESS_TIME_ZONE,
@@ -1701,23 +1690,6 @@ function Contracts({ user }: { user: User }) {
   const [listQuery, setListQuery] = useState('');
   const [listStatus, setListStatus] = useState('');
   const [listSort, setListSort] = useState('-updated_at');
-  const [anuPackages, setAnuPackages] = useState<any[]>([]);
-  const [anuBusy, setAnuBusy] = useState('');
-  const [anuStart, setAnuStart] = useState(() => {
-    const date = new Date();
-    date.setDate(date.getDate() - 31);
-    return dateInputValue(date);
-  });
-  const [anuEnd, setAnuEnd] = useState(() => {
-    const date = new Date();
-    date.setDate(date.getDate() + 180);
-    return dateInputValue(date);
-  });
-  const [anuSettingsOpen, setAnuSettingsOpen] = useState(false);
-  const [anuSettingsClient, setAnuSettingsClient] = useState('');
-  const [anuSettingsForm, setAnuSettingsForm] = useState<any>({});
-  const [anuSettingsDefaults, setAnuSettingsDefaults] = useState<any>({});
-
   const load = async () => {
     const params = new URLSearchParams();
     if (listQuery.trim()) params.set('search', listQuery.trim());
@@ -1734,12 +1706,6 @@ function Contracts({ user }: { user: User }) {
       setTemplates(unpack(templateData).filter((template: any) => template.active));
       setWorkers(unpack(workerData).filter((worker: any) => worker.active));
       setClients(unpack(clientData).filter((client: any) => client.active));
-      try {
-        const packageData = await api('automation/orders/packages/');
-        setAnuPackages(unpack(packageData));
-      } catch {
-        setAnuPackages([]);
-      }
     }
   };
 
@@ -1775,76 +1741,6 @@ function Contracts({ user }: { user: User }) {
       setForm({});
       await load();
       setToast('Vertrag wurde als Entwurf angelegt.');
-    } catch (reason: any) {
-      setToast(reason.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function syncAnuPackages() {
-    setAnuBusy('sync');
-    try {
-      const result: any = await api('automation/orders/sync-packages/', {
-        method: 'POST',
-        body: JSON.stringify({ start: anuStart, end: anuEnd }),
-      });
-      await load();
-      const created = Number(result?.created || 0);
-      setToast(created ? `${created} ANÜ Paket${created === 1 ? '' : 'e'} aus dem A+ Dienstplan angelegt.` : 'ANÜ Pakete sind aktuell.');
-    } catch (reason: any) {
-      setToast(reason.message);
-    } finally {
-      setAnuBusy('');
-    }
-  }
-
-  async function generateAnuPackage(packageId: string) {
-    setAnuBusy(packageId);
-    try {
-      await api(`automation/orders/packages/${packageId}/generate/`, { method: 'POST', body: '{}' });
-      await load();
-      setToast('ANÜ Vertrag wurde aus dem A+ Dienstplan erstellt.');
-    } catch (reason: any) {
-      setToast(reason.message);
-    } finally {
-      setAnuBusy('');
-    }
-  }
-
-  async function loadAnuSettings(clientId = '') {
-    const query = clientId ? `?client_id=${encodeURIComponent(clientId)}` : '';
-    const result: any = await api(`automation/auev-settings/${query}`);
-    setAnuSettingsDefaults(result.defaults || {});
-    setAnuSettingsForm(result.overrides || {});
-  }
-
-  async function openAnuSettings() {
-    setAnuSettingsClient('');
-    setAnuSettingsOpen(true);
-    try {
-      await loadAnuSettings('');
-    } catch (reason: any) {
-      setToast(reason.message);
-    }
-  }
-
-  async function saveAnuSettings() {
-    setBusy(true);
-    try {
-      await api('automation/auev-settings/', {
-        method: 'PATCH',
-        body: JSON.stringify({
-          client_id: anuSettingsClient || null,
-          permit_date: anuSettingsForm.permit_date || '',
-          framework_date: anuSettingsForm.framework_date || '',
-          effective_date: anuSettingsForm.effective_date || '',
-          required_qualification: anuSettingsForm.required_qualification || '',
-          intended_activity: anuSettingsForm.intended_activity || '',
-        }),
-      });
-      setAnuSettingsOpen(false);
-      setToast(anuSettingsClient ? 'ANÜ Werte für den Kunden gespeichert.' : 'ANÜ Standardwerte gespeichert.');
     } catch (reason: any) {
       setToast(reason.message);
     } finally {
