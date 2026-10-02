@@ -45,24 +45,41 @@ jobs:
           grep -qi '^x-aplus-origin: backup-primary' /tmp/pre.headers
 
           BACKUP_RECOVERY="$(
-            sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST" \
+            sshpass -e ssh \
+              -o PubkeyAuthentication=no \
+              -o PreferredAuthentications=password \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              root@"$BACKUP_HOST" \
               'cd /opt/aplussolution && docker compose exec -T db sh -lc '\''psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"'\'' | tr -d "[:space:]"'
           )"
           test "$BACKUP_RECOVERY" = "f"
 
+          cat >/tmp/aplus-check-strato-standby.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          cd /opt/aplussolution
+          recovery="$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"' | tr -d '[:space:]')"
+          receiving="$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_last_wal_receive_lsn() is not null"' | tr -d '[:space:]')"
+          printf '%s|%s\n' "$recovery" "$receiving"
+          SCRIPT
+          chmod 700 /tmp/aplus-check-strato-standby.sh
+          scp -q \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            /tmp/aplus-check-strato-standby.sh root@"$STRATO_HOST":/tmp/aplus-check-strato-standby.sh
           STRATO_STATE="$(
-            ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" '
-              set -e
-              cd /opt/aplussolution
-              recovery="$(docker compose exec -T db sh -lc '\''psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"'\'' | tr -d "[:space:]")"
-              receive="$(docker compose exec -T db sh -lc '\''psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select coalesce(pg_last_wal_receive_lsn()::text, '\''\'''\'')"'\'' | tr -d "[:space:]")"
-              printf "%s|%s\n" "$recovery" "$receive"
-            '
+            ssh \
+              -i "$HOME/.ssh/strato_ed25519" \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              root@"$STRATO_HOST" \
+              'bash /tmp/aplus-check-strato-standby.sh; rc=$?; rm -f /tmp/aplus-check-strato-standby.sh; exit $rc'
           )"
-          case "$STRATO_STATE" in
-            t\|?*) ;;
-            *) echo "STRATO is not a healthy streaming standby: $STRATO_STATE" >&2; exit 1 ;;
-          esac
+          test "$STRATO_STATE" = "t|t"
           echo PREFLIGHT_ROLES_OK
 
       - name: Freeze backup writers and capture final WAL position
@@ -90,9 +107,17 @@ jobs:
           scp -q -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /tmp/aplus-cutover-lsn root@"$STRATO_HOST":/root/aplus-cutover-lsn
 
       - name: Wait for exact STRATO catchup and perform final media copy
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
         run: |
           set -euo pipefail
-          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" "BACKUP_HOST='$BACKUP_HOST' bash -s" <<'REMOTE'
+
+          ssh \
+            -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
           TARGET="$(cat /root/aplus-cutover-lsn)"
@@ -108,14 +133,27 @@ jobs:
             sleep 1
           done
           test "$caught" -eq 1
+          echo STRATO_CAUGHT_UP
+          REMOTE
 
-          docker volume create aplussolution_media_data >/dev/null
-          ssh -i /root/.ssh/aplus_repl_from_backup -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$BACKUP_HOST" \
-            'cd /opt/aplussolution && docker compose exec -T backend tar -C /app/media -cf - .' \
-            | docker run --rm -i -v aplussolution_media_data:/data alpine:3.20 tar -xf - -C /data
+          # Backend on the old primary is intentionally stopped here, so copy
+          # directly from the persistent media volume rather than docker exec.
+          sshpass -e ssh \
+            -o PubkeyAuthentication=no \
+            -o PreferredAuthentications=password \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$BACKUP_HOST" \
+            'docker run --rm -v aplussolution_media_data:/data:ro alpine:3.20 tar -C /data -cf - .' \
+          | ssh \
+              -i "$HOME/.ssh/strato_ed25519" \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              root@"$STRATO_HOST" \
+              'docker volume create aplussolution_media_data >/dev/null; docker run --rm -i -v aplussolution_media_data:/data alpine:3.20 tar -xf - -C /data'
 
           echo STRATO_CAUGHT_UP_AND_MEDIA_FINALIZED
-          REMOTE
 
       - name: Promote STRATO and start full application
         run: |
