@@ -536,7 +536,7 @@ def _new_docx(data):
 
     outer = doc.add_table(rows=1, cols=2)
     outer.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _set_table_widths(outer, [12.2, 13.9])
+    _set_table_widths(outer, [12.2, 14.6])
     _no_table_borders(outer)
     left = outer.cell(0, 0)
     right = outer.cell(0, 1)
