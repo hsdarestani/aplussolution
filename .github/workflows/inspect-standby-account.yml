@@ -1,0 +1,44 @@
+name: Inspect standby account
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-standby-account.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        run: |
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/key"
+          chmod 600 "$HOME/.ssh/key"
+
+      - name: Inspect account
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/key"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set +e
+          ENTRY="$(getent passwd aplusstandby)"
+          echo "ACCOUNT_PRESENT=$([ -n "$ENTRY" ] && echo true || echo false)"
+          if [ -n "$ENTRY" ]; then
+            HOME_DIR="$(printf '%s' "$ENTRY" | cut -d: -f6)"
+            SHELL_PATH="$(printf '%s' "$ENTRY" | cut -d: -f7)"
+            echo "HOME_PATH=$HOME_DIR"
+            echo "SHELL_PATH=$SHELL_PATH"
+            passwd -S aplusstandby | awk '{print "PASSWD_STATUS="$2}'
+            ls -ld "$HOME_DIR" "$HOME_DIR/.ssh" "$HOME_DIR/.ssh/authorized_keys" 2>&1 || true
+          fi
+          echo "DEFAULT_HOME=$(useradd -D | awk -F= '$1=="HOME"{print $2}')"
+          echo "CONFIG_EXISTS=$([ -f /etc/ssh/sshd_config.d/98-aplus-standby.conf ] && echo true || echo false)"
+          sed -n '1,40p' /etc/ssh/sshd_config.d/98-aplus-standby.conf 2>/dev/null || true
+          REMOTE
