@@ -91,11 +91,14 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
   const blockers = useMemo(() => {
     const result: string[] = [];
     if (!preview?.row_count) result.push('Keine besetzten Einsätze im gewählten Zeitraum.');
-    if (preview?.unassigned?.length) result.push(`${preview.unassigned.length} Einsatz oder Einsätze sind noch nicht vollständig besetzt.`);
     if (preview?.missing_birth_dates?.length) result.push(`Geburtsdatum fehlt für ${preview.missing_birth_dates.join(', ')}.`);
     if (templateKey === 'new' && preview?.new_template_limit_exceeded) result.push('Die neue Vorlage unterstützt maximal 25 Mitarbeiterzeilen.');
     return result;
   }, [preview, templateKey]);
+
+  const assignmentWarning = preview?.unassigned?.length
+    ? `${preview.unassigned.length} Einsatz oder Einsätze sind noch nicht vollständig besetzt. Dafür werden leere Mitarbeiterzeilen ausgegeben.`
+    : '';
 
   async function generate() {
     if (!clientId || !start || !end || !signatureDate || blockers.length) return;
@@ -256,6 +259,12 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
             <div><small>Letzter Einsatz</small><strong>{deDate(preview.last_shift_date)}</strong></div>
             <div><small>Einsätze</small><strong>{preview.shift_count || 0}</strong></div>
             <div><small>Mitarbeiterzeilen</small><strong>{preview.row_count || 0}</strong></div>
+          </div>
+        )}
+
+        {!!assignmentWarning && (
+          <div className="auev-warning">
+            <p>{assignmentWarning}</p>
           </div>
         )}
 
