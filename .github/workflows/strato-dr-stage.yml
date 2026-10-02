@@ -96,36 +96,23 @@ jobs:
             psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_reload_conf();"
           '
 
-          if ! command -v socat >/dev/null 2>&1; then
-            apt-get update -qq
-            apt-get install -y -qq socat
-          fi
+          # Publish the existing database only on the host loopback interface.
+          # A tiny bridge container avoids recreating or restarting the live db.
+          systemctl disable --now aplus-postgres-loopback.service >/dev/null 2>&1 || true
+          rm -f /etc/systemd/system/aplus-postgres-loopback.service
+          systemctl daemon-reload >/dev/null 2>&1 || true
+          docker rm -f aplus-pg-loopback >/dev/null 2>&1 || true
+          docker run -d             --name aplus-pg-loopback             --restart unless-stopped             --network aplussolution_default             -p 127.0.0.1:5432:5432             alpine:3.20             sh -c 'apk add --no-cache socat >/dev/null && exec socat TCP-LISTEN:5432,reuseaddr,fork TCP:db:5432' >/dev/null
 
-          DB_CID="$(docker compose ps -q db)"
-          test -n "$DB_CID"
-          DB_IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$DB_CID")"
-          test -n "$DB_IP"
-
-          cat > /etc/systemd/system/aplus-postgres-loopback.service <<EOF
-          [Unit]
-          Description=A+ Solution loopback bridge to Docker PostgreSQL
-          After=docker.service
-          Requires=docker.service
-
-          [Service]
-          Type=simple
-          ExecStart=/usr/bin/socat TCP-LISTEN:5432,bind=127.0.0.1,reuseaddr,fork TCP:${DB_IP}:5432
-          Restart=always
-          RestartSec=2
-
-          [Install]
-          WantedBy=multi-user.target
-          EOF
-
-          systemctl daemon-reload
-          systemctl enable --now aplus-postgres-loopback.service
-          systemctl restart aplus-postgres-loopback.service
-          ss -ltn | grep -q '127.0.0.1:5432'
+          bridge_ready=0
+          for i in $(seq 1 30); do
+            if docker run --rm --network host postgres:16-alpine pg_isready -h 127.0.0.1 -p 5432 -U replicator >/dev/null 2>&1; then
+              bridge_ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$bridge_ready" -eq 1
           echo BACKUP_REPLICATION_SOURCE_READY
           REMOTE
 
