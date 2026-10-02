@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   IonBadge,
   IonButton,
@@ -61,6 +61,8 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
   const [editOpen, setEditOpen] = useState(false);
   const [editItem, setEditItem] = useState<any>();
   const [editForm, setEditForm] = useState<any>({});
+  const [uploadTarget, setUploadTarget] = useState<any>();
+  const replacementInputRef = useRef<HTMLInputElement>(null);
 
   const loadExports = async () => {
     const data = await api('automation/auev-exports/');
@@ -130,6 +132,39 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
       setToast(reason.message);
     } finally {
       setBusy('');
+    }
+  }
+
+  function chooseReplacementDocx(item: any) {
+    setUploadTarget(item);
+    window.setTimeout(() => replacementInputRef.current?.click(), 0);
+  }
+
+  async function replaceDocx(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !uploadTarget) return;
+    if (!file.name.toLowerCase().endsWith('.docx')) {
+      setToast('Bitte eine DOCX Datei auswählen.');
+      return;
+    }
+
+    setBusy(`upload-${uploadTarget.id}`);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const updated: any = await api(`automation/auev-exports/${uploadTarget.id}/replace-docx/`, {
+        method: 'POST',
+        body: form,
+      });
+      setToast(`${updated.file_stem}: DOCX aktualisiert und PDF neu erzeugt.`);
+      await loadExports();
+      if (onChanged) await onChanged();
+    } catch (reason: any) {
+      setToast(reason.message);
+    } finally {
+      setBusy('');
+      setUploadTarget(undefined);
     }
   }
 
@@ -239,6 +274,13 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
 
   return (
     <>
+      <input
+        ref={replacementInputRef}
+        type="file"
+        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        style={{ display: 'none' }}
+        onChange={(event) => void replaceDocx(event)}
+      />
       <section className="panel auev-builder-panel" data-testid="auev-builder-panel">
         <div className="auev-builder-head">
           <div>
@@ -360,6 +402,14 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
               <div className="auev-file-actions">
                 <IonButton size="small" fill="outline" href={item.pdf_url} target="_blank">PDF</IonButton>
                 <IonButton size="small" fill="outline" href={item.docx_url} target="_blank">DOCX</IonButton>
+                <IonButton
+                  size="small"
+                  fill="outline"
+                  disabled={busy === `upload-${item.id}`}
+                  onClick={() => chooseReplacementDocx(item)}
+                >
+                  {busy === `upload-${item.id}` ? <IonSpinner name="dots" /> : 'DOCX ersetzen'}
+                </IonButton>
                 <IonButton size="small" fill="outline" onClick={() => openEdit(item)}>Bearbeiten</IonButton>
                 <IonButton
                   size="small"
