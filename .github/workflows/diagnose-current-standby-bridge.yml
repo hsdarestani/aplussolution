@@ -36,6 +36,13 @@ jobs:
           systemctl --no-pager --full status aplus-repl-from-strato.service 2>&1 | tail -40
           echo "=== JOURNAL ==="
           journalctl -u aplus-repl-from-strato.service -n 50 --no-pager 2>&1
+          echo "=== POSTGRES THROUGH BRIDGE ==="
+          cd /opt/aplussolution
+          GW="$(docker network inspect -f '{{(index .IPAM.Config 0).Gateway}}' aplussolution_default)"
+          REPL_PASS="$(cat /root/aplus-replication.secret)"
+          timeout 12 docker run --rm             --network aplussolution_default             -e PGPASSWORD="$REPL_PASS"             -e PGCONNECT_TIMEOUT=5             postgres:16-alpine             psql -h "$GW" -p 55432 -U replicator -d postgres -tAc 'select 1'
+          echo "BRIDGE_PSQL_RC=$?"
+
           echo "=== RAW SSH STREAM PROBE ==="
           timeout 4 ssh -T             -i /root/.ssh/aplus_repl_from_strato             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ConnectTimeout=3             aplusrepl@"$STRATO_HOST" </dev/null >/dev/null 2>/tmp/ssh.err
           rc=$?
