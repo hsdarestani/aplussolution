@@ -44,7 +44,7 @@ jobs:
           echo "BRIDGE_PSQL_RC=$?"
 
           echo "=== RAW SSH STREAM PROBE ==="
-          timeout 4 ssh -T             -i /root/.ssh/aplus_repl_from_strato             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ConnectTimeout=3             aplusrepl@"$STRATO_HOST" </dev/null >/dev/null 2>/tmp/ssh.err
+          timeout 4 ssh -T             -i /root/.ssh/aplus_standby_from_strato             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ConnectTimeout=3             aplusstandby@"$STRATO_HOST" </dev/null >/dev/null 2>/tmp/ssh.err
           rc=$?
           echo "RAW_SSH_RC=$rc"
           tail -20 /tmp/ssh.err || true
