@@ -1,0 +1,43 @@
+name: Diagnose current standby bridge
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-current-standby-bridge.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BACKUP_HOST: ${{ secrets.BACKUP_HOST }}
+      BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+    steps:
+      - name: Install SSH helper
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+
+      - name: Probe backup bridge
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$BACKUP_HOST" 'bash -s' <<'REMOTE'
+          set +e
+          echo "SERVICE_ACTIVE=$(systemctl is-active aplus-repl-from-strato.service 2>/dev/null)"
+          echo "LISTENER_55432=$(ss -ltn | grep -q ':55432 ' && echo true || echo false)"
+          echo "=== SERVICE STATUS ==="
+          systemctl --no-pager --full status aplus-repl-from-strato.service 2>&1 | tail -40
+          echo "=== JOURNAL ==="
+          journalctl -u aplus-repl-from-strato.service -n 50 --no-pager 2>&1
+          echo "=== RAW SSH STREAM PROBE ==="
+          timeout 4 ssh -T             -i /root/.ssh/aplus_repl_from_strato             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ConnectTimeout=3             aplusrepl@"$STRATO_HOST" </dev/null >/dev/null 2>/tmp/ssh.err
+          rc=$?
+          echo "RAW_SSH_RC=$rc"
+          tail -20 /tmp/ssh.err || true
+          REMOTE
