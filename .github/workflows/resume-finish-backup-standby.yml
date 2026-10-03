@@ -82,7 +82,7 @@ jobs:
             grep -q "^host[[:space:]]\+replication[[:space:]]\+replicator[[:space:]]" "$PGDATA/pg_hba.conf" ||
               printf "\nhost replication replicator 0.0.0.0/0 scram-sha-256\n" >> "$PGDATA/pg_hba.conf"
             psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_reload_conf();" >/dev/null
-            psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_create_physical_replication_slot('"'"'aplus_backup_slot'"'"') WHERE NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name='"'"'aplus_backup_slot'"'"');" >/dev/null
+            psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name='"'"'aplus_backup_slot'"'"' AND NOT active;" >/dev/null
           '
 
           cat >/usr/local/sbin/aplus-postgres-repl-source <<'SCRIPT'
@@ -214,7 +214,7 @@ jobs:
 
           docker run --rm             --network "$NET_NAME"             -e PGPASSWORD="$REPL_PASS"             -e PGCONNECT_TIMEOUT=10             -e REPL_HOST="$GW"             -v "$DB_VOL":/var/lib/postgresql/data             postgres:16-alpine             sh -ceu '
               find /var/lib/postgresql/data -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-              pg_basebackup -h "$REPL_HOST" -p 55432 -U replicator                 -D /var/lib/postgresql/data -Fp -Xs -P -R -S aplus_backup_slot
+              pg_basebackup -h "$REPL_HOST" -p 55432 -U replicator                 -D /var/lib/postgresql/data -Fp -Xs -P -R -C -S aplus_backup_slot
             '
 
           docker run --rm             -e REPL_HOST="$GW"             -e REPL_PASS="$REPL_PASS"             -v "$DB_VOL":/var/lib/postgresql/data             postgres:16-alpine             sh -ceu '
