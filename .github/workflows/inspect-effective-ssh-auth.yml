@@ -1,0 +1,54 @@
+name: Inspect effective SSH auth paths
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-effective-ssh-auth.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+      BACKUP_HOST: ${{ secrets.BACKUP_HOST }}
+      BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+    steps:
+      - name: Configure access
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Inspect STRATO effective sshd root auth
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" '
+              set -e
+              echo HOST=STRATO
+              sshd -T -C user=root,host=localhost,addr=127.0.0.1 2>/dev/null | grep -E "^(authorizedkeysfile|pubkeyauthentication|permitrootlogin|allowtcpforwarding|gatewayports)" || true
+              ls -ld /root /root/.ssh 2>/dev/null || true
+              ls -l /root/.ssh/authorized_keys 2>/dev/null || true
+            '
+
+      - name: Inspect BACKUP effective sshd root auth
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$BACKUP_HOST" '
+              set -e
+              echo HOST=BACKUP
+              sshd -T -C user=root,host=localhost,addr=127.0.0.1 2>/dev/null | grep -E "^(authorizedkeysfile|pubkeyauthentication|permitrootlogin|allowtcpforwarding|gatewayports)" || true
+              ls -ld /root /root/.ssh 2>/dev/null || true
+              ls -l /root/.ssh/authorized_keys 2>/dev/null || true
+            '
