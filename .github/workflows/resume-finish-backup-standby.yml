@@ -72,6 +72,19 @@ jobs:
 
           test -s /root/.ssh/aplus_reverse_repl
 
+          # Ensure replication role and slot exist every time before basebackup.
+          REPL_PASS="$(cat /root/aplus-replication.secret)"
+          docker compose exec -T db sh -lc \
+            'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '"'"'replicator'"'"') THEN CREATE ROLE replicator WITH LOGIN REPLICATION; END IF; END \$\$;"'
+          docker compose exec -T db sh -lc \
+            "psql -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"ALTER ROLE replicator WITH LOGIN REPLICATION PASSWORD '$REPL_PASS';\""
+          docker compose exec -T db sh -lc '
+            grep -q "^host[[:space:]]\+replication[[:space:]]\+replicator[[:space:]]" "$PGDATA/pg_hba.conf" ||
+              printf "\nhost replication replicator 0.0.0.0/0 scram-sha-256\n" >> "$PGDATA/pg_hba.conf"
+            psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_reload_conf();" >/dev/null
+            psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_create_physical_replication_slot('"'"'aplus_backup_slot'"'"') WHERE NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name='"'"'aplus_backup_slot'"'"');" >/dev/null
+          '
+
           cat >/usr/local/sbin/aplus-postgres-repl-source <<'SCRIPT'
           #!/bin/sh
           set -eu
