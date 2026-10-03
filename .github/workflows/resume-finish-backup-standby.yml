@@ -1,0 +1,287 @@
+name: Resume and finish backup standby
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/resume-finish-backup-standby.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aplus-ha-maintenance
+  cancel-in-progress: false
+
+jobs:
+  finish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+      BACKUP_HOST: ${{ secrets.BACKUP_HOST }}
+      BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Verify production is still STRATO primary
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" '
+              set -e
+              cd /opt/aplussolution
+              test "$(docker compose exec -T db sh -lc '"'"'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"'"'"' | tr -d "[:space:]")" = "f"
+              docker compose exec -T backend curl -fsS http://127.0.0.1:8000/health/ >/dev/null
+              test -n "$(docker compose ps -q celery --status running)"
+              test -n "$(docker compose ps -q celery-beat --status running)"
+              echo STRATO_PRIMARY_OK
+            '
+
+      - name: Start STRATO replication source and reverse tunnel
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" '
+              set -e
+              systemctl daemon-reload
+              systemctl enable aplus-postgres-repl-source.service >/dev/null
+              systemctl restart aplus-postgres-repl-source.service
+              systemctl enable aplus-repl-reverse-tunnel.service >/dev/null
+              systemctl restart aplus-repl-reverse-tunnel.service
+              sleep 3
+              systemctl is-active --quiet aplus-postgres-repl-source.service
+              systemctl is-active --quiet aplus-repl-reverse-tunnel.service
+              ss -ltn | grep -q "127.0.0.1:55432"
+              echo STRATO_REPLICATION_SERVICES_ACTIVE
+            '
+
+      - name: Verify reverse tunnel reached backup
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$BACKUP_HOST" '
+              set -e
+              systemctl restart aplus-repl-docker-bridge.service
+              ready=0
+              for i in $(seq 1 30); do
+                if timeout 2 bash -c "</dev/tcp/127.0.0.1/55431" >/dev/null 2>&1; then
+                  ready=1
+                  break
+                fi
+                sleep 2
+              done
+              test "$ready" -eq 1
+              systemctl is-active --quiet aplus-repl-docker-bridge.service
+              ss -ltn | grep -q "172.18.0.1:55432"
+              echo BACKUP_REVERSE_TUNNEL_OK
+            '
+
+      - name: Copy replication credential to backup
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          scp -q             -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST":/root/aplus-replication.secret /tmp/aplus-replication.secret
+          sshpass -e scp -q             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             /tmp/aplus-replication.secret root@"$BACKUP_HOST":/root/aplus-replication.secret
+          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$BACKUP_HOST" 'chmod 600 /root/aplus-replication.secret'
+
+      - name: Build backup PostgreSQL standby
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ServerAliveInterval=15             -o ServerAliveCountMax=12             root@"$BACKUP_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+
+          NET_NAME="aplussolution_default"
+          GW="$(docker network inspect -f '{{(index .IPAM.Config 0).Gateway}}' "$NET_NAME")"
+          REPL_PASS="$(cat /root/aplus-replication.secret)"
+
+          probe="$(
+            docker run --rm --network "$NET_NAME"               -e PGPASSWORD="$REPL_PASS" -e PGCONNECT_TIMEOUT=5               postgres:16-alpine               psql -h "$GW" -p 55432 -U replicator -d postgres -tAc 'select 1' 2>/dev/null               | tr -d '[:space:]' || true
+          )"
+          test "$probe" = "1"
+
+          docker compose stop backend frontend caddy celery celery-beat >/dev/null 2>&1 || true
+
+          DB_CID="$(docker compose ps -aq db || true)"
+          DB_VOL=""
+          if [ -n "$DB_CID" ]; then
+            DB_VOL="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' "$DB_CID")"
+          fi
+          if [ -z "$DB_VOL" ]; then
+            DB_VOL="$(docker volume ls --format '{{.Name}}' | grep -E '(^|_)postgres_data$' | head -n1 || true)"
+          fi
+          if [ -z "$DB_VOL" ]; then
+            DB_VOL="aplussolution_postgres_data"
+            docker volume create "$DB_VOL" >/dev/null
+          fi
+
+          docker compose stop db >/dev/null 2>&1 || true
+          docker compose rm -sf db >/dev/null 2>&1 || true
+
+          docker run --rm             --network "$NET_NAME"             -e PGPASSWORD="$REPL_PASS"             -e PGCONNECT_TIMEOUT=10             -e REPL_HOST="$GW"             -v "$DB_VOL":/var/lib/postgresql/data             postgres:16-alpine             sh -ceu '
+              find /var/lib/postgresql/data -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+              pg_basebackup -h "$REPL_HOST" -p 55432 -U replicator                 -D /var/lib/postgresql/data -Fp -Xs -P -R -S aplus_backup_slot
+            '
+
+          docker run --rm             -e REPL_HOST="$GW"             -e REPL_PASS="$REPL_PASS"             -v "$DB_VOL":/var/lib/postgresql/data             postgres:16-alpine             sh -ceu '
+              printf "\nprimary_conninfo = '\''host=%s port=55432 user=replicator password=%s application_name=backup_standby connect_timeout=10 keepalives_idle=30 keepalives_interval=10 keepalives_count=3'\''\n" "$REPL_HOST" "$REPL_PASS" >> /var/lib/postgresql/data/postgresql.auto.conf
+              printf "primary_slot_name = '\''aplus_backup_slot'\''\n" >> /var/lib/postgresql/data/postgresql.auto.conf
+              touch /var/lib/postgresql/data/standby.signal
+              chown -R postgres:postgres /var/lib/postgresql/data
+            '
+
+          docker compose up -d db
+
+          recovery=0
+          for i in $(seq 1 90); do
+            state="$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"' 2>/dev/null | tr -d '[:space:]' || true)"
+            if [ "$state" = "t" ]; then
+              recovery=1
+              break
+            fi
+            sleep 2
+          done
+          test "$recovery" -eq 1
+
+          recv="$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select coalesce(pg_last_wal_receive_lsn()::text, '"'"''"'"')"' | tr -d '[:space:]')"
+          replay="$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select coalesce(pg_last_wal_replay_lsn()::text, '"'"''"'"')"' | tr -d '[:space:]')"
+          test -n "$recv"
+          test -n "$replay"
+
+          echo BACKUP_STREAMING_STANDBY_READY
+          echo "receive_lsn=$recv"
+          echo "replay_lsn=$replay"
+          REMOTE
+
+      - name: Configure continuous media push from STRATO
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          ssh -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" '
+              set -e
+              if [ ! -s /root/.ssh/aplus_media_push ]; then
+                ssh-keygen -q -t ed25519 -N "" -f /root/.ssh/aplus_media_push
+              fi
+              cat /root/.ssh/aplus_media_push.pub
+            ' > /tmp/media-push.pub
+
+          sshpass -e scp -q             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             /tmp/media-push.pub root@"$BACKUP_HOST":/tmp/media-push.pub
+
+          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$BACKUP_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          cat >/usr/local/sbin/aplus-media-import <<'SCRIPT'
+          #!/bin/sh
+          set -eu
+          docker run --rm -i -v aplussolution_media_data:/data alpine:3.20             sh -ceu 'find /data -mindepth 1 -maxdepth 1 -exec rm -rf {} +; tar -xf - -C /data'
+          SCRIPT
+          chmod 700 /usr/local/sbin/aplus-media-import
+
+          PUB="$(cat /tmp/media-push.pub)"
+          mkdir -p /root/.ssh
+          chmod 700 /root/.ssh
+          touch /root/.ssh/authorized_keys
+          grep -vF "$PUB" /root/.ssh/authorized_keys >/tmp/root.keys || true
+          mv /tmp/root.keys /root/.ssh/authorized_keys
+          printf 'command="/usr/local/sbin/aplus-media-import",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty %s\n' "$PUB" >> /root/.ssh/authorized_keys
+          chmod 600 /root/.ssh/authorized_keys
+          rm -f /tmp/media-push.pub
+          REMOTE
+
+          ssh -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" "BACKUP_HOST='$BACKUP_HOST' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          cat >/usr/local/sbin/aplus-media-push <<EOF
+          #!/bin/sh
+          set -eu
+          exec 9>/run/aplus-media-push.lock
+          flock -n 9 || exit 0
+          docker run --rm -v aplussolution_media_data:/data:ro alpine:3.20 tar -C /data -cf - . \
+            | ssh -i /root/.ssh/aplus_media_push -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$BACKUP_HOST
+          EOF
+          chmod 700 /usr/local/sbin/aplus-media-push
+
+          cat >/etc/systemd/system/aplus-media-push.service <<'EOF'
+          [Unit]
+          Description=A+ Solution push media to backup
+          After=network-online.target docker.service
+          Wants=network-online.target
+          Requires=docker.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/aplus-media-push
+          EOF
+
+          cat >/etc/systemd/system/aplus-media-push.timer <<'EOF'
+          [Unit]
+          Description=Mirror A+ Solution media to backup
+
+          [Timer]
+          OnBootSec=45
+          OnUnitActiveSec=120
+          AccuracySec=15
+          Unit=aplus-media-push.service
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+          EOF
+
+          systemctl daemon-reload
+          systemctl enable --now aplus-media-push.timer
+          systemctl start aplus-media-push.service
+          systemctl is-active --quiet aplus-media-push.timer
+          echo MEDIA_MIRROR_ACTIVE
+          REMOTE
+
+      - name: Final architecture verification
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          ssh -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" '
+              set -e
+              cd /opt/aplussolution
+              test "$(docker compose exec -T db sh -lc '"'"'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"'"'"' | tr -d "[:space:]")" = "f"
+              test "$(docker compose exec -T db sh -lc '"'"'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select active from pg_replication_slots where slot_name='"'"'aplus_backup_slot'"'"'" | tr -d "[:space:]")" = "t"
+              test "$(docker compose exec -T db sh -lc '"'"'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select count(*) from pg_stat_replication where application_name='"'"'backup_standby'"'"'" | tr -d "[:space:]")" -ge 1
+              test -n "$(docker compose ps -q celery --status running)"
+              test -n "$(docker compose ps -q celery-beat --status running)"
+              systemctl is-active --quiet aplus-media-push.timer
+              echo STRATO_PRIMARY_STREAMING_OK
+            '
+
+          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$BACKUP_HOST" '
+              set -e
+              cd /opt/aplussolution
+              test "$(docker compose exec -T db sh -lc '"'"'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_is_in_recovery()"'"'"' | tr -d "[:space:]")" = "t"
+              test "$(docker compose exec -T db sh -lc '"'"'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select pg_last_wal_receive_lsn() is not null"'"'"' | tr -d "[:space:]")" = "t"
+              test -z "$(docker compose ps -q backend --status running)"
+              test -z "$(docker compose ps -q celery --status running)"
+              test -z "$(docker compose ps -q celery-beat --status running)"
+              echo BACKUP_SAFE_STANDBY_OK
+            '
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519" /tmp/aplus-replication.secret /tmp/media-push.pub
