@@ -52,19 +52,84 @@ jobs:
       - name: Start STRATO replication source and reverse tunnel
         run: |
           set -euo pipefail
-          ssh -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" '
-              set -e
-              systemctl daemon-reload
-              systemctl enable aplus-postgres-repl-source.service >/dev/null
-              systemctl restart aplus-postgres-repl-source.service
-              systemctl enable aplus-repl-reverse-tunnel.service >/dev/null
-              systemctl restart aplus-repl-reverse-tunnel.service
-              sleep 3
-              systemctl is-active --quiet aplus-postgres-repl-source.service
-              systemctl is-active --quiet aplus-repl-reverse-tunnel.service
-              ss -ltn | grep -q "127.0.0.1:55432"
-              echo STRATO_REPLICATION_SERVICES_ACTIVE
-            '
+          ssh -i "$HOME/.ssh/strato_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            root@"$STRATO_HOST" "BACKUP_HOST='$BACKUP_HOST' bash -s" <<'REMOTE'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          cd /opt/aplussolution
+
+          if ! command -v socat >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y -qq socat
+          fi
+          if ! command -v autossh >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y -qq autossh
+          fi
+
+          test -s /root/.ssh/aplus_reverse_repl
+
+          cat >/usr/local/sbin/aplus-postgres-repl-source <<'SCRIPT'
+          #!/bin/sh
+          set -eu
+          cd /opt/aplussolution
+          CID="$(docker compose ps -q db)"
+          test -n "$CID"
+          IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CID")"
+          test -n "$IP"
+          exec /usr/bin/socat TCP-LISTEN:55432,bind=127.0.0.1,reuseaddr,fork TCP:"$IP":5432
+          SCRIPT
+          chmod 700 /usr/local/sbin/aplus-postgres-repl-source
+
+          cat >/etc/systemd/system/aplus-postgres-repl-source.service <<'EOF'
+          [Unit]
+          Description=A+ Solution PostgreSQL replication source
+          After=docker.service
+          Requires=docker.service
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/sbin/aplus-postgres-repl-source
+          Restart=always
+          RestartSec=2
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          cat >/etc/systemd/system/aplus-repl-reverse-tunnel.service <<EOF
+          [Unit]
+          Description=A+ Solution reverse PostgreSQL tunnel to backup
+          After=network-online.target aplus-postgres-repl-source.service
+          Wants=network-online.target
+          Requires=aplus-postgres-repl-source.service
+
+          [Service]
+          Type=simple
+          Environment=AUTOSSH_GATETIME=0
+          ExecStart=/usr/bin/autossh -M 0 -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i /root/.ssh/aplus_reverse_repl -R 127.0.0.1:55431:127.0.0.1:55432 root@$BACKUP_HOST
+          Restart=always
+          RestartSec=3
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          systemctl daemon-reload
+          systemctl enable --now aplus-postgres-repl-source.service
+          systemctl restart aplus-postgres-repl-source.service
+          systemctl enable --now aplus-repl-reverse-tunnel.service
+          systemctl restart aplus-repl-reverse-tunnel.service
+
+          sleep 3
+          systemctl is-active --quiet aplus-postgres-repl-source.service
+          systemctl is-active --quiet aplus-repl-reverse-tunnel.service
+          ss -ltn | grep -q "127.0.0.1:55432"
+          echo STRATO_REPLICATION_SERVICES_ACTIVE
+          REMOTE
 
       - name: Verify reverse tunnel reached backup
         env:
