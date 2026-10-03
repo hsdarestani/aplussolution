@@ -1,0 +1,54 @@
+name: Inspect reverse replication services
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-reverse-replication.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+      BACKUP_HOST: ${{ secrets.BACKUP_HOST }}
+      BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+    steps:
+      - name: Configure access
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Inspect STRATO reverse tunnel
+        run: |
+          set +e
+          ssh -i "$HOME/.ssh/strato_ed25519"             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$STRATO_HOST" '
+              echo HOST=STRATO
+              systemctl is-active aplus-postgres-repl-source.service || true
+              systemctl is-active aplus-repl-reverse-tunnel.service || true
+              journalctl -u aplus-repl-reverse-tunnel.service -n 40 --no-pager 2>/dev/null | tail -40 || true
+              test -s /root/.ssh/aplus_reverse_repl && echo REVERSE_KEY_EXISTS=true || echo REVERSE_KEY_EXISTS=false
+              ss -ltn | grep 55432 || true
+            '
+
+      - name: Inspect BACKUP listener
+        env:
+          SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set +e
+          sshpass -e ssh             -o PubkeyAuthentication=no             -o PreferredAuthentications=password             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             root@"$BACKUP_HOST" '
+              echo HOST=BACKUP
+              ss -ltn | grep -E "55431|55432" || true
+              systemctl is-active aplus-repl-docker-bridge.service || true
+              journalctl -u ssh -u sshd --since "-5 minutes" --no-pager 2>/dev/null | tail -50 || true
+            '
