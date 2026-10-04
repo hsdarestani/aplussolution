@@ -158,7 +158,7 @@ class ShiftApiSerializer(serializers.ModelSerializer):
             if shift_ids:
                 attachments = (
                     ShiftPlanAttachment.objects.filter(shift_id__in=shift_ids)
-                    .select_related('document')
+                    .select_related('document', 'target_worker__user')
                     .order_by('shift_id', '-created_at')
                 )
                 for attachment in attachments:
@@ -170,9 +170,16 @@ class ShiftApiSerializer(serializers.ModelSerializer):
         else:
             attachments = list(
                 ShiftPlanAttachment.objects.filter(shift=obj)
-                .select_related('document')
+                .select_related('document', 'target_worker__user')
                 .order_by('-created_at')
             )
+
+        if request and request.user.is_authenticated and getattr(request.user, 'role', None) == User.Role.WORKER:
+            worker_id = request.user.worker_profile.id
+            attachments = [
+                attachment for attachment in attachments
+                if attachment.visibility == 'all' or attachment.target_worker_id == worker_id
+            ]
 
         return [
             {
@@ -182,7 +189,15 @@ class ShiftApiSerializer(serializers.ModelSerializer):
                 'event_numbers': attachment.document.extracted_event_numbers,
                 'event_dates': attachment.document.extracted_event_dates,
                 'created_at': attachment.created_at,
+                'visibility': attachment.visibility,
+                'target_worker_id': str(attachment.target_worker_id) if attachment.target_worker_id else None,
+                'target_worker_name': (
+                    attachment.target_worker.user.get_full_name() or attachment.target_worker.user.email
+                    if attachment.target_worker_id else ''
+                ),
+                'view_url': f'/api/shift-plans/attachments/{attachment.id}/view/',
                 'download_url': f'/api/shift-plans/attachments/{attachment.id}/download/',
+                'delete_url': f'/api/shift-plans/attachments/{attachment.id}/',
             }
             for attachment in attachments
         ]
