@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from io import BytesIO
 
 import pytest
@@ -11,7 +11,8 @@ from core.models import AuditLog, Shift, TimeEntry
 
 @pytest.mark.django_db
 def test_attendance_pdf_includes_unapproved_wiw_import(auth_admin, worker_user, shift):
-    start = timezone.now() - timedelta(days=2, hours=7)
+    local_day = timezone.localdate() - timedelta(days=2)
+    start = timezone.make_aware(datetime.combine(local_day, datetime.min.time()).replace(hour=9))
     shift.starts_at = start
     shift.ends_at = start + timedelta(hours=7)
     shift.save(update_fields=['starts_at', 'ends_at', 'updated_at'])
