@@ -8,7 +8,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Notification, Shift, User, WorkerProfile
+from .models import AuditLog, Notification, Shift, User, WorkerProfile
 from .permissions import IsAdminOrManager
 from .operational_notifications import notify_admins_shift_claimed, notify_claimed_workers_shift_changed, notify_open_shift_available, notify_worker_shift_event
 from .premium_approval_models import ShiftPickupRequest
@@ -30,6 +30,38 @@ from .shift_rules import shift_visible_to_worker
 
 
 SYNTHETIC_MIGRATION_EMAIL_SUFFIX = '@sync.invalid'
+
+
+def _shift_change_snapshot(shift):
+    starts_at = timezone.localtime(shift.starts_at) if shift.starts_at else None
+    ends_at = timezone.localtime(shift.ends_at) if shift.ends_at else None
+    groups = {
+        'service': 'Service',
+        'front_office': 'Front Office',
+        'housekeeping': 'Housekeeping',
+    }
+    group_values = getattr(shift, 'schedule_groups', None) or []
+    return {
+        'Beginn': starts_at.strftime('%d.%m.%Y %H:%M') if starts_at else '',
+        'Ende': ends_at.strftime('%d.%m.%Y %H:%M') if ends_at else '',
+        'Kunde': getattr(getattr(shift, 'client', None), 'name', '') or '',
+        'Einsatzort': getattr(getattr(shift, 'location', None), 'name', '') or '',
+        'Position': getattr(getattr(shift, 'position', None), 'name', '') or '',
+        'Notiz': str(getattr(shift, 'notes', '') or '').strip(),
+        'Mitarbeiterzahl': str(int(getattr(shift, 'required_count', 1) or 1)),
+        'Pause': f"{int(getattr(shift, 'break_minutes', 0) or 0)} Min.",
+        'Bestätigung': 'Erforderlich' if getattr(shift, 'confirmation_required', False) else 'Nicht erforderlich',
+        'Bereich': ', '.join(groups.get(value, str(value)) for value in group_values),
+        'Status': str(getattr(shift, 'get_status_display', lambda: getattr(shift, 'status', ''))()),
+    }
+
+
+def _shift_change_rows(before, after):
+    return [
+        {'field': field, 'before': before.get(field, ''), 'after': after.get(field, '')}
+        for field in before.keys()
+        if before.get(field, '') != after.get(field, '')
+    ]
 
 
 def _notify_open_shift_available_async(shift, reason):
@@ -96,6 +128,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         previous_status = serializer.instance.status
         previous_confirmation_required = bool(serializer.instance.confirmation_required)
+        before = _shift_change_snapshot(serializer.instance)
         with transaction.atomic():
             obj = serializer.save(worker=None)
             ensure_slots(obj)
@@ -117,8 +150,8 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                             user=slot.worker.user,
                             kind=f'shift-confirmation-required-{slot.id}-{int(now.timestamp())}',
                             title='Schicht bestätigen',
-                            body=f'{timezone.localtime(obj.starts_at):%d.%m.%Y %H:%M} – {obj.location.name}',
-                            action_url='/schedule',
+                            body=f'{timezone.localtime(obj.starts_at):%d.%m.%Y %H:%M} · {obj.location.name}',
+                            action_url=f'/schedule?missing_shift={obj.id}',
                         )
                     else:
                         slot.confirmation_status = ShiftSlot.ConfirmationStatus.CONFIRMED
@@ -126,11 +159,20 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                         slot.confirmation_decided_at = now
                     slot.save(update_fields=['confirmation_status', 'confirmation_requested_at', 'confirmation_decided_at', 'updated_at'])
             refresh_shift_state(obj)
+            after = _shift_change_snapshot(obj)
+            changes = _shift_change_rows(before, after)
             audit(self.request, 'staffing_demand.updated', obj, {
                 'required_count': obj.required_count,
                 'confirmation_required': obj.confirmation_required,
+                'changes': changes,
             })
-            notify_claimed_workers_shift_changed(obj)
+            if changes:
+                notify_claimed_workers_shift_changed(
+                    obj,
+                    title='Schicht geändert',
+                    reason='updated',
+                    changes=changes,
+                )
         if previous_status != Shift.Status.PUBLISHED and obj.status == Shift.Status.PUBLISHED:
             _notify_open_shift_available_async(obj, 'updated-published')
 
@@ -143,6 +185,39 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
         page = self.paginate_queryset(qs)
         data = self.get_serializer(page if page is not None else qs, many=True).data
         return self.get_paginated_response(data) if page is not None else Response(data)
+
+    @action(detail=True, methods=['get'])
+    def changes(self, request, pk=None):
+        shift = self.get_object()
+        if request.user.role == User.Role.WORKER:
+            if not ShiftSlot.objects.filter(
+                shift=shift,
+                worker=request.user.worker_profile,
+                status=ShiftSlot.Status.CLAIMED,
+            ).exists():
+                return Response({'detail': 'Änderungen sind nur für eigene Schichten sichtbar.'}, status=403)
+
+        logs = AuditLog.objects.filter(
+            object_type='Shift',
+            object_id=str(shift.id),
+            action='staffing_demand.updated',
+        ).select_related('actor').order_by('-created_at')[:30]
+
+        history = []
+        for item in logs:
+            changes = (item.metadata or {}).get('changes') or []
+            if not changes:
+                continue
+            history.append({
+                'id': str(item.id),
+                'created_at': item.created_at,
+                'actor': (
+                    item.actor.get_full_name() or item.actor.email
+                    if item.actor_id else 'Administration'
+                ),
+                'changes': changes,
+            })
+        return Response(history)
 
     @action(detail=False, methods=['get'])
     def available(self, request):
