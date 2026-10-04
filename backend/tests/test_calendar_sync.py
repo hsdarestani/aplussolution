@@ -1,7 +1,8 @@
 from datetime import timedelta
+from urllib.parse import urlsplit
 
 import pytest
-from django.test import Client
+from django.test import Client, override_settings
 from django.utils import timezone
 
 from core.models import Shift
@@ -24,13 +25,29 @@ def test_worker_calendar_subscription_and_feed(auth_worker, worker_user, shift):
     assert payload['webcal_url'].startswith('webcal://')
     assert 'calendar.google.com' in payload['google_url']
 
-    feed_path = payload['feed_url'].replace('http://testserver', '')
+    feed_path = urlsplit(payload['feed_url']).path
     public = Client().get(feed_path)
     assert public.status_code == 200
     assert public['Content-Type'].startswith('text/calendar')
     text = public.content.decode('utf-8')
     assert f'UID:shift-{shift.id}@aplus-solution.de' in text
     assert 'Bitte Seiteneingang nutzen' in text
+
+
+@pytest.mark.django_db
+@override_settings(ALLOWED_HOSTS=['testserver', 'app.aplus-solution.de'])
+def test_calendar_subscription_forces_https_for_public_host(auth_worker):
+    response = auth_worker.get(
+        '/api/calendar/subscription/',
+        HTTP_HOST='app.aplus-solution.de',
+        HTTP_X_FORWARDED_PROTO='http',
+    )
+
+    assert response.status_code == 200
+    payload = response.data
+    assert payload['feed_url'].startswith('https://app.aplus-solution.de/api/calendar/feed/')
+    assert payload['webcal_url'].startswith('webcal://app.aplus-solution.de/api/calendar/feed/')
+    assert 'cid=https%3A%2F%2Fapp.aplus-solution.de%2Fapi%2Fcalendar%2Ffeed%2F' in payload['google_url']
 
 
 @pytest.mark.django_db
