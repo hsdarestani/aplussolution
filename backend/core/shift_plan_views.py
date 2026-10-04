@@ -258,6 +258,7 @@ def delete_attachment(request, attachment_id):
 
     document = attachment.document
     shift = attachment.shift
+    document_id = str(document.id)
     filename = document.original_name
     attachment.delete()
     if not document.attachments.exists():
@@ -268,7 +269,7 @@ def delete_attachment(request, attachment_id):
         document.delete()
 
     audit(request, 'shift_plan.deleted', shift, {
-        'document_id': str(document.id),
+        'document_id': document_id,
         'filename': filename,
     })
     return Response(status=204)
