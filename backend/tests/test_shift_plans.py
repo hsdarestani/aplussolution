@@ -7,7 +7,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from reportlab.pdfgen import canvas
 from rest_framework.test import APIClient
 
-from core.models import ClientCompany, Location, Position, Shift, User, WorkerProfile
+from core.models import ClientCompany, Location, Notification, Position, Shift, User, WorkerProfile
 from core.shift_plan_models import ShiftPlanAttachment, ShiftPlanDocument
 from core.shift_slots import ShiftSlot
 
@@ -182,3 +182,83 @@ def test_worker_can_download_plan_only_for_assigned_shift():
     other_upload = admin_api.post(f'/api/shifts/{other.id}/plans/', {'file': pdf_upload('99999.pdf')}, format='multipart')
     denied = worker_api.get(f"/api/shift-plans/attachments/{other_upload.data['id']}/download/")
     assert denied.status_code == 403
+
+
+
+def test_targeted_plan_is_visible_only_to_selected_worker_and_can_be_deleted():
+    admin, _, _, shift1, _, _ = setup_schedule()
+    first_user = User.objects.create_user(email='first@example.com', password='pw', role=User.Role.WORKER)
+    second_user = User.objects.create_user(email='second@example.com', password='pw', role=User.Role.WORKER)
+    first = WorkerProfile.objects.create(user=first_user, employee_number='E-11')
+    second = WorkerProfile.objects.create(user=second_user, employee_number='E-12')
+    ShiftSlot.objects.create(shift=shift1, worker=first, status=ShiftSlot.Status.CLAIMED, source='test')
+    ShiftSlot.objects.create(shift=shift1, worker=second, status=ShiftSlot.Status.CLAIMED, source='test')
+
+    admin_api = APIClient()
+    admin_api.force_authenticate(admin)
+    uploaded = admin_api.post(
+        f'/api/shifts/{shift1.id}/plans/',
+        {
+            'file': pdf_upload(),
+            'visibility': 'worker',
+            'target_worker': str(first.id),
+        },
+        format='multipart',
+    )
+    assert uploaded.status_code == 201
+    assert uploaded.data['visibility'] == 'worker'
+    assert uploaded.data['target_worker_id'] == str(first.id)
+    attachment_id = uploaded.data['id']
+
+    first_api = APIClient()
+    first_api.force_authenticate(first_user)
+    first_list = first_api.get(f'/api/shifts/{shift1.id}/plans/')
+    assert first_list.status_code == 200
+    assert len(first_list.data) == 1
+    assert first_api.get(f'/api/shift-plans/attachments/{attachment_id}/view/').status_code == 200
+
+    second_api = APIClient()
+    second_api.force_authenticate(second_user)
+    second_list = second_api.get(f'/api/shifts/{shift1.id}/plans/')
+    assert second_list.status_code == 200
+    assert second_list.data == []
+    assert second_api.get(f'/api/shift-plans/attachments/{attachment_id}/view/').status_code == 403
+
+    assert Notification.objects.filter(
+        user=first_user,
+        title='Einsatzplan verfügbar',
+    ).count() == 1
+    assert Notification.objects.filter(
+        user=second_user,
+        title='Einsatzplan verfügbar',
+    ).count() == 0
+
+    deleted = admin_api.delete(f'/api/shift-plans/attachments/{attachment_id}/')
+    assert deleted.status_code == 204
+    assert not ShiftPlanAttachment.objects.filter(pk=attachment_id).exists()
+
+
+def test_all_worker_plan_notifies_every_assigned_worker():
+    admin, _, _, shift1, _, _ = setup_schedule()
+    users = []
+    for index in range(2):
+        user = User.objects.create_user(
+            email=f'all{index}@example.com',
+            password='pw',
+            role=User.Role.WORKER,
+        )
+        worker = WorkerProfile.objects.create(user=user, employee_number=f'E-2{index}')
+        ShiftSlot.objects.create(shift=shift1, worker=worker, status=ShiftSlot.Status.CLAIMED, source='test')
+        users.append(user)
+
+    admin_api = APIClient()
+    admin_api.force_authenticate(admin)
+    uploaded = admin_api.post(
+        f'/api/shifts/{shift1.id}/plans/',
+        {'file': pdf_upload(), 'visibility': 'all'},
+        format='multipart',
+    )
+    assert uploaded.status_code == 201
+    assert uploaded.data['visibility'] == 'all'
+    for user in users:
+        assert Notification.objects.filter(user=user, title='Einsatzplan verfügbar').count() == 1
