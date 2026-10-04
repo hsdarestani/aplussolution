@@ -145,6 +145,7 @@ export default function WiwEmployeeScheduleMobile() {
   const [open, setOpen] = useState<any[]>([]);
   const [anchor, setAnchor] = useState(berlinToday());
   const [selected, setSelected] = useState<any>();
+  const [changeHistory, setChangeHistory] = useState<any[]>([]);
   const [releaseTarget, setReleaseTarget] = useState<any>();
   const [timeReport, setTimeReport] = useState<any>();
   const [timeReportLegalOpen, setTimeReportLegalOpen] = useState(false);
@@ -242,6 +243,22 @@ export default function WiwEmployeeScheduleMobile() {
       legacySegments.forEach((element) => element.setAttribute('value', 'mine'));
     };
   }, [active, mobile, worker?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selected?.id || mode !== 'mine') {
+      setChangeHistory([]);
+      return () => { cancelled = true; };
+    }
+    void api(`shifts/${selected.id}/changes/`)
+      .then((rows: any) => {
+        if (!cancelled) setChangeHistory(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (!cancelled) setChangeHistory([]);
+      });
+    return () => { cancelled = true; };
+  }, [selected?.id, mode]);
 
   const weekStart = monday(anchor);
   const days = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
@@ -424,6 +441,30 @@ export default function WiwEmployeeScheduleMobile() {
         <DetailRow icon={colorPaletteOutline}>Standardfarbe</DetailRow>
       </div>
       <ShiftPlanAttachments shift={selected} />
+      {changeHistory.length ? <section className="wiw-shift-change-history">
+        <div className="wiw-shift-change-title">
+          <b>Änderungen an dieser Schicht</b>
+          <small>Vorher und nachher</small>
+        </div>
+        {changeHistory.map((entry: any) => <article key={entry.id}>
+          <small>{new Intl.DateTimeFormat('de-DE', {
+            timeZone: TZ,
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          }).format(new Date(entry.created_at))}</small>
+          <div>
+            {(Array.isArray(entry.changes) ? entry.changes : []).map((change: any, index: number) => <p key={String(change.field) + index}>
+              <b>{change.field}</b>
+              <span>{change.before || 'leer'}</span>
+              <i aria-hidden="true">→</i>
+              <strong>{change.after || 'leer'}</strong>
+            </p>)}
+          </div>
+        </article>)}
+      </section> : null}
       <div className="wiw-employee-detail-actions">
         {mode === 'open' ? (
           <button type="button" className="primary" disabled={busy} onClick={() => void claim(selected)}>{busy ? 'Bitte warten …' : 'Schicht übernehmen'}</button>
