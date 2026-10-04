@@ -673,10 +673,6 @@ def _document_data(client, start, end, signature_date, sequence_number):
     collected = collect_rows(client, start, end)
     if not collected['shifts']:
         raise ValueError('Im gewählten Zeitraum wurden für diesen Kunden keine Einsätze gefunden.')
-    if collected['missing_birth_dates']:
-        names = ', '.join(collected['missing_birth_dates'][:8])
-        raise ValueError(f'Geburtsdatum fehlt für: {names}')
-
     settings = resolve_settings(client)
     dates = collected['actual_dates']
     first = min(dates)
