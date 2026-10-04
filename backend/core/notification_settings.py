@@ -22,6 +22,7 @@ PUSH_RULE_CATALOG = (
     PushRuleDefinition('admin_open_shift', 'OpenShift-Zusammenfassung für Admins'),
     PushRuleDefinition('shift_assignment', 'Schicht zugeteilt / übertragen'),
     PushRuleDefinition('shift_updated', 'Schicht geändert'),
+    PushRuleDefinition('shift_plan', 'Einsatzplan verfügbar'),
     PushRuleDefinition('shift_deleted', 'Schicht gelöscht'),
     PushRuleDefinition('shift_manual_reminder', 'Manuelle Schichterinnerung'),
     PushRuleDefinition('shift_24h_reminder', '24-Stunden-Schichterinnerung'),
@@ -71,6 +72,8 @@ def notification_rule_key(notification) -> str:
         return 'open_shift'
     if kind.startswith(('shift-admin-assigned-', 'shift-release-transfer-', 'shift-published-')):
         return 'shift_assignment'
+    if kind.startswith('shift-plan-'):
+        return 'shift_plan'
     if kind.startswith('shift-event-'):
         if '-manual-reminder-' in kind:
             return 'shift_manual_reminder'
@@ -152,7 +155,11 @@ COPY_EXAMPLES = {
     ],
     "shift_updated": [
         "Deine Schicht wurde aktualisiert",
-        "[Datum] · neu [Beginn]–[Ende] Uhr\n[Location] - [Position]"
+        "[Datum] · Änderungen mit vorherigen Werten"
+    ],
+    "shift_plan": [
+        "Einsatzplan verfügbar",
+        "[Datum] · [Beginn] Uhr · [Location]"
     ],
     "shift_deleted": [
         "Schicht gelöscht am",
