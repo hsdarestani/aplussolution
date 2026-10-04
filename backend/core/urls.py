@@ -79,6 +79,8 @@ urlpatterns = [
     path('shifts/<uuid:shift_id>/plans/', shift_plan_views.shift_plans),
     path('shift-plans/bulk-upload/', shift_plan_views.bulk_upload),
     path('shift-plans/documents/<uuid:document_id>/attach/', shift_plan_views.manual_attach_document),
+    path('shift-plans/attachments/<uuid:attachment_id>/', shift_plan_views.delete_attachment),
+    path('shift-plans/attachments/<uuid:attachment_id>/view/', shift_plan_views.view_attachment),
     path('shift-plans/attachments/<uuid:attachment_id>/download/', shift_plan_views.download_attachment),
     path('shifts/<uuid:shift_id>/cards/<uuid:slot_id>/', shift_slot_actions.edit_shift_slot),
     path('shifts/<uuid:shift_id>/cards/<uuid:slot_id>/delete/', shift_card_admin.delete_shift_card),
