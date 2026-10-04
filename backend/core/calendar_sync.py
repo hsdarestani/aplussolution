@@ -16,6 +16,7 @@ from .shift_slots import ShiftSlot
 
 
 CALENDAR_SIGNING_SALT = 'aplus.worker-calendar.v1'
+CALENDAR_HTTPS_HOST_SUFFIXES = ('aplus-solution.de', 'smarbiz.sbs')
 
 
 def _calendar_token(worker: WorkerProfile) -> str:
@@ -66,6 +67,18 @@ def _assigned_shifts(worker: WorkerProfile):
     )
 
 
+def _public_calendar_feed_url(request, token: str) -> str:
+    feed_url = request.build_absolute_uri(f'/api/calendar/feed/{token}.ics')
+    host = request.get_host().split(':', 1)[0].strip('[]').lower()
+
+    # Calendar clients such as iOS reject insecure subscription feeds. In
+    # production Cloudflare/Caddy can terminate TLS before Django, so an
+    # internal HTTP hop must never leak into the public calendar URL.
+    if feed_url.startswith('http://') and host.endswith(CALENDAR_HTTPS_HOST_SUFFIXES):
+        feed_url = 'https://' + feed_url[len('http://'):]
+    return feed_url
+
+
 @api_view(['GET'])
 def calendar_subscription(request):
     if getattr(request.user, 'role', None) != User.Role.WORKER:
@@ -76,7 +89,7 @@ def calendar_subscription(request):
         return Response({'detail': 'Mitarbeiterprofil wurde nicht gefunden.'}, status=404)
 
     token = quote(_calendar_token(worker), safe='')
-    feed_url = request.build_absolute_uri(f'/api/calendar/feed/{token}.ics')
+    feed_url = _public_calendar_feed_url(request, token)
     webcal_url = feed_url.replace('https://', 'webcal://', 1).replace('http://', 'webcal://', 1)
     encoded_feed = quote(feed_url, safe='')
     calendar_name = quote('A+ Solution Dienstplan', safe='')
