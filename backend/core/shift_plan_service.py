@@ -13,8 +13,9 @@ from django.utils import timezone
 from pypdf import PdfReader
 
 from .client_portal_access import get_client_portal_access
-from .models import Shift, User
+from .models import Notification, Shift, User
 from .shift_plan_models import ShiftPlanAttachment, ShiftPlanDocument
+from .shift_slots import ShiftSlot
 
 
 PLAN_MAX_BYTES = 20 * 1024 * 1024
@@ -604,7 +605,75 @@ def save_plan_document(payload, user, client=None):
     return document, True
 
 
-def attach_document(document, shift, user, score=0, reason='', automatic=False):
+def can_view_plan_attachment(user, attachment):
+    if not can_view_shift_plan(user, attachment.shift):
+        return False
+    if user.role != User.Role.WORKER:
+        return True
+    try:
+        worker_id = user.worker_profile.id
+    except Exception:
+        return False
+    if attachment.visibility == ShiftPlanAttachment.Visibility.WORKER:
+        return attachment.target_worker_id == worker_id
+    return True
+
+
+def notify_plan_available(attachment):
+    shift = attachment.shift
+    if attachment.visibility == ShiftPlanAttachment.Visibility.WORKER and attachment.target_worker_id:
+        worker_ids = [attachment.target_worker_id]
+    else:
+        worker_ids = list(
+            ShiftSlot.objects.filter(
+                shift=shift,
+                status=ShiftSlot.Status.CLAIMED,
+                worker__isnull=False,
+            ).values_list('worker_id', flat=True).distinct()
+        )
+    if not worker_ids:
+        return 0
+
+    local_start = timezone.localtime(shift.starts_at)
+    body = f'{local_start:%d.%m.%Y %H:%M} · {shift.location.name}'
+    created = 0
+    users = User.objects.filter(
+        worker_profile__id__in=worker_ids,
+        is_active=True,
+        role=User.Role.WORKER,
+    ).distinct()
+    for recipient in users:
+        _, was_created = Notification.objects.get_or_create(
+            user=recipient,
+            kind=f'shift-plan-available-{attachment.id}-{recipient.id}',
+            defaults={
+                'title': 'Einsatzplan verfügbar',
+                'body': body,
+                'action_url': f'/schedule?missing_shift={shift.id}',
+            },
+        )
+        created += int(was_created)
+    return created
+
+
+def attach_document(
+    document,
+    shift,
+    user,
+    score=0,
+    reason='',
+    automatic=False,
+    visibility=ShiftPlanAttachment.Visibility.ALL,
+    target_worker=None,
+):
+    visibility = (
+        ShiftPlanAttachment.Visibility.WORKER
+        if visibility == ShiftPlanAttachment.Visibility.WORKER
+        else ShiftPlanAttachment.Visibility.ALL
+    )
+    if visibility == ShiftPlanAttachment.Visibility.ALL:
+        target_worker = None
+
     attachment, created = ShiftPlanAttachment.objects.get_or_create(
         shift=shift,
         document=document,
@@ -613,13 +682,27 @@ def attach_document(document, shift, user, score=0, reason='', automatic=False):
             'match_reason': str(reason or '')[:500],
             'matched_automatically': bool(automatic),
             'attached_by': user,
+            'visibility': visibility,
+            'target_worker': target_worker,
         },
     )
+    changed_visibility = False
+    if not created and not automatic:
+        next_worker_id = target_worker.id if target_worker else None
+        if attachment.visibility != visibility or attachment.target_worker_id != next_worker_id:
+            attachment.visibility = visibility
+            attachment.target_worker = target_worker
+            attachment.save(update_fields=['visibility', 'target_worker'])
+            changed_visibility = True
+
     if not created and automatic and int(score or 0) > attachment.match_score:
         attachment.match_score = max(0, min(255, int(score or 0)))
         attachment.match_reason = str(reason or '')[:500]
         attachment.matched_automatically = True
         attachment.save(update_fields=['match_score', 'match_reason', 'matched_automatically'])
+
+    if created or changed_visibility:
+        notify_plan_available(attachment)
     return attachment, created
 
 
