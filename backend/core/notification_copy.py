@@ -195,6 +195,10 @@ def apply_final_notification_copy(sender, instance: Notification, **kwargs):
                 'Erinnerung an deine Schicht',
                 f'{start:%d.%m.%Y} von {start:%H:%M}–{end:%H:%M} Uhr\n{_shift_detail(shift)}',
             )
+        elif '-updated-' in kind and '→' in str(instance.body or ''):
+            # Rich shift edits already contain the exact before and after values.
+            # Keep those values instead of replacing them with the generic shift copy.
+            _set(instance, 'Schicht geändert', str(instance.body or ''))
         elif '-deleted-' in kind or '-card-delete-' in kind:
             start = timezone.localtime(shift.starts_at)
             end = timezone.localtime(shift.ends_at)
