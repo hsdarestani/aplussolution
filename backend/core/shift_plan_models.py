@@ -44,8 +44,20 @@ class ShiftPlanDocument(models.Model):
 
 
 class ShiftPlanAttachment(models.Model):
+    class Visibility(models.TextChoices):
+        ALL = 'all', 'Alle Mitarbeiter'
+        WORKER = 'worker', 'Ein Mitarbeiter'
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     shift = models.ForeignKey('Shift', on_delete=models.CASCADE, related_name='plan_attachments')
+    visibility = models.CharField(max_length=20, choices=Visibility.choices, default=Visibility.ALL)
+    target_worker = models.ForeignKey(
+        'WorkerProfile',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='targeted_shift_plan_attachments',
+    )
     document = models.ForeignKey(ShiftPlanDocument, on_delete=models.CASCADE, related_name='attachments')
     match_score = models.PositiveSmallIntegerField(default=0)
     match_reason = models.CharField(max_length=500, blank=True)
