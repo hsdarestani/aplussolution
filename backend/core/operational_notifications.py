@@ -139,20 +139,31 @@ def notify_admins_shift_claimed(slot: ShiftSlot) -> int:
     return created
 
 
-def notify_worker_shift_event(user: User | None, shift: Shift, title: str, reason: str) -> int:
+def notify_worker_shift_event(
+    user: User | None,
+    shift: Shift,
+    title: str,
+    reason: str,
+    body: str | None = None,
+) -> int:
     if not user or not user.is_active:
         return 0
     Notification.objects.create(
         user=user,
         kind=f'shift-event-{reason}-{shift.id}-{uuid.uuid4().hex[:10]}',
         title=title,
-        body=_shift_body(shift),
-        action_url='/schedule',
+        body=body or _shift_body(shift),
+        action_url=f'/schedule?missing_shift={shift.id}',
     )
     return 1
 
 
-def notify_claimed_workers_shift_changed(shift: Shift, title: str = 'Schicht aktualisiert', reason: str = 'updated') -> int:
+def notify_claimed_workers_shift_changed(
+    shift: Shift,
+    title: str = 'Schicht aktualisiert',
+    reason: str = 'updated',
+    changes=None,
+) -> int:
     users = []
     seen = set()
     for slot in (
@@ -165,7 +176,21 @@ def notify_claimed_workers_shift_changed(shift: Shift, title: str = 'Schicht akt
             seen.add(user.id)
     if shift.worker_id and shift.worker.user_id not in seen:
         users.append(shift.worker.user)
-    return sum(notify_worker_shift_event(user, shift, title, reason) for user in users)
+
+    body = None
+    if changes:
+        rows = []
+        for item in list(changes)[:6]:
+            field = str(item.get('field') or 'Änderung')
+            before = str(item.get('before') or 'leer')
+            after = str(item.get('after') or 'leer')
+            rows.append(f'{field}: {before} → {after}')
+        body = '\n'.join(rows)
+
+    return sum(
+        notify_worker_shift_event(user, shift, title, reason, body=body)
+        for user in users
+    )
 
 
 def notify_managers_attendance(entry: TimeEntry, event: str) -> int:
