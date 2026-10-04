@@ -96,10 +96,13 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
   const blockers = useMemo(() => {
     const result: string[] = [];
     if (!preview?.row_count) result.push('Keine besetzten Einsätze im gewählten Zeitraum.');
-    if (preview?.missing_birth_dates?.length) result.push(`Geburtsdatum fehlt für ${preview.missing_birth_dates.join(', ')}.`);
     if (templateKey === 'new' && preview?.new_template_limit_exceeded) result.push('Die neue Vorlage unterstützt maximal 25 Mitarbeiterzeilen.');
     return result;
   }, [preview, templateKey]);
+
+  const birthDateWarning = preview?.missing_birth_dates?.length
+    ? `Geburtsdatum fehlt für ${preview.missing_birth_dates.join(', ')}. Die Datei kann trotzdem erstellt werden. Bitte das Geburtsdatum anschließend in der DOCX ergänzen.`
+    : '';
 
   const assignmentWarning = preview?.unassigned?.length
     ? `${preview.unassigned.length} Einsatz oder Einsätze sind noch nicht vollständig besetzt. Dafür werden leere Mitarbeiterzeilen ausgegeben.`
@@ -365,6 +368,12 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
         {!!assignmentWarning && (
           <div className="auev-warning">
             <p>{assignmentWarning}</p>
+          </div>
+        )}
+
+        {!!birthDateWarning && (
+          <div className="auev-warning">
+            <p>{birthDateWarning}</p>
           </div>
         )}
 
