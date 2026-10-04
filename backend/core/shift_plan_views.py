@@ -13,6 +13,7 @@ from .shift_plan_service import (
     MAX_BULK_FILES,
     attach_document,
     can_upload_shift_plan,
+    can_view_plan_attachment,
     can_view_shift_plan,
     candidate_shifts_for_upload,
     document_payload,
@@ -35,7 +36,15 @@ def attachment_payload(request, attachment):
         'matched_automatically': attachment.matched_automatically,
         'match_score': attachment.match_score,
         'match_reason': attachment.match_reason,
+        'visibility': attachment.visibility,
+        'target_worker_id': str(attachment.target_worker_id) if attachment.target_worker_id else None,
+        'target_worker_name': (
+            attachment.target_worker.user.get_full_name() or attachment.target_worker.user.email
+            if attachment.target_worker_id else ''
+        ),
+        'view_url': f'/api/shift-plans/attachments/{attachment.id}/view/',
         'download_url': f'/api/shift-plans/attachments/{attachment.id}/download/',
+        'delete_url': f'/api/shift-plans/attachments/{attachment.id}/',
     }
 
 
@@ -52,7 +61,11 @@ def shift_plans(request, shift_id):
     if request.method == 'GET':
         if not can_view_shift_plan(request.user, shift):
             raise PermissionDenied('Für diese Schicht dürfen keine Pläne angezeigt werden.')
-        rows = ShiftPlanAttachment.objects.filter(shift=shift).select_related('document').order_by('-created_at')
+        rows = ShiftPlanAttachment.objects.filter(shift=shift).select_related(
+            'document', 'target_worker__user'
+        ).order_by('-created_at')
+        if request.user.role == User.Role.WORKER:
+            rows = [item for item in rows if can_view_plan_attachment(request.user, item)]
         return Response([attachment_payload(request, item) for item in rows])
 
     if not can_upload_shift_plan(request.user, shift):
@@ -66,6 +79,21 @@ def shift_plans(request, shift_id):
     except ValueError as exc:
         return Response({'detail': str(exc)}, status=400)
 
+    visibility = str(request.data.get('visibility') or ShiftPlanAttachment.Visibility.ALL).strip().lower()
+    target_worker = None
+    if visibility == ShiftPlanAttachment.Visibility.WORKER:
+        worker_id = str(request.data.get('target_worker') or '').strip()
+        slot = shift.slots.select_related('worker__user').filter(
+            worker_id=worker_id,
+            status='claimed',
+            worker__isnull=False,
+        ).first()
+        if not slot:
+            return Response({'detail': 'Bitte einen zugewiesenen Mitarbeiter auswählen.'}, status=400)
+        target_worker = slot.worker
+    else:
+        visibility = ShiftPlanAttachment.Visibility.ALL
+
     document, _ = save_plan_document(payload, request.user, client=shift.client)
     attachment, created = attach_document(
         document,
@@ -74,12 +102,16 @@ def shift_plans(request, shift_id):
         score=255,
         reason='Manuell direkt dieser Schicht zugeordnet',
         automatic=False,
+        visibility=visibility,
+        target_worker=target_worker,
     )
     audit(request, 'shift_plan.attached', shift, {
         'document_id': str(document.id),
         'attachment_id': str(attachment.id),
         'filename': document.original_name,
         'created': created,
+        'visibility': attachment.visibility,
+        'target_worker': str(attachment.target_worker_id) if attachment.target_worker_id else None,
     })
     return Response(attachment_payload(request, attachment), status=201 if created else 200)
 
@@ -175,14 +207,21 @@ def manual_attach_document(request, document_id):
     return Response(attachment_payload(request, attachment), status=201 if created else 200)
 
 
-@api_view(['GET'])
-def download_attachment(request, attachment_id):
-    attachment = ShiftPlanAttachment.objects.select_related(
-        'shift__client', 'shift__location', 'document'
+def _attachment_or_404(attachment_id):
+    return ShiftPlanAttachment.objects.select_related(
+        'shift__client',
+        'shift__location',
+        'shift__position',
+        'document',
+        'target_worker__user',
     ).filter(pk=attachment_id).first()
+
+
+def _pdf_response(request, attachment_id, as_attachment):
+    attachment = _attachment_or_404(attachment_id)
     if not attachment:
         return Response({'detail': 'Plan wurde nicht gefunden.'}, status=404)
-    if not can_view_shift_plan(request.user, attachment.shift):
+    if not can_view_plan_attachment(request.user, attachment):
         raise PermissionDenied('Dieser Plan ist für dein Konto nicht freigegeben.')
 
     document = attachment.document
@@ -190,5 +229,46 @@ def download_attachment(request, attachment_id):
     try:
         file_handle = document.file.open('rb')
     except Exception:
-        return Response({'detail': 'Die PDF-Datei ist aktuell nicht verfügbar.'}, status=404)
-    return FileResponse(file_handle, as_attachment=True, filename=filename, content_type='application/pdf')
+        return Response({'detail': 'Die PDF Datei ist aktuell nicht verfügbar.'}, status=404)
+    return FileResponse(
+        file_handle,
+        as_attachment=as_attachment,
+        filename=filename,
+        content_type='application/pdf',
+    )
+
+
+@api_view(['GET'])
+def view_attachment(request, attachment_id):
+    return _pdf_response(request, attachment_id, as_attachment=False)
+
+
+@api_view(['GET'])
+def download_attachment(request, attachment_id):
+    return _pdf_response(request, attachment_id, as_attachment=True)
+
+
+@api_view(['DELETE'])
+def delete_attachment(request, attachment_id):
+    attachment = _attachment_or_404(attachment_id)
+    if not attachment:
+        return Response({'detail': 'Plan wurde nicht gefunden.'}, status=404)
+    if not can_upload_shift_plan(request.user, attachment.shift):
+        raise PermissionDenied('Dieser Plan darf nicht gelöscht werden.')
+
+    document = attachment.document
+    shift = attachment.shift
+    filename = document.original_name
+    attachment.delete()
+    if not document.attachments.exists():
+        try:
+            document.file.delete(save=False)
+        except Exception:
+            pass
+        document.delete()
+
+    audit(request, 'shift_plan.deleted', shift, {
+        'document_id': str(document.id),
+        'filename': filename,
+    })
+    return Response(status=204)
