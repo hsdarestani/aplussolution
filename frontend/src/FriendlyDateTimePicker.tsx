@@ -114,7 +114,7 @@ function setNativeReactValue(input: HTMLInputElement, next: string) {
 
 function displayValue(element: HTMLElement, next: string) {
   if (element.dataset.aplusPickerDisplay !== 'de-date' || !next) return next;
-  const match = /^(\\d{4})-(\\d{2})-(\\d{2})/.exec(next);
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(next);
   return match ? `${match[3]}.${match[2]}.${match[1]}` : next;
 }
 
@@ -241,7 +241,7 @@ export default function FriendlyDateTimePicker() {
   const minutes = target && (target.kind === 'time' || target.kind === 'datetime-local') ? minuteValues(target.step) : undefined;
   const directDateParts = useMemo(() => {
     const fallback = new Date();
-    const match = /^(\\d{4})-(\\d{2})-(\\d{2})/.exec(draft || '');
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(draft || '');
     return {
       year: Number(match?.[1] || fallback.getFullYear()),
       month: Number(match?.[2] || fallback.getMonth() + 1),
