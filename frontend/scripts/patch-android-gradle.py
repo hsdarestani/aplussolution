@@ -50,6 +50,16 @@ text, version_name_count = re.subn(
 if version_code_count != 1 or version_name_count != 1:
     raise SystemExit("Could not set Android versionCode/versionName from Publisher release metadata.")
 
+# Google Play automatic protection now requires minSdkVersion >= 24.
+text, min_sdk_count = re.subn(
+    r"\bminSdkVersion\s+(?:rootProject\.ext\.minSdkVersion|\d+)",
+    "minSdkVersion 24",
+    text,
+    count=1,
+)
+if min_sdk_count != 1:
+    raise SystemExit("Could not set Android minSdkVersion to 24.")
+
 # Guard against the exact regression that caused the first Publisher build to fail.
 signing_section = re.search(r"signingConfigs\s*\{(?P<body>.*?)\n\s*\}\s*\n\s*(?:buildTypes|defaultConfig|compileSdk)", text, re.S)
 if signing_section and "signingConfig signingConfigs.release" in signing_section.group("body"):
