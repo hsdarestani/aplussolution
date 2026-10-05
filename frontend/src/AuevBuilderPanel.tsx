@@ -34,6 +34,37 @@ const deDate = (value?: string) => {
 
 const apiRows = (data: any) => data?.results || data || [];
 
+const deDateInput = (value?: string) => (value ? deDate(value) : '');
+
+function GermanDateInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value?: string;
+  onChange: (value: string) => void;
+}) {
+  const isoValue = String(value || '');
+  return (
+    <IonInput
+      fill="outline"
+      type="text"
+      label={label}
+      labelPlacement="floating"
+      placeholder="TT.MM.JJJJ"
+      value={deDateInput(isoValue)}
+      readonly
+      inputMode="none"
+      data-aplus-picker-kind="date"
+      data-aplus-picker-value={isoValue}
+      data-aplus-picker-display="de-date"
+      onIonInput={(event) => onChange(String(event.detail.value || ''))}
+    />
+  );
+}
+
+
 export default function AuevBuilderPanel({ clients, onChanged }: Props) {
   const [clientId, setClientId] = useState('');
   const [start, setStart] = useState(() => {
@@ -306,22 +337,8 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
             {clients.map((client) => <IonSelectOption value={client.id} key={client.id}>{client.name}</IonSelectOption>)}
           </IonSelect>
 
-          <IonInput
-            fill="outline"
-            type="date"
-            label="Von"
-            labelPlacement="floating"
-            value={start}
-            onIonInput={(event) => setStart(String(event.detail.value || ''))}
-          />
-          <IonInput
-            fill="outline"
-            type="date"
-            label="Bis"
-            labelPlacement="floating"
-            value={end}
-            onIonInput={(event) => setEnd(String(event.detail.value || ''))}
-          />
+          <GermanDateInput label="Von" value={start} onChange={setStart} />
+          <GermanDateInput label="Bis" value={end} onChange={setEnd} />
 
           <IonSelect
             fill="outline"
@@ -334,14 +351,7 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
             <IonSelectOption value="new">Neue Vorlage new templ</IonSelectOption>
           </IonSelect>
 
-          <IonInput
-            fill="outline"
-            type="date"
-            label="Unterschriftsdatum"
-            labelPlacement="floating"
-            value={signatureDate}
-            onIonInput={(event) => setSignatureDate(String(event.detail.value || ''))}
-          />
+          <GermanDateInput label="Unterschriftsdatum" value={signatureDate} onChange={setSignatureDate} />
 
           <IonInput
             fill="outline"
@@ -458,22 +468,16 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
               {clients.map((client) => <IonSelectOption value={client.id} key={client.id}>{client.name}</IonSelectOption>)}
             </IonSelect>
 
-            <IonInput
-              fill="outline"
-              type="date"
+            <GermanDateInput
               label="Von"
-              labelPlacement="floating"
               value={editForm.start || ''}
-              onIonInput={(event) => setEditForm({ ...editForm, start: String(event.detail.value || '') })}
+              onChange={(value) => setEditForm({ ...editForm, start: value })}
             />
 
-            <IonInput
-              fill="outline"
-              type="date"
+            <GermanDateInput
               label="Bis"
-              labelPlacement="floating"
               value={editForm.end || ''}
-              onIonInput={(event) => setEditForm({ ...editForm, end: String(event.detail.value || '') })}
+              onChange={(value) => setEditForm({ ...editForm, end: value })}
             />
 
             <IonSelect
@@ -487,13 +491,10 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
               <IonSelectOption value="new">Neue Vorlage new templ</IonSelectOption>
             </IonSelect>
 
-            <IonInput
-              fill="outline"
-              type="date"
+            <GermanDateInput
               label="Unterschriftsdatum"
-              labelPlacement="floating"
               value={editForm.signature_date || ''}
-              onIonInput={(event) => setEditForm({ ...editForm, signature_date: String(event.detail.value || '') })}
+              onChange={(value) => setEditForm({ ...editForm, signature_date: value })}
             />
 
             <IonInput
@@ -544,9 +545,9 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
 
             {settingsClient && <div className="notice full">Leere Kundenfelder übernehmen automatisch den Standardwert.</div>}
 
-            <IonInput fill="outline" type="date" label="Erlaubnisdatum" labelPlacement="floating" value={settingsForm.permit_date || ''} onIonInput={(event) => setSettingsForm({ ...settingsForm, permit_date: event.detail.value })} />
-            <IonInput fill="outline" type="date" label="Datum der Rahmenvereinbarung" labelPlacement="floating" value={settingsForm.framework_date || ''} onIonInput={(event) => setSettingsForm({ ...settingsForm, framework_date: event.detail.value })} />
-            <IonInput fill="outline" type="date" label="Wirkung zum" labelPlacement="floating" value={settingsForm.effective_date || ''} onIonInput={(event) => setSettingsForm({ ...settingsForm, effective_date: event.detail.value })} />
+            <GermanDateInput label="Erlaubnisdatum" value={settingsForm.permit_date || ''} onChange={(value) => setSettingsForm({ ...settingsForm, permit_date: value })} />
+            <GermanDateInput label="Datum der Rahmenvereinbarung" value={settingsForm.framework_date || ''} onChange={(value) => setSettingsForm({ ...settingsForm, framework_date: value })} />
+            <GermanDateInput label="Wirkung zum" value={settingsForm.effective_date || ''} onChange={(value) => setSettingsForm({ ...settingsForm, effective_date: value })} />
             <IonInput fill="outline" label="Erforderliche Qualifikation" labelPlacement="floating" value={settingsForm.required_qualification || ''} placeholder={settingsClient ? settingsDefaults.required_qualification || '' : ''} onIonInput={(event) => setSettingsForm({ ...settingsForm, required_qualification: event.detail.value })} />
             <IonInput fill="outline" label="Vorgesehene Tätigkeit" labelPlacement="floating" value={settingsForm.intended_activity || ''} placeholder={settingsClient ? settingsDefaults.intended_activity || '' : ''} onIonInput={(event) => setSettingsForm({ ...settingsForm, intended_activity: event.detail.value })} />
             <IonTextarea fill="outline" label="Vertragspartner Text" labelPlacement="floating" value={settingsForm.client_contract_text || ''} placeholder="Leer lassen für Kundenname plus Adresse aus Stammdaten" onIonInput={(event) => setSettingsForm({ ...settingsForm, client_contract_text: event.detail.value })} />
