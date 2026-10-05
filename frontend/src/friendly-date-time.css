@@ -83,6 +83,46 @@ ion-modal.friendly-picker-modal {
   flex: 0 0 auto;
 }
 
+.friendly-picker-jump {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(110px, .8fr);
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.friendly-picker-jump label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.friendly-picker-jump span {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  opacity: .58;
+}
+
+.friendly-picker-jump select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid color-mix(in srgb, var(--ion-color-primary, #155eef) 26%, #cfd7e6);
+  border-radius: 12px;
+  background: var(--ion-background-color, #fff);
+  color: var(--ion-text-color, #17233b);
+  padding: 0 38px 0 12px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.friendly-picker-jump select:focus {
+  outline: 0;
+  border-color: var(--ion-color-primary, #155eef);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ion-color-primary, #155eef) 12%, transparent);
+}
+
 .friendly-picker-calendar {
   flex: 1 1 auto;
   min-height: 0;
@@ -106,6 +146,18 @@ ion-modal.friendly-picker-modal {
   flex: 0 0 auto;
   padding-top: 4px;
   background: var(--ion-background-color, #fff);
+}
+
+@media (max-width: 420px) {
+  .friendly-picker-jump {
+    grid-template-columns: 1fr 112px;
+    gap: 8px;
+  }
+
+  .friendly-picker-jump select {
+    min-height: 40px;
+    padding-left: 10px;
+  }
 }
 
 @media (min-width: 700px) {
