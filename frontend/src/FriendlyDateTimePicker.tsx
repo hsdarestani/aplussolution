@@ -31,6 +31,8 @@ const friendlySelector = [
   'input[type="datetime-local"]',
   'input[type="month"]',
   'input[type="week"]',
+  'ion-input[data-aplus-picker-kind]',
+  'input[data-aplus-picker-kind]',
 ].join(',');
 
 function isIonInput(element: HTMLElement) {
@@ -38,6 +40,8 @@ function isIonInput(element: HTMLElement) {
 }
 
 function currentValue(element: HTMLElement) {
+  const stored = element.dataset.aplusPickerValue;
+  if (stored !== undefined) return stored;
   if (isIonInput(element)) return String((element as any).value ?? element.getAttribute('value') ?? '');
   return element instanceof HTMLInputElement ? element.value : '';
 }
@@ -108,13 +112,21 @@ function setNativeReactValue(input: HTMLInputElement, next: string) {
   input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
 }
 
+function displayValue(element: HTMLElement, next: string) {
+  if (element.dataset.aplusPickerDisplay !== 'de-date' || !next) return next;
+  const match = /^(\\d{4})-(\\d{2})-(\\d{2})/.exec(next);
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : next;
+}
+
 function emitValue(element: HTMLElement, next: string) {
+  const visible = displayValue(element, next);
+  if (element.hasAttribute('data-aplus-picker-value')) element.dataset.aplusPickerValue = next;
   if (isIonInput(element)) {
-    (element as any).value = next;
+    (element as any).value = visible;
     element.dispatchEvent(new CustomEvent('ionInput', { detail: { value: next }, bubbles: true, composed: true }));
     element.dispatchEvent(new CustomEvent('ionChange', { detail: { value: next }, bubbles: true, composed: true }));
   } else if (element instanceof HTMLInputElement) {
-    setNativeReactValue(element, next);
+    setNativeReactValue(element, visible);
   }
   window.requestAnimationFrame(() => enhanceAll());
 }
@@ -126,6 +138,23 @@ function minuteValues(step?: string) {
   if (minutes < 1 || minutes > 30 || 60 % minutes !== 0) return undefined;
   return Array.from({ length: 60 / minutes }, (_, index) => index * minutes).join(',');
 }
+
+const germanMonths = [
+  'Januar',
+  'Februar',
+  'März',
+  'April',
+  'Mai',
+  'Juni',
+  'Juli',
+  'August',
+  'September',
+  'Oktober',
+  'November',
+  'Dezember',
+];
+
+const pad2 = (value: number) => String(value).padStart(2, '0');
 
 export default function FriendlyDateTimePicker() {
   const [target, setTarget] = useState<PickerTarget>();
@@ -210,6 +239,23 @@ export default function FriendlyDateTimePicker() {
 
   const icon = target?.kind === 'time' ? timeOutline : calendarOutline;
   const minutes = target && (target.kind === 'time' || target.kind === 'datetime-local') ? minuteValues(target.step) : undefined;
+  const directDateParts = useMemo(() => {
+    const fallback = new Date();
+    const match = /^(\\d{4})-(\\d{2})-(\\d{2})/.exec(draft || '');
+    return {
+      year: Number(match?.[1] || fallback.getFullYear()),
+      month: Number(match?.[2] || fallback.getMonth() + 1),
+      day: Number(match?.[3] || fallback.getDate()),
+    };
+  }, [draft]);
+  const directYearOptions = useMemo(() => {
+    if (!target || (target.kind !== 'date' && target.kind !== 'month')) return [];
+    const minYear = Number((target.min || '1900').slice(0, 4)) || 1900;
+    const maxYear = Number((target.max || '2100').slice(0, 4)) || 2100;
+    const lower = Math.min(minYear, maxYear);
+    const upper = Math.max(minYear, maxYear);
+    return Array.from({ length: upper - lower + 1 }, (_, index) => upper - index);
+  }, [target]);
 
   function close() {
     setTarget(undefined);
@@ -230,6 +276,16 @@ export default function FriendlyDateTimePicker() {
   function setQuick(offset: number) {
     if (!target) return;
     setDraft(quickPickerValue(target.kind, offset));
+  }
+
+  function setCalendarMonthOrYear(part: 'month' | 'year', raw: string) {
+    if (!target || (target.kind !== 'date' && target.kind !== 'month')) return;
+    const year = part === 'year' ? Number(raw) : directDateParts.year;
+    const month = part === 'month' ? Number(raw) : directDateParts.month;
+    if (!year || !month) return;
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const day = target.kind === 'month' ? 1 : Math.min(Math.max(directDateParts.day || 1, 1), lastDay);
+    setDraft(`${String(year).padStart(4, '0')}-${pad2(month)}-${pad2(day)}`);
   }
 
   return (
@@ -262,6 +318,31 @@ export default function FriendlyDateTimePicker() {
                 <IonButton size="small" fill="outline" onClick={() => setQuick(1)}>Morgen</IonButton>
               </>
             )}
+          </div>
+        )}
+
+        {!!target && (target.kind === 'date' || target.kind === 'month') && (
+          <div className="friendly-picker-jump" aria-label="Monat und Jahr direkt auswählen">
+            <label>
+              <span>Monat</span>
+              <select
+                aria-label="Monat direkt auswählen"
+                value={directDateParts.month}
+                onChange={(event) => setCalendarMonthOrYear('month', event.currentTarget.value)}
+              >
+                {germanMonths.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>Jahr</span>
+              <select
+                aria-label="Jahr direkt auswählen"
+                value={directDateParts.year}
+                onChange={(event) => setCalendarMonthOrYear('year', event.currentTarget.value)}
+              >
+                {directYearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+              </select>
+            </label>
           </div>
         )}
 
