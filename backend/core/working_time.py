@@ -506,10 +506,12 @@ def export_csv(queryset) -> HttpResponse:
     statements = _statement_map(rows)
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';')
+    # Preserve the historical first eleven columns for downstream payroll
+    # workbooks; append richer audit fields instead of shifting old indexes.
     writer.writerow([
-        'Mitarbeiter', 'Beschäftigung', 'Monat', 'Ist-Stunden', 'Soll-Stunden',
-        'Bezahlte Stunden gesamt', 'Zusätzlich ausgezahlte Stunden', 'Monatssaldo',
-        'Übertrag', 'Saldo kumuliert', 'Stundensatz', 'Brutto Basis',
+        'Mitarbeiter', 'Monat', 'Ist-Stunden', 'Soll-Stunden', 'Plusstunden',
+        'Übertrag', 'Ausbezahlt', 'Korrektur', 'Saldo', 'Stundensatz', 'Brutto',
+        'Beschäftigung', 'Bezahlte Stunden gesamt', 'Monatssaldo',
         'Nachtstunden', 'Samstagsstunden', 'Sonntagsstunden', 'Zuschläge',
         'Brutto inkl. Zuschläge', 'Lexware überwiesen', 'Lexware Zahlungsdatum',
     ])
@@ -518,11 +520,13 @@ def export_csv(queryset) -> HttpResponse:
         data = record_dict(row, statement)
         payroll = data.get('payroll_statement') or {}
         writer.writerow([
-            data['employee_name'], data['employment_type'], data['year_month'],
-            data['ist_hours'], data['soll_hours'], data['paid_total_hours'], data['paid_hours'],
-            data['monthly_balance_hours'], data['carryover_previous'], data['saldo_cumulative'],
-            data['hourly_rate'], data['gross_amount'], data['night_hours'], data['saturday_hours'],
-            data['sunday_hours'], data['surcharge_amount'], data['gross_with_surcharges'],
+            data['employee_name'], data['year_month'], data['ist_hours'],
+            data['soll_hours'], data['difference_hours'], data['carryover_previous'],
+            data['paid_hours'], data['manual_adjustment'], data['saldo_cumulative'],
+            data['hourly_rate'], data['gross_amount'],
+            data['employment_type'], data['paid_total_hours'], data['monthly_balance_hours'],
+            data['night_hours'], data['saturday_hours'], data['sunday_hours'],
+            data['surcharge_amount'], data['gross_with_surcharges'],
             payroll.get('transferred_amount') or '', payroll.get('payment_date') or '',
         ])
     response = HttpResponse('\ufeff' + output.getvalue(), content_type='text/csv; charset=utf-8')
@@ -537,9 +541,9 @@ def export_xlsx(queryset) -> HttpResponse:
     ws = wb.active
     ws.title = 'Arbeitszeitkonto'
     headers = [
-        'Mitarbeiter', 'Beschäftigung', 'Monat', 'Ist-Stunden', 'Soll-Stunden',
-        'Bezahlte Stunden gesamt', 'Zusätzlich ausgezahlt', 'Monatssaldo',
-        'Übertrag', 'Saldo kumuliert', 'Stundensatz', 'Brutto Basis',
+        'Mitarbeiter', 'Monat', 'Ist-Stunden', 'Soll-Stunden', 'Plusstunden',
+        'Übertrag', 'Ausbezahlt', 'Korrektur', 'Saldo', 'Stundensatz', 'Brutto',
+        'Beschäftigung', 'Bezahlte Stunden gesamt', 'Monatssaldo',
         'Nachtstunden', 'Samstagsstunden', 'Sonntagsstunden', 'Zuschläge',
         'Brutto inkl. Zuschläge', 'Lexware überwiesen', 'Lexware Zahlungsdatum',
     ]
@@ -548,13 +552,15 @@ def export_xlsx(queryset) -> HttpResponse:
         data = record_dict(row, statements.get((str(row.worker_id), row.year_month)))
         payroll = data.get('payroll_statement') or {}
         ws.append([
-            data['employee_name'], data['employment_type'], data['year_month'],
-            float(data['ist_hours']), float(data['soll_hours']), float(data['paid_total_hours']),
-            float(data['paid_hours']), float(data['monthly_balance_hours']),
-            float(data['carryover_previous']), float(data['saldo_cumulative']),
-            float(data['hourly_rate']), float(data['gross_amount']), float(data['night_hours']),
-            float(data['saturday_hours']), float(data['sunday_hours']), float(data['surcharge_amount']),
-            float(data['gross_with_surcharges']),
+            data['employee_name'], data['year_month'], float(data['ist_hours']),
+            float(data['soll_hours']), float(data['difference_hours']),
+            float(data['carryover_previous']), float(data['paid_hours']),
+            float(data['manual_adjustment']), float(data['saldo_cumulative']),
+            float(data['hourly_rate']), float(data['gross_amount']),
+            data['employment_type'], float(data['paid_total_hours']),
+            float(data['monthly_balance_hours']), float(data['night_hours']),
+            float(data['saturday_hours']), float(data['sunday_hours']),
+            float(data['surcharge_amount']), float(data['gross_with_surcharges']),
             float(payroll['transferred_amount']) if payroll.get('transferred_amount') else None,
             payroll.get('payment_date') or '',
         ])
