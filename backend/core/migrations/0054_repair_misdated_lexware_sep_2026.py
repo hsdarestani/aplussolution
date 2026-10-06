@@ -88,6 +88,7 @@ def repair_misdated_lexware_import(apps, schema_editor):
 
     source_statements = list(PayrollStatement.objects.filter(period=SOURCE_PERIOD))
     for source in source_statements:
+        worker_id = worker_id
         raw_items = list(source.raw_data or [])
         moved = [
             item for item in raw_items
@@ -102,7 +103,7 @@ def repair_misdated_lexware_import(apps, schema_editor):
         ]
 
         target, _ = PayrollStatement.objects.get_or_create(
-            worker_id=source.worker_id,
+            worker_id=worker_id,
             period=TARGET_PERIOD,
             defaults={'source': 'lexware_import'},
         )
@@ -143,11 +144,11 @@ def repair_misdated_lexware_import(apps, schema_editor):
         if latest_payslip and latest_payslip.get('compensation_type') == 'hourly':
             quantity = _dec(latest_payslip.get('quantity'))
             september_record = WorkingTimeAccountRecord.objects.filter(
-                worker_id=source.worker_id,
+                worker_id=worker_id,
                 year_month=TARGET_PERIOD,
             ).first()
             october_record = WorkingTimeAccountRecord.objects.filter(
-                worker_id=source.worker_id,
+                worker_id=worker_id,
                 year_month=SOURCE_PERIOD,
             ).first()
 
@@ -159,7 +160,7 @@ def repair_misdated_lexware_import(apps, schema_editor):
                 october_record.paid_total_hours = Decimal('0.00')
                 october_record.save(update_fields=['paid_total_hours'])
 
-        _recompute_time_chain(WorkingTimeAccountRecord, source.worker_id)
+        _recompute_time_chain(WorkingTimeAccountRecord, worker_id)
 
 
 def noop_reverse(apps, schema_editor):
