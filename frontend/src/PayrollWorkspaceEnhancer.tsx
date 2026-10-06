@@ -443,10 +443,12 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
       const form = new FormData();
       form.append('file', masterDataFile);
       const result: any = await api('workers/master-data/import/', { method: 'POST', body: form });
+      const rebuilt: any = await api('working-time/rebuild-all/', { method: 'POST', body: '{}' });
       await loadRows();
       const imported = result?.employees?.length || 0;
       const unmatched = result?.unmatched?.length || 0;
-      setMessage(`Lexware Stammdaten gespeichert: ${imported} Mitarbeiter. ${unmatched} nicht zugeordnet.`);
+      const rebuiltCount = rebuilt?.records_count || 0;
+      setMessage(`Lexware Stammdaten gespeichert: ${imported} Mitarbeiter. ${unmatched} nicht zugeordnet. Arbeitszeitkonten automatisch neu berechnet: ${rebuiltCount}.`);
       setMasterDataFile(null);
     } catch (error: any) {
       setMessage(error?.message || 'Lexware Stammdaten konnten nicht importiert werden.');
@@ -575,6 +577,8 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
           const expanded = expandedId === row.id;
           const detail = details[row.id];
           const statement = row.payroll_statement;
+          const payrollMasterMismatch = statement?.lexware_compensation_type === 'salary'
+            && row.balance_basis !== 'soll_salary';
           return <article className={`payroll-record-card ${expanded ? 'is-expanded' : ''}`} key={row.id}>
             <header>
               <div className="payroll-record-month"><span>{monthLabel(row.year_month)}</span><small>{employmentLabel(row.employment_type)}</small></div>
@@ -588,6 +592,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
               </div>
             </header>
 
+            {payrollMasterMismatch && <div className="payroll-warning">Lexware weist Gehalt aus, aber die A+ Stammdaten sind noch nicht auf Gehalt/Sollzeit umgestellt. Lexware Stammdaten übernehmen; die Historie wird danach automatisch neu berechnet.</div>}
             {row.minijob_warning && <div className="payroll-warning">Prüfung nötig: Grundbrutto liegt über {money(row.minijob_limit)}. Die Minijob Einstufung wird nicht automatisch geändert.</div>}
 
             <div className="payroll-metrics">
