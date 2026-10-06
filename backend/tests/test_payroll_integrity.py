@@ -189,6 +189,7 @@ def test_fifty_worked_thirty_eight_paid_leaves_twelve_hours_credit(
     assert record.soll_hours == Decimal('38.00')
     assert record.paid_total_hours == Decimal('38.00')
     assert record.saldo_cumulative == Decimal('12.00')
+    assert record.employment_type_snapshot == 'minijob'
     assert len(record.raw_entries) == 5
     assert all(item['client_name'] == company.name for item in record.raw_entries)
     assert all(item['worked_minutes'] == 600 for item in record.raw_entries)
@@ -326,3 +327,63 @@ def test_each_employee_history_starts_with_first_authoritative_work_month(
 
     assert first_worker_months[0] == date(2026, 1, 1)
     assert second_worker_months == [date(2026, 3, 1)]
+
+
+
+@pytest.mark.django_db
+def test_closed_month_keeps_historical_contract_and_rate_snapshot(
+    worker_user, company, location, position
+):
+    worker = worker_user.worker_profile
+    worker.monthly_hours = Decimal('38.00')
+    worker.tariff_hourly_rate = Decimal('15.00')
+    worker.employment_type = 'minijob'
+    worker.save(update_fields=[
+        'monthly_hours', 'tariff_hourly_rate', 'employment_type', 'updated_at'
+    ])
+
+    month = date(2026, 1, 1)
+    start = timezone.make_aware(
+        datetime.combine(month + timedelta(days=4), time(8, 0)),
+        timezone.get_current_timezone(),
+    )
+    shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        worker=worker,
+        starts_at=start,
+        ends_at=start + timedelta(hours=8),
+        break_minutes=0,
+        status=Shift.Status.CONFIRMED,
+    )
+    TimeEntry.objects.create(
+        worker=worker,
+        shift=shift,
+        clock_in=start,
+        clock_out=start + timedelta(hours=8),
+        approved=True,
+    )
+
+    sync_working_time(month, date(2026, 1, 31))
+    record = WorkingTimeAccountRecord.objects.get(worker=worker, year_month=month)
+    assert record.soll_hours == Decimal('38.00')
+    assert record.hourly_rate == Decimal('15.00')
+    assert record.employment_type_snapshot == 'minijob'
+
+    worker.monthly_hours = Decimal('80.00')
+    worker.tariff_hourly_rate = Decimal('20.00')
+    worker.employment_type = 'teilzeit'
+    worker.save(update_fields=[
+        'monthly_hours', 'tariff_hourly_rate', 'employment_type', 'updated_at'
+    ])
+    setting = WorkingTimeSetting.objects.get(worker=worker)
+    setting.monthly_limit = Decimal('80.00')
+    setting.hourly_rate = Decimal('20.00')
+    setting.save(update_fields=['monthly_limit', 'hourly_rate', 'updated_at'])
+
+    sync_working_time(month, date(2026, 1, 31))
+    record.refresh_from_db()
+    assert record.soll_hours == Decimal('38.00')
+    assert record.hourly_rate == Decimal('15.00')
+    assert record.employment_type_snapshot == 'minijob'
