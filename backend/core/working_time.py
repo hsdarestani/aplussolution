@@ -311,6 +311,8 @@ def sync_working_time(start: date, end: date, client=None) -> WorkingTimeSyncLog
 def _paid_total(row: WorkingTimeAccountRecord) -> Decimal:
     if row.paid_total_hours is not None:
         return dec(row.paid_total_hours)
+    if _compensation_type(row.worker) == 'salary':
+        return Decimal('0.00')
     return (dec(row.soll_hours) + dec(row.paid_hours)).quantize(TWO)
 
 
