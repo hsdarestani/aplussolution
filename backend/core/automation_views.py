@@ -39,6 +39,8 @@ from .working_time import (
     settings_rows,
     update_record,
     worker_pdf,
+    worker_docx,
+    lexware_reconciliation_docx,
 )
 
 
@@ -556,6 +558,41 @@ def worktime_pdf(request, worker_id):
     queryset = WorkingTimeAccountRecord.objects.filter(worker=worker).order_by('year_month')
     response = HttpResponse(worker_pdf(worker, queryset), content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="arbeitszeit-lohnkonto-{worker.employee_number}.pdf"'
+    return response
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminOrManager])
+def worktime_docx(request, worker_id):
+    worker = get_object_or_404(WorkerProfile.objects.select_related('user'), pk=worker_id)
+    queryset = WorkingTimeAccountRecord.objects.filter(worker=worker).order_by('year_month')
+    response = HttpResponse(
+        worker_docx(worker, queryset),
+        content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    )
+    response['Content-Disposition'] = f'attachment; filename="01_Arbeitszeitnachweis_{worker.employee_number}.docx"'
+    return response
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminOrManager])
+def worktime_lexware_docx(request):
+    period_text = str(request.query_params.get('month') or '').strip()
+    try:
+        period = datetime.strptime(period_text, '%Y-%m').date().replace(day=1)
+    except ValueError:
+        return Response({'detail': 'Bitte einen Monat im Format JJJJ-MM auswählen.'}, status=400)
+    queryset = WorkingTimeAccountRecord.objects.filter(year_month=period).order_by(
+        'worker__user__last_name', 'worker__user__first_name'
+    )
+    worker_id = request.query_params.get('worker')
+    if worker_id:
+        queryset = queryset.filter(worker_id=worker_id)
+    response = HttpResponse(
+        lexware_reconciliation_docx(queryset, period),
+        content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    )
+    response['Content-Disposition'] = f'attachment; filename="03_Lexware_Abgleich_{period.strftime("%Y-%m")}.docx"'
     return response
 
 
