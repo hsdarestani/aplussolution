@@ -245,14 +245,24 @@ def _find_worker(row: dict, matchers):
 @permission_classes([IsAdminOrManager])
 @parser_classes([MultiPartParser, FormParser])
 def lexware_bank_import(request):
-    """One-time Lexware Office bank export import.
+    """Import Lexware evidence for one payroll period.
 
-    The selected payroll period is authoritative because salary payments can be
-    booked in a later calendar month than the payroll period they belong to.
+    Supported evidence:
+    - bank CSV/ZIP exports
+    - Lexware Zahlungsliste PDF
+    - Lexware Lohnabrechnungen PDF
+
+    The selected payroll period remains authoritative. Payment-list amounts are
+    treated as actual payout evidence. Payslips provide gross/net and, for
+    hourly Lohn rows, paid hours and the historical hourly rate. A fixed Gehalt
+    is never converted into hours automatically.
     """
-    upload = request.FILES.get('file')
-    if not upload:
-        return Response({'detail': 'Bitte Lexware CSV oder ZIP auswählen.'}, status=400)
+    uploads = request.FILES.getlist('files')
+    if not uploads:
+        single = request.FILES.get('file')
+        uploads = [single] if single else []
+    if not uploads:
+        return Response({'detail': 'Bitte Lexware CSV, ZIP oder PDF auswählen.'}, status=400)
 
     period_text = str(request.data.get('period') or '').strip()
     if not re.fullmatch(r'\d{4}-\d{2}', period_text):
@@ -262,46 +272,105 @@ def lexware_bank_import(request):
     except ValueError:
         return Response({'detail': 'Ungültiger Abrechnungsmonat.'}, status=400)
 
-    rows = _bank_rows(upload)
     matchers = _employee_matchers()
     grouped = defaultdict(list)
+    source_files = defaultdict(set)
     unmatched = []
+    parsed_rows = 0
 
-    for row in rows:
-        worker = _find_worker(row, matchers)
-        amount = _parse_money(_row_value(row, (
-            'Betrag', 'Umsatz', 'Umsatz (ohne Soll/Haben-Kz)', 'Basis-Umsatz',
-            'Amount', 'Betrag EUR', 'Wert', 'Transaction amount',
-        )))
-        if not worker or amount in (None, Decimal('0')):
-            if any(str(value or '').strip() for value in row.values()):
-                unmatched.append({
-                    'file': row.get('_source_file', ''),
-                    'text': str(_row_value(row, ('Verwendungszweck', 'Buchungstext', 'Beschreibung', 'Text')) or '')[:180],
-                })
+    for upload in uploads:
+        name = str(getattr(upload, 'name', '') or 'lexware')
+        lower_name = name.lower()
+
+        if lower_name.endswith('.pdf') or str(getattr(upload, 'content_type', '')).lower() == 'application/pdf':
+            payload = upload.read()
+            try:
+                document_type, pdf_rows = parse_lexware_pdf(payload)
+            except Exception as exc:
+                unmatched.append({'file': name, 'text': f'PDF konnte nicht gelesen werden: {exc}'[:180]})
+                continue
+
+            if document_type == 'unknown':
+                unmatched.append({'file': name, 'text': 'Unbekannter Lexware PDF Typ'})
+                continue
+
+            parsed_rows += len(pdf_rows)
+            for row in pdf_rows:
+                worker = _find_worker({'employee_name': row.get('employee_name', '')}, matchers)
+                if not worker:
+                    unmatched.append({
+                        'file': name,
+                        'text': str(row.get('employee_name') or 'Unbekannter Mitarbeiter')[:180],
+                    })
+                    continue
+
+                item = dict(row)
+                item['source_file'] = name
+                item['source_type'] = (
+                    'lexware_payslip_pdf'
+                    if row.get('kind') == 'payslip'
+                    else 'lexware_zahlungsliste_pdf'
+                )
+                key_source = '|'.join([
+                    name,
+                    period_text,
+                    str(row.get('kind') or ''),
+                    str(row.get('employee_name') or ''),
+                    str(row.get('personal_number') or ''),
+                    str(row.get('amount') or ''),
+                    str(row.get('gross_amount') or ''),
+                    str(row.get('payout_amount') or ''),
+                ])
+                item['key'] = hashlib.sha256(key_source.encode('utf-8')).hexdigest()
+                grouped[worker.id].append(item)
+                source_files[worker.id].add(name)
             continue
 
-        payment_date = _parse_bank_date(_row_value(row, (
-            'Buchungsdatum', 'Belegdatum', 'Datum', 'Wertstellung', 'Date', 'Transaction date',
-        )), period)
-        purpose = str(_row_value(row, (
-            'Verwendungszweck', 'Buchungstext', 'Beschreibung', 'Text', 'Purpose',
-            'Auftraggeber/Empfänger', 'Zahlungspflichtiger/Zahlungsempfänger',
-        )) or '')
-        recipient = str(_row_value(row, (
-            'Empfänger', 'Zahlungsempfänger', 'Begünstigter', 'Name', 'Recipient',
-            'Auftraggeber/Empfänger', 'Zahlungspflichtiger/Zahlungsempfänger',
-        )) or '')
-        amount = abs(amount).quantize(Decimal('0.01'))
-        key_source = f'{row.get("_source_file","")}|{payment_date}|{amount}|{recipient}|{purpose}'
-        grouped[worker.id].append({
-            'key': hashlib.sha256(key_source.encode('utf-8')).hexdigest(),
-            'amount': str(amount),
-            'payment_date': payment_date.isoformat() if payment_date else None,
-            'recipient': recipient,
-            'purpose': purpose,
-            'source_file': row.get('_source_file', ''),
-        })
+        try:
+            rows = _bank_rows(upload)
+        except Exception as exc:
+            unmatched.append({'file': name, 'text': f'Datei konnte nicht gelesen werden: {exc}'[:180]})
+            continue
+
+        parsed_rows += len(rows)
+        for row in rows:
+            worker = _find_worker(row, matchers)
+            amount = _parse_money(_row_value(row, (
+                'Betrag', 'Umsatz', 'Umsatz (ohne Soll/Haben-Kz)', 'Basis-Umsatz',
+                'Amount', 'Betrag EUR', 'Wert', 'Transaction amount',
+            )))
+            if not worker or amount in (None, Decimal('0')):
+                if any(str(value or '').strip() for value in row.values()):
+                    unmatched.append({
+                        'file': row.get('_source_file', name),
+                        'text': str(_row_value(row, ('Verwendungszweck', 'Buchungstext', 'Beschreibung', 'Text')) or '')[:180],
+                    })
+                continue
+
+            payment_date = _parse_bank_date(_row_value(row, (
+                'Buchungsdatum', 'Belegdatum', 'Datum', 'Wertstellung', 'Date', 'Transaction date',
+            )), period)
+            purpose = str(_row_value(row, (
+                'Verwendungszweck', 'Buchungstext', 'Beschreibung', 'Text', 'Purpose',
+                'Auftraggeber/Empfänger', 'Zahlungspflichtiger/Zahlungsempfänger',
+            )) or '')
+            recipient = str(_row_value(row, (
+                'Empfänger', 'Zahlungsempfänger', 'Begünstigter', 'Name', 'Recipient',
+                'Auftraggeber/Empfänger', 'Zahlungspflichtiger/Zahlungsempfänger',
+            )) or '')
+            amount = abs(amount).quantize(Decimal('0.01'))
+            key_source = f'{row.get("_source_file",name)}|{payment_date}|{amount}|{recipient}|{purpose}'
+            grouped[worker.id].append({
+                'kind': 'payment',
+                'key': hashlib.sha256(key_source.encode('utf-8')).hexdigest(),
+                'amount': str(amount),
+                'payment_date': payment_date.isoformat() if payment_date else None,
+                'recipient': recipient,
+                'purpose': purpose,
+                'source_file': row.get('_source_file', name),
+                'source_type': 'lexware_bank_export',
+            })
+            source_files[worker.id].add(name)
 
     imported = []
     for worker_id, items in grouped.items():
@@ -309,46 +378,105 @@ def lexware_bank_import(request):
         statement, _ = PayrollStatement.objects.get_or_create(
             worker=worker,
             period=period,
-            defaults={'source': 'lexware_bank_export'},
+            defaults={'source': 'lexware_import'},
         )
         existing = list(statement.raw_data or [])
         by_key = {str(item.get('key')): item for item in existing if item.get('key')}
         for item in items:
             by_key[item['key']] = item
         merged = list(by_key.values())
-        total = sum((dec(item.get('amount')) for item in merged), Decimal('0.00')).quantize(Decimal('0.01'))
+
+        payment_items = [
+            item for item in merged
+            if item.get('kind') == 'payment'
+            or (not item.get('kind') and item.get('amount') is not None)
+        ]
+        payslip_items = [item for item in merged if item.get('kind') == 'payslip']
+        latest_payslip = payslip_items[-1] if payslip_items else None
+
+        if payment_items:
+            total = sum((dec(item.get('amount')) for item in payment_items), Decimal('0.00')).quantize(Decimal('0.01'))
+            statement.transferred_amount = total
         dates = [
             _parse_bank_date(item.get('payment_date'), period)
-            for item in merged if item.get('payment_date')
+            for item in payment_items if item.get('payment_date')
         ]
-        statement.transferred_amount = total
-        statement.payment_date = max((value for value in dates if value), default=statement.payment_date)
-        statement.source = 'lexware_bank_export'
-        statement.source_reference = str(getattr(upload, 'name', '') or '')[:255]
+        if dates:
+            statement.payment_date = max(value for value in dates if value)
+
+        if latest_payslip:
+            statement.gross_amount = _parse_money(latest_payslip.get('gross_amount'))
+            statement.net_amount = _parse_money(latest_payslip.get('net_amount'))
+
+        source_types = {str(item.get('source_type') or '') for item in merged}
+        if 'lexware_payslip_pdf' in source_types and 'lexware_zahlungsliste_pdf' in source_types:
+            statement.source = 'lexware_pdf_bundle'
+        elif 'lexware_payslip_pdf' in source_types:
+            statement.source = 'lexware_payslip_pdf'
+        elif 'lexware_zahlungsliste_pdf' in source_types:
+            statement.source = 'lexware_zahlungsliste_pdf'
+        elif 'lexware_bank_export' in source_types:
+            statement.source = 'lexware_bank_export'
+        else:
+            statement.source = 'lexware_import'
+
+        current_refs = sorted(source_files.get(worker_id) or [])
+        if current_refs:
+            statement.source_reference = ', '.join(current_refs)[:255]
         statement.raw_data = merged
         statement.save(update_fields=[
-            'transferred_amount', 'payment_date', 'source', 'source_reference',
-            'raw_data', 'updated_at',
+            'gross_amount', 'net_amount', 'transferred_amount', 'payment_date',
+            'source', 'source_reference', 'raw_data', 'updated_at',
         ])
+
+        auto_paid_hours = None
+        lexware_hourly_rate = None
+        compensation_type = ''
+        payout_amount = None
+        supplements = []
+        if latest_payslip:
+            compensation_type = str(latest_payslip.get('compensation_type') or '')
+            payout_amount = latest_payslip.get('payout_amount')
+            supplements = latest_payslip.get('supplements') or []
+            if compensation_type == 'hourly' and latest_payslip.get('quantity') is not None:
+                auto_paid_hours = max(Decimal('0'), dec(latest_payslip.get('quantity')))
+                lexware_hourly_rate = max(Decimal('0'), dec(latest_payslip.get('hourly_rate')))
+                record = WorkingTimeAccountRecord.objects.filter(
+                    worker=worker,
+                    year_month=period,
+                ).first()
+                if record:
+                    update_record(record, paid_total_hours=auto_paid_hours)
+
         imported.append({
             'worker_id': str(worker.id),
             'employee_name': str(worker.user),
             'period': period_text,
-            'transferred_amount': str(total),
-            'transactions': len(merged),
+            'transferred_amount': str(statement.transferred_amount) if statement.transferred_amount is not None else None,
+            'gross_amount': str(statement.gross_amount) if statement.gross_amount is not None else None,
+            'net_amount': str(statement.net_amount) if statement.net_amount is not None else None,
+            'payout_amount': payout_amount,
+            'compensation_type': compensation_type,
+            'paid_hours': str(auto_paid_hours) if auto_paid_hours is not None else None,
+            'hourly_rate': str(lexware_hourly_rate) if lexware_hourly_rate is not None else None,
+            'supplements': supplements,
+            'evidence_items': len(merged),
         })
 
-    audit(request, 'payroll.lexware_bank_imported', request.user, {
+    audit(request, 'payroll.lexware_imported', request.user, {
         'period': period_text,
         'employees': len(imported),
-        'rows': len(rows),
+        'rows': parsed_rows,
+        'files': len(uploads),
         'unmatched': len(unmatched),
     })
     return Response({
         'status': 'ok',
         'period': period_text,
-        'rows': len(rows),
+        'files': len(uploads),
+        'rows': parsed_rows,
         'employees': imported,
         'unmatched_count': len(unmatched),
         'unmatched_preview': unmatched[:20],
     })
+
