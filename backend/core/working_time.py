@@ -720,6 +720,285 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
     return buffer.getvalue()
 
 
+def _docx_bytes(document: Document) -> bytes:
+    buffer = io.BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+def _docx_style(document: Document):
+    normal = document.styles['Normal']
+    normal.font.name = 'Arial'
+    normal.font.size = Pt(9)
+    for section in document.sections:
+        section.top_margin = Cm(1.4)
+        section.bottom_margin = Cm(1.4)
+        section.left_margin = Cm(1.4)
+        section.right_margin = Cm(1.4)
+
+
+def _docx_title(document: Document, title: str, subtitle: str = ''):
+    paragraph = document.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = paragraph.add_run(title)
+    run.bold = True
+    run.font.size = Pt(18)
+    if subtitle:
+        sub = document.add_paragraph()
+        sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = sub.add_run(subtitle)
+        r.bold = True
+        r.font.size = Pt(10)
+
+
+def _docx_table(document: Document, headers: list[str], rows: list[list[Any]]):
+    table = document.add_table(rows=1, cols=len(headers))
+    table.style = 'Table Grid'
+    table.autofit = True
+    for index, header in enumerate(headers):
+        cell = table.rows[0].cells[index]
+        cell.text = str(header)
+        for run in cell.paragraphs[0].runs:
+            run.bold = True
+            run.font.size = Pt(8)
+    for row in rows:
+        cells = table.add_row().cells
+        for index, value in enumerate(row):
+            cells[index].text = '' if value is None else str(value)
+            for paragraph in cells[index].paragraphs:
+                for run in paragraph.runs:
+                    run.font.size = Pt(8)
+    return table
+
+
+def _worker_master_data(worker: WorkerProfile) -> dict:
+    try:
+        return dict(worker.master_data.data or {})
+    except Exception:
+        master = EmployeeMasterData.objects.filter(worker=worker).first()
+        return dict(master.data or {}) if master else {}
+
+
+def worker_docx(worker: WorkerProfile, queryset) -> bytes:
+    rows = list(queryset.select_related('worker__user'))
+    statements = _statement_map(rows)
+    master = _worker_master_data(worker)
+    document = Document()
+    _docx_style(document)
+    section = document.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width, section.page_height = section.page_height, section.page_width
+
+    _docx_title(
+        document,
+        'Arbeitszeitnachweis und Lohnkonto',
+        f'{worker.user} · {master.get("employment_type_lexware") or worker.get_employment_type_display()}',
+    )
+
+    info_rows = [
+        ['Eintritt', master.get('entry_date') or ''],
+        ['Beschäftigung', master.get('employment_type_lexware') or worker.get_employment_type_display()],
+        ['Vergütung', 'Gehalt' if master.get('compensation_type') == 'salary' else 'Stundenlohn'],
+        ['Stundenlohn', f"{master.get('hourly_rate') or worker.tariff_hourly_rate or ''} €" if master.get('compensation_type') != 'salary' else ''],
+        ['Monatsgehalt', f"{master.get('monthly_salary') or ''} €" if master.get('compensation_type') == 'salary' else ''],
+        ['Wochenstunden', master.get('weekly_hours') or ''],
+        ['Sollstunden monatlich', str(worker.monthly_hours or '')],
+    ]
+    _docx_table(document, ['Stammdatum', 'Wert'], info_rows)
+    document.add_paragraph()
+
+    monthly_rows = []
+    for row in rows:
+        item = record_dict(row, statements.get((str(row.worker_id), row.year_month)))
+        payroll = item.get('payroll_statement') or {}
+        monthly_rows.append([
+            row.year_month.strftime('%m/%Y'),
+            item['ist_hours'],
+            item['soll_hours'],
+            item['paid_total_hours'],
+            item['monthly_balance_hours'],
+            item['saldo_cumulative'],
+            f"{item['hourly_rate']} €",
+            item['night_hours'],
+            item['saturday_hours'],
+            item['sunday_hours'],
+            f"{item['surcharge_amount']} €",
+            f"{payroll.get('gross_amount') or ''} €" if payroll.get('gross_amount') else '',
+            f"{payroll.get('net_amount') or ''} €" if payroll.get('net_amount') else '',
+            f"{payroll.get('lexware_payout_amount') or payroll.get('transferred_amount') or ''} €" if (payroll.get('lexware_payout_amount') or payroll.get('transferred_amount')) else '',
+        ])
+    _docx_table(
+        document,
+        ['Monat', 'Ist', 'Soll', 'Bezahlt', 'Saldo Monat', 'Saldo gesamt', 'Satz', 'Nacht', 'Sa', 'So', 'Zuschläge', 'Lexware Brutto', 'Lexware Netto', 'Auszahlung'],
+        monthly_rows,
+    )
+
+    for row in rows:
+        entries = sorted(
+            list(row.raw_entries or []),
+            key=lambda item: str(item.get('local_clock_in') or item.get('clock_in') or ''),
+        )
+        if not entries:
+            continue
+        document.add_page_break()
+        item = record_dict(row, statements.get((str(row.worker_id), row.year_month)))
+        heading = document.add_paragraph()
+        run = heading.add_run(row.year_month.strftime('%m/%Y'))
+        run.bold = True
+        run.font.size = Pt(14)
+        document.add_paragraph(
+            f"Ist {item['ist_hours']} Std. | Soll {item['soll_hours']} Std. | "
+            f"Bezahlt {item['paid_total_hours']} Std. | Monatssaldo {item['monthly_balance_hours']} Std. | "
+            f"Saldo gesamt {item['saldo_cumulative']} Std."
+        )
+        daily = []
+        for entry in entries:
+            client = str(entry.get('client_name') or 'Ohne Zuordnung')
+            location = str(entry.get('location_name') or entry.get('position_name') or '')
+            daily.append([
+                _pdf_date(entry.get('local_clock_in') or entry.get('clock_in')),
+                client,
+                location,
+                f"{_pdf_clock(entry.get('planned_start'))} bis {_pdf_clock(entry.get('planned_end'))}",
+                f"{_pdf_clock(entry.get('local_clock_in') or entry.get('clock_in'))} bis {_pdf_clock(entry.get('local_clock_out') or entry.get('clock_out'))}",
+                f"{int(entry.get('break_minutes') or 0)} Min.",
+                _pdf_hours(entry.get('worked_minutes')),
+                _pdf_hours(entry.get('night_minutes')),
+                _pdf_hours(entry.get('saturday_minutes')),
+                _pdf_hours(entry.get('sunday_minutes')),
+            ])
+        _docx_table(
+            document,
+            ['Datum', 'Kunde', 'Ort', 'Plan', 'Ist', 'Pause', 'Netto', 'Nacht', 'Sa', 'So'],
+            daily,
+        )
+
+    document.add_paragraph()
+    note = document.add_paragraph(
+        'Hinweis: Ist Zeiten stammen aus der tatsächlichen Zeiterfassung. '
+        'Dienstplanzeiten dienen nur dem Vergleich. Lexware Werte werden als eigener Nachweis geführt.'
+    )
+    note.runs[0].italic = True
+    return _docx_bytes(document)
+
+
+def _supplement_hours(payroll: dict, keyword: str) -> Decimal | None:
+    supplements = payroll.get('lexware_supplements') or []
+    values = []
+    for item in supplements:
+        if keyword.lower() in str(item.get('label') or '').lower():
+            values.append(dec(item.get('hours')))
+    if not values:
+        return None
+    return sum(values, Decimal('0.00')).quantize(TWO)
+
+
+def _reconciliation_status(item: dict) -> tuple[str, list[str]]:
+    payroll = item.get('payroll_statement') or {}
+    issues = []
+    hard_difference = False
+
+    payout = dec(payroll.get('lexware_payout_amount')) if payroll.get('lexware_payout_amount') not in (None, '') else None
+    payment_list = dec(payroll.get('transferred_amount')) if payroll.get('transferred_amount') not in (None, '') else None
+    if payout is not None and payment_list is not None and abs(payout - payment_list) > Decimal('0.01'):
+        hard_difference = True
+        issues.append(f'Auszahlung {payout} € ≠ Zahlungsliste {payment_list} €')
+    elif payout is None or payment_list is None:
+        issues.append('Auszahlung oder Zahlungsliste fehlt')
+
+    if payroll.get('lexware_compensation_type') == 'hourly':
+        lex_hours = dec(payroll.get('lexware_paid_hours')) if payroll.get('lexware_paid_hours') not in (None, '') else None
+        paid = dec(item.get('paid_total_hours'))
+        if lex_hours is not None and abs(lex_hours - paid) > Decimal('0.05'):
+            hard_difference = True
+            issues.append(f'Bezahlte Stunden {paid} ≠ Lexware {lex_hours}')
+        elif lex_hours is None:
+            issues.append('Lexware Stunden fehlen')
+
+    for key, label, keyword in (
+        ('night_hours', 'Nacht', 'nacht'),
+        ('saturday_hours', 'Samstag', 'samstag'),
+        ('sunday_hours', 'Sonntag', 'sonntag'),
+    ):
+        app_hours = dec(item.get(key))
+        lex_hours = _supplement_hours(payroll, keyword)
+        if lex_hours is not None and abs(app_hours - lex_hours) > Decimal('0.10'):
+            hard_difference = True
+            issues.append(f'{label} A+ {app_hours} Std. ≠ Lexware {lex_hours} Std.')
+        elif lex_hours is None and app_hours > 0:
+            issues.append(f'{label} in A+ vorhanden, Lexware Zuschlag nicht nachgewiesen')
+
+    if hard_difference:
+        return 'ABWEICHUNG', issues
+    if issues:
+        return 'PRÜFEN', issues
+    return 'MATCH', []
+
+
+def lexware_reconciliation_docx(queryset, period: date) -> bytes:
+    rows = list(queryset.select_related('worker__user'))
+    statements = _statement_map(rows)
+    document = Document()
+    _docx_style(document)
+    section = document.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width, section.page_height = section.page_height, section.page_width
+    _docx_title(document, 'Lexware Abgleich', period.strftime('%m/%Y'))
+
+    table_rows = []
+    detail_blocks = []
+    for row in rows:
+        item = record_dict(row, statements.get((str(row.worker_id), row.year_month)))
+        payroll = item.get('payroll_statement') or {}
+        status, issues = _reconciliation_status(item)
+        master = _worker_master_data(row.worker)
+        compensation = (
+            f"Gehalt {master.get('monthly_salary') or payroll.get('lexware_monthly_salary') or ''} €"
+            if (master.get('compensation_type') == 'salary' or payroll.get('lexware_compensation_type') == 'salary')
+            else f"{master.get('hourly_rate') or payroll.get('lexware_hourly_rate') or item.get('hourly_rate') or ''} €/Std."
+        )
+        table_rows.append([
+            item['employee_name'],
+            master.get('employment_type_lexware') or item.get('employment_type') or '',
+            item['ist_hours'],
+            item['soll_hours'],
+            item['paid_total_hours'],
+            item['monthly_balance_hours'],
+            compensation,
+            f"{payroll.get('gross_amount') or ''} €" if payroll.get('gross_amount') else '',
+            f"{payroll.get('net_amount') or ''} €" if payroll.get('net_amount') else '',
+            f"{payroll.get('lexware_payout_amount') or payroll.get('transferred_amount') or ''} €" if (payroll.get('lexware_payout_amount') or payroll.get('transferred_amount')) else '',
+            status,
+        ])
+        if issues:
+            detail_blocks.append((item['employee_name'], status, issues))
+
+    _docx_table(
+        document,
+        ['Mitarbeiter', 'Beschäftigung', 'Ist', 'Soll', 'Bezahlt', 'Saldo', 'Vergütung', 'Brutto', 'Netto', 'Auszahlung', 'Status'],
+        table_rows,
+    )
+
+    if detail_blocks:
+        document.add_paragraph()
+        heading = document.add_paragraph()
+        r = heading.add_run('Prüfhinweise')
+        r.bold = True
+        r.font.size = Pt(13)
+        for employee, status, issues in detail_blocks:
+            paragraph = document.add_paragraph(style='List Bullet')
+            paragraph.add_run(f'{employee}: {status}. ').bold = True
+            paragraph.add_run('; '.join(issues))
+
+    document.add_paragraph()
+    note = document.add_paragraph(
+        'Status MATCH bedeutet, dass die vorhandenen Nachweise innerhalb der Toleranz übereinstimmen. '
+        'PRÜFEN bedeutet, dass ein Nachweis fehlt. ABWEICHUNG bedeutet, dass vorhandene Werte voneinander abweichen.'
+    )
+    note.runs[0].italic = True
+    return _docx_bytes(document)
+
+
 def create_backup(kind='manual') -> dict:
     backup_dir = Path(settings.MEDIA_ROOT) / 'backups' / 'working-time'
     backup_dir.mkdir(parents=True, exist_ok=True)
