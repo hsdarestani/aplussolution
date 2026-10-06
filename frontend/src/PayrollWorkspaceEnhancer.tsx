@@ -30,6 +30,7 @@ type PayrollEntry = {
   night_minutes?: number;
   saturday_minutes?: number;
   sunday_minutes?: number;
+  clock_out_rollover_corrected?: boolean;
   source?: string;
 };
 
@@ -528,7 +529,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
                     <span>{dateLabel(entry.local_clock_in)}</span>
                     <span>{entry.client_name || 'Ohne Zuordnung'}<small>{entry.location_name || entry.position_name || ''}</small></span>
                     <span>{timeLabel(entry.planned_start)} bis {timeLabel(entry.planned_end)}</span>
-                    <span>{timeLabel(entry.local_clock_in)} bis {timeLabel(entry.local_clock_out)}</span>
+                    <span>{timeLabel(entry.local_clock_in)} bis {timeLabel(entry.local_clock_out)}{entry.clock_out_rollover_corrected ? <small>Datumswechsel korrigiert</small> : null}</span>
                     <span>{entry.break_minutes || 0} Min.</span>
                     <span>{hoursFromMinutes(entry.worked_minutes)} Std.</span>
                     <span>{hoursFromMinutes(entry.night_minutes)}</span>
