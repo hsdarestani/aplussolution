@@ -303,21 +303,65 @@ def sync_working_time(start: date, end: date, client=None) -> WorkingTimeSyncLog
     return log
 
 
-def update_record(record: WorkingTimeAccountRecord, *, paid_hours=None, manual_adjustment=None) -> WorkingTimeAccountRecord:
-    if paid_hours is not None:
+def _paid_total(row: WorkingTimeAccountRecord) -> Decimal:
+    if row.paid_total_hours is not None:
+        return dec(row.paid_total_hours)
+    return (dec(row.soll_hours) + dec(row.paid_hours)).quantize(TWO)
+
+
+def update_record(
+    record: WorkingTimeAccountRecord,
+    *,
+    paid_total_hours=None,
+    paid_hours=None,
+    manual_adjustment=None,
+) -> WorkingTimeAccountRecord:
+    # paid_total_hours is the new unambiguous field. paid_hours remains accepted
+    # for compatibility with older clients and means legacy extra hours.
+    if paid_total_hours is not None:
+        record.paid_total_hours = max(Decimal('0'), dec(paid_total_hours))
+    elif paid_hours is not None:
         record.paid_hours = max(Decimal('0'), dec(paid_hours))
+        record.paid_total_hours = (record.soll_hours + record.paid_hours).quantize(TWO)
+    elif record.paid_total_hours is None:
+        record.paid_total_hours = (record.soll_hours + record.paid_hours).quantize(TWO)
+
     if manual_adjustment is not None:
         record.manual_adjustment = dec(manual_adjustment)
-    previous = WorkingTimeAccountRecord.objects.filter(worker=record.worker, year_month__lt=record.year_month).order_by('-year_month').first()
+
+    previous = (
+        WorkingTimeAccountRecord.objects
+        .filter(worker=record.worker, year_month__lt=record.year_month)
+        .order_by('-year_month')
+        .first()
+    )
     record.carryover_previous = previous.saldo_cumulative if previous else Decimal('0')
-    record.saldo_cumulative = (record.carryover_previous + record.difference_hours + record.manual_adjustment - record.paid_hours).quantize(TWO)
-    record.save(update_fields=['paid_hours', 'manual_adjustment', 'carryover_previous', 'saldo_cumulative', 'updated_at'])
-    # Recalculate following months so a correction carries forward consistently.
+    record.saldo_cumulative = (
+        record.carryover_previous
+        + record.ist_hours
+        + record.manual_adjustment
+        - _paid_total(record)
+    ).quantize(TWO)
+    record.save(update_fields=[
+        'paid_hours', 'paid_total_hours', 'manual_adjustment',
+        'carryover_previous', 'saldo_cumulative', 'updated_at',
+    ])
+
     carry = record.saldo_cumulative
-    for row in WorkingTimeAccountRecord.objects.filter(worker=record.worker, year_month__gt=record.year_month).order_by('year_month'):
+    for row in (
+        WorkingTimeAccountRecord.objects
+        .filter(worker=record.worker, year_month__gt=record.year_month)
+        .order_by('year_month')
+    ):
         row.carryover_previous = carry
-        row.saldo_cumulative = (carry + row.difference_hours + row.manual_adjustment - row.paid_hours).quantize(TWO)
-        row.save(update_fields=['carryover_previous', 'saldo_cumulative', 'updated_at'])
+        if row.paid_total_hours is None:
+            row.paid_total_hours = (row.soll_hours + row.paid_hours).quantize(TWO)
+        row.saldo_cumulative = (
+            carry + row.ist_hours + row.manual_adjustment - _paid_total(row)
+        ).quantize(TWO)
+        row.save(update_fields=[
+            'paid_total_hours', 'carryover_previous', 'saldo_cumulative', 'updated_at',
+        ])
         carry = row.saldo_cumulative
     return record
 
@@ -379,8 +423,8 @@ def record_dict(
     include_entries: bool = False,
 ) -> dict:
     totals = _entry_totals(row.raw_entries or [])
-    paid_total = (row.soll_hours + row.paid_hours).quantize(TWO)
-    monthly_balance = (row.difference_hours + row.manual_adjustment - row.paid_hours).quantize(TWO)
+    paid_total = _paid_total(row)
+    monthly_balance = (row.ist_hours + row.manual_adjustment - paid_total).quantize(TWO)
     surcharge_amount = totals['surcharge_amount']
     gross_with_surcharges = (row.gross_amount + surcharge_amount).quantize(TWO)
     minijob_limit = _minijob_limit(row.year_month) if row.worker.employment_type == WorkerProfile.EmploymentType.MINI else None
@@ -396,9 +440,7 @@ def record_dict(
         'soll_hours': str(row.soll_hours),
         'difference_hours': str(row.difference_hours),
         'carryover_previous': str(row.carryover_previous),
-        # Existing DB field: overtime paid on top of contractual/SOLL hours.
         'paid_hours': str(row.paid_hours),
-        'paid_base_hours': str(row.soll_hours),
         'paid_total_hours': str(paid_total),
         'monthly_balance_hours': str(monthly_balance),
         'manual_adjustment': str(row.manual_adjustment),
