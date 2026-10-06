@@ -90,7 +90,14 @@ def calendar_subscription(request):
 
     token = quote(_calendar_token(worker), safe='')
     feed_url = _public_calendar_feed_url(request, token)
-    webcal_url = feed_url.replace('https://', 'webcal://', 1).replace('http://', 'webcal://', 1)
+    # Preserve transport security for Apple Calendar. iOS may downgrade
+    # plain webcal:// subscriptions to HTTP, which produces the
+    # "Unsichere Verbindung" flow even when the feed itself is HTTPS.
+    webcal_url = (
+        feed_url.replace('https://', 'webcals://', 1)
+        if feed_url.startswith('https://')
+        else feed_url.replace('http://', 'webcal://', 1)
+    )
     encoded_feed = quote(feed_url, safe='')
     calendar_name = quote('A+ Solution Dienstplan', safe='')
 
