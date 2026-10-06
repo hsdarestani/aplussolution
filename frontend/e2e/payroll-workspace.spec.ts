@@ -112,7 +112,8 @@ test('admin payroll workspace reconciles daily actual time and paid hours withou
   await workspace.getByRole('button', { name: 'Tagesdetails und Bearbeitung', exact: true }).click();
   await expect(page.getByText('17,50 €')).toBeVisible();
   await expect(page.getByText('Kunde GmbH')).toBeVisible();
-  await expect(page.getByText('10,00 Std.')).toBeVisible();
+  const dailyTable = workspace.getByRole('table', { name: 'Tagesnachweis Anna Becker 2026-08' });
+  await expect(dailyTable.getByText('10,00 Std.')).toBeVisible();
 
   await page.getByLabel('Bezahlte Stunden Anna Becker 2026-08').fill('45');
   await page.getByLabel('Korrektur Anna Becker 2026-08').fill('0');
