@@ -289,8 +289,11 @@ def test_payroll_repairs_implausible_one_day_clockout_rollover(
     assert audit_row['worked_minutes'] == 360
     assert audit_row['night_minutes'] == 0
     assert audit_row['clock_out_rollover_corrected'] is True
-    assert audit_row['source_clock_out'] == entry.clock_out.isoformat()
-    assert audit_row['local_clock_out'].startswith('2026-09-16T22:30')
+    source_clock_out = datetime.fromisoformat(audit_row['source_clock_out'])
+    assert source_clock_out == entry.clock_out
+    corrected_clock_out = datetime.fromisoformat(audit_row['local_clock_out'])
+    assert corrected_clock_out.astimezone(tz).date() == day
+    assert corrected_clock_out.astimezone(tz).time().replace(tzinfo=None) == time(22, 30)
 
 
 @pytest.mark.django_db
