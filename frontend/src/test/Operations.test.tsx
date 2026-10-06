@@ -45,7 +45,7 @@ describe('Operations integrations', () => {
     expect(screen.getByText('6/8 installiert')).toBeInTheDocument();
     expect(screen.getByText('Dokument 8')).toBeInTheDocument();
     expect(screen.getByTestId('order-automation-panel')).toBeInTheDocument();
-    expect(screen.getByTestId('working-time-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('working-time-panel')).not.toBeInTheDocument();
     expect(apiMock).toHaveBeenCalledWith('integrations/wiw/status/');
     expect(apiMock).toHaveBeenCalledWith('document-catalog/');
   });
