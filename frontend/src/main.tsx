@@ -22,7 +22,6 @@ import ClientPortalV2 from './ClientPortalV2';
 import StoreComplianceLinks from './StoreComplianceLinks';
 import StoreLegalPage, { legalPageFromPath } from './StoreLegalPages';
 import FriendlyDateTimePicker from './FriendlyDateTimePicker';
-import PayrollWorkspaceEnhancer from './PayrollWorkspaceEnhancer';
 import WorkflowCompletionEnhancer from './WorkflowCompletionEnhancer';
 import OrderDocumentImportEnhancer from './OrderDocumentImportEnhancer';
 import ApiHealthBanner from './ApiHealthBanner';
@@ -151,7 +150,6 @@ function ResumeAwareEnhancers() {
     <AdminAkteAvatarEnhancer />
     <StoreComplianceLinks />
     <FriendlyDateTimePicker />
-    <PayrollWorkspaceEnhancer />
     <WorkflowCompletionEnhancer />
     <OrderDocumentImportEnhancer />
     <ApiHealthBanner />
