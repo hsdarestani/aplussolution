@@ -3175,10 +3175,14 @@ export default function App() {
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 900px)');
-    const sync = () => setMobileViewport(media.matches);
+    const sync = () => setMobileViewport(window.innerWidth <= 900);
     sync();
     media.addEventListener?.('change', sync);
-    return () => media.removeEventListener?.('change', sync);
+    window.addEventListener('resize', sync);
+    return () => {
+      media.removeEventListener?.('change', sync);
+      window.removeEventListener('resize', sync);
+    };
   }, []);
 
 
