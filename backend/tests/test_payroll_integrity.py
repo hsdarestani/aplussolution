@@ -391,6 +391,62 @@ def test_lexware_import_rejects_filename_period_mismatch(auth_admin):
 
 
 @pytest.mark.django_db
+def test_lexware_employee_master_data_import_updates_personal_and_payroll_settings(
+    auth_admin, worker_user
+):
+    import json
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    worker = worker_user.worker_profile
+    upload = SimpleUploadedFile(
+        'lexware-stammdaten.json',
+        json.dumps({
+            'employees': [{
+                'name': worker.user.get_full_name(),
+                'app_employment_type': 'minijob',
+                'data': {
+                    'employment_type_lexware': 'Minijobber – Rentenversicherungsfrei',
+                    'entry_date': '2026-08-30',
+                    'weekly_hours': '8.00',
+                    'compensation_type': 'hourly',
+                    'hourly_rate': '16.00',
+                    'iban': 'DE00 TEST',
+                    'night_surcharge_percent': '25',
+                    'sunday_surcharge_percent': '50',
+                },
+            }],
+        }).encode('utf-8'),
+        content_type='application/json',
+    )
+
+    response = auth_admin.post(
+        '/api/workers/master-data/import/',
+        {'file': upload},
+        format='multipart',
+    )
+    assert response.status_code == 200
+    assert len(response.data['employees']) == 1
+    assert response.data['unmatched'] == []
+
+    worker.refresh_from_db()
+    assert worker.employment_type == 'minijob'
+    assert worker.tariff_hourly_rate == Decimal('16.00')
+    assert worker.monthly_hours == Decimal('34.67')
+
+    master = worker.master_data
+    assert master.data['entry_date'] == '2026-08-30'
+    assert master.data['iban'] == 'DE00 TEST'
+    assert master.source_map['iban'] == 'lexware_stammdaten'
+
+    setting = worker.working_time_setting
+    assert setting.monthly_limit == Decimal('34.67')
+    assert setting.hourly_rate == Decimal('16.00')
+    assert setting.night_surcharge_percent == Decimal('25')
+    assert setting.sunday_surcharge_percent == Decimal('50')
+
+
+@pytest.mark.django_db
 def test_lexware_pdf_bundle_imports_hourly_payslip_and_payment(
     auth_admin, worker_user
 ):
