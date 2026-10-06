@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 import pytest
@@ -277,3 +277,52 @@ def test_one_time_lexware_bank_import_links_transfer_to_employee_month(
     assert statement.source == 'lexware_bank_export'
     assert statement.payment_date == period.replace(day=5)
     assert len(statement.raw_data) == 1
+
+
+
+@pytest.mark.django_db
+def test_each_employee_history_starts_with_first_authoritative_work_month(
+    worker_user, second_worker, company, location, position
+):
+    tz = timezone.get_current_timezone()
+    cases = [
+        (worker_user.worker_profile, date(2026, 1, 5)),
+        (second_worker, date(2026, 3, 5)),
+    ]
+    for worker, work_day in cases:
+        start = timezone.make_aware(datetime.combine(work_day, time(8, 0)), tz)
+        shift = Shift.objects.create(
+            client=company,
+            location=location,
+            position=position,
+            worker=worker,
+            starts_at=start,
+            ends_at=start + timedelta(hours=8),
+            break_minutes=0,
+            status=Shift.Status.CONFIRMED,
+        )
+        TimeEntry.objects.create(
+            worker=worker,
+            shift=shift,
+            clock_in=start,
+            clock_out=start + timedelta(hours=8),
+            approved=True,
+        )
+
+    sync_working_time(date(2026, 1, 1), date(2026, 3, 31))
+
+    first_worker_months = list(
+        WorkingTimeAccountRecord.objects
+        .filter(worker=worker_user.worker_profile)
+        .order_by('year_month')
+        .values_list('year_month', flat=True)
+    )
+    second_worker_months = list(
+        WorkingTimeAccountRecord.objects
+        .filter(worker=second_worker)
+        .order_by('year_month')
+        .values_list('year_month', flat=True)
+    )
+
+    assert first_worker_months[0] == date(2026, 1, 1)
+    assert second_worker_months == [date(2026, 3, 1)]
