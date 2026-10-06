@@ -528,7 +528,8 @@ def export_csv(queryset) -> HttpResponse:
         'Übertrag', 'Ausbezahlt', 'Korrektur', 'Saldo', 'Stundensatz', 'Brutto',
         'Beschäftigung', 'Bezahlte Stunden gesamt', 'Monatssaldo',
         'Nachtstunden', 'Samstagsstunden', 'Sonntagsstunden', 'Zuschläge',
-        'Brutto inkl. Zuschläge', 'Lexware überwiesen', 'Lexware Zahlungsdatum',
+        'Brutto inkl. Zuschläge', 'Lexware Brutto', 'Lexware Netto',
+        'Lexware Auszahlung', 'Lexware Zahlungsdatum', 'Vergütungsart',
     ])
     for row in rows:
         statement = statements.get((str(row.worker_id), row.year_month))
@@ -542,7 +543,10 @@ def export_csv(queryset) -> HttpResponse:
             data['employment_type'], data['paid_total_hours'], data['monthly_balance_hours'],
             data['night_hours'], data['saturday_hours'], data['sunday_hours'],
             data['surcharge_amount'], data['gross_with_surcharges'],
-            payroll.get('transferred_amount') or '', payroll.get('payment_date') or '',
+            payroll.get('gross_amount') or '', payroll.get('net_amount') or '',
+            payroll.get('lexware_payout_amount') or payroll.get('transferred_amount') or '',
+            payroll.get('payment_date') or '',
+            payroll.get('lexware_compensation_type') or '',
         ])
     response = HttpResponse('\ufeff' + output.getvalue(), content_type='text/csv; charset=utf-8')
     response['Content-Disposition'] = 'attachment; filename="arbeitszeit-lohnkonto.csv"'
@@ -560,7 +564,8 @@ def export_xlsx(queryset) -> HttpResponse:
         'Übertrag', 'Ausbezahlt', 'Korrektur', 'Saldo', 'Stundensatz', 'Brutto',
         'Beschäftigung', 'Bezahlte Stunden gesamt', 'Monatssaldo',
         'Nachtstunden', 'Samstagsstunden', 'Sonntagsstunden', 'Zuschläge',
-        'Brutto inkl. Zuschläge', 'Lexware überwiesen', 'Lexware Zahlungsdatum',
+        'Brutto inkl. Zuschläge', 'Lexware Brutto', 'Lexware Netto',
+        'Lexware Auszahlung', 'Lexware Zahlungsdatum', 'Vergütungsart',
     ]
     ws.append(headers)
     for row in rows:
@@ -576,15 +581,18 @@ def export_xlsx(queryset) -> HttpResponse:
             float(data['monthly_balance_hours']), float(data['night_hours']),
             float(data['saturday_hours']), float(data['sunday_hours']),
             float(data['surcharge_amount']), float(data['gross_with_surcharges']),
-            float(payroll['transferred_amount']) if payroll.get('transferred_amount') else None,
+            float(payroll['gross_amount']) if payroll.get('gross_amount') else None,
+            float(payroll['net_amount']) if payroll.get('net_amount') else None,
+            float(payroll.get('lexware_payout_amount') or payroll.get('transferred_amount')) if (payroll.get('lexware_payout_amount') or payroll.get('transferred_amount')) else None,
             payroll.get('payment_date') or '',
+            payroll.get('lexware_compensation_type') or '',
         ])
     for column in ws.columns:
         ws.column_dimensions[column[0].column_letter].width = min(max(len(str(cell.value or '')) for cell in column) + 2, 32)
     buffer = io.BytesIO()
     wb.save(buffer)
     response = HttpResponse(buffer.getvalue(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = 'attachment; filename="arbeitszeit-lohnkonto.xlsx"'
+    response['Content-Disposition'] = 'attachment; filename="02_Lohnkonto_Gesamt.xlsx"'
     return response
 
 
