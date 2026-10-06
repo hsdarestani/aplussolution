@@ -372,6 +372,25 @@ def test_one_time_lexware_bank_import_links_transfer_to_employee_month(
 
 
 @pytest.mark.django_db
+def test_lexware_import_rejects_filename_period_mismatch(auth_admin):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    upload = SimpleUploadedFile(
+        'Lohnabrechnungen_2026-09.pdf',
+        b'not parsed because period validation runs first',
+        content_type='application/pdf',
+    )
+    response = auth_admin.post(
+        '/api/working-time/lexware-import/',
+        {'period': '2026-10', 'file': upload},
+        format='multipart',
+    )
+    assert response.status_code == 400
+    assert response.data['detected_period'] == '2026-09'
+    assert '2026-10' in response.data['detail']
+
+
+@pytest.mark.django_db
 def test_lexware_pdf_bundle_imports_hourly_payslip_and_payment(
     auth_admin, worker_user
 ):
