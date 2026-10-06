@@ -22,6 +22,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from .models import (
+    PayrollStatement,
     User,
     WorkerProfile,
     WorkingTimeAccountRecord,
@@ -321,25 +322,109 @@ def update_record(record: WorkingTimeAccountRecord, *, paid_hours=None, manual_a
     return record
 
 
-def record_dict(row: WorkingTimeAccountRecord) -> dict:
+def _entry_totals(raw_entries: list[dict]) -> dict:
+    totals = {
+        'worked_minutes': 0,
+        'break_minutes': 0,
+        'night_minutes': 0,
+        'saturday_minutes': 0,
+        'sunday_minutes': 0,
+        'night_surcharge_amount': Decimal('0.00'),
+        'saturday_surcharge_amount': Decimal('0.00'),
+        'sunday_surcharge_amount': Decimal('0.00'),
+    }
+    for entry in raw_entries or []:
+        for key in ('worked_minutes', 'break_minutes', 'night_minutes', 'saturday_minutes', 'sunday_minutes'):
+            totals[key] += int(entry.get(key) or 0)
+        for key in ('night_surcharge_amount', 'saturday_surcharge_amount', 'sunday_surcharge_amount'):
+            totals[key] += dec(entry.get(key) or 0)
+    totals['surcharge_amount'] = (
+        totals['night_surcharge_amount']
+        + totals['saturday_surcharge_amount']
+        + totals['sunday_surcharge_amount']
+    ).quantize(TWO)
+    return totals
+
+
+def _minijob_limit(year_month: date) -> Decimal | None:
+    # Historical values used only for an informational warning in the audit UI.
+    # The classification remains a payroll/tax decision and is never auto-changed.
+    limits = {
+        2024: Decimal('538.00'),
+        2025: Decimal('556.00'),
+        2026: Decimal('603.00'),
+    }
+    return limits.get(year_month.year)
+
+
+def statement_dict(statement: PayrollStatement | None) -> dict | None:
+    if not statement:
+        return None
     return {
+        'id': str(statement.id),
+        'gross_amount': str(statement.gross_amount) if statement.gross_amount is not None else None,
+        'net_amount': str(statement.net_amount) if statement.net_amount is not None else None,
+        'transferred_amount': str(statement.transferred_amount) if statement.transferred_amount is not None else None,
+        'payment_date': statement.payment_date.isoformat() if statement.payment_date else None,
+        'source': statement.source,
+        'source_reference': statement.source_reference,
+        'document_url': statement.document.url if statement.document else '',
+    }
+
+
+def record_dict(
+    row: WorkingTimeAccountRecord,
+    statement: PayrollStatement | None = None,
+    *,
+    include_entries: bool = False,
+) -> dict:
+    totals = _entry_totals(row.raw_entries or [])
+    paid_total = (row.soll_hours + row.paid_hours).quantize(TWO)
+    monthly_balance = (row.difference_hours + row.manual_adjustment - row.paid_hours).quantize(TWO)
+    surcharge_amount = totals['surcharge_amount']
+    gross_with_surcharges = (row.gross_amount + surcharge_amount).quantize(TWO)
+    minijob_limit = _minijob_limit(row.year_month) if row.worker.employment_type == WorkerProfile.EmploymentType.MINI else None
+    result = {
         'id': str(row.id),
         'worker_id': str(row.worker_id),
         'employee_name': str(row.worker.user),
+        'employee_number': row.worker.employee_number,
+        'employment_type': row.worker.employment_type,
         'wiw_user_id': row.worker.wiw_user_id,
         'year_month': row.year_month.strftime('%Y-%m'),
         'ist_hours': str(row.ist_hours),
         'soll_hours': str(row.soll_hours),
         'difference_hours': str(row.difference_hours),
         'carryover_previous': str(row.carryover_previous),
+        # Existing DB field: overtime paid on top of contractual/SOLL hours.
         'paid_hours': str(row.paid_hours),
+        'paid_base_hours': str(row.soll_hours),
+        'paid_total_hours': str(paid_total),
+        'monthly_balance_hours': str(monthly_balance),
         'manual_adjustment': str(row.manual_adjustment),
         'saldo_cumulative': str(row.saldo_cumulative),
         'hourly_rate': str(row.hourly_rate),
         'gross_amount': str(row.gross_amount),
+        'gross_with_surcharges': str(gross_with_surcharges),
+        'worked_minutes': totals['worked_minutes'],
+        'break_minutes': totals['break_minutes'],
+        'night_hours': str((Decimal(totals['night_minutes']) / Decimal('60')).quantize(TWO)),
+        'saturday_hours': str((Decimal(totals['saturday_minutes']) / Decimal('60')).quantize(TWO)),
+        'sunday_hours': str((Decimal(totals['sunday_minutes']) / Decimal('60')).quantize(TWO)),
+        'night_surcharge_amount': str(totals['night_surcharge_amount'].quantize(TWO)),
+        'saturday_surcharge_amount': str(totals['saturday_surcharge_amount'].quantize(TWO)),
+        'sunday_surcharge_amount': str(totals['sunday_surcharge_amount'].quantize(TWO)),
+        'surcharge_amount': str(surcharge_amount),
+        'entry_count': len(row.raw_entries or []),
         'source': row.source,
         'synced_at': row.synced_at.isoformat() if row.synced_at else None,
+        'payroll_statement': statement_dict(statement),
+        'minijob_limit': str(minijob_limit) if minijob_limit is not None else None,
+        'minijob_warning': bool(minijob_limit is not None and gross_with_surcharges > minijob_limit),
     }
+    if include_entries:
+        result['entries'] = row.raw_entries or []
+    return result
 
 
 def settings_rows() -> list[dict]:
@@ -350,52 +435,120 @@ def settings_rows() -> list[dict]:
         'worker_id': str(item.worker_id),
         'wiw_user_id': item.worker.wiw_user_id,
         'employee_name': str(item.worker.user),
+        'employment_type': item.worker.employment_type,
         'monthly_limit': str(item.monthly_limit),
         'hourly_rate': str(item.hourly_rate),
+        'night_surcharge_percent': str(item.night_surcharge_percent),
+        'saturday_surcharge_percent': str(item.saturday_surcharge_percent),
+        'sunday_surcharge_percent': str(item.sunday_surcharge_percent),
         'active': item.active,
         'excluded': item.excluded,
         'notes': item.notes,
     } for item in rows]
 
 
+def _statement_map(rows: list[WorkingTimeAccountRecord]) -> dict[tuple[str, date], PayrollStatement]:
+    worker_ids = {row.worker_id for row in rows}
+    if not worker_ids:
+        return {}
+    periods = {row.year_month for row in rows}
+    statements = PayrollStatement.objects.filter(worker_id__in=worker_ids, period__in=periods)
+    return {(str(item.worker_id), item.period): item for item in statements}
+
+
 def export_csv(queryset) -> HttpResponse:
+    rows = list(queryset.select_related('worker__user'))
+    statements = _statement_map(rows)
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';')
-    writer.writerow(['Mitarbeiter', 'Monat', 'Ist-Stunden', 'Soll-Stunden', 'Plusstunden', 'Übertrag', 'Ausbezahlt', 'Korrektur', 'Saldo', 'Stundensatz', 'Brutto'])
-    for row in queryset.select_related('worker__user'):
-        writer.writerow([str(row.worker.user), row.year_month.strftime('%Y-%m'), row.ist_hours, row.soll_hours, row.difference_hours, row.carryover_previous, row.paid_hours, row.manual_adjustment, row.saldo_cumulative, row.hourly_rate, row.gross_amount])
+    writer.writerow([
+        'Mitarbeiter', 'Beschäftigung', 'Monat', 'Ist-Stunden', 'Soll-Stunden',
+        'Bezahlte Stunden gesamt', 'Zusätzlich ausgezahlte Stunden', 'Monatssaldo',
+        'Übertrag', 'Saldo kumuliert', 'Stundensatz', 'Brutto Basis',
+        'Nachtstunden', 'Samstagsstunden', 'Sonntagsstunden', 'Zuschläge',
+        'Brutto inkl. Zuschläge', 'Lexware überwiesen', 'Lexware Zahlungsdatum',
+    ])
+    for row in rows:
+        statement = statements.get((str(row.worker_id), row.year_month))
+        data = record_dict(row, statement)
+        payroll = data.get('payroll_statement') or {}
+        writer.writerow([
+            data['employee_name'], data['employment_type'], data['year_month'],
+            data['ist_hours'], data['soll_hours'], data['paid_total_hours'], data['paid_hours'],
+            data['monthly_balance_hours'], data['carryover_previous'], data['saldo_cumulative'],
+            data['hourly_rate'], data['gross_amount'], data['night_hours'], data['saturday_hours'],
+            data['sunday_hours'], data['surcharge_amount'], data['gross_with_surcharges'],
+            payroll.get('transferred_amount') or '', payroll.get('payment_date') or '',
+        ])
     response = HttpResponse('\ufeff' + output.getvalue(), content_type='text/csv; charset=utf-8')
-    response['Content-Disposition'] = 'attachment; filename="arbeitszeitkonto.csv"'
+    response['Content-Disposition'] = 'attachment; filename="arbeitszeit-lohnkonto.csv"'
     return response
 
 
 def export_xlsx(queryset) -> HttpResponse:
+    rows = list(queryset.select_related('worker__user'))
+    statements = _statement_map(rows)
     wb = Workbook()
     ws = wb.active
-    ws.title = 'Arbeitszeitkonto'
-    headers = ['Mitarbeiter', 'Monat', 'Ist-Stunden', 'Soll-Stunden', 'Plusstunden', 'Übertrag', 'Ausbezahlt', 'Korrektur', 'Saldo', 'Stundensatz', 'Brutto']
+    ws.title = 'Arbeitszeit & Lohnkonto'
+    headers = [
+        'Mitarbeiter', 'Beschäftigung', 'Monat', 'Ist-Stunden', 'Soll-Stunden',
+        'Bezahlte Stunden gesamt', 'Zusätzlich ausgezahlt', 'Monatssaldo',
+        'Übertrag', 'Saldo kumuliert', 'Stundensatz', 'Brutto Basis',
+        'Nachtstunden', 'Samstagsstunden', 'Sonntagsstunden', 'Zuschläge',
+        'Brutto inkl. Zuschläge', 'Lexware überwiesen', 'Lexware Zahlungsdatum',
+    ]
     ws.append(headers)
-    for row in queryset.select_related('worker__user'):
-        ws.append([str(row.worker.user), row.year_month.strftime('%Y-%m'), float(row.ist_hours), float(row.soll_hours), float(row.difference_hours), float(row.carryover_previous), float(row.paid_hours), float(row.manual_adjustment), float(row.saldo_cumulative), float(row.hourly_rate), float(row.gross_amount)])
+    for row in rows:
+        data = record_dict(row, statements.get((str(row.worker_id), row.year_month)))
+        payroll = data.get('payroll_statement') or {}
+        ws.append([
+            data['employee_name'], data['employment_type'], data['year_month'],
+            float(data['ist_hours']), float(data['soll_hours']), float(data['paid_total_hours']),
+            float(data['paid_hours']), float(data['monthly_balance_hours']),
+            float(data['carryover_previous']), float(data['saldo_cumulative']),
+            float(data['hourly_rate']), float(data['gross_amount']), float(data['night_hours']),
+            float(data['saturday_hours']), float(data['sunday_hours']), float(data['surcharge_amount']),
+            float(data['gross_with_surcharges']),
+            float(payroll['transferred_amount']) if payroll.get('transferred_amount') else None,
+            payroll.get('payment_date') or '',
+        ])
     for column in ws.columns:
         ws.column_dimensions[column[0].column_letter].width = min(max(len(str(cell.value or '')) for cell in column) + 2, 32)
     buffer = io.BytesIO()
     wb.save(buffer)
     response = HttpResponse(buffer.getvalue(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = 'attachment; filename="arbeitszeitkonto.xlsx"'
+    response['Content-Disposition'] = 'attachment; filename="arbeitszeit-lohnkonto.xlsx"'
     return response
 
 
 def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
+    rows = list(queryset.select_related('worker__user'))
+    statements = _statement_map(rows)
     buffer = io.BytesIO()
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name='WTTitle', parent=styles['Title'], alignment=TA_CENTER, spaceAfter=12))
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=14 * mm, rightMargin=14 * mm, topMargin=14 * mm, bottomMargin=14 * mm)
-    story = [Paragraph('Arbeitszeitkonto', styles['WTTitle']), Paragraph(str(worker.user), styles['Heading2']), Spacer(1, 8)]
-    data = [['Monat', 'Ist', 'Soll', 'Plus', 'Übertrag', 'Ausbezahlt', 'Korrektur', 'Saldo', 'Brutto']]
-    for row in queryset:
-        data.append([row.year_month.strftime('%m/%Y'), row.ist_hours, row.soll_hours, row.difference_hours, row.carryover_previous, row.paid_hours, row.manual_adjustment, row.saldo_cumulative, f'{row.gross_amount} €'])
-    table = Table(data, repeatRows=1, colWidths=[25 * mm] + [24 * mm] * 8)
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=10 * mm, rightMargin=10 * mm, topMargin=12 * mm, bottomMargin=12 * mm)
+    story = [
+        Paragraph('Arbeitszeit- und Lohnkonto', styles['WTTitle']),
+        Paragraph(f'{worker.user} · {worker.get_employment_type_display()}', styles['Heading2']),
+        Spacer(1, 8),
+    ]
+    data = [[
+        'Monat', 'Ist', 'Soll', 'Bezahlt', 'Monatssaldo', 'Übertrag', 'Saldo',
+        'Nacht', 'Sa.', 'So.', 'Zuschläge', 'Brutto', 'Überwiesen',
+    ]]
+    for row in rows:
+        item = record_dict(row, statements.get((str(row.worker_id), row.year_month)))
+        payroll = item.get('payroll_statement') or {}
+        data.append([
+            row.year_month.strftime('%m/%Y'), item['ist_hours'], item['soll_hours'],
+            item['paid_total_hours'], item['monthly_balance_hours'], item['carryover_previous'],
+            item['saldo_cumulative'], item['night_hours'], item['saturday_hours'], item['sunday_hours'],
+            f"{item['surcharge_amount']} €", f"{item['gross_with_surcharges']} €",
+            f"{payroll.get('transferred_amount')} €" if payroll.get('transferred_amount') else '–',
+        ])
+    table = Table(data, repeatRows=1, colWidths=[20 * mm] + [19 * mm] * 12)
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#163B65')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -403,10 +556,16 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F5F8FC')]),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('FONTSIZE', (0, 0), (-1, -1), 7),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
     ]))
     story.append(table)
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(
+        'IST basiert auf freigegebenen A+ Zeiteinträgen bzw. historischem WIW Altbestand. '
+        'Dienstplanzeiten dienen nur dem Vergleich. Zuschläge verwenden die je Mitarbeiter hinterlegten Prozentsätze.',
+        styles['BodyText'],
+    ))
     doc.build(story)
     return buffer.getvalue()
 
