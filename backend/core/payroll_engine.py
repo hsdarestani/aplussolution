@@ -212,47 +212,74 @@ def sync_working_time(start: date, end: date, *, include_inactive_workers: bool 
             )
             carry = prior.saldo_cumulative if prior else Decimal('0.00')
 
+            current_month = timezone.localdate().replace(day=1)
             for month in iter_months(worker_range_start, worker_range_end):
                 existing = WorkingTimeAccountRecord.objects.filter(
                     worker=worker,
                     year_month=month,
                 ).first()
+                closed_month = month < current_month
+
+                month_limit = (
+                    dec(existing.soll_hours)
+                    if existing and closed_month
+                    else monthly_limit
+                )
+                month_rate = (
+                    dec(existing.hourly_rate)
+                    if existing and closed_month and dec(existing.hourly_rate) > 0
+                    else effective_rate
+                )
+                employment_snapshot = (
+                    existing.employment_type_snapshot
+                    if existing and existing.employment_type_snapshot
+                    else worker.employment_type
+                )
+
                 ist = hours_by_key.get((str(worker.id), month), Decimal('0')).quantize(TWO)
-                difference = (ist - monthly_limit).quantize(TWO)
+                difference = (ist - month_limit).quantize(TWO)
                 legacy_paid_extra = existing.paid_hours if existing else Decimal('0')
                 paid_total = (
                     existing.paid_total_hours
                     if existing and existing.paid_total_hours is not None
-                    else (monthly_limit + legacy_paid_extra)
+                    else (month_limit + legacy_paid_extra)
                 ).quantize(TWO)
                 manual = existing.manual_adjustment if existing else Decimal('0')
-                # The hour balance is independent from SOLL: actual worked hours
-                # minus total compensated hours, plus manual corrections.
                 saldo = (carry + ist + manual - paid_total).quantize(TWO)
-                gross = (ist * effective_rate).quantize(TWO)
+                gross = (ist * month_rate).quantize(TWO)
 
                 raw_entries = grouped.get((str(worker.id), month), [])
+                previous_raw = {
+                    str(item.get('id')): item
+                    for item in (existing.raw_entries if existing and closed_month else []) or []
+                    if item.get('id')
+                }
                 for raw in raw_entries:
-                    raw['night_surcharge_percent'] = str(night_percent)
-                    raw['saturday_surcharge_percent'] = str(saturday_percent)
-                    raw['sunday_surcharge_percent'] = str(sunday_percent)
-                    raw['night_surcharge_amount'] = str(_surcharge_amount(raw['night_minutes'], effective_rate, night_percent))
-                    raw['saturday_surcharge_amount'] = str(_surcharge_amount(raw['saturday_minutes'], effective_rate, saturday_percent))
-                    raw['sunday_surcharge_amount'] = str(_surcharge_amount(raw['sunday_minutes'], effective_rate, sunday_percent))
+                    previous = previous_raw.get(str(raw.get('id'))) or {}
+                    row_night_percent = dec(previous.get('night_surcharge_percent', night_percent))
+                    row_saturday_percent = dec(previous.get('saturday_surcharge_percent', saturday_percent))
+                    row_sunday_percent = dec(previous.get('sunday_surcharge_percent', sunday_percent))
+                    raw['night_surcharge_percent'] = str(row_night_percent)
+                    raw['saturday_surcharge_percent'] = str(row_saturday_percent)
+                    raw['sunday_surcharge_percent'] = str(row_sunday_percent)
+                    raw['night_surcharge_amount'] = str(_surcharge_amount(raw['night_minutes'], month_rate, row_night_percent))
+                    raw['saturday_surcharge_amount'] = str(_surcharge_amount(raw['saturday_minutes'], month_rate, row_saturday_percent))
+                    raw['sunday_surcharge_amount'] = str(_surcharge_amount(raw['sunday_minutes'], month_rate, row_sunday_percent))
 
                 WorkingTimeAccountRecord.objects.update_or_create(
                     worker=worker,
                     year_month=month,
                     defaults={
                         'ist_hours': ist,
-                        'soll_hours': monthly_limit,
+                        'soll_hours': month_limit,
                         'difference_hours': difference,
                         'carryover_previous': carry,
                         'paid_hours': legacy_paid_extra,
                         'paid_total_hours': paid_total,
+                        'employment_type_snapshot': employment_snapshot,
                         'manual_adjustment': manual,
                         'saldo_cumulative': saldo,
-                        'hourly_rate': effective_rate,
+                        'hourly_rate': month_rate,
                         'gross_amount': gross,
                         'raw_entries': raw_entries,
                         'source': 'aplus_time_entries',
