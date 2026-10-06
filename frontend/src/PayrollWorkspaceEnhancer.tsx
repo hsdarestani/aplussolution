@@ -395,6 +395,29 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     }
   }
 
+  async function importMasterData() {
+    if (!masterDataFile) {
+      setMessage('Bitte Lexware Stammdaten JSON auswählen.');
+      return;
+    }
+    setMasterDataBusy(true);
+    setMessage('');
+    try {
+      const form = new FormData();
+      form.append('file', masterDataFile);
+      const result: any = await api('workers/master-data/import/', { method: 'POST', body: form });
+      await loadRows();
+      const imported = result?.employees?.length || 0;
+      const unmatched = result?.unmatched?.length || 0;
+      setMessage(`Lexware Stammdaten gespeichert: ${imported} Mitarbeiter. ${unmatched} nicht zugeordnet.`);
+      setMasterDataFile(null);
+    } catch (error: any) {
+      setMessage(error?.message || 'Lexware Stammdaten konnten nicht importiert werden.');
+    } finally {
+      setMasterDataBusy(false);
+    }
+  }
+
   const workspace = (
     <div className={`payroll-workspace ${standalone ? 'payroll-standalone' : ''}`} data-testid="payroll-workspace">
       {standalone && <header className="payroll-page-hero">
@@ -631,27 +654,3 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   if (!target) return null;
   return createPortal(workspace, target);
 }
-  async function importMasterData() {
-    if (!masterDataFile) {
-      setMessage('Bitte Lexware Stammdaten JSON auswählen.');
-      return;
-    }
-    setMasterDataBusy(true);
-    setMessage('');
-    try {
-      const form = new FormData();
-      form.append('file', masterDataFile);
-      const result: any = await api('workers/master-data/import/', { method: 'POST', body: form });
-      await loadRows();
-      const imported = result?.employees?.length || 0;
-      const unmatched = result?.unmatched?.length || 0;
-      setMessage(`Lexware Stammdaten gespeichert: ${imported} Mitarbeiter. ${unmatched} nicht zugeordnet.`);
-      setMasterDataFile(null);
-    } catch (error: any) {
-      setMessage(error?.message || 'Lexware Stammdaten konnten nicht importiert werden.');
-    } finally {
-      setMasterDataBusy(false);
-    }
-  }
-
-
