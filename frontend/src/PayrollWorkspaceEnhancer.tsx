@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api, apiBlob } from './api';
 import { BUSINESS_TIME_ZONE } from './berlinLocale';
@@ -45,7 +45,6 @@ type PayrollRow = {
   difference_hours: string;
   carryover_previous: string;
   paid_hours: string;
-  paid_base_hours?: string;
   paid_total_hours?: string;
   monthly_balance_hours?: string;
   manual_adjustment: string;
@@ -67,6 +66,17 @@ type PayrollRow = {
 
 type Draft = { paid_total_hours: string; manual_adjustment: string };
 type EmployeeOption = { worker_id: string; employee_name: string };
+type SettingRow = EmployeeOption & {
+  employment_type?: string;
+  monthly_limit: string;
+  hourly_rate: string;
+  night_surcharge_percent: string;
+  saturday_surcharge_percent: string;
+  sunday_surcharge_percent: string;
+  active?: boolean;
+  excluded?: boolean;
+  notes?: string;
+};
 
 const number = (value: unknown) => {
   const parsed = Number(String(value ?? '0').replace(',', '.'));
@@ -90,54 +100,106 @@ const currentMonth = () => {
   return year && month ? `${year}-${month}` : '';
 };
 
-export default function PayrollWorkspaceEnhancer() {
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+export default function PayrollWorkspaceEnhancer({ standalone = false }: { standalone?: boolean }) {
   const [target, setTarget] = useState<Element | null>(null);
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [details, setDetails] = useState<Record<string, PayrollRow>>({});
-  const [month, setMonth] = useState('');
+  const [settingsRows, setSettingsRows] = useState<SettingRow[]>([]);
+  const [month, setMonth] = useState('all');
   const [selectedWorkerId, setSelectedWorkerId] = useState('');
   const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
   const [expandedId, setExpandedId] = useState('');
   const [busyId, setBusyId] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [emptyReason, setEmptyReason] = useState('');
   const [lexwarePeriod, setLexwarePeriod] = useState(currentMonth());
   const [lexwareFile, setLexwareFile] = useState<File | null>(null);
   const [lexwareBusy, setLexwareBusy] = useState(false);
   const [historyBusy, setHistoryBusy] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const autoBuildAttempted = useRef(false);
 
   useEffect(() => {
+    if (standalone) return;
     const locate = () => setTarget(document.querySelector('[data-testid="working-time-panel"]'));
     locate();
     const observer = new MutationObserver(locate);
     observer.observe(document.body, { childList: true, subtree: true });
     return () => observer.disconnect();
-  }, []);
+  }, [standalone]);
 
-  async function loadRows() {
+  async function fetchWorkspaceData() {
+    const [response, settingsResponse]: any[] = await Promise.all([
+      api('working-time/records/'),
+      api('working-time/settings/'),
+    ]);
+    return { response, settingsResponse };
+  }
+
+  function applyWorkspaceData(response: any, settingsResponse: any) {
+    const nextRows = (response?.results || response || []) as PayrollRow[];
+    const configuredSettings = Array.isArray(settingsResponse?.employees)
+      ? settingsResponse.employees.map((item: any) => ({
+          worker_id: String(item.worker_id || ''),
+          employee_name: String(item.employee_name || ''),
+          employment_type: item.employment_type,
+          monthly_limit: String(item.monthly_limit ?? '0'),
+          hourly_rate: String(item.hourly_rate ?? '0'),
+          night_surcharge_percent: String(item.night_surcharge_percent ?? '0'),
+          saturday_surcharge_percent: String(item.saturday_surcharge_percent ?? '0'),
+          sunday_surcharge_percent: String(item.sunday_surcharge_percent ?? '0'),
+          active: item.active,
+          excluded: item.excluded,
+          notes: item.notes,
+        })).filter((item: SettingRow) => item.worker_id && item.employee_name)
+      : [];
+    const rowEmployees = nextRows.map(item => ({ worker_id: item.worker_id, employee_name: item.employee_name }));
+    const uniqueEmployees = Array.from(
+      new Map([...configuredSettings, ...rowEmployees].map(item => [item.worker_id, { worker_id: item.worker_id, employee_name: item.employee_name }])).values(),
+    ).sort((a, b) => a.employee_name.localeCompare(b.employee_name, 'de'));
+
+    setRows(nextRows);
+    setEmployeeOptions(uniqueEmployees);
+    setSettingsRows(configuredSettings);
+    setDrafts(Object.fromEntries(nextRows.map(row => [row.id, {
+      paid_total_hours: row.paid_total_hours ?? row.soll_hours,
+      manual_adjustment: row.manual_adjustment,
+    }])));
+  }
+
+  async function loadRows(autoBuild = false) {
     setLoading(true);
     setMessage('');
+    setEmptyReason('');
     try {
-      const [response, settingsResponse]: any[] = await Promise.all([
-        api('working-time/records/'),
-        api('working-time/settings/'),
-      ]);
-      const nextRows = (response?.results || response || []) as PayrollRow[];
-      const configuredEmployees = Array.isArray(settingsResponse?.employees)
-        ? settingsResponse.employees
-            .map((item: any) => ({ worker_id: String(item.worker_id || ''), employee_name: String(item.employee_name || '') }))
-            .filter((item: EmployeeOption) => item.worker_id && item.employee_name)
-        : [];
-      const rowEmployees = nextRows.map(item => ({ worker_id: item.worker_id, employee_name: item.employee_name }));
-      const uniqueEmployees = Array.from(
-        new Map([...configuredEmployees, ...rowEmployees].map(item => [item.worker_id, item])).values(),
-      ).sort((a, b) => a.employee_name.localeCompare(b.employee_name, 'de'));
-      setRows(nextRows);
-      setEmployeeOptions(uniqueEmployees);
-      setDrafts(Object.fromEntries(nextRows.map(row => [row.id, { paid_total_hours: row.paid_total_hours ?? row.soll_hours, manual_adjustment: row.manual_adjustment }])));
-      const newestMonth = Array.from(new Set(nextRows.map(row => row.year_month))).sort().reverse()[0];
-      setMonth(current => current || newestMonth || 'all');
+      let { response, settingsResponse } = await fetchWorkspaceData();
+      let nextRows = (response?.results || response || []) as PayrollRow[];
+
+      if (standalone && autoBuild && !nextRows.length && !autoBuildAttempted.current) {
+        autoBuildAttempted.current = true;
+        setMessage('Arbeitszeitdaten werden aus den vorhandenen Ist Zeiten aufgebaut.');
+        const rebuilt: any = await api('working-time/rebuild-all/', { method: 'POST', body: '{}' });
+        if (!rebuilt?.records_count) {
+          setEmptyReason(rebuilt?.detail || 'Es wurden keine abgeschlossenen oder freigegebenen Ist Zeiten gefunden.');
+        }
+        ({ response, settingsResponse } = await fetchWorkspaceData());
+        nextRows = (response?.results || response || []) as PayrollRow[];
+      }
+
+      applyWorkspaceData(response, settingsResponse);
+      if (nextRows.length) setMessage('');
     } catch (error: any) {
       setMessage(error?.message || 'Arbeitszeitkonto konnte nicht geladen werden.');
     } finally {
@@ -146,25 +208,35 @@ export default function PayrollWorkspaceEnhancer() {
   }
 
   useEffect(() => {
-    if (target) void loadRows();
-  }, [target]);
+    if (standalone || target) void loadRows(standalone);
+  }, [standalone, target]);
 
-  const months = useMemo(() => Array.from(new Set(rows.map(row => row.year_month))).sort().reverse(), [rows]);
-  const visibleRows = useMemo(() => rows.filter(row =>
-    (month === 'all' || !month || row.year_month === month)
-    && (!selectedWorkerId || row.worker_id === selectedWorkerId)
-  ), [rows, month, selectedWorkerId]);
-
+  const workerRows = useMemo(
+    () => selectedWorkerId ? rows.filter(row => row.worker_id === selectedWorkerId) : rows,
+    [rows, selectedWorkerId],
+  );
+  const months = useMemo(() => Array.from(new Set(workerRows.map(row => row.year_month))).sort().reverse(), [workerRows]);
+  const visibleRows = useMemo(() => workerRows.filter(row => month === 'all' || !month || row.year_month === month), [workerRows, month]);
   const summaryRows = useMemo(() => {
-    if (month && month !== 'all') return rows.filter(row => row.year_month === month);
+    if (month && month !== 'all') return workerRows.filter(row => row.year_month === month);
+    if (selectedWorkerId) return workerRows;
     const newest = months[0];
     return newest ? rows.filter(row => row.year_month === newest) : [];
-  }, [rows, month, months]);
+  }, [rows, workerRows, selectedWorkerId, month, months]);
 
+  useEffect(() => {
+    if (month === 'all' || !month || months.includes(month)) return;
+    setMonth('all');
+  }, [selectedWorkerId, months, month]);
+
+  const selectedEmployee = employeeOptions.find(item => item.worker_id === selectedWorkerId);
+  const selectedSetting = settingsRows.find(item => item.worker_id === selectedWorkerId);
   const summary = {
     ist: summaryRows.reduce((sum, row) => sum + number(row.ist_hours), 0),
     paid: summaryRows.reduce((sum, row) => sum + number(row.paid_total_hours ?? row.soll_hours), 0),
-    saldo: summaryRows.reduce((sum, row) => sum + number(row.saldo_cumulative), 0),
+    saldo: selectedWorkerId && month === 'all'
+      ? number(workerRows[0]?.saldo_cumulative)
+      : summaryRows.reduce((sum, row) => sum + number(row.monthly_balance_hours ?? row.saldo_cumulative), 0),
     gross: summaryRows.reduce((sum, row) => sum + number(row.gross_with_surcharges ?? row.gross_amount), 0),
     transferred: summaryRows.reduce((sum, row) => sum + number(row.payroll_statement?.transferred_amount), 0),
   };
@@ -200,7 +272,7 @@ export default function PayrollWorkspaceEnhancer() {
         return next;
       });
       await loadRows();
-      setMessage('Auszahlung und Korrektur gespeichert. Alle Folgemonate wurden neu berechnet.');
+      setMessage('Auszahlung und Korrektur gespeichert. Die Folgemonate wurden neu berechnet.');
     } catch (error: any) {
       setMessage(error?.message || 'Änderung konnte nicht gespeichert werden.');
     } finally {
@@ -211,6 +283,7 @@ export default function PayrollWorkspaceEnhancer() {
   async function rebuildHistory() {
     setHistoryBusy(true);
     setMessage('');
+    setEmptyReason('');
     try {
       const result: any = await api('working-time/rebuild-all/', { method: 'POST', body: '{}' });
       setDetails({});
@@ -225,17 +298,52 @@ export default function PayrollWorkspaceEnhancer() {
     }
   }
 
+  async function saveSelectedSettings() {
+    if (!selectedSetting) {
+      setMessage('Bitte zuerst einen Mitarbeiter auswählen.');
+      return;
+    }
+    setSettingsBusy(true);
+    setMessage('');
+    try {
+      await api('working-time/settings/', {
+        method: 'POST',
+        body: JSON.stringify({ employees: [selectedSetting] }),
+      });
+      await loadRows();
+      setMessage('Stundensatz, Sollstunden und Zuschläge wurden gespeichert.');
+    } catch (error: any) {
+      setMessage(error?.message || 'Einstellungen konnten nicht gespeichert werden.');
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
+
+  function updateSelectedSetting(key: keyof SettingRow, value: string) {
+    if (!selectedWorkerId) return;
+    setSettingsRows(current => current.map(item => item.worker_id === selectedWorkerId ? { ...item, [key]: value } : item));
+  }
+
+  async function downloadExport(format: 'xlsx' | 'csv') {
+    setBusyId(`export:${format}`);
+    setMessage('');
+    try {
+      const query = selectedWorkerId ? `?worker=${encodeURIComponent(selectedWorkerId)}` : '';
+      const result = await apiBlob(`working-time/export/${format}/${query}`);
+      triggerBlobDownload(result.blob, result.filename || `arbeitszeit-lohnkonto.${format}`);
+    } catch (error: any) {
+      setMessage(error?.message || 'Export konnte nicht erstellt werden.');
+    } finally {
+      setBusyId('');
+    }
+  }
+
   async function downloadPayrollPdf(row: PayrollRow) {
     setBusyId(`pdf:${row.worker_id}`);
     setMessage('');
     try {
       const result = await apiBlob(`working-time/pdf/${row.worker_id}/`);
-      const url = URL.createObjectURL(result.blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = result.filename || `Arbeitszeitkonto_${row.employee_number || row.worker_id}.pdf`;
-      link.click();
-      URL.revokeObjectURL(url);
+      triggerBlobDownload(result.blob, result.filename || `Arbeitszeitkonto_${row.employee_number || row.worker_id}.pdf`);
     } catch (error: any) {
       setMessage(error?.message || 'PDF konnte nicht erstellt werden.');
     } finally {
@@ -265,64 +373,91 @@ export default function PayrollWorkspaceEnhancer() {
     }
   }
 
-  if (!target) return null;
-
-  return createPortal(
-    <div className="payroll-workspace" data-testid="payroll-workspace">
-      <div className="payroll-workspace-head">
+  const workspace = (
+    <div className={`payroll-workspace ${standalone ? 'payroll-standalone' : ''}`} data-testid="payroll-workspace">
+      {standalone && <header className="payroll-page-hero">
         <div>
-          <small>ARBEITSZEIT UND LOHNKONTO</small>
-          <h4>Monatskonto mit Tagesnachweis</h4>
-          <p>IST kommt ausschließlich aus tatsächlichen Arbeitszeiten. Dienstplanzeiten werden nur zum Vergleich gezeigt. Auszahlung, Lexware Zahlung und Zeitkonto bleiben getrennte Nachweise.</p>
+          <span className="payroll-kicker">A+ SOLUTION · ABRECHNUNG</span>
+          <h2>Arbeitszeit &amp; Lohnkonto</h2>
+          <p>Ein Mitarbeiter. Eine nachvollziehbare Monatsakte. Ist Zeiten, Dienstplan und tatsächliche Zahlung bleiben getrennt und trotzdem direkt vergleichbar.</p>
         </div>
-        <div className="payroll-workspace-controls">
+        <div className="payroll-hero-actions">
+          <button type="button" className="payroll-secondary" onClick={() => void downloadExport('xlsx')} disabled={busyId === 'export:xlsx'}>Excel</button>
+          <button type="button" className="payroll-secondary" onClick={() => void downloadExport('csv')} disabled={busyId === 'export:csv'}>CSV</button>
+          <button type="button" onClick={() => setSettingsOpen(value => !value)}>{settingsOpen ? 'Stammdaten schließen' : 'Stammdaten'}</button>
+        </div>
+      </header>}
+
+      <section className="payroll-filter-deck">
+        <div className="payroll-filter-main">
+          <label>Mitarbeiter
+            <select aria-label="Mitarbeiter auswählen" value={selectedWorkerId} onChange={event => { setSelectedWorkerId(event.target.value); setExpandedId(''); }}>
+              <option value="">Alle Mitarbeiter</option>
+              {employeeOptions.map(item => <option key={item.worker_id} value={item.worker_id}>{item.employee_name}</option>)}
+            </select>
+          </label>
           <label>Monat
             <select aria-label="Arbeitszeitkonto Monat" value={month} onChange={event => { setMonth(event.target.value); setExpandedId(''); }}>
               <option value="all">Alle Monate</option>
               {months.map(item => <option key={item} value={item}>{monthLabel(item)}</option>)}
             </select>
           </label>
-          <label className="payroll-employee-filter">Mitarbeiter
-            <select aria-label="Mitarbeiter auswählen" value={selectedWorkerId} onChange={event => { setSelectedWorkerId(event.target.value); setExpandedId(''); }}>
-              <option value="">Alle Mitarbeiter</option>
-              {employeeOptions.map(item => <option key={item.worker_id} value={item.worker_id}>{item.employee_name}</option>)}
-            </select>
-          </label>
-          <button type="button" onClick={() => void loadRows()} disabled={loading}>{loading ? 'Lädt' : 'Aktualisieren'}</button>
+          <button type="button" className="payroll-refresh" onClick={() => void loadRows()} disabled={loading}>{loading ? 'Wird geladen' : 'Aktualisieren'}</button>
         </div>
-      </div>
-
-      <div className="payroll-summary" aria-label="Lohnübersicht">
-        <div><span>Gearbeitet</span><strong>{decimal(summary.ist)} Std.</strong></div>
-        <div><span>Bezahlt</span><strong>{decimal(summary.paid)} Std.</strong></div>
-        <div><span>Saldo</span><strong className={summary.saldo < 0 ? 'negative' : 'positive'}>{decimal(summary.saldo)} Std.</strong></div>
-        <div><span>Brutto vorbereitet</span><strong>{money(summary.gross)}</strong></div>
-        <div><span>Lexware überwiesen</span><strong>{money(summary.transferred)}</strong></div>
-      </div>
-
-      <div className="payroll-audit-tools">
-        <div>
-          <b>Gesamthistorie</b>
-          <span>Vom ersten echten Arbeitsmonat bis heute neu berechnen.</span>
-          <button type="button" onClick={() => void rebuildHistory()} disabled={historyBusy}>{historyBusy ? 'Berechnet' : 'Gesamthistorie neu berechnen'}</button>
+        <div className="payroll-filter-context">
+          <span>{selectedEmployee?.employee_name || 'Gesamte Belegschaft'}</span>
+          <b>{visibleRows.length} Monatskonten</b>
+          <small>{month === 'all' ? 'Gesamter verfügbarer Zeitraum' : monthLabel(month)}</small>
         </div>
-        <div>
-          <b>Lexware Import einmalig</b>
-          <span>Bankexport als CSV oder ZIP. Der gewählte Monat ist der Abrechnungsmonat.</span>
+      </section>
+
+      <section className="payroll-evidence-grid" aria-label="Drei Nachweise">
+        <article><span>01</span><div><b>Ist Arbeitszeit</b><small>Beginn, Ende, Pause und Kunde aus der tatsächlichen Zeiterfassung.</small></div></article>
+        <article><span>02</span><div><b>Dienstplan</b><small>Der geplante Einsatz bleibt als Vergleich sichtbar und verändert die Ist Stunden nicht.</small></div></article>
+        <article><span>03</span><div><b>Zahlung</b><small>Bezahlte Stunden und Lexware Bankbetrag werden separat dokumentiert.</small></div></article>
+      </section>
+
+      <section className="payroll-summary" aria-label="Lohnübersicht">
+        <div><span>Gearbeitet</span><strong>{decimal(summary.ist)} Std.</strong><small>Ist Zeit</small></div>
+        <div><span>Bezahlt</span><strong>{decimal(summary.paid)} Std.</strong><small>bestätigte Stunden</small></div>
+        <div><span>Saldo</span><strong className={summary.saldo < 0 ? 'negative' : 'positive'}>{decimal(summary.saldo)} Std.</strong><small>offenes Zeitkonto</small></div>
+        <div><span>Brutto vorbereitet</span><strong>{money(summary.gross)}</strong><small>inklusive Zuschläge</small></div>
+        <div><span>Lexware überwiesen</span><strong>{money(summary.transferred)}</strong><small>Bankabfluss</small></div>
+      </section>
+
+      {settingsOpen && <section className="payroll-settings-panel">
+        <div className="payroll-section-title">
+          <div><span>STAMMDATEN</span><h3>Vertrag und Zuschläge</h3></div>
+          <p>{selectedSetting ? selectedSetting.employee_name : 'Für die Bearbeitung bitte einen Mitarbeiter auswählen.'}</p>
+        </div>
+        {selectedSetting && <div className="payroll-settings-grid">
+          <label>Sollstunden pro Monat<input type="number" step="0.25" value={selectedSetting.monthly_limit} onChange={event => updateSelectedSetting('monthly_limit', event.target.value)} /></label>
+          <label>Stundensatz<input type="number" step="0.01" value={selectedSetting.hourly_rate} onChange={event => updateSelectedSetting('hourly_rate', event.target.value)} /></label>
+          <label>Nacht Zuschlag %<input type="number" step="0.01" value={selectedSetting.night_surcharge_percent} onChange={event => updateSelectedSetting('night_surcharge_percent', event.target.value)} /></label>
+          <label>Samstag Zuschlag %<input type="number" step="0.01" value={selectedSetting.saturday_surcharge_percent} onChange={event => updateSelectedSetting('saturday_surcharge_percent', event.target.value)} /></label>
+          <label>Sonntag Zuschlag %<input type="number" step="0.01" value={selectedSetting.sunday_surcharge_percent} onChange={event => updateSelectedSetting('sunday_surcharge_percent', event.target.value)} /></label>
+          <button type="button" onClick={() => void saveSelectedSettings()} disabled={settingsBusy}>{settingsBusy ? 'Speichert' : 'Stammdaten speichern'}</button>
+        </div>}
+      </section>}
+
+      <section className="payroll-tool-row">
+        <div className="payroll-tool-card">
+          <span className="payroll-tool-index">A</span>
+          <div><b>Historie neu berechnen</b><small>Alle vorhandenen echten Arbeitszeiten werden vom ersten Arbeitsmonat bis heute neu aufgebaut.</small></div>
+          <button type="button" onClick={() => void rebuildHistory()} disabled={historyBusy}>{historyBusy ? 'Berechnet' : 'Neu berechnen'}</button>
+        </div>
+        <div className="payroll-tool-card payroll-lexware-card">
+          <span className="payroll-tool-index">L</span>
+          <div><b>Lexware übernehmen</b><small>CSV oder ZIP Bankexport einem Abrechnungsmonat zuordnen.</small></div>
           <div className="payroll-lexware-fields">
             <input aria-label="Lexware Abrechnungsmonat" type="month" value={lexwarePeriod} onChange={event => setLexwarePeriod(event.target.value)} />
             <input aria-label="Lexware Datei" type="file" accept=".csv,.zip,text/csv,application/zip" onChange={event => setLexwareFile(event.target.files?.[0] || null)} />
-            <button type="button" onClick={() => void importLexware()} disabled={lexwareBusy || !lexwareFile}>{lexwareBusy ? 'Importiert' : 'Lexware übernehmen'}</button>
+            <button type="button" onClick={() => void importLexware()} disabled={lexwareBusy || !lexwareFile}>{lexwareBusy ? 'Importiert' : 'Übernehmen'}</button>
           </div>
         </div>
-      </div>
+      </section>
 
       {message && <div className="payroll-message" role="status">{message}</div>}
-
-      <div className="payroll-list-meta">
-        <span>{visibleRows.length} Monatskonten</span>
-        {month !== 'all' && month && <b>{monthLabel(month)}</b>}
-      </div>
 
       <div className="payroll-record-list" data-testid="payroll-record-list">
         {visibleRows.map(row => {
@@ -332,9 +467,10 @@ export default function PayrollWorkspaceEnhancer() {
           const statement = row.payroll_statement;
           return <article className={`payroll-record-card ${expanded ? 'is-expanded' : ''}`} key={row.id}>
             <header>
+              <div className="payroll-record-month"><span>{monthLabel(row.year_month)}</span><small>{employmentLabel(row.employment_type)}</small></div>
               <div className="payroll-record-person">
                 <strong>{row.employee_name}</strong>
-                <span>{employmentLabel(row.employment_type)} · {monthLabel(row.year_month)}</span>
+                <span>{row.employee_number || 'Ohne Personalnummer'}</span>
               </div>
               <div className="payroll-record-gross">
                 <small>Lexware überwiesen</small>
@@ -344,30 +480,27 @@ export default function PayrollWorkspaceEnhancer() {
 
             {row.minijob_warning && <div className="payroll-warning">Prüfung nötig: Grundbrutto liegt über {money(row.minijob_limit)}. Die Minijob Einstufung wird nicht automatisch geändert.</div>}
 
-            <div className="payroll-mobile-summary" aria-label={`Kurzinfo ${row.employee_name}`}>
-              <div><span>IST</span><b>{decimal(row.ist_hours)}</b></div>
-              <div><span>Bezahlt</span><b>{decimal(row.paid_total_hours ?? row.soll_hours)}</b></div>
-              <div><span>Saldo</span><b className={number(row.saldo_cumulative) < 0 ? 'negative' : 'positive'}>{decimal(row.saldo_cumulative)}</b></div>
+            <div className="payroll-metrics">
+              <div><span>IST</span><b>{decimal(row.ist_hours)} Std.</b></div>
+              <div><span>Bezahlt</span><b>{decimal(row.paid_total_hours ?? row.soll_hours)} Std.</b></div>
+              <div><span>Monatssaldo</span><b className={number(row.monthly_balance_hours) < 0 ? 'negative' : 'positive'}>{decimal(row.monthly_balance_hours)} Std.</b></div>
+              <div><span>Saldo gesamt</span><b className={number(row.saldo_cumulative) < 0 ? 'negative' : 'positive'}>{decimal(row.saldo_cumulative)} Std.</b></div>
+              <div><span>Stundensatz</span><b>{money(row.hourly_rate)}</b></div>
+              <div><span>Brutto</span><b>{money(row.gross_with_surcharges ?? row.gross_amount)}</b></div>
+              <div><span>Nacht</span><b>{decimal(row.night_hours)} Std.</b></div>
+              <div><span>Samstag</span><b>{decimal(row.saturday_hours)} Std.</b></div>
+              <div><span>Sonntag</span><b>{decimal(row.sunday_hours)} Std.</b></div>
+              <div><span>Zuschläge</span><b>{money(row.surcharge_amount)}</b></div>
+              <div><span>Soll</span><b>{decimal(row.soll_hours)} Std.</b></div>
+              <div><span>Einträge</span><b>{row.entry_count || 0}</b></div>
             </div>
 
-            <button className="payroll-card-toggle" type="button" aria-expanded={expanded} onClick={() => void toggleRow(row)}>{expanded ? 'Weniger anzeigen' : 'Tagesdetails und Bearbeitung'}</button>
+            <div className="payroll-record-actions">
+              <button type="button" onClick={() => void toggleRow(row)}>{expanded ? 'Details schließen' : 'Tagesnachweis öffnen'}</button>
+              <button type="button" className="payroll-secondary" onClick={() => void downloadPayrollPdf(row)} disabled={busyId === `pdf:${row.worker_id}`}>{busyId === `pdf:${row.worker_id}` ? 'PDF wird erstellt' : 'PDF'}</button>
+            </div>
 
-            <div className="payroll-card-details">
-              <div className="payroll-metrics">
-                <div><span>Gearbeitet</span><b>{decimal(row.ist_hours)} Std.</b></div>
-                <div><span>Bezahlt gesamt</span><b>{decimal(row.paid_total_hours ?? row.soll_hours)} Std.</b></div>
-                <div><span>Monatssaldo</span><b className={number(row.monthly_balance_hours) < 0 ? 'negative' : 'positive'}>{decimal(row.monthly_balance_hours)} Std.</b></div>
-                <div><span>Saldo kumuliert</span><b className={number(row.saldo_cumulative) < 0 ? 'negative' : 'positive'}>{decimal(row.saldo_cumulative)} Std.</b></div>
-                <div><span>Stundensatz</span><b>{money(row.hourly_rate)}</b></div>
-                <div><span>Brutto mit Zuschlägen</span><b>{money(row.gross_with_surcharges ?? row.gross_amount)}</b></div>
-                <div><span>Nacht</span><b>{decimal(row.night_hours)} Std.</b></div>
-                <div><span>Samstag</span><b>{decimal(row.saturday_hours)} Std.</b></div>
-                <div><span>Sonntag</span><b>{decimal(row.sunday_hours)} Std.</b></div>
-                <div><span>Zuschläge</span><b>{money(row.surcharge_amount)}</b></div>
-                <div><span>Soll</span><b>{decimal(row.soll_hours)} Std.</b></div>
-                <div><span>Offene Stunden im Monat</span><b className={number(row.monthly_balance_hours) < 0 ? 'negative' : 'positive'}>{decimal(row.monthly_balance_hours)} Std.</b></div>
-              </div>
-
+            {expanded && <div className="payroll-card-details">
               <div className="payroll-edit-row">
                 <label>Bezahlte Stunden gesamt
                   <input aria-label={`Bezahlte Stunden ${row.employee_name} ${row.year_month}`} type="number" min="0" step="0.25" value={draft.paid_total_hours} onChange={event => setDrafts({ ...drafts, [row.id]: { ...draft, paid_total_hours: event.target.value } })} />
@@ -384,15 +517,8 @@ export default function PayrollWorkspaceEnhancer() {
                 <div><span>Quelle</span><b>{statement?.source === 'lexware_bank_export' ? 'Lexware Bankexport' : statement?.source || 'Keine Daten'}</b></div>
               </div>
 
-              <div className="payroll-document-actions">
-                <button type="button" onClick={() => void downloadPayrollPdf(row)} disabled={busyId === `pdf:${row.worker_id}`}>
-                  {busyId === `pdf:${row.worker_id}` ? 'PDF wird erstellt' : 'PDF Arbeitszeitkonto'}
-                </button>
-                <span>Enthält Monatsübersicht und Tagesnachweis mit Kunde, Plan, Ist, Pause, Nacht, Samstag und Sonntag.</span>
-              </div>
-
               <div className="payroll-daily">
-                <div className="payroll-daily-head"><b>Tagesnachweis</b><span>{detail?.entries?.length ?? row.entry_count ?? 0} Einträge</span></div>
+                <div className="payroll-daily-head"><div><span>TAGESNACHWEIS</span><b>Plan und Ist nebeneinander</b></div><small>{detail?.entries?.length ?? row.entry_count ?? 0} Einträge</small></div>
                 {!detail && <div className="payroll-detail-loading">Tagesdetails werden geladen.</div>}
                 {!!detail?.entries?.length && <div className="payroll-daily-table" role="table" aria-label={`Tagesnachweis ${row.employee_name} ${row.year_month}`}>
                   <div className="payroll-daily-row payroll-daily-header" role="row">
@@ -410,16 +536,28 @@ export default function PayrollWorkspaceEnhancer() {
                     <span>{hoursFromMinutes(entry.sunday_minutes)}</span>
                   </div>)}
                 </div>}
-                {detail && !detail.entries?.length && <div className="payroll-empty">Keine Tageszeiten in diesem Monat.</div>}
+                {detail && !detail.entries?.length && <div className="payroll-empty compact">Keine Tageszeiten in diesem Monat.</div>}
               </div>
-            </div>
+            </div>}
           </article>;
         })}
-        {!visibleRows.length && !loading && <div className="payroll-empty">Keine passenden Monatsdaten gefunden.</div>}
+
+        {!visibleRows.length && !loading && <section className="payroll-empty-state">
+          <span className="payroll-empty-mark">A+</span>
+          <div>
+            <small>NOCH KEIN MONATSKONTO</small>
+            <h3>{selectedEmployee ? `Für ${selectedEmployee.employee_name} sind noch keine Monatsdaten vorhanden.` : 'Es sind noch keine Monatsdaten vorhanden.'}</h3>
+            <p>{emptyReason || 'Die Seite hat den automatischen Aufbau bereits geprüft. Falls neue Ist Zeiten freigegeben wurden, kannst du die Historie erneut berechnen.'}</p>
+          </div>
+          <button type="button" onClick={() => void rebuildHistory()} disabled={historyBusy}>{historyBusy ? 'Wird geprüft' : 'Historie prüfen'}</button>
+        </section>}
       </div>
 
-      <p className="payroll-footnote">Saldo wird aus tatsächlich gearbeiteten Stunden minus tatsächlich bezahlten Stunden berechnet. SOLL bleibt ein separater Vertragsvergleich. Der Lexware Betrag ist der importierte Bankabfluss und wird nicht automatisch in Stunden umgerechnet.</p>
-    </div>,
-    target,
+      <footer className="payroll-footnote">Der Saldo basiert auf tatsächlichen Ist Stunden, bestätigten bezahlten Stunden und manuellen Korrekturen. Sollstunden bleiben ein Vertragsvergleich. Ein Lexware Bankbetrag wird nicht automatisch in Stunden umgerechnet.</footer>
+    </div>
   );
+
+  if (standalone) return workspace;
+  if (!target) return null;
+  return createPortal(workspace, target);
 }
