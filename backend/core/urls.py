@@ -138,6 +138,8 @@ urlpatterns = [
     path('working-time/lexware-import/', payroll_views.lexware_bank_import),
     path('working-time/export/<str:file_format>/', automation_views.worktime_export),
     path('working-time/pdf/<uuid:worker_id>/', automation_views.worktime_pdf),
+    path('working-time/docx/<uuid:worker_id>/', automation_views.worktime_docx),
+    path('working-time/lexware-docx/', automation_views.worktime_lexware_docx),
     path('working-time/backup/', automation_views.worktime_backup),
     path('reports/timesheets.csv', advanced_views.export_timesheets),
     path('reports/schedule.csv', native_operations.export_schedule),
