@@ -3155,6 +3155,12 @@ function Legal({ deletePage = false }: { deletePage?: boolean }) {
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  useEffect(() => {
+    // Ionic and custom dialogs may be portaled outside IonApp.
+    if (user && isManager(user) && !Capacitor.isNativePlatform()) document.body.dataset.apAdminWeb = 'true';
+    else delete document.body.dataset.apAdminWeb;
+    return () => { delete document.body.dataset.apAdminWeb; };
+  }, [user?.role]);
   const [ready, setReady] = useState(false);
   const [view, setView] = useState<View>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);

@@ -53,6 +53,23 @@ test('desktop modules share the brand frame and preserve navigation', async ({ p
     await page.locator('.app > aside ion-item').filter({ hasText: label }).click();
     await expect(page.locator('.ap-workspace-header h1')).toHaveText(label);
     await expect(page.locator('.app-main')).toBeVisible();
+    if (label === 'Zeiterfassung') await expect(page.locator('.attendance-head')).toBeVisible();
+    if (label === 'Anfragen, Berichte & Verwaltung') await expect(page.locator('.operations-stats')).toBeVisible();
+    if (label === 'Einstellungen') await expect(page.getByRole('button', { name: 'Einsatzort anlegen', exact: true })).toBeVisible();
     await page.screenshot({ path: `test-results/module-${label.replace(/[^a-zA-Z]/g, '')}.png`, fullPage: true });
   }
+});
+
+test('settings form retains editable fields and cancel action', async ({ page }) => {
+  await openAdminHome(page, 1440, 1000);
+  await page.locator('.app > aside ion-item').filter({ hasText: 'Einstellungen' }).click();
+  await page.getByRole('button', { name: 'Einsatzort anlegen', exact: true }).click();
+  const modal = page.locator('ion-modal').filter({ has: page.getByText('Einsatzort anlegen', {exact: true}) });
+  await expect(modal).toBeVisible();
+  const name = modal.locator('ion-input').filter({ hasText: 'Bezeichnung' }).locator('input');
+  await name.fill('Test Einsatzort');
+  await expect(name).toHaveValue('Test Einsatzort');
+  await page.screenshot({path: 'test-results/settings-location-form.png'});
+  await modal.getByRole('button', {name: 'Abbrechen', exact: true}).click();
+  await expect(modal).toBeHidden();
 });
