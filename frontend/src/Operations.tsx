@@ -516,21 +516,7 @@ export default function Operations({ user }: { user: User }) {
                 {!orderPackages.length && <Empty>Noch keine Auftragspakete vorhanden.</Empty>}
               </div>
             </section>
-            <section id="arbeitszeitkonto" className="operations-panel" data-testid="working-time-panel">
-              <div className="operations-head"><div><h3>Arbeitszeitkonto</h3><p>Ist-/Sollstunden, Plusstunden, Übertrag, Auszahlung, Korrektur und kumulierter Saldo.</p></div><IonIcon icon={calendarOutline} /></div>
-              <div className="report-fields">
-                <IonInput fill="outline" type="date" label="Von" labelPlacement="floating" value={workingTimeRange.start} onIonInput={(event) => setWorkingTimeRange({ ...workingTimeRange, start: value(event) })} />
-                <IonInput fill="outline" type="date" label="Bis" labelPlacement="floating" value={workingTimeRange.end} onIonInput={(event) => setWorkingTimeRange({ ...workingTimeRange, end: value(event) })} />
-              </div>
-              <div className="operations-actions">
-                <IonButton onClick={syncWorkingTime}>Arbeitszeit aktualisieren</IonButton>
-                <IonButton fill="outline" onClick={() => setModal('working-time-settings')}>Einstellungen</IonButton>
-                <IonButton fill="outline" onClick={() => download('working-time/export/xlsx/', 'arbeitszeitkonto.xlsx')}>Excel</IonButton>
-                <IonButton fill="outline" onClick={() => download('working-time/export/csv/', 'arbeitszeitkonto.csv')}>CSV</IonButton>
-                <IonButton fill="clear" onClick={createWorkingTimeBackup}>Backup</IonButton>
-              </div>
-              <div className="operations-note">{workingTimeRecords.length} Monatsdatensätze · {workingTime.employees?.length || 0} Mitarbeiter. Manuelle Auszahlungen und Korrekturen bleiben bei jeder Aktualisierung erhalten.</div>
-            </section>
+
           </div>
 
           <div className="operations-grid two">
