@@ -48,9 +48,11 @@ import {
   starOutline,
   stopwatchOutline,
   trashOutline,
+  walletOutline,
 } from 'ionicons/icons';
 import { api, consumeOAuth, login, logout, me, socialUrl, User } from './api';
 import Operations from './Operations';
+import PayrollWorkspaceEnhancer from './PayrollWorkspaceEnhancer';
 import ScheduleV2 from './ScheduleV2';
 import AttendanceV3 from './AttendanceV3';
 import ActivationPage from './ActivationPage';
@@ -78,6 +80,7 @@ type View =
   | 'ratings'
   | 'profile'
   | 'operations'
+  | 'payroll'
   | 'settings'
   | 'akte';
 
@@ -94,6 +97,7 @@ const icons: Record<string, string> = {
   ratings: starOutline,
   profile: peopleOutline,
   operations: refreshOutline,
+  payroll: walletOutline,
   settings: settingsOutline,
 };
 
@@ -3189,7 +3193,7 @@ export default function App() {
   useEffect(() => {
     const syncViewFromUrl = () => {
       const requested = new URLSearchParams(window.location.search).get('view') as View | null;
-      const allowed: View[] = ['dashboard', 'schedule', 'time', 'contracts', 'documents', 'orders', 'people', 'messages', 'ranking', 'ratings', 'profile', 'operations', 'settings', 'akte'];
+      const allowed: View[] = ['dashboard', 'schedule', 'time', 'contracts', 'documents', 'orders', 'people', 'messages', 'ranking', 'ratings', 'profile', 'operations', 'payroll', 'settings', 'akte'];
       if (requested && allowed.includes(requested)) {
         setView(requested);
         setMobileMenuOpen(false);
@@ -3315,13 +3319,18 @@ export default function App() {
   const items = nav[user.role] || nav.worker;
   // Desktop customer sidebar intentionally stays simpler than the mobile navigation.
   // Keep `items` untouched so the existing mobile client portal is not changed.
-  const desktopItems = user.role === 'client'
+  const baseDesktopItems = user.role === 'client'
     ? items.filter(([key]) => key !== 'operations' && key !== 'contracts')
     : items;
+  const desktopItems: [View, string][] = desktopAdminWeb && isManager(user)
+    ? baseDesktopItems.flatMap((item) => item[0] === 'documents'
+      ? [item, ['payroll', 'Arbeitszeit & Lohnkonto'] as [View, string]]
+      : [item])
+    : baseDesktopItems;
   const primaryViews: View[] = ['dashboard', 'schedule', 'time'];
   const mobilePrimaryItems = items.filter(([key]) => primaryViews.includes(key));
   const mobileMoreItems = items.filter(([key]) => !primaryViews.includes(key));
-  const currentLabel = view === 'profile' ? 'Profil' : view === 'akte' ? 'Digitale Akte' : items.find(([key]) => key === view)?.[1] || 'A+ Solution';
+  const currentLabel = view === 'profile' ? 'Profil' : view === 'akte' ? 'Digitale Akte' : view === 'payroll' ? 'Arbeitszeit & Lohnkonto' : items.find(([key]) => key === view)?.[1] || 'A+ Solution';
   const roleLabel: Record<string, string> = {
     admin: 'Administration',
     manager: 'Management',
@@ -3371,6 +3380,7 @@ export default function App() {
   else if (view === 'ratings') content = <Ratings user={user} />;
   else if (view === 'profile') content = <Profile user={user} />;
   else if (view === 'operations') content = <Operations user={user} />;
+  else if (view === 'payroll') content = isManager(user) ? <PayrollWorkspaceEnhancer standalone /> : <Dashboard user={user} navigate={navigateTo} />;
   else if (view === 'akte') content = <AktePage user={user} />;
 
   if (mobileMenuOpen) {
@@ -3415,7 +3425,7 @@ export default function App() {
                     button
                     detail={false}
                     key={item[0]}
-                    className={view === item[0] ? 'active' : ''}
+                    className={`${view === item[0] ? 'active' : ''} ${item[0] === 'payroll' ? 'ap-nav-subitem' : ''}`.trim()}
                     aria-current={view === item[0] ? 'page' : undefined}
                     onClick={() => navigateTo(item[0])}
                   >
