@@ -524,6 +524,10 @@ def test_lexware_pdf_bundle_imports_hourly_payslip_and_payment(
     record.refresh_from_db()
     assert record.paid_total_hours == Decimal('38.90')
     assert record.saldo_cumulative == Decimal('11.10')
+    worker.refresh_from_db()
+    assert worker.tariff_hourly_rate == Decimal('15.50')
+    setting = worker.working_time_setting
+    assert setting.hourly_rate == Decimal('15.50')
 
 
 @pytest.mark.django_db
