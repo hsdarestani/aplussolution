@@ -36,3 +36,8 @@ Die Lexware Bankdatei bestätigt den Bankabfluss, aber nicht selbst die vergüte
 Für Minijobs wird 2026 bei einem Grundbrutto über 603 EUR gewarnt. Die Warnung ist ein Hinweis, keine automatische rechtliche Neubewertung. Zusätzliche Sonderfälle und die Behandlung von Zuschlägen sind lohnabrechnerisch zu prüfen.
 
 Die Bedienoberfläche und das Datenmodell ergänzen das bestehende Adminsystem; eine Änderung des Mitarbeiter App Designs ist nicht Teil dieses Moduls.
+
+
+## Plausibilitätsprüfung von Zeitintervallen
+
+Bei einem offensichtlich um genau einen Kalendertag verrutschten Clock-out wird die Lohnkonto-Berechnung nur dann korrigiert, wenn der Rohzeitraum länger als 18 Stunden ist, der zugehörige Dienstplan höchstens 18 Stunden umfasst und die auf den richtigen Tag zurückgesetzte Endzeit höchstens sechs Stunden vom geplanten Ende abweicht. Der ursprüngliche Clock-out bleibt als Quelldatum erhalten und die Korrektur wird im Tagesnachweis markiert.
