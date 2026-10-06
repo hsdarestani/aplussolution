@@ -114,11 +114,26 @@ export function ShiftPlanAttachments({
   const [visibility, setVisibility] = useState<'all' | 'worker'>('all');
   const [targetWorker, setTargetWorker] = useState('');
   const [preview, setPreview] = useState<{ plan: Plan; url: string }>();
+  const [previewZoom, setPreviewZoom] = useState(1);
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setPlans(Array.isArray(shift?.plans) ? shift.plans : []);
   }, [shift?.id, shift?.plans]);
+
+  useEffect(() => {
+    if (!preview) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closePreview();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [preview?.url]);
 
   async function upload(file?: File) {
     if (!file || !shift?.id || busy) return;
@@ -155,6 +170,7 @@ export function ShiftPlanAttachments({
     try {
       const result = await apiBlob(planPath(plan.view_url || plan.download_url));
       const url = URL.createObjectURL(result.blob);
+      setPreviewZoom(1);
       setPreview((current) => {
         if (current?.url) URL.revokeObjectURL(current.url);
         return { plan, url };
@@ -167,10 +183,15 @@ export function ShiftPlanAttachments({
   }
 
   function closePreview() {
+    setPreviewZoom(1);
     setPreview((current) => {
       if (current?.url) URL.revokeObjectURL(current.url);
       return undefined;
     });
+  }
+
+  function changePreviewZoom(delta: number) {
+    setPreviewZoom((current) => Math.max(0.75, Math.min(3, Math.round((current + delta) * 100) / 100)));
   }
 
   async function removePlan(plan: Plan) {
@@ -251,16 +272,46 @@ export function ShiftPlanAttachments({
         {canUpload && !compact && plan.delete_url ? <button type="button" className="shift-plan-delete" disabled={busy} onClick={() => void removePlan(plan)} aria-label="Einsatzplan löschen">Löschen</button> : null}
       </div>)}
     </div> : null}
-    {preview ? <div className="shift-plan-preview" role="dialog" aria-modal="true" aria-label={preview.plan.name}>
+    {preview ? <div
+      className="shift-plan-preview"
+      role="dialog"
+      aria-modal="true"
+      aria-label={preview.plan.name}
+      onClick={(event) => event.stopPropagation()}
+    >
       <div className="shift-plan-preview-card">
         <div className="shift-plan-preview-head">
           <b>{preview.plan.name}</b>
-          <button type="button" onClick={closePreview} aria-label="Schließen">×</button>
+          <div className="shift-plan-preview-head-actions">
+            <div className="shift-plan-preview-zoom" aria-label="PDF Zoom">
+              <button type="button" onClick={() => changePreviewZoom(-0.25)} disabled={previewZoom <= 0.75} aria-label="Verkleinern">−</button>
+              <button type="button" className="shift-plan-preview-zoom-value" onClick={() => setPreviewZoom(1)} aria-label="Zoom zurücksetzen">
+                {Math.round(previewZoom * 100)}%
+              </button>
+              <button type="button" onClick={() => changePreviewZoom(0.25)} disabled={previewZoom >= 3} aria-label="Vergrößern">+</button>
+            </div>
+            <button
+              type="button"
+              className="shift-plan-preview-close"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                closePreview();
+              }}
+              aria-label="Schließen"
+            >×</button>
+          </div>
         </div>
-        <iframe src={preview.url} title={preview.plan.name} />
+        <div className="shift-plan-preview-stage">
+          <iframe
+            src={preview.url}
+            title={preview.plan.name}
+            style={{ width: `${previewZoom * 100}%`, height: `${previewZoom * 100}%` }}
+          />
+        </div>
         <div className="shift-plan-preview-actions">
-          <button type="button" onClick={closePreview}>Schließen</button>
-          <button type="button" className="primary" onClick={() => void shareOrSavePlan(preview.plan)}>Teilen oder speichern</button>
+          <button type="button" onPointerDown={(event) => { event.preventDefault(); closePreview(); }}>Schließen</button>
+          <button type="button" className="primary" onClick={() => void shareOrSavePlan(preview.plan)}>Speichern / Teilen</button>
         </div>
       </div>
     </div> : null}
