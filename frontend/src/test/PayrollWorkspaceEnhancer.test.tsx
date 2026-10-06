@@ -3,7 +3,11 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const apiMock = vi.fn();
-vi.mock('../api', () => ({ api: (...args: any[]) => apiMock(...args) }));
+const apiBlobMock = vi.fn();
+vi.mock('../api', () => ({
+  api: (...args: any[]) => apiMock(...args),
+  apiBlob: (...args: any[]) => apiBlobMock(...args),
+}));
 
 import PayrollWorkspaceEnhancer from '../PayrollWorkspaceEnhancer';
 
@@ -61,6 +65,8 @@ describe('PayrollWorkspaceEnhancer', () => {
   beforeEach(() => {
     document.body.innerHTML = '<div id="root"></div><section data-testid="working-time-panel"></section>';
     apiMock.mockReset();
+    apiBlobMock.mockReset();
+    apiBlobMock.mockResolvedValue({ blob: new Blob(['pdf']), filename: 'Arbeitszeitkonto.pdf' });
     apiMock.mockImplementation((path: string, options?: RequestInit) => {
       if (path === 'working-time/records/' && !options) return Promise.resolve({ results: [row] });
       if (path === 'working-time/records/rec-1/details/') return Promise.resolve(detail);
@@ -82,7 +88,8 @@ describe('PayrollWorkspaceEnhancer', () => {
 
     fireEvent.click(within(workspace).getByRole('button', { name: 'Tagesdetails und Bearbeitung' }));
     expect(await within(workspace).findByText('Kunde GmbH')).toBeInTheDocument();
-    expect(within(workspace).getByText(/10,00 Std/)).toBeInTheDocument();
+    const dailyTable = within(workspace).getByRole('table', { name: 'Tagesnachweis Anna Becker 2026-08' });
+    expect(within(dailyTable).getByText('10,00 Std.')).toBeInTheDocument();
 
     const paid = within(workspace).getByLabelText('Bezahlte Stunden Anna Becker 2026-08');
     const correction = within(workspace).getByLabelText('Korrektur Anna Becker 2026-08');
