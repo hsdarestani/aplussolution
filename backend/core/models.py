@@ -616,6 +616,7 @@ class WorkingTimeAccountRecord(TimestampedModel):
     carryover_previous = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     paid_hours = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     paid_total_hours = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    employment_type_snapshot = models.CharField(max_length=20, blank=True)
     manual_adjustment = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     saldo_cumulative = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
