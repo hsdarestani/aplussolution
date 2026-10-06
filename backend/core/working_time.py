@@ -535,7 +535,7 @@ def export_xlsx(queryset) -> HttpResponse:
     statements = _statement_map(rows)
     wb = Workbook()
     ws = wb.active
-    ws.title = 'Arbeitszeit & Lohnkonto'
+    ws.title = 'Arbeitszeitkonto'
     headers = [
         'Mitarbeiter', 'Beschäftigung', 'Monat', 'Ist-Stunden', 'Soll-Stunden',
         'Bezahlte Stunden gesamt', 'Zusätzlich ausgezahlt', 'Monatssaldo',
