@@ -413,7 +413,12 @@ class PayrollStatement(TimestampedModel):
     period = models.DateField(help_text='Erster Tag des Abrechnungsmonats')
     gross_amount = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     net_amount = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
-    document = models.FileField(upload_to='payroll/%Y/%m/')
+    transferred_amount = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
+    payment_date = models.DateField(blank=True, null=True)
+    source = models.CharField(max_length=40, default='manual')
+    source_reference = models.CharField(max_length=255, blank=True)
+    raw_data = models.JSONField(default=list, blank=True)
+    document = models.FileField(upload_to='payroll/%Y/%m/', blank=True, null=True)
 
     class Meta:
         unique_together = ('worker', 'period')
@@ -594,6 +599,9 @@ class WorkingTimeSetting(TimestampedModel):
     worker = models.OneToOneField(WorkerProfile, on_delete=models.CASCADE, related_name='working_time_setting')
     monthly_limit = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    night_surcharge_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    saturday_surcharge_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    sunday_surcharge_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
     active = models.BooleanField(default=True)
     excluded = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
