@@ -427,13 +427,14 @@ def record_dict(
     monthly_balance = (row.ist_hours + row.manual_adjustment - paid_total).quantize(TWO)
     surcharge_amount = totals['surcharge_amount']
     gross_with_surcharges = (row.gross_amount + surcharge_amount).quantize(TWO)
-    minijob_limit = _minijob_limit(row.year_month) if row.worker.employment_type == WorkerProfile.EmploymentType.MINI else None
+    employment_type = row.employment_type_snapshot or row.worker.employment_type
+    minijob_limit = _minijob_limit(row.year_month) if employment_type == WorkerProfile.EmploymentType.MINI else None
     result = {
         'id': str(row.id),
         'worker_id': str(row.worker_id),
         'employee_name': str(row.worker.user),
         'employee_number': row.worker.employee_number,
-        'employment_type': row.worker.employment_type,
+        'employment_type': employment_type,
         'wiw_user_id': row.worker.wiw_user_id,
         'year_month': row.year_month.strftime('%Y-%m'),
         'ist_hours': str(row.ist_hours),
