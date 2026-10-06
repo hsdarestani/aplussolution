@@ -166,7 +166,7 @@ def test_rebuild_all_creates_month_for_closed_pending_attendance(
         year_month=today.replace(day=1),
     )
     assert record.ist_hours == Decimal('0.00')
-    assert record.entry_count if hasattr(record, 'entry_count') else True
+    assert record.raw_entries == []
 
 
 @pytest.mark.django_db
