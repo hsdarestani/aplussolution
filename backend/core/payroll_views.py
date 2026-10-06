@@ -272,6 +272,27 @@ def lexware_bank_import(request):
     except ValueError:
         return Response({'detail': 'Ungültiger Abrechnungsmonat.'}, status=400)
 
+    # Lexware standard filenames include the payroll month, e.g.
+    # Lohnabrechnungen_2026-09.pdf. Never silently book a September document
+    # into October just because the month picker was left unchanged.
+    detected_periods = set()
+    for upload in uploads:
+        source_name = str(getattr(upload, 'name', '') or '')
+        match = re.search(r'(20\\d{2})[-_](0[1-9]|1[0-2])', source_name)
+        if match:
+            detected_periods.add(f'{match.group(1)}-{match.group(2)}')
+    if len(detected_periods) > 1:
+        return Response({
+            'detail': 'Die ausgewählten Lexware Dateien gehören zu unterschiedlichen Abrechnungsmonaten.',
+            'detected_periods': sorted(detected_periods),
+        }, status=400)
+    if detected_periods and period_text not in detected_periods:
+        detected = next(iter(detected_periods))
+        return Response({
+            'detail': f'Die Lexware Datei gehört zu {detected}, ausgewählt ist aber {period_text}. Bitte den Abrechnungsmonat korrigieren.',
+            'detected_period': detected,
+        }, status=400)
+
     matchers = _employee_matchers()
     grouped = defaultdict(list)
     source_files = defaultdict(set)
