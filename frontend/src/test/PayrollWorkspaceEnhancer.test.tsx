@@ -87,7 +87,7 @@ describe('PayrollWorkspaceEnhancer', () => {
     render(<PayrollWorkspaceEnhancer />);
 
     const workspace = await screen.findByTestId('payroll-workspace');
-    expect(within(workspace).getByText('Anna Becker')).toBeInTheDocument();
+    expect(within(workspace).getAllByText('Anna Becker').length).toBeGreaterThanOrEqual(1);
     const employeeSelect = within(workspace).getByLabelText('Mitarbeiter auswählen');
     expect(employeeSelect.tagName).toBe('SELECT');
     expect(within(employeeSelect).getByRole('option', { name: 'Alle Mitarbeiter' })).toBeInTheDocument();
@@ -96,7 +96,7 @@ describe('PayrollWorkspaceEnhancer', () => {
     expect(within(workspace).getAllByText(/500,00/).length).toBeGreaterThanOrEqual(1);
     expect(within(workspace).getByText(/17,50/)).toBeInTheDocument();
 
-    fireEvent.click(within(workspace).getByRole('button', { name: 'Tagesdetails und Bearbeitung' }));
+    fireEvent.click(within(workspace).getByRole('button', { name: 'Tagesnachweis öffnen' }));
     expect(await within(workspace).findByText('Kunde GmbH')).toBeInTheDocument();
     const dailyTable = within(workspace).getByRole('table', { name: 'Tagesnachweis Anna Becker 2026-08' });
     expect(within(dailyTable).getByText('10,00 Std.')).toBeInTheDocument();
