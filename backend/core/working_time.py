@@ -506,8 +506,8 @@ def export_csv(queryset) -> HttpResponse:
     statements = _statement_map(rows)
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';')
-    # Preserve the historical first eleven columns for downstream payroll
-    # workbooks; append richer audit fields instead of shifting old indexes.
+    # Keep the original 11-column Arbeitszeitkonto contract intact for existing
+    # consumers, then append the richer payroll/audit fields.
     writer.writerow([
         'Mitarbeiter', 'Monat', 'Ist-Stunden', 'Soll-Stunden', 'Plusstunden',
         'Übertrag', 'Ausbezahlt', 'Korrektur', 'Saldo', 'Stundensatz', 'Brutto',
@@ -520,13 +520,12 @@ def export_csv(queryset) -> HttpResponse:
         data = record_dict(row, statement)
         payroll = data.get('payroll_statement') or {}
         writer.writerow([
-            data['employee_name'], data['year_month'], data['ist_hours'],
-            data['soll_hours'], data['difference_hours'], data['carryover_previous'],
-            data['paid_hours'], data['manual_adjustment'], data['saldo_cumulative'],
-            data['hourly_rate'], data['gross_amount'],
-            data['employment_type'], data['paid_total_hours'], data['monthly_balance_hours'],
-            data['night_hours'], data['saturday_hours'], data['sunday_hours'],
-            data['surcharge_amount'], data['gross_with_surcharges'],
+            data['employee_name'], data['year_month'], data['ist_hours'], data['soll_hours'],
+            data['difference_hours'], data['carryover_previous'], data['paid_hours'],
+            data['manual_adjustment'], data['saldo_cumulative'], data['hourly_rate'],
+            data['gross_amount'], data['employment_type'], data['paid_total_hours'],
+            data['monthly_balance_hours'], data['night_hours'], data['saturday_hours'],
+            data['sunday_hours'], data['surcharge_amount'], data['gross_with_surcharges'],
             payroll.get('transferred_amount') or '', payroll.get('payment_date') or '',
         ])
     response = HttpResponse('\ufeff' + output.getvalue(), content_type='text/csv; charset=utf-8')
@@ -540,6 +539,8 @@ def export_xlsx(queryset) -> HttpResponse:
     wb = Workbook()
     ws = wb.active
     ws.title = 'Arbeitszeitkonto'
+    # Preserve the established column order through "Brutto" so legacy exports,
+    # tests and downstream spreadsheets remain compatible.
     headers = [
         'Mitarbeiter', 'Monat', 'Ist-Stunden', 'Soll-Stunden', 'Plusstunden',
         'Übertrag', 'Ausbezahlt', 'Korrektur', 'Saldo', 'Stundensatz', 'Brutto',
@@ -556,10 +557,9 @@ def export_xlsx(queryset) -> HttpResponse:
             float(data['soll_hours']), float(data['difference_hours']),
             float(data['carryover_previous']), float(data['paid_hours']),
             float(data['manual_adjustment']), float(data['saldo_cumulative']),
-            float(data['hourly_rate']), float(data['gross_amount']),
-            data['employment_type'], float(data['paid_total_hours']),
-            float(data['monthly_balance_hours']), float(data['night_hours']),
-            float(data['saturday_hours']), float(data['sunday_hours']),
+            float(data['hourly_rate']), float(data['gross_amount']), data['employment_type'],
+            float(data['paid_total_hours']), float(data['monthly_balance_hours']),
+            float(data['night_hours']), float(data['saturday_hours']), float(data['sunday_hours']),
             float(data['surcharge_amount']), float(data['gross_with_surcharges']),
             float(payroll['transferred_amount']) if payroll.get('transferred_amount') else None,
             payroll.get('payment_date') or '',
