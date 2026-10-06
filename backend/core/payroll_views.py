@@ -113,7 +113,7 @@ def _parse_money(value) -> Decimal | None:
         return None
 
 
-def _parse_bank_date(value):
+def _parse_bank_date(value, payroll_period=None):
     text = str(value or '').strip()
     if not text:
         return None
@@ -122,6 +122,18 @@ def _parse_bank_date(value):
             return datetime.strptime(text[:10], fmt).date()
         except ValueError:
             continue
+    if payroll_period and re.fullmatch(r'\d{4}', text):
+        day = int(text[:2])
+        month = int(text[2:])
+        year = payroll_period.year
+        if month < payroll_period.month - 6:
+            year += 1
+        elif month > payroll_period.month + 6:
+            year -= 1
+        try:
+            return payroll_period.replace(year=year, month=month, day=day)
+        except ValueError:
+            return None
     return None
 
 
@@ -135,13 +147,29 @@ def _read_csv(name: str, payload: bytes) -> list[dict]:
             continue
     if decoded is None:
         return []
-    sample = decoded[:4096]
+
+    # DATEV files start with an EXTF metadata line before the real column header.
+    # Lexware Office uses DATEV CSV for bank exports of Giro accounts.
+    lines = decoded.splitlines()
+    header_index = 0
+    for index, line in enumerate(lines[:30]):
+        normalized = _norm(line)
+        if (
+            ('umsatz ohne soll haben kz' in normalized and 'buchungstext' in normalized)
+            or ('buchungsdatum' in normalized and ('betrag' in normalized or 'umsatz' in normalized))
+            or ('datum' in normalized and 'betrag' in normalized)
+        ):
+            header_index = index
+            break
+    decoded_table = '\n'.join(lines[header_index:])
+
+    sample = decoded_table[:4096]
     try:
         dialect = csv.Sniffer().sniff(sample, delimiters=';,\t,')
     except csv.Error:
         dialect = csv.excel
         dialect.delimiter = ';'
-    reader = csv.DictReader(io.StringIO(decoded), dialect=dialect)
+    reader = csv.DictReader(io.StringIO(decoded_table), dialect=dialect)
     rows = []
     for row in reader:
         clean = {str(key or '').strip(): value for key, value in row.items()}
@@ -229,7 +257,8 @@ def lexware_bank_import(request):
     for row in rows:
         worker = _find_worker(row, matchers)
         amount = _parse_money(_row_value(row, (
-            'Betrag', 'Umsatz', 'Amount', 'Betrag EUR', 'Wert', 'Transaction amount',
+            'Betrag', 'Umsatz', 'Umsatz (ohne Soll/Haben-Kz)', 'Basis-Umsatz',
+            'Amount', 'Betrag EUR', 'Wert', 'Transaction amount',
         )))
         if not worker or amount in (None, Decimal('0')):
             if any(str(value or '').strip() for value in row.values()):
@@ -240,13 +269,15 @@ def lexware_bank_import(request):
             continue
 
         payment_date = _parse_bank_date(_row_value(row, (
-            'Buchungsdatum', 'Datum', 'Wertstellung', 'Date', 'Transaction date',
-        )))
+            'Buchungsdatum', 'Belegdatum', 'Datum', 'Wertstellung', 'Date', 'Transaction date',
+        )), period)
         purpose = str(_row_value(row, (
             'Verwendungszweck', 'Buchungstext', 'Beschreibung', 'Text', 'Purpose',
+            'Auftraggeber/Empfänger', 'Zahlungspflichtiger/Zahlungsempfänger',
         )) or '')
         recipient = str(_row_value(row, (
             'Empfänger', 'Zahlungsempfänger', 'Begünstigter', 'Name', 'Recipient',
+            'Auftraggeber/Empfänger', 'Zahlungspflichtiger/Zahlungsempfänger',
         )) or '')
         amount = abs(amount).quantize(Decimal('0.01'))
         key_source = f'{row.get("_source_file","")}|{payment_date}|{amount}|{recipient}|{purpose}'
@@ -274,7 +305,7 @@ def lexware_bank_import(request):
         merged = list(by_key.values())
         total = sum((dec(item.get('amount')) for item in merged), Decimal('0.00')).quantize(Decimal('0.01'))
         dates = [
-            _parse_bank_date(item.get('payment_date'))
+            _parse_bank_date(item.get('payment_date'), period)
             for item in merged if item.get('payment_date')
         ]
         statement.transferred_amount = total
