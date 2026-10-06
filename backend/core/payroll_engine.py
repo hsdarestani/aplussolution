@@ -19,12 +19,7 @@ TWO = Decimal('0.01')
 
 
 def effective_hourly_rate(worker: WorkerProfile, row_setting: WorkingTimeSetting | None = None) -> tuple[Decimal, Decimal, Decimal]:
-    """Return (base rate, allowance, effective rate) for payroll preparation.
-
-    WorkingTimeSetting.hourly_rate is treated as the employee's configurable base
-    hourly rate. WorkerProfile.extra_allowance is added consistently on top, the
-    same way the labor-cost forecast treats the allowance.
-    """
+    """Return (base rate, allowance, effective rate) for payroll preparation."""
     base = dec(
         (row_setting.hourly_rate if row_setting else None)
         or worker.tariff_hourly_rate
@@ -34,8 +29,69 @@ def effective_hourly_rate(worker: WorkerProfile, row_setting: WorkingTimeSetting
     return base, allowance, (base + allowance).quantize(TWO)
 
 
+def _overlap_minutes(start: datetime, end: datetime, window_start: datetime, window_end: datetime) -> int:
+    overlap_start = max(start, window_start)
+    overlap_end = min(end, window_end)
+    if overlap_end <= overlap_start:
+        return 0
+    return max(0, int((overlap_end - overlap_start).total_seconds() // 60))
+
+
+def _entry_metrics(entry: TimeEntry, current_tz) -> dict:
+    """Return payroll/audit metrics from the same approved TimeEntry used for IST.
+
+    We do not know the exact position of a break inside the shift. As in the
+    existing attendance report, category minutes are therefore reduced
+    proportionally by the unpaid break.
+    """
+    local_start = timezone.localtime(entry.clock_in, current_tz)
+    local_end = timezone.localtime(entry.clock_out, current_tz)
+    gross_minutes = max(0, int((local_end - local_start).total_seconds() // 60))
+    worked_minutes = max(0, int(entry.worked_minutes))
+    factor = (Decimal(worked_minutes) / Decimal(gross_minutes)) if gross_minutes else Decimal('0')
+
+    night_gross = 0
+    saturday_gross = 0
+    sunday_gross = 0
+    cursor = local_start.date() - timedelta(days=1)
+    final_day = local_end.date()
+    while cursor <= final_day:
+        night_start = timezone.make_aware(datetime.combine(cursor, time(23, 0)), current_tz)
+        night_end = timezone.make_aware(datetime.combine(cursor + timedelta(days=1), time(6, 0)), current_tz)
+        night_gross += _overlap_minutes(local_start, local_end, night_start, night_end)
+
+        day_start = timezone.make_aware(datetime.combine(cursor, time.min), current_tz)
+        day_end = timezone.make_aware(datetime.combine(cursor + timedelta(days=1), time.min), current_tz)
+        if cursor.weekday() == 5:
+            saturday_gross += _overlap_minutes(local_start, local_end, day_start, day_end)
+        if cursor.weekday() == 6:
+            sunday_gross += _overlap_minutes(local_start, local_end, day_start, day_end)
+        cursor += timedelta(days=1)
+
+    return {
+        'gross_minutes': gross_minutes,
+        'break_minutes': int(entry.effective_break_minutes),
+        'worked_minutes': worked_minutes,
+        'night_minutes': int((Decimal(night_gross) * factor).quantize(Decimal('1'))),
+        'saturday_minutes': int((Decimal(saturday_gross) * factor).quantize(Decimal('1'))),
+        'sunday_minutes': int((Decimal(sunday_gross) * factor).quantize(Decimal('1'))),
+    }
+
+
+def _surcharge_amount(minutes: int, hourly_rate: Decimal, percent: Decimal) -> Decimal:
+    if minutes <= 0 or percent <= 0:
+        return Decimal('0.00')
+    return (
+        Decimal(minutes) / Decimal('60') * hourly_rate * percent / Decimal('100')
+    ).quantize(TWO)
+
+
 def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
-    """Rebuild payroll-preparation records from approved local A+ time entries only."""
+    """Rebuild payroll records from actual A+ attendance.
+
+    Approved native A+ entries and imported historical WIW time rows are
+    authoritative. Planned Shift.start/end values remain comparison data only.
+    """
     if end < start:
         raise ValueError('Das Enddatum muss nach dem Startdatum liegen.')
 
@@ -50,12 +106,18 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
             clock_in__lt=end_dt,
             clock_out__isnull=False,
         )
-        .select_related('worker__user', 'shift')
+        .select_related('worker__user', 'shift__client', 'shift__location', 'shift__position')
         .order_by('clock_in')
     )
 
-    approved_entries = [entry for entry in closed_entries if entry.approved]
-    excluded_unapproved = len(closed_entries) - len(approved_entries)
+    approved_entries = [
+        entry for entry in closed_entries
+        if entry.approved or bool(entry.wiw_time_id)
+    ]
+    excluded_unapproved = len([
+        entry for entry in closed_entries
+        if not entry.approved and not entry.wiw_time_id
+    ])
 
     workers = list(WorkerProfile.objects.select_related('user').filter(active=True))
     settings_map = {
@@ -68,19 +130,31 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
 
     for entry in approved_entries:
         local_clock_in = timezone.localtime(entry.clock_in, current_tz)
+        local_clock_out = timezone.localtime(entry.clock_out, current_tz)
         month = local_clock_in.date().replace(day=1)
         key = (str(entry.worker_id), month)
-        worked_minutes = entry.worked_minutes
-        hours_by_key[key] += Decimal(worked_minutes) / Decimal('60')
+        metrics = _entry_metrics(entry, current_tz)
+        hours_by_key[key] += Decimal(metrics['worked_minutes']) / Decimal('60')
+        shift = entry.shift
         grouped[key].append({
             'id': str(entry.id),
             'worker_id': str(entry.worker_id),
             'shift_id': str(entry.shift_id) if entry.shift_id else None,
+            'client_id': str(shift.client_id) if shift else None,
+            'client_name': shift.client.name if shift else '',
+            'location_id': str(shift.location_id) if shift else None,
+            'location_name': shift.location.name if shift else '',
+            'position_name': shift.position.name if shift else '',
+            'planned_start': shift.starts_at.isoformat() if shift else None,
+            'planned_end': shift.ends_at.isoformat() if shift else None,
+            'planned_break_minutes': int(shift.break_minutes) if shift else 0,
             'clock_in': entry.clock_in.isoformat(),
-            'clock_out': entry.clock_out.isoformat() if entry.clock_out else None,
-            'worked_minutes': worked_minutes,
-            'approved': True,
-            'source': 'aplus',
+            'clock_out': entry.clock_out.isoformat(),
+            'local_clock_in': local_clock_in.isoformat(),
+            'local_clock_out': local_clock_out.isoformat(),
+            **metrics,
+            'approved': bool(entry.approved),
+            'source': 'wiw_historical' if entry.wiw_time_id else 'aplus',
         })
 
     now = timezone.now()
@@ -97,6 +171,9 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
                 or settings.WORKING_TIME_DEFAULT_MONTHLY_LIMIT
             )
             _base_rate, _allowance, effective_rate = effective_hourly_rate(worker, row_setting)
+            night_percent = dec(row_setting.night_surcharge_percent if row_setting else 0)
+            saturday_percent = dec(row_setting.saturday_surcharge_percent if row_setting else 0)
+            sunday_percent = dec(row_setting.sunday_surcharge_percent if row_setting else 0)
 
             prior = (
                 WorkingTimeAccountRecord.objects
@@ -113,12 +190,22 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
                 ).first()
                 ist = hours_by_key.get((str(worker.id), month), Decimal('0')).quantize(TWO)
                 difference = (ist - monthly_limit).quantize(TWO)
+                # paid_hours means overtime hours paid on top of the contractual
+                # base/SOLL hours. Total compensated hours are SOLL + paid_hours.
                 paid = existing.paid_hours if existing else Decimal('0')
                 manual = existing.manual_adjustment if existing else Decimal('0')
                 saldo = (carry + difference + manual - paid).quantize(TWO)
                 gross = (ist * effective_rate).quantize(TWO)
 
                 raw_entries = grouped.get((str(worker.id), month), [])
+                for raw in raw_entries:
+                    raw['night_surcharge_percent'] = str(night_percent)
+                    raw['saturday_surcharge_percent'] = str(saturday_percent)
+                    raw['sunday_surcharge_percent'] = str(sunday_percent)
+                    raw['night_surcharge_amount'] = str(_surcharge_amount(raw['night_minutes'], effective_rate, night_percent))
+                    raw['saturday_surcharge_amount'] = str(_surcharge_amount(raw['saturday_minutes'], effective_rate, saturday_percent))
+                    raw['sunday_surcharge_amount'] = str(_surcharge_amount(raw['sunday_minutes'], effective_rate, sunday_percent))
+
                 WorkingTimeAccountRecord.objects.update_or_create(
                     worker=worker,
                     year_month=month,
@@ -130,7 +217,6 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
                         'paid_hours': paid,
                         'manual_adjustment': manual,
                         'saldo_cumulative': saldo,
-                        # Store the effective rate used for this payroll snapshot.
                         'hourly_rate': effective_rate,
                         'gross_amount': gross,
                         'raw_entries': raw_entries,
@@ -146,7 +232,7 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
         if excluded_unapproved:
             status = 'warning'
             message = (
-                f'{excluded_unapproved} noch nicht freigegebene Zeiteinträge wurden '
+                f'{excluded_unapproved} noch nicht freigegebene A+ Zeiteinträge wurden '
                 'aus der Lohnvorbereitung ausgeschlossen.'
             )
 
@@ -159,7 +245,7 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
             metadata={
                 'source': 'aplus_time_entries',
                 'closed_entries': len(closed_entries),
-                'approved_entries': len(approved_entries),
+                'approved_or_historical_entries': len(approved_entries),
                 'excluded_unapproved_entries': excluded_unapproved,
             },
         )
