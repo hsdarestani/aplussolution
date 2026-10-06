@@ -1,0 +1,30 @@
+name: Admin brand visual review
+on:
+  push:
+    branches: ['design/aplus-admin-identity']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund --package-lock=false
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test e2e/admin-brand-system.spec.ts e2e/admin-priority-navigation.spec.ts --workers=2
+      - run: npx playwright test e2e/app-shell.spec.ts --grep 'admin exception center' --workers=1 --output=test-shell-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: admin-brand-review
+          path: |
+            frontend/test-results/
+            frontend/test-shell-results/

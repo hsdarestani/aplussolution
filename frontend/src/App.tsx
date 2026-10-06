@@ -3155,6 +3155,12 @@ function Legal({ deletePage = false }: { deletePage?: boolean }) {
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  useEffect(() => {
+    // Ionic and custom dialogs may be portaled outside IonApp.
+    if (user && isManager(user) && !Capacitor.isNativePlatform()) document.body.dataset.apAdminWeb = 'true';
+    else delete document.body.dataset.apAdminWeb;
+    return () => { delete document.body.dataset.apAdminWeb; };
+  }, [user?.role]);
   const [ready, setReady] = useState(false);
   const [view, setView] = useState<View>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -3367,7 +3373,7 @@ export default function App() {
   }
 
   return (
-    <IonApp className="mobile-first-app-shell-v1" data-view={mobileMenuOpen ? 'more' : view} data-role={user.role}>
+    <IonApp className="mobile-first-app-shell-v1" data-view={mobileMenuOpen ? 'more' : view} data-role={user.role} data-admin-web={isManager(user) && !Capacitor.isNativePlatform() ? "true" : undefined}>
       <IonPage>
         <Header title="A+ Solution" appShell />
         <IonContent className="app-content">
@@ -3397,6 +3403,7 @@ export default function App() {
                   <small>{roleLabel[user.role] || user.role}</small>
                 </div>
               </div>
+              {isManager(user) && !Capacitor.isNativePlatform() && <div className="ap-nav-caption">ARBEITSALLTAG</div>}
               <IonList lines="none">
                 {desktopItems.map((item) => (
                   <IonItem
@@ -3404,6 +3411,7 @@ export default function App() {
                     detail={false}
                     key={item[0]}
                     className={view === item[0] ? 'active' : ''}
+                    aria-current={view === item[0] ? 'page' : undefined}
                     onClick={() => navigateTo(item[0])}
                   >
                     <IonIcon slot="start" icon={icons[item[0]]} />
@@ -3424,9 +3432,14 @@ export default function App() {
                 <IonIcon slot="start" icon={exitOutline} />
                 Abmelden
               </IonButton>
+              {isManager(user) && !Capacitor.isNativePlatform() && <div className="ap-brand-signature"><span>PERSONAL. PLANUNG. PRÄZISION.</span><b>A+ Solution</b></div>}
             </aside>
 
             <main className="app-main">
+              {isManager(user) && !Capacitor.isNativePlatform() && <header className="ap-workspace-header">
+                <div><span className="ap-eyebrow">A+ SOLUTION / WORKSPACE</span><h1>{currentLabel}</h1></div>
+                <div className="ap-workspace-meta"><time dateTime={new Date().toISOString().slice(0, 10)}>{new Date().toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin', weekday: 'long', day: '2-digit', month: 'long' })}</time><button type="button" onClick={() => navigateTo('profile')} aria-label="Profil öffnen"><span>{user.name[0]}</span><b>{user.name}</b></button></div>
+              </header>}
               <React.Fragment key={`resume-${resumeGeneration}`}>
                 {isManager(user) && view !== 'time' && !(view === 'schedule' && mobileViewport) && <GlobalSearch onNavigate={navigateTo} />}
                 {content}
