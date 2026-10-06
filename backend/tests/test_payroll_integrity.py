@@ -4,9 +4,65 @@ from decimal import Decimal
 import pytest
 from django.utils import timezone
 
-from core.models import PayrollStatement, Shift, TimeEntry, WorkingTimeAccountRecord, WorkingTimeSetting
+from core.models import EmployeeMasterData, PayrollStatement, Shift, TimeEntry, WorkingTimeAccountRecord, WorkingTimeSetting
 from core.native_cutover import sync_working_time
 from core.payroll_engine import effective_hourly_rate
+
+
+@pytest.mark.django_db
+def test_fixed_salary_balance_uses_contractual_soll_not_paid_hours(
+    worker_user, company, location, position
+):
+    worker = worker_user.worker_profile
+    worker.monthly_hours = Decimal('100.00')
+    worker.tariff_hourly_rate = Decimal('0.00')
+    worker.save(update_fields=['monthly_hours', 'tariff_hourly_rate', 'updated_at'])
+    EmployeeMasterData.objects.create(
+        worker=worker,
+        data={'compensation_type': 'salary', 'monthly_salary': '2975.00'},
+    )
+    WorkingTimeSetting.objects.create(
+        worker=worker,
+        monthly_limit=Decimal('100.00'),
+        hourly_rate=Decimal('0.00'),
+    )
+
+    start = timezone.make_aware(
+        datetime(2026, 9, 1, 8, 0),
+        timezone.get_current_timezone(),
+    )
+    shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        worker=worker,
+        starts_at=start,
+        ends_at=start + timedelta(hours=8),
+        break_minutes=0,
+        status=Shift.Status.CONFIRMED,
+    )
+    TimeEntry.objects.create(
+        worker=worker,
+        shift=shift,
+        clock_in=start,
+        clock_out=start + timedelta(hours=8),
+        approved=True,
+    )
+
+    sync_working_time(date(2026, 9, 1), date(2026, 9, 30))
+    record = WorkingTimeAccountRecord.objects.get(worker=worker, year_month=date(2026, 9, 1))
+
+    assert record.ist_hours == Decimal('8.00')
+    assert record.soll_hours == Decimal('100.00')
+    assert record.paid_total_hours == Decimal('0.00')
+    assert record.saldo_cumulative == Decimal('-92.00')
+    assert record.gross_amount == Decimal('2975.00')
+
+    from core.working_time import record_dict
+    data = record_dict(record)
+    assert data['balance_basis'] == 'soll_salary'
+    assert data['balance_reference_hours'] == '100.00'
+    assert data['monthly_balance_hours'] == '-92.00'
 
 
 @pytest.mark.django_db
