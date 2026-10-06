@@ -148,3 +148,7 @@ ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] i
 ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] :is(ion-input,ion-textarea,ion-select).ion-focused { --border-color: #102e40; --background: #fff; }
 ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] :is(.admin-priority-actions button strong) { font-size: 14px; line-height: 1.4; }
 ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] :is(.admin-priority-actions button small) { font-size: 11px; line-height: 1.5; }
+ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] .admin-attention-hero ion-button { --background: transparent !important; --background-hover: #ffffff12 !important; --color: #fff !important; --border-color: #ffffff40 !important; }
+ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] .admin-attention-hero :is(small,p) { opacity: 1 !important; }
+ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] .admin-priority-actions button > small { font-size: 11px !important; color: #61747e !important; }
+ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] .admin-priority-actions button > strong { font-size: 14px !important; }

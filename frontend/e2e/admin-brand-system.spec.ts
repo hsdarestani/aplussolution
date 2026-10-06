@@ -36,7 +36,12 @@ for (const width of [1440, 1024, 390]) {
     const priorities = page.getByTestId('admin-priority-actions');
     await expect(priorities).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+    await expect(page.locator('.admin-attention-hero ion-button')).toContainText('Aktualisieren');
     await page.screenshot({ path: `test-results/admin-brand-${width}.png`, fullPage: true });
+    if (width === 390) {
+      await page.getByTestId('admin-priority-actions').scrollIntoViewIfNeeded();
+      await page.screenshot({ path: 'test-results/admin-brand-mobile-actions.png' });
+    }
     await priorities.getByRole('button', { name: 'Personal & Kunden', exact: true }).click();
     await expect(page.locator('.ap-workspace-header h1')).toHaveText(/Personal|Mitarbeiter/);
   });
