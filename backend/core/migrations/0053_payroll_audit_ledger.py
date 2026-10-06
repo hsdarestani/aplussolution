@@ -10,6 +10,11 @@ class Migration(migrations.Migration):
     operations = [
         migrations.AddField(
             model_name='workingtimeaccountrecord',
+            name='employment_type_snapshot',
+            field=models.CharField(blank=True, max_length=20),
+        ),
+        migrations.AddField(
+            model_name='workingtimeaccountrecord',
             name='paid_total_hours',
             field=models.DecimalField(blank=True, decimal_places=2, max_digits=10, null=True),
         ),
