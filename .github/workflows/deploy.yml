@@ -128,6 +128,19 @@ jobs:
           rm -f /tmp/aplussolution-release.tgz
 
           docker compose pull db redis caddy || true
+
+          # A cancelled Compose recreate can leave temporary containers named
+          # like <hex>_aplussolution-backend-1. They are not production
+          # service containers, but Docker reserves their names and the next
+          # recreate then fails with a name conflict. Remove only these stale
+          # prefixed temporary containers; persistent data containers/volumes
+          # and the normal aplussolution-* service names are left untouched.
+          stale_compose_ids=$(docker ps -a --format '{{.ID}} {{.Names}}' \
+            | awk '$2 ~ /^[0-9a-f]+_aplussolution-(backend|frontend|caddy|celery|celery-beat|db|redis)-1$/ {print $1}')
+          if [ -n "$stale_compose_ids" ]; then
+            docker rm -f $stale_compose_ids
+          fi
+
           docker compose up -d --build --remove-orphans
           docker compose up -d --force-recreate --no-deps caddy
 
