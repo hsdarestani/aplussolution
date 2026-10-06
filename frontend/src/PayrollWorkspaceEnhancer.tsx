@@ -327,7 +327,7 @@ export default function PayrollWorkspaceEnhancer() {
               </div>
             </header>
 
-            {row.minijob_warning && <div className="payroll-warning">Prüfung nötig: vorbereiteter Bruttowert liegt über {money(row.minijob_limit)}. Die Minijob Einstufung wird nicht automatisch geändert.</div>}
+            {row.minijob_warning && <div className="payroll-warning">Prüfung nötig: Grundbrutto liegt über {money(row.minijob_limit)}. Die Minijob Einstufung wird nicht automatisch geändert.</div>}
 
             <div className="payroll-mobile-summary" aria-label={`Kurzinfo ${row.employee_name}`}>
               <div><span>IST</span><b>{decimal(row.ist_hours)}</b></div>
