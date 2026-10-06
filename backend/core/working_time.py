@@ -404,6 +404,9 @@ def _minijob_limit(year_month: date) -> Decimal | None:
 def statement_dict(statement: PayrollStatement | None) -> dict | None:
     if not statement:
         return None
+    raw_items = list(statement.raw_data or [])
+    payslips = [item for item in raw_items if item.get('kind') == 'payslip']
+    payslip = payslips[-1] if payslips else {}
     return {
         'id': str(statement.id),
         'gross_amount': str(statement.gross_amount) if statement.gross_amount is not None else None,
@@ -413,6 +416,13 @@ def statement_dict(statement: PayrollStatement | None) -> dict | None:
         'source': statement.source,
         'source_reference': statement.source_reference,
         'document_url': statement.document.url if statement.document else '',
+        'lexware_compensation_type': payslip.get('compensation_type') or '',
+        'lexware_paid_hours': payslip.get('quantity') if payslip.get('compensation_type') == 'hourly' else None,
+        'lexware_hourly_rate': payslip.get('hourly_rate'),
+        'lexware_monthly_salary': payslip.get('monthly_salary'),
+        'lexware_payout_amount': payslip.get('payout_amount'),
+        'lexware_personal_number': payslip.get('personal_number') or '',
+        'lexware_supplements': payslip.get('supplements') or [],
     }
 
 
