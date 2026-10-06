@@ -314,6 +314,20 @@ def _paid_total(row: WorkingTimeAccountRecord) -> Decimal:
     return (dec(row.soll_hours) + dec(row.paid_hours)).quantize(TWO)
 
 
+def _compensation_type(worker: WorkerProfile) -> str:
+    try:
+        return str((worker.master_data.data or {}).get('compensation_type') or '').strip().lower()
+    except Exception:
+        master = EmployeeMasterData.objects.filter(worker=worker).only('data').first()
+        return str((master.data or {}).get('compensation_type') or '').strip().lower() if master else ''
+
+
+def _balance_reference(row: WorkingTimeAccountRecord) -> tuple[Decimal, str]:
+    if _compensation_type(row.worker) == 'salary':
+        return dec(row.soll_hours), 'soll_salary'
+    return _paid_total(row), 'paid_hours'
+
+
 def update_record(
     record: WorkingTimeAccountRecord,
     *,
@@ -328,7 +342,7 @@ def update_record(
     elif paid_hours is not None:
         record.paid_hours = max(Decimal('0'), dec(paid_hours))
         record.paid_total_hours = (record.soll_hours + record.paid_hours).quantize(TWO)
-    elif record.paid_total_hours is None:
+    elif record.paid_total_hours is None and _compensation_type(record.worker) != 'salary':
         record.paid_total_hours = (record.soll_hours + record.paid_hours).quantize(TWO)
 
     if manual_adjustment is not None:
@@ -345,7 +359,7 @@ def update_record(
         record.carryover_previous
         + record.ist_hours
         + record.manual_adjustment
-        - _paid_total(record)
+        - _balance_reference(record)[0]
     ).quantize(TWO)
     record.save(update_fields=[
         'paid_hours', 'paid_total_hours', 'manual_adjustment',
@@ -359,10 +373,10 @@ def update_record(
         .order_by('year_month')
     ):
         row.carryover_previous = carry
-        if row.paid_total_hours is None:
+        if row.paid_total_hours is None and _compensation_type(row.worker) != 'salary':
             row.paid_total_hours = (row.soll_hours + row.paid_hours).quantize(TWO)
         row.saldo_cumulative = (
-            carry + row.ist_hours + row.manual_adjustment - _paid_total(row)
+            carry + row.ist_hours + row.manual_adjustment - _balance_reference(row)[0]
         ).quantize(TWO)
         row.save(update_fields=[
             'paid_total_hours', 'carryover_previous', 'saldo_cumulative', 'updated_at',
@@ -439,7 +453,8 @@ def record_dict(
 ) -> dict:
     totals = _entry_totals(row.raw_entries or [])
     paid_total = _paid_total(row)
-    monthly_balance = (row.ist_hours + row.manual_adjustment - paid_total).quantize(TWO)
+    balance_reference, balance_basis = _balance_reference(row)
+    monthly_balance = (row.ist_hours + row.manual_adjustment - balance_reference).quantize(TWO)
     surcharge_amount = totals['surcharge_amount']
     gross_with_surcharges = (row.gross_amount + surcharge_amount).quantize(TWO)
     employment_type = row.employment_type_snapshot or row.worker.employment_type
@@ -458,6 +473,8 @@ def record_dict(
         'carryover_previous': str(row.carryover_previous),
         'paid_hours': str(row.paid_hours),
         'paid_total_hours': str(paid_total),
+        'balance_basis': balance_basis,
+        'balance_reference_hours': str(balance_reference),
         'monthly_balance_hours': str(monthly_balance),
         'manual_adjustment': str(row.manual_adjustment),
         'saldo_cumulative': str(row.saldo_cumulative),
