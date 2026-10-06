@@ -229,7 +229,7 @@ test.describe('Phase 6 mobile QA', () => {
 
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeiterfassung' }).click();
     await expect(page.getByTestId('phase8-pay-periods')).toBeVisible();
-    await expect(page.getByText('Abrechnungszeiträume', { exact: true })).toBeVisible();
+    await expect(page.locator('.wiw-mobile-screen-title').filter({ hasText: 'Abrechnungszeiträume' })).toBeVisible();
     await expectNoHorizontalPageOverflow(page);
 
     await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
@@ -290,7 +290,7 @@ test.describe('Phase 6 mobile QA', () => {
 
     await page.locator('.mobile-tabbar button').filter({ hasText: 'Zeiterfassung' }).click();
     await expect(page.getByTestId('phase8-pay-periods')).toBeVisible();
-    await expect(page.getByText('Abrechnungszeiträume', { exact: true })).toBeVisible();
+    await expect(page.locator('.wiw-mobile-screen-title').filter({ hasText: 'Abrechnungszeiträume' })).toBeVisible();
 
     await page.getByRole('button', { name: 'Weitere Bereiche öffnen' }).click();
     const moreMenu = page.getByTestId('wiw-more-screen');
