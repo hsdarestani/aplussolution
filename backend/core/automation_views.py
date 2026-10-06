@@ -521,7 +521,7 @@ def worktime_rebuild_all(request):
         return Response({'status': 'ok', 'records_count': 0, 'detail': 'Keine abgeschlossenen Arbeitszeiten vorhanden.'})
     start = timezone.localtime(first.clock_in).date().replace(day=1)
     end = timezone.localdate()
-    log = sync_working_time(start, end)
+    log = sync_working_time(start, end, include_inactive_workers=True)
     audit(request, 'working_time.rebuilt_all', log, {
         'start': start.isoformat(),
         'end': end.isoformat(),
