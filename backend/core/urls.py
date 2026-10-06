@@ -100,6 +100,7 @@ urlpatterns = [
     path('integrations/wiw/sync/', integration_views.wiw_sync),
     path('integrations/wiw/webhook/', integration_views.wiw_webhook),
     path('workers/<uuid:pk>/master-data/', integration_views.worker_master_data),
+    path('workers/master-data/import/', integration_views.import_lexware_employee_master_data),
     path('workers/<uuid:pk>/master-data/verify/', integration_views.verify_worker_master_data),
     path('document-catalog/', document_catalog_views.document_catalog),
     path('document-catalog/seed/', integration_views.seed_catalog),
