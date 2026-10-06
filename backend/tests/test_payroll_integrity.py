@@ -447,6 +447,90 @@ def test_lexware_employee_master_data_import_updates_personal_and_payroll_settin
 
 
 @pytest.mark.django_db
+def test_editable_worktime_docx_export(auth_admin, worker_user):
+    import io
+    import zipfile
+
+    worker = worker_user.worker_profile
+    period = date(2026, 9, 1)
+    WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=period,
+        ist_hours=Decimal('50.00'),
+        soll_hours=Decimal('40.00'),
+        paid_total_hours=Decimal('38.00'),
+        saldo_cumulative=Decimal('12.00'),
+        raw_entries=[{
+            'local_clock_in': '2026-09-01T08:00:00+02:00',
+            'local_clock_out': '2026-09-01T16:30:00+02:00',
+            'planned_start': '2026-09-01T08:00:00+02:00',
+            'planned_end': '2026-09-01T16:00:00+02:00',
+            'break_minutes': 30,
+            'worked_minutes': 480,
+            'night_minutes': 0,
+            'saturday_minutes': 0,
+            'sunday_minutes': 0,
+            'client_name': 'Testkunde',
+        }],
+    )
+
+    response = auth_admin.get(f'/api/working-time/docx/{worker.id}/')
+    assert response.status_code == 200
+    assert response['Content-Type'].startswith(
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    )
+    assert '01_Arbeitszeitnachweis' in response['Content-Disposition']
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        document_xml = archive.read('word/document.xml').decode('utf-8')
+    assert 'Arbeitszeitnachweis und Lohnkonto' in document_xml
+    assert 'Testkunde' in document_xml
+
+
+@pytest.mark.django_db
+def test_lexware_reconciliation_docx_export(auth_admin, worker_user):
+    import io
+    import zipfile
+
+    worker = worker_user.worker_profile
+    period = date(2026, 9, 1)
+    WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=period,
+        ist_hours=Decimal('50.00'),
+        soll_hours=Decimal('40.00'),
+        paid_total_hours=Decimal('38.00'),
+        saldo_cumulative=Decimal('12.00'),
+        hourly_rate=Decimal('15.50'),
+    )
+    PayrollStatement.objects.create(
+        worker=worker,
+        period=period,
+        gross_amount=Decimal('589.00'),
+        net_amount=Decimal('589.00'),
+        transferred_amount=Decimal('589.00'),
+        source='lexware_pdf_bundle',
+        raw_data=[{
+            'kind': 'payslip',
+            'compensation_type': 'hourly',
+            'quantity': '38.00',
+            'hourly_rate': '15.50',
+            'gross_amount': '589.00',
+            'net_amount': '589.00',
+            'payout_amount': '589.00',
+            'supplements': [],
+        }],
+    )
+
+    response = auth_admin.get('/api/working-time/lexware-docx/?month=2026-09')
+    assert response.status_code == 200
+    assert '03_Lexware_Abgleich_2026-09.docx' in response['Content-Disposition']
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        document_xml = archive.read('word/document.xml').decode('utf-8')
+    assert 'Lexware Abgleich' in document_xml
+    assert 'Anna Becker' in document_xml
+
+
+@pytest.mark.django_db
 def test_lexware_pdf_bundle_imports_hourly_payslip_and_payment(
     auth_admin, worker_user
 ):
