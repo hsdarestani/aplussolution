@@ -4,6 +4,14 @@ import { api, apiBlob } from './api';
 import { BUSINESS_TIME_ZONE } from './berlinLocale';
 import './payroll-workspace.css';
 
+type LexwareSupplement = {
+  label?: string;
+  hours?: string;
+  hourly_rate?: string;
+  percent?: string;
+  amount?: string;
+};
+
 type PayrollStatement = {
   id: string;
   gross_amount?: string | null;
@@ -13,6 +21,13 @@ type PayrollStatement = {
   source?: string;
   source_reference?: string;
   document_url?: string;
+  lexware_compensation_type?: string;
+  lexware_paid_hours?: string | null;
+  lexware_hourly_rate?: string | null;
+  lexware_monthly_salary?: string | null;
+  lexware_payout_amount?: string | null;
+  lexware_personal_number?: string;
+  lexware_supplements?: LexwareSupplement[];
 };
 
 type PayrollEntry = {
@@ -125,7 +140,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   const [message, setMessage] = useState('');
   const [emptyReason, setEmptyReason] = useState('');
   const [lexwarePeriod, setLexwarePeriod] = useState(currentMonth());
-  const [lexwareFile, setLexwareFile] = useState<File | null>(null);
+  const [lexwareFiles, setLexwareFiles] = useState<File[]>([]);
   const [lexwareBusy, setLexwareBusy] = useState(false);
   const [historyBusy, setHistoryBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -353,8 +368,8 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   }
 
   async function importLexware() {
-    if (!lexwareFile || !lexwarePeriod) {
-      setMessage('Bitte Abrechnungsmonat und Lexware Datei auswählen.');
+    if (!lexwareFiles.length || !lexwarePeriod) {
+      setMessage('Bitte Abrechnungsmonat und mindestens eine Lexware Datei auswählen.');
       return;
     }
     setLexwareBusy(true);
@@ -362,11 +377,11 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     try {
       const form = new FormData();
       form.append('period', lexwarePeriod);
-      form.append('file', lexwareFile);
+      lexwareFiles.forEach(file => form.append('files', file));
       const result: any = await api('working-time/lexware-import/', { method: 'POST', body: form });
       await loadRows();
-      setMessage(`Lexware Import abgeschlossen. ${result?.employees?.length || 0} Mitarbeiter zugeordnet. ${result?.unmatched_count || 0} Zeilen nicht zugeordnet.`);
-      setLexwareFile(null);
+      setMessage(`Lexware Import abgeschlossen. ${result?.files || lexwareFiles.length} Datei(en), ${result?.employees?.length || 0} Mitarbeiter zugeordnet, ${result?.unmatched_count || 0} nicht zugeordnet.`);
+      setLexwareFiles([]);
     } catch (error: any) {
       setMessage(error?.message || 'Lexware Import konnte nicht verarbeitet werden.');
     } finally {
@@ -449,11 +464,11 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         </div>
         <div className="payroll-tool-card payroll-lexware-card">
           <span className="payroll-tool-index">L</span>
-          <div><b>Lexware übernehmen</b><small>CSV oder ZIP Bankexport einem Abrechnungsmonat zuordnen.</small></div>
+          <div><b>Lexware übernehmen</b><small>Lohnabrechnungen PDF, Zahlungsliste PDF oder CSV/ZIP gemeinsam importieren.</small></div>
           <div className="payroll-lexware-fields">
             <input aria-label="Lexware Abrechnungsmonat" type="month" value={lexwarePeriod} onChange={event => setLexwarePeriod(event.target.value)} />
-            <input aria-label="Lexware Datei" type="file" accept=".csv,.zip,text/csv,application/zip" onChange={event => setLexwareFile(event.target.files?.[0] || null)} />
-            <button type="button" onClick={() => void importLexware()} disabled={lexwareBusy || !lexwareFile}>{lexwareBusy ? 'Importiert' : 'Übernehmen'}</button>
+            <input aria-label="Lexware Dateien" type="file" multiple accept=".pdf,.csv,.zip,application/pdf,text/csv,application/zip" onChange={event => setLexwareFiles(Array.from(event.target.files || []))} />
+            <button type="button" onClick={() => void importLexware()} disabled={lexwareBusy || !lexwareFiles.length}>{lexwareBusy ? 'Importiert' : `Übernehmen${lexwareFiles.length ? ` (${lexwareFiles.length})` : ''}`}</button>
           </div>
         </div>
       </section>
@@ -513,10 +528,31 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
               </div>
 
               <div className="payroll-payment-strip">
-                <div><span>Lexware Betrag</span><b>{statement?.transferred_amount ? money(statement.transferred_amount) : 'Keine Daten'}</b></div>
-                <div><span>Zahlungsdatum</span><b>{statement?.payment_date ? dateLabel(statement.payment_date) : 'Keine Daten'}</b></div>
-                <div><span>Quelle</span><b>{statement?.source === 'lexware_bank_export' ? 'Lexware Bankexport' : statement?.source || 'Keine Daten'}</b></div>
+                <div><span>Zahlungsliste</span><b>{statement?.transferred_amount ? money(statement.transferred_amount) : 'Keine Daten'}</b></div>
+                <div><span>Lexware Brutto</span><b>{statement?.gross_amount ? money(statement.gross_amount) : 'Keine Daten'}</b></div>
+                <div><span>Lexware Netto</span><b>{statement?.net_amount ? money(statement.net_amount) : 'Keine Daten'}</b></div>
+                <div><span>Auszahlungsbetrag</span><b>{statement?.lexware_payout_amount ? money(statement.lexware_payout_amount) : 'Keine Daten'}</b></div>
+                <div><span>Abrechnungsart</span><b>{
+                  statement?.lexware_compensation_type === 'hourly'
+                    ? `${decimal(statement.lexware_paid_hours)} Std. × ${money(statement.lexware_hourly_rate)}`
+                    : statement?.lexware_compensation_type === 'salary'
+                      ? `Gehalt ${money(statement.lexware_monthly_salary)}`
+                      : 'Keine Daten'
+                }</b></div>
+                <div><span>Quelle</span><b>{
+                  statement?.source === 'lexware_pdf_bundle' ? 'Lexware PDFs'
+                  : statement?.source === 'lexware_payslip_pdf' ? 'Lohnabrechnung PDF'
+                  : statement?.source === 'lexware_zahlungsliste_pdf' ? 'Zahlungsliste PDF'
+                  : statement?.source === 'lexware_bank_export' ? 'Lexware Bankexport'
+                  : statement?.source || 'Keine Daten'
+                }</b></div>
               </div>
+              {statement?.lexware_compensation_type === 'salary' && <div className="payroll-lexware-note">
+                Lexware weist hier ein festes Gehalt aus, keine bezahlten Stunden. Stunden werden deshalb nicht aus dem Geldbetrag geschätzt.
+              </div>}
+              {!!statement?.lexware_supplements?.length && <div className="payroll-lexware-supplements">
+                {statement.lexware_supplements.map((item, index) => <span key={index}>{item.label}: {decimal(item.hours)} Std. · {decimal(item.percent)}% · {money(item.amount)}</span>)}
+              </div>}
 
               <div className="payroll-daily">
                 <div className="payroll-daily-head"><div><span>TAGESNACHWEIS</span><b>Plan und Ist nebeneinander</b></div><small>{detail?.entries?.length ?? row.entry_count ?? 0} Einträge</small></div>
