@@ -16,12 +16,13 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import PayrollStatement, User, WorkerProfile, WorkingTimeAccountRecord, WorkingTimeSetting
+from .models import EmployeeMasterData, PayrollStatement, User, WorkerProfile, WorkingTimeAccountRecord, WorkingTimeSetting
 from .permissions import IsAdminOrManager
 from .serializers import PayrollStatementSerializer
 from .services import audit
 from .working_time import dec, settings_rows, update_record
 from .lexware_pdf import parse_lexware_pdf
+from .wiw_sync import calculate_completeness
 
 
 class PayrollViewSet(viewsets.ModelViewSet):
@@ -459,15 +460,63 @@ def lexware_bank_import(request):
             compensation_type = str(latest_payslip.get('compensation_type') or '')
             payout_amount = latest_payslip.get('payout_amount')
             supplements = latest_payslip.get('supplements') or []
+
+            master, _ = EmployeeMasterData.objects.get_or_create(worker=worker)
+            master_data = dict(master.data or {})
+            source_map = dict(master.source_map or {})
+            observed = {
+                'lexware_personal_number': latest_payslip.get('personal_number'),
+                'compensation_type': compensation_type,
+                'lexware_monthly_salary': latest_payslip.get('monthly_salary'),
+                'hourly_rate': latest_payslip.get('hourly_rate'),
+                'lexware_latest_payroll_period': period_text,
+                'lexware_supplements': supplements,
+            }
+            for key, value in observed.items():
+                if value not in (None, '', []):
+                    master_data[key] = value
+                    source_map[key] = 'lexware_payslip'
+            completeness, missing = calculate_completeness(master_data)
+            master.data = master_data
+            master.source_map = source_map
+            master.completeness = completeness
+            master.missing_fields = missing
+            master.save()
+
+            setting, _ = WorkingTimeSetting.objects.get_or_create(worker=worker)
+            setting_fields = []
+            for supplement in supplements:
+                label = str(supplement.get('label') or '').lower()
+                percent = max(Decimal('0'), dec(supplement.get('percent')))
+                if percent <= 0:
+                    continue
+                if 'nacht' in label:
+                    setting.night_surcharge_percent = percent
+                    setting_fields.append('night_surcharge_percent')
+                elif 'sonntag' in label:
+                    setting.sunday_surcharge_percent = percent
+                    setting_fields.append('sunday_surcharge_percent')
+                elif 'samstag' in label:
+                    setting.saturday_surcharge_percent = percent
+                    setting_fields.append('saturday_surcharge_percent')
+
             if compensation_type == 'hourly' and latest_payslip.get('quantity') is not None:
                 auto_paid_hours = max(Decimal('0'), dec(latest_payslip.get('quantity')))
                 lexware_hourly_rate = max(Decimal('0'), dec(latest_payslip.get('hourly_rate')))
+                if lexware_hourly_rate > 0:
+                    worker.tariff_hourly_rate = lexware_hourly_rate
+                    worker.save(update_fields=['tariff_hourly_rate'])
+                    setting.hourly_rate = lexware_hourly_rate
+                    setting_fields.append('hourly_rate')
                 record = WorkingTimeAccountRecord.objects.filter(
                     worker=worker,
                     year_month=period,
                 ).first()
                 if record:
                     update_record(record, paid_total_hours=auto_paid_hours)
+
+            if setting_fields:
+                setting.save(update_fields=list(dict.fromkeys(setting_fields)))
 
         imported.append({
             'worker_id': str(worker.id),
