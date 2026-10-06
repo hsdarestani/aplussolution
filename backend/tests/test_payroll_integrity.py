@@ -254,6 +254,46 @@ def test_fifty_worked_thirty_eight_paid_leaves_twelve_hours_credit(
 
 
 @pytest.mark.django_db
+def test_payroll_repairs_implausible_one_day_clockout_rollover(
+    worker_user, company, location, position
+):
+    worker = worker_user.worker_profile
+    day = date(2026, 9, 16)
+    tz = timezone.get_current_timezone()
+    start = timezone.make_aware(datetime.combine(day, time(16, 0)), tz)
+    shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        worker=worker,
+        starts_at=start,
+        ends_at=start + timedelta(hours=6),
+        break_minutes=30,
+        status=Shift.Status.CONFIRMED,
+    )
+    entry = TimeEntry.objects.create(
+        worker=worker,
+        shift=shift,
+        clock_in=start,
+        clock_out=start + timedelta(days=1, hours=6, minutes=30),
+        break_minutes=30,
+        approved=True,
+    )
+
+    sync_working_time(day, day)
+    record = WorkingTimeAccountRecord.objects.get(worker=worker, year_month=day.replace(day=1))
+
+    assert record.ist_hours == Decimal('6.00')
+    assert len(record.raw_entries) == 1
+    audit_row = record.raw_entries[0]
+    assert audit_row['worked_minutes'] == 360
+    assert audit_row['night_minutes'] == 0
+    assert audit_row['clock_out_rollover_corrected'] is True
+    assert audit_row['source_clock_out'] == entry.clock_out.isoformat()
+    assert audit_row['local_clock_out'].startswith('2026-09-16T22:30')
+
+
+@pytest.mark.django_db
 def test_historical_wiw_time_is_authoritative_even_without_native_approval(
     worker_user, company, location, position
 ):
