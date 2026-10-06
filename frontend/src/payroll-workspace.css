@@ -383,6 +383,31 @@
 .payroll-payment-strip span,.payroll-payment-strip b{display:block}
 .payroll-payment-strip span{font-size:.63rem;color:var(--payroll-muted)}
 .payroll-payment-strip b{margin-top:4px;font-size:.78rem}
+.payroll-lexware-note{
+  margin:-4px 0 12px;
+  padding:10px 12px;
+  border:1px solid #f0d9a9;
+  border-radius:11px;
+  background:#fffaf0;
+  color:#7a5b24;
+  font-size:.7rem;
+  line-height:1.45;
+  font-weight:700;
+}
+.payroll-lexware-supplements{
+  display:flex;
+  flex-wrap:wrap;
+  gap:7px;
+  margin:-4px 0 13px;
+}
+.payroll-lexware-supplements span{
+  padding:7px 10px;
+  border-radius:999px;
+  background:#edf4f7;
+  color:var(--payroll-navy);
+  font-size:.66rem;
+  font-weight:800;
+}
 .payroll-daily{min-width:0}
 .payroll-daily-head{
   display:flex;
