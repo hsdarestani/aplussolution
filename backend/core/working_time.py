@@ -462,7 +462,9 @@ def record_dict(
         'synced_at': row.synced_at.isoformat() if row.synced_at else None,
         'payroll_statement': statement_dict(statement),
         'minijob_limit': str(minijob_limit) if minijob_limit is not None else None,
-        'minijob_warning': bool(minijob_limit is not None and gross_with_surcharges > minijob_limit),
+        # Informational only. Use base gross here because treatment of supplements
+        # in the Minijob earnings test depends on the payroll/tax classification.
+        'minijob_warning': bool(minijob_limit is not None and row.gross_amount > minijob_limit),
     }
     if include_entries:
         result['entries'] = row.raw_entries or []
