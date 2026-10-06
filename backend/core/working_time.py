@@ -19,7 +19,7 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from .models import (
     PayrollStatement,
@@ -564,18 +564,47 @@ def export_xlsx(queryset) -> HttpResponse:
     return response
 
 
+def _pdf_dt(value):
+    parsed = parse_dt(value)
+    return parsed
+
+
+def _pdf_clock(value):
+    parsed = _pdf_dt(value)
+    return parsed.strftime('%H:%M') if parsed else '–'
+
+
+def _pdf_date(value):
+    parsed = _pdf_dt(value)
+    return parsed.strftime('%d.%m.%Y') if parsed else '–'
+
+
+def _pdf_hours(minutes) -> str:
+    total = max(0, int(minutes or 0))
+    return f'{total // 60}:{total % 60:02d}'
+
+
 def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
     rows = list(queryset.select_related('worker__user'))
     statements = _statement_map(rows)
     buffer = io.BytesIO()
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name='WTTitle', parent=styles['Title'], alignment=TA_CENTER, spaceAfter=12))
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=10 * mm, rightMargin=10 * mm, topMargin=12 * mm, bottomMargin=12 * mm)
+    styles.add(ParagraphStyle(name='WTMonth', parent=styles['Heading2'], spaceBefore=4, spaceAfter=6))
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=10 * mm,
+        rightMargin=10 * mm,
+        topMargin=12 * mm,
+        bottomMargin=12 * mm,
+    )
     story = [
-        Paragraph('Arbeitszeit- und Lohnkonto', styles['WTTitle']),
+        Paragraph('Arbeitszeit und Lohnkonto', styles['WTTitle']),
         Paragraph(f'{worker.user} · {worker.get_employment_type_display()}', styles['Heading2']),
         Spacer(1, 8),
     ]
+
     data = [[
         'Monat', 'Ist', 'Soll', 'Bezahlt', 'Monatssaldo', 'Übertrag', 'Saldo',
         'Nacht', 'Sa.', 'So.', 'Zuschläge', 'Brutto', 'Überwiesen',
@@ -604,10 +633,65 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
     story.append(table)
     story.append(Spacer(1, 8))
     story.append(Paragraph(
-        'IST basiert auf freigegebenen A+ Zeiteinträgen bzw. historischem WIW Altbestand. '
-        'Dienstplanzeiten dienen nur dem Vergleich. Zuschläge verwenden die je Mitarbeiter hinterlegten Prozentsätze.',
+        'IST basiert auf tatsächlichen freigegebenen A+ Zeiten und historischem WIW Altbestand. '
+        'Dienstplanzeiten dienen nur als Vergleich. Bezahlt sind die tatsächlich für den Monat '
+        'hinterlegten bezahlten Stunden. Zuschläge verwenden die je Mitarbeiter hinterlegten Prozentsätze.',
         styles['BodyText'],
     ))
+
+    for row_index, row in enumerate(rows):
+        entries = sorted(
+            list(row.raw_entries or []),
+            key=lambda item: str(item.get('local_clock_in') or item.get('clock_in') or ''),
+        )
+        if not entries:
+            continue
+        story.append(PageBreak())
+        statement = statements.get((str(row.worker_id), row.year_month))
+        item = record_dict(row, statement)
+        payroll = item.get('payroll_statement') or {}
+        story.append(Paragraph(row.year_month.strftime('%m/%Y'), styles['WTMonth']))
+        story.append(Paragraph(
+            f"Gearbeitet: {item['ist_hours']} Std. · Bezahlt: {item['paid_total_hours']} Std. · "
+            f"Saldo Monat: {item['monthly_balance_hours']} Std. · Saldo kumuliert: {item['saldo_cumulative']} Std. · "
+            f"Stundensatz: {item['hourly_rate']} € · Brutto mit Zuschlägen: {item['gross_with_surcharges']} € · "
+            f"Lexware überwiesen: {payroll.get('transferred_amount') or '–'} €",
+            styles['BodyText'],
+        ))
+        story.append(Spacer(1, 6))
+        detail = [['Datum', 'Kunde / Ort', 'Plan', 'Ist', 'Pause', 'Netto', 'Nacht', 'Sa.', 'So.']]
+        for entry in entries:
+            client = str(entry.get('client_name') or 'Ohne Zuordnung')
+            location = str(entry.get('location_name') or entry.get('position_name') or '')
+            if location:
+                client = f'{client} / {location}'
+            detail.append([
+                _pdf_date(entry.get('local_clock_in') or entry.get('clock_in')),
+                client,
+                f"{_pdf_clock(entry.get('planned_start'))} bis {_pdf_clock(entry.get('planned_end'))}",
+                f"{_pdf_clock(entry.get('local_clock_in') or entry.get('clock_in'))} bis {_pdf_clock(entry.get('local_clock_out') or entry.get('clock_out'))}",
+                f"{int(entry.get('break_minutes') or 0)} Min.",
+                _pdf_hours(entry.get('worked_minutes')),
+                _pdf_hours(entry.get('night_minutes')),
+                _pdf_hours(entry.get('saturday_minutes')),
+                _pdf_hours(entry.get('sunday_minutes')),
+            ])
+        detail_table = Table(
+            detail,
+            repeatRows=1,
+            colWidths=[23 * mm, 55 * mm, 30 * mm, 30 * mm, 20 * mm, 20 * mm, 20 * mm, 17 * mm, 17 * mm],
+        )
+        detail_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#163B65')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), .35, colors.HexColor('#CCD5E0')),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F5F8FC')]),
+            ('FONTSIZE', (0, 0), (-1, -1), 7),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        story.append(detail_table)
+
     doc.build(story)
     return buffer.getvalue()
 
