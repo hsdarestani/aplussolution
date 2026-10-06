@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
+from django.db.models import Q
 from django.http import HttpResponse
 from django.core.files.base import ContentFile
 from django.shortcuts import get_object_or_404
@@ -12,7 +13,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import FormParser, MultiPartParser
 
 from .document_engine import convert_docx_to_pdf
-from .models import AuevExport, AuevSetting, ClientCompany, ShiftImportPackage, WorkingTimeAccountRecord, WorkingTimeSetting, WorkerProfile
+from .models import AuevExport, AuevSetting, ClientCompany, PayrollStatement, ShiftImportPackage, TimeEntry, WorkingTimeAccountRecord, WorkingTimeSetting, WorkerProfile
 from .order_automation import parse_order_text
 from .auev_builder import (
     delete_export as delete_auev_export,
@@ -434,6 +435,17 @@ def worktime_sync(request):
 
 @api_view(['GET'])
 @permission_classes([IsAdminOrManager])
+def _payroll_statement_map(rows):
+    worker_ids = {row.worker_id for row in rows}
+    periods = {row.year_month for row in rows}
+    if not worker_ids or not periods:
+        return {}
+    queryset = PayrollStatement.objects.filter(worker_id__in=worker_ids, period__in=periods)
+    return {(str(item.worker_id), item.period): item for item in queryset}
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminOrManager])
 def worktime_records(request):
     queryset = WorkingTimeAccountRecord.objects.select_related('worker__user').order_by('-year_month', 'worker__user__last_name')
     worker = request.query_params.get('worker')
@@ -446,16 +458,83 @@ def worktime_records(request):
     if month_to:
         queryset = queryset.filter(year_month__lt=(datetime.strptime(month_to[:7], '%Y-%m').date().replace(day=28) + timedelta(days=4)).replace(day=1))
     rows = list(queryset[:2000])
-    return Response({'count': len(rows), 'results': [record_dict(row) for row in rows]})
+    statements = _payroll_statement_map(rows)
+    return Response({
+        'count': len(rows),
+        'results': [
+            record_dict(row, statements.get((str(row.worker_id), row.year_month)))
+            for row in rows
+        ],
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminOrManager])
+def worktime_record_detail(request, pk):
+    record = get_object_or_404(
+        WorkingTimeAccountRecord.objects.select_related('worker__user'),
+        pk=pk,
+    )
+    statement = PayrollStatement.objects.filter(
+        worker=record.worker,
+        period=record.year_month,
+    ).first()
+    return Response(record_dict(record, statement, include_entries=True))
 
 
 @api_view(['PATCH'])
 @permission_classes([IsAdminOrManager])
 def worktime_record_update(request, pk):
-    record = get_object_or_404(WorkingTimeAccountRecord, pk=pk)
-    record = update_record(record, paid_hours=request.data.get('paid_hours'), manual_adjustment=request.data.get('manual_adjustment'))
-    audit(request, 'working_time.record_adjusted', record, {'paid_hours': str(record.paid_hours), 'manual_adjustment': str(record.manual_adjustment)})
-    return Response(record_dict(record))
+    record = get_object_or_404(
+        WorkingTimeAccountRecord.objects.select_related('worker__user'),
+        pk=pk,
+    )
+    record = update_record(
+        record,
+        paid_total_hours=request.data.get('paid_total_hours'),
+        paid_hours=request.data.get('paid_hours'),
+        manual_adjustment=request.data.get('manual_adjustment'),
+    )
+    statement = PayrollStatement.objects.filter(
+        worker=record.worker,
+        period=record.year_month,
+    ).first()
+    audit(request, 'working_time.record_adjusted', record, {
+        'paid_total_hours': str(record.paid_total_hours) if record.paid_total_hours is not None else None,
+        'legacy_paid_hours': str(record.paid_hours),
+        'manual_adjustment': str(record.manual_adjustment),
+    })
+    return Response(record_dict(record, statement))
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminOrManager])
+def worktime_rebuild_all(request):
+    authoritative = (
+        TimeEntry.objects
+        .filter(clock_out__isnull=False)
+        .filter(Q(approved=True) | (Q(wiw_time_id__isnull=False) & ~Q(wiw_time_id='')))
+        .order_by('clock_in')
+    )
+    first = authoritative.first()
+    if not first:
+        return Response({'status': 'ok', 'records_count': 0, 'detail': 'Keine abgeschlossenen Arbeitszeiten vorhanden.'})
+    start = timezone.localtime(first.clock_in).date().replace(day=1)
+    end = timezone.localdate()
+    log = sync_working_time(start, end, include_inactive_workers=True)
+    audit(request, 'working_time.rebuilt_all', log, {
+        'start': start.isoformat(),
+        'end': end.isoformat(),
+        'records': log.records_count,
+    })
+    return Response({
+        'status': log.status,
+        'message': log.message,
+        'records_count': log.records_count,
+        'start': start.isoformat(),
+        'end': end.isoformat(),
+        'metadata': log.metadata,
+    })
 
 
 @api_view(['GET'])
@@ -478,7 +557,7 @@ def worktime_pdf(request, worker_id):
     worker = get_object_or_404(WorkerProfile.objects.select_related('user'), pk=worker_id)
     queryset = WorkingTimeAccountRecord.objects.filter(worker=worker).order_by('year_month')
     response = HttpResponse(worker_pdf(worker, queryset), content_type='application/pdf')
-    response['Content-Disposition'] = f'attachment; filename="arbeitszeitkonto-{worker.employee_number}.pdf"'
+    response['Content-Disposition'] = f'attachment; filename="arbeitszeit-lohnkonto-{worker.employee_number}.pdf"'
     return response
 
 
