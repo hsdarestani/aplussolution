@@ -190,11 +190,16 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
                 ).first()
                 ist = hours_by_key.get((str(worker.id), month), Decimal('0')).quantize(TWO)
                 difference = (ist - monthly_limit).quantize(TWO)
-                # paid_hours means overtime hours paid on top of the contractual
-                # base/SOLL hours. Total compensated hours are SOLL + paid_hours.
-                paid = existing.paid_hours if existing else Decimal('0')
+                legacy_paid_extra = existing.paid_hours if existing else Decimal('0')
+                paid_total = (
+                    existing.paid_total_hours
+                    if existing and existing.paid_total_hours is not None
+                    else (monthly_limit + legacy_paid_extra)
+                ).quantize(TWO)
                 manual = existing.manual_adjustment if existing else Decimal('0')
-                saldo = (carry + difference + manual - paid).quantize(TWO)
+                # The hour balance is independent from SOLL: actual worked hours
+                # minus total compensated hours, plus manual corrections.
+                saldo = (carry + ist + manual - paid_total).quantize(TWO)
                 gross = (ist * effective_rate).quantize(TWO)
 
                 raw_entries = grouped.get((str(worker.id), month), [])
@@ -214,7 +219,8 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
                         'soll_hours': monthly_limit,
                         'difference_hours': difference,
                         'carryover_previous': carry,
-                        'paid_hours': paid,
+                        'paid_hours': legacy_paid_extra,
+                        'paid_total_hours': paid_total,
                         'manual_adjustment': manual,
                         'saldo_cumulative': saldo,
                         'hourly_rate': effective_rate,
@@ -245,6 +251,7 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
             metadata={
                 'source': 'aplus_time_entries',
                 'closed_entries': len(closed_entries),
+                'approved_entries': len(approved_entries),
                 'approved_or_historical_entries': len(approved_entries),
                 'excluded_unapproved_entries': excluded_unapproved,
             },
