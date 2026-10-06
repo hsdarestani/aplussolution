@@ -67,6 +67,7 @@ import './wiw-mobile-overlay-stability.css';
 import './schedule-client-exact-colors.css';
 import './wiw-schedule-bottom-clearance.css';
 import './wiw-shift-keyboard-guard.css';
+import './admin-brand-system.css';
 
 installBerlinLocaleDefaults();
 installOperationalFetchResilience();
