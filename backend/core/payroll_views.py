@@ -278,7 +278,7 @@ def lexware_bank_import(request):
     detected_periods = set()
     for upload in uploads:
         source_name = str(getattr(upload, 'name', '') or '')
-        match = re.search(r'(20\\d{2})[-_](0[1-9]|1[0-2])', source_name)
+        match = re.search(r'(20[0-9]{2})[-_](0[1-9]|1[0-2])', source_name)
         if match:
             detected_periods.add(f'{match.group(1)}-{match.group(2)}')
     if len(detected_periods) > 1:
