@@ -510,13 +510,13 @@ def worktime_record_update(request, pk):
 @api_view(['POST'])
 @permission_classes([IsAdminOrManager])
 def worktime_rebuild_all(request):
-    authoritative = (
-        TimeEntry.objects
-        .filter(clock_out__isnull=False)
-        .filter(Q(approved=True) | (Q(wiw_time_id__isnull=False) & ~Q(wiw_time_id='')))
-        .order_by('clock_in')
-    )
-    first = authoritative.first()
+    # Any closed attendance row establishes that an employee has a work month.
+    # Approval controls whether its minutes count toward IST, not whether the
+    # monthly account itself exists. Using only authoritative rows here caused
+    # a completely empty payroll workspace when all imported/native rows were
+    # still waiting for approval.
+    closed = TimeEntry.objects.filter(clock_out__isnull=False).order_by('clock_in')
+    first = closed.first()
     if not first:
         return Response({'status': 'ok', 'records_count': 0, 'detail': 'Keine abgeschlossenen Arbeitszeiten vorhanden.'})
     start = timezone.localtime(first.clock_in).date().replace(day=1)
