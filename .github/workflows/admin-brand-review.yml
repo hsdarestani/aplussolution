@@ -20,6 +20,7 @@ jobs:
       - run: npm install --no-audit --no-fund --package-lock=false
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test e2e/admin-brand-system.spec.ts e2e/admin-priority-navigation.spec.ts --workers=2
+      - run: npx playwright test e2e/app-shell.spec.ts --grep 'admin exception center' --workers=1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
