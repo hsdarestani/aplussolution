@@ -168,6 +168,11 @@ def test_rebuild_all_creates_month_for_closed_pending_attendance(
     assert record.ist_hours == Decimal('0.00')
     assert record.raw_entries == []
 
+    records_response = auth_admin.get('/api/working-time/records/')
+    assert records_response.status_code == 200
+    assert records_response.data['count'] >= 1
+    assert any(item['id'] == str(record.id) for item in records_response.data['results'])
+
 
 @pytest.mark.django_db
 def test_payroll_setting_is_base_rate_and_allowance_is_added(worker_user):
