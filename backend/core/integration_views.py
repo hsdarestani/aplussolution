@@ -13,7 +13,7 @@ from rest_framework.response import Response
 
 from .document_catalog import DOCUMENT_CATALOG, WIW_SUPPORTED_MASTER_FIELDS, WIW_UNSUPPORTED_LEGAL_FIELDS
 from .document_engine import import_template_bundle, seed_document_catalog
-from .models import EmployeeMasterData, IntegrationSyncRun, User, WebhookEvent, WorkerProfile, WorkingTimeSetting
+from .models import EmployeeMasterData, IntegrationSyncRun, PayrollStatement, User, WebhookEvent, WorkerProfile, WorkingTimeSetting
 from .permissions import IsAdminOrManager
 from .serializers import EmployeeMasterDataSerializer, IntegrationSyncRunSerializer
 from .services import audit
@@ -100,6 +100,41 @@ def import_lexware_employee_master_data(request):
             continue
 
         data = dict(item.get('data') or {})
+
+        # Reuse payroll evidence that was already imported before the master
+        # data upload. This lets one final Stammdaten import also pick up
+        # observed Lexware rates and surcharge percentages without requiring
+        # the user to upload old payroll PDFs again.
+        latest_payslip = None
+        for statement in PayrollStatement.objects.filter(worker=worker).order_by('-period'):
+            payslips = [
+                row for row in (statement.raw_data or [])
+                if isinstance(row, dict) and row.get('kind') == 'payslip'
+            ]
+            if payslips:
+                latest_payslip = payslips[-1]
+                break
+        if latest_payslip:
+            if data.get('compensation_type') in (None, ''):
+                data['compensation_type'] = latest_payslip.get('compensation_type') or ''
+            if data.get('hourly_rate') in (None, '') and latest_payslip.get('hourly_rate') not in (None, ''):
+                data['hourly_rate'] = latest_payslip.get('hourly_rate')
+            if data.get('monthly_salary') in (None, '') and latest_payslip.get('monthly_salary') not in (None, ''):
+                data['monthly_salary'] = latest_payslip.get('monthly_salary')
+            if data.get('lexware_personal_number') in (None, '') and latest_payslip.get('personal_number'):
+                data['lexware_personal_number'] = latest_payslip.get('personal_number')
+            for supplement in latest_payslip.get('supplements') or []:
+                label = str(supplement.get('label') or '').lower()
+                percent = supplement.get('percent')
+                if percent in (None, ''):
+                    continue
+                if 'nacht' in label and data.get('night_surcharge_percent') in (None, ''):
+                    data['night_surcharge_percent'] = percent
+                elif 'samstag' in label and data.get('saturday_surcharge_percent') in (None, ''):
+                    data['saturday_surcharge_percent'] = percent
+                elif 'sonntag' in label and data.get('sunday_surcharge_percent') in (None, ''):
+                    data['sunday_surcharge_percent'] = percent
+
         master, _ = EmployeeMasterData.objects.get_or_create(worker=worker)
         merged = dict(master.data or {})
         sources = dict(master.source_map or {})
