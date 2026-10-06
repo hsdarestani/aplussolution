@@ -3009,8 +3009,25 @@ function Profile({ user }: { user: User }) {
     if (user.role !== 'worker') return;
     let cancelled = false;
     setCalendarLoading(true);
-    void api('calendar/subscription/').then((payload) => {
-      if (!cancelled) setCalendarSync(payload);
+    void api('calendar/subscription/').then((payload: any) => {
+      if (cancelled) return;
+      const rawFeed = String(payload?.feed_url || '');
+      const secureFeed = rawFeed.replace(/^http:\/\//i, 'https://');
+      const secureApple = secureFeed.startsWith('https://')
+        ? secureFeed.replace(/^https:\/\//i, 'webcals://')
+        : String(payload?.webcal_url || '').replace(/^webcal:\/\//i, 'webcals://');
+      const encodedFeed = encodeURIComponent(secureFeed || rawFeed);
+      setCalendarSync({
+        ...payload,
+        feed_url: secureFeed || rawFeed,
+        webcal_url: secureApple || payload?.webcal_url,
+        google_url: secureFeed
+          ? `https://calendar.google.com/calendar/render?cid=${encodedFeed}`
+          : payload?.google_url,
+        outlook_url: secureFeed
+          ? `https://outlook.live.com/calendar/0/addfromweb?url=${encodedFeed}&name=${encodeURIComponent('A+ Solution Dienstplan')}`
+          : payload?.outlook_url,
+      });
     }).catch((reason: any) => {
       if (!cancelled) setToast(reason?.message || 'Kalenderlink konnte nicht geladen werden.');
     }).finally(() => { if (!cancelled) setCalendarLoading(false); });
