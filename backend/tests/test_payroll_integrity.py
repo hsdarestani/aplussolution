@@ -372,6 +372,141 @@ def test_one_time_lexware_bank_import_links_transfer_to_employee_month(
 
 
 @pytest.mark.django_db
+def test_lexware_pdf_bundle_imports_hourly_payslip_and_payment(
+    auth_admin, worker_user
+):
+    import io
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from reportlab.pdfgen import canvas
+
+    def make_pdf(lines):
+        buffer = io.BytesIO()
+        doc = canvas.Canvas(buffer)
+        y = 800
+        for line in lines:
+            doc.drawString(40, y, line)
+            y -= 18
+        doc.save()
+        return buffer.getvalue()
+
+    worker = worker_user.worker_profile
+    period = date(2026, 9, 1)
+    record = WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=period,
+        ist_hours=Decimal('50.00'),
+        soll_hours=Decimal('0.00'),
+        paid_total_hours=Decimal('0.00'),
+        saldo_cumulative=Decimal('50.00'),
+        hourly_rate=Decimal('0.00'),
+        gross_amount=Decimal('0.00'),
+    )
+    payslip = SimpleUploadedFile(
+        'Lohnabrechnungen_2026-09.pdf',
+        make_pdf([
+            'Abrechnung für September 2026 - Anna Becker',
+            'erstellt mit Lexware Seite 1 von 1',
+            'Personal-Nr. Geburtsdatum Steuerklasse Konfession',
+            '14 01.01.1990 1 ohne',
+            'Entgelt',
+            'Bezeichnung Kennz Menge Faktor Prozentsatz Betrag',
+            'Lohn LSG 38,90 15,50 € 602,95 €',
+            'Gesamtbrutto 602,95 €',
+            'Netto 602,95 €',
+            'Auszahlungsbetrag 602,95 €',
+        ]),
+        content_type='application/pdf',
+    )
+    payment = SimpleUploadedFile(
+        'Zahlungsliste_2026-09.pdf',
+        make_pdf([
+            'Zahlungsliste September 2026',
+            'Überweisung',
+            'Mitarbeiter',
+            'Empfänger Verwendungszweck IBAN Betrag',
+            'Anna Becker Lohn & Gehalt September 2026 DE79 5085 2553 0117 5072 51 602,95',
+        ]),
+        content_type='application/pdf',
+    )
+
+    response = auth_admin.post(
+        '/api/working-time/lexware-import/',
+        {'period': '2026-09', 'files': [payslip, payment]},
+        format='multipart',
+    )
+    assert response.status_code == 200
+    assert response.data['files'] == 2
+    assert response.data['unmatched_count'] == 0
+
+    statement = PayrollStatement.objects.get(worker=worker, period=period)
+    assert statement.gross_amount == Decimal('602.95')
+    assert statement.net_amount == Decimal('602.95')
+    assert statement.transferred_amount == Decimal('602.95')
+    assert statement.source == 'lexware_pdf_bundle'
+    assert len(statement.raw_data) == 2
+
+    record.refresh_from_db()
+    assert record.paid_total_hours == Decimal('38.90')
+    assert record.saldo_cumulative == Decimal('11.10')
+
+
+@pytest.mark.django_db
+def test_lexware_salary_pdf_does_not_infer_paid_hours(auth_admin, worker_user):
+    import io
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from reportlab.pdfgen import canvas
+
+    buffer = io.BytesIO()
+    doc = canvas.Canvas(buffer)
+    for index, line in enumerate([
+        'Abrechnung für September 2026 - Anna Becker',
+        'erstellt mit Lexware Seite 1 von 1',
+        'Personal-Nr. Geburtsdatum Steuerklasse Konfession',
+        '14 01.01.1990 1 ohne',
+        'Entgelt',
+        'Bezeichnung Kennz Menge Faktor Prozentsatz Betrag',
+        'Gehalt LSG 1,00 2.975,00 € 2.975,00 €',
+        'Gesamtbrutto 2.975,00 €',
+        'Netto 2.049,81 €',
+        'Auszahlungsbetrag 2.099,81 €',
+    ]):
+        doc.drawString(40, 800 - index * 18, line)
+    doc.save()
+
+    worker = worker_user.worker_profile
+    period = date(2026, 9, 1)
+    record = WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=period,
+        ist_hours=Decimal('96.98'),
+        paid_total_hours=Decimal('0.00'),
+        saldo_cumulative=Decimal('96.98'),
+    )
+    upload = SimpleUploadedFile(
+        'Lohnabrechnungen_2026-09.pdf',
+        buffer.getvalue(),
+        content_type='application/pdf',
+    )
+    response = auth_admin.post(
+        '/api/working-time/lexware-import/',
+        {'period': '2026-09', 'file': upload},
+        format='multipart',
+    )
+    assert response.status_code == 200
+
+    record.refresh_from_db()
+    assert record.paid_total_hours == Decimal('0.00')
+    statement = PayrollStatement.objects.get(worker=worker, period=period)
+    assert statement.gross_amount == Decimal('2975.00')
+    assert statement.net_amount == Decimal('2049.81')
+    assert statement.transferred_amount is None
+    assert statement.raw_data[0]['compensation_type'] == 'salary'
+    assert statement.raw_data[0]['monthly_salary'] == '2975.00'
+
+
+@pytest.mark.django_db
 def test_each_employee_history_starts_with_first_authoritative_work_month(
     worker_user, second_worker, company, location, position
 ):
