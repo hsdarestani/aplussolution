@@ -79,7 +79,7 @@ const severityText: Record<string, string> = {
 };
 
 const priorityActions = [
-  { view: 'schedule', label: 'Dienstplan', hint: 'Besetzung koordinieren', icon: calendarOutline },
+  { view: 'schedule', label: 'Dienstplan', hint: 'OpenShifts & Besetzung', icon: calendarOutline },
   { view: 'time', label: 'Zeiterfassung', hint: 'Zeiten prüfen', icon: timeOutline },
   { view: 'operations', label: 'Lohn & Anfragen', hint: 'Freigaben, Saldo & Berichte', icon: walletOutline },
   { view: 'people', label: 'Personal & Kunden', hint: 'Stammdaten & Zugänge', icon: peopleOutline },
@@ -118,7 +118,7 @@ function missingShiftTime(value: string) {
   });
 }
 
-export default function AdminHomeV4({ navigate }: { navigate: Navigate }) {
+export default function AdminHomeV4({ navigate, desktopBrand = false }: { navigate: Navigate; desktopBrand?: boolean }) {
   const [data, setData] = useState<any>();
   const [mobileDashboard, setMobileDashboard] = useState<MobileDashboard>();
   const [category, setCategory] = useState('all');
@@ -289,9 +289,9 @@ export default function AdminHomeV4({ navigate }: { navigate: Navigate }) {
 
       <section className="admin-attention-hero">
         <div>
-          <small>PERSONAL. PLANUNG. PRÄZISION.</small>
-          <h1>Alles im Blick. Jeder Einsatz zählt.</h1>
-          <p>Menschen verbinden. Einsätze koordinieren. Hier sehen Sie, was ansteht und wo Ihre Aufmerksamkeit gebraucht wird.</p>
+          <small>{desktopBrand ? 'PERSONAL. PLANUNG. PRÄZISION.' : 'ADMIN · HANDLUNGSBEDARF'}</small>
+          <h1>{desktopBrand ? 'Alles im Blick. Jeder Einsatz zählt.' : 'Nur das, was heute Aufmerksamkeit braucht.'}</h1>
+          <p>{desktopBrand ? 'Menschen verbinden. Einsätze koordinieren. Hier sehen Sie, was ansteht und wo Ihre Aufmerksamkeit gebraucht wird.' : 'Keine allgemeine KPI-Wand. Offene Besetzung, fehlende Check-ins, Vertragsfristen, unvollständige Akten und technische Fehler – nach Dringlichkeit sortiert.'}</p>
         </div>
         <IonButton fill="outline" disabled={busy} onClick={() => void load()}>
           <IonIcon slot="start" icon={refreshOutline} />

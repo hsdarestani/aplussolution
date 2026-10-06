@@ -1,7 +1,13 @@
 name: Admin brand visual review
 on:
   push:
-    branches: ['design/aplus-admin-identity']
+    branches: ['design/aplus-admin-identity', main]
+    paths:
+      - 'frontend/src/App.tsx'
+      - 'frontend/src/AdminHomeV4.tsx'
+      - 'frontend/src/admin-brand-system.css'
+      - 'frontend/e2e/admin-brand-system.spec.ts'
+      - '.github/workflows/admin-brand-review.yml'
   workflow_dispatch:
 permissions:
   contents: read

@@ -28,8 +28,8 @@ async function openAdminHome(page: any, width: number, height: number) {
   await page.goto('/');
 }
 
-test('browser admin keeps daily shortcuts available on mobile and desktop', async ({ page }) => {
-  for (const width of [390, 1440]) {
+test('desktop browser admin keeps daily shortcuts available', async ({ page }) => {
+  for (const width of [1440]) {
     await openAdminHome(page, width, 1000);
     const priorities = page.getByTestId('admin-priority-actions');
     await expect(priorities).toBeVisible();

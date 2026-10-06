@@ -3155,18 +3155,19 @@ function Legal({ deletePage = false }: { deletePage?: boolean }) {
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  useEffect(() => {
-    // Ionic and custom dialogs may be portaled outside IonApp.
-    if (user && isManager(user) && !Capacitor.isNativePlatform()) document.body.dataset.apAdminWeb = 'true';
-    else delete document.body.dataset.apAdminWeb;
-    return () => { delete document.body.dataset.apAdminWeb; };
-  }, [user?.role]);
   const [ready, setReady] = useState(false);
   const [view, setView] = useState<View>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileViewport, setMobileViewport] = useState(() =>
     typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches
   );
+  const desktopAdminWeb = Boolean(user && isManager(user) && !mobileViewport && !Capacitor.isNativePlatform());
+  useEffect(() => {
+    // Desktop-only scope also covers dialogs portaled outside IonApp.
+    if (desktopAdminWeb) document.body.dataset.apAdminWeb = 'true';
+    else delete document.body.dataset.apAdminWeb;
+    return () => { delete document.body.dataset.apAdminWeb; };
+  }, [desktopAdminWeb]);
   const [resumeGeneration, setResumeGeneration] = useState(0);
   const resumeInFlight = useRef(false);
   const backgroundedAt = useRef<number | null>(null);
@@ -3345,7 +3346,7 @@ export default function App() {
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
 
-  let content: React.ReactNode = user.role === 'worker' ? <EmployeeHome user={user} navigate={navigateTo} /> : isManager(user) ? <AdminHomeV4 navigate={navigateTo} /> : <Dashboard user={user} navigate={navigateTo} />;
+  let content: React.ReactNode = user.role === 'worker' ? <EmployeeHome user={user} navigate={navigateTo} /> : isManager(user) ? <AdminHomeV4 navigate={navigateTo} desktopBrand={desktopAdminWeb} /> : <Dashboard user={user} navigate={navigateTo} />;
 
   if (view === 'schedule') {
     // On manager/admin phones the compact WIW-style Dienstplan is the only
@@ -3373,7 +3374,7 @@ export default function App() {
   }
 
   return (
-    <IonApp className="mobile-first-app-shell-v1" data-view={mobileMenuOpen ? 'more' : view} data-role={user.role} data-admin-web={isManager(user) && !Capacitor.isNativePlatform() ? "true" : undefined}>
+    <IonApp className="mobile-first-app-shell-v1" data-view={mobileMenuOpen ? 'more' : view} data-role={user.role} data-admin-web={desktopAdminWeb ? "true" : undefined}>
       <IonPage>
         <Header title="A+ Solution" appShell />
         <IonContent className="app-content">
@@ -3403,7 +3404,7 @@ export default function App() {
                   <small>{roleLabel[user.role] || user.role}</small>
                 </div>
               </div>
-              {isManager(user) && !Capacitor.isNativePlatform() && <div className="ap-nav-caption">ARBEITSALLTAG</div>}
+              {desktopAdminWeb && <div className="ap-nav-caption">ARBEITSALLTAG</div>}
               <IonList lines="none">
                 {desktopItems.map((item) => (
                   <IonItem
@@ -3432,11 +3433,11 @@ export default function App() {
                 <IonIcon slot="start" icon={exitOutline} />
                 Abmelden
               </IonButton>
-              {isManager(user) && !Capacitor.isNativePlatform() && <div className="ap-brand-signature"><span>PERSONAL. PLANUNG. PRÄZISION.</span><b>A+ Solution</b></div>}
+              {desktopAdminWeb && <div className="ap-brand-signature"><span>PERSONAL. PLANUNG. PRÄZISION.</span><b>A+ Solution</b></div>}
             </aside>
 
             <main className="app-main">
-              {isManager(user) && !Capacitor.isNativePlatform() && <header className="ap-workspace-header">
+              {desktopAdminWeb && <header className="ap-workspace-header">
                 <div><span className="ap-eyebrow">A+ SOLUTION / WORKSPACE</span><h1>{currentLabel}</h1></div>
                 <div className="ap-workspace-meta"><time dateTime={new Date().toISOString().slice(0, 10)}>{new Date().toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin', weekday: 'long', day: '2-digit', month: 'long' })}</time><button type="button" onClick={() => navigateTo('profile')} aria-label="Profil öffnen"><span>{user.name[0]}</span><b>{user.name}</b></button></div>
               </header>}

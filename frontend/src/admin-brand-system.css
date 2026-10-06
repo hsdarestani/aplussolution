@@ -1,3 +1,5 @@
+/* Desktop web only. Mobile browser and native layouts retain their existing design. */
+@media (min-width: 901px) {
 /* A+ Solution: precision in planning, warmth in people. Browser managers only.
    This final layer owns the shared UI; service/status colours belong to data. */
 :is(ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view],body[data-ap-admin-web='true']) {
@@ -161,4 +163,6 @@
   ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] .mobile-appbar { display: grid !important; grid-template-columns: 70px minmax(0,1fr) 36px !important; background: #102e40 !important; padding: 12px 16px !important; }
   ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] .mobile-page-title { display: block !important; }
   ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] .mobile-avatar { display: grid !important; background: #ffffff18 !important; }
+}
+
 }

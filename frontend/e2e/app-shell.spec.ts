@@ -281,10 +281,10 @@ test.describe('Phase 6 mobile QA', () => {
     await page.goto('/');
 
     await expect(page.getByTestId('admin-exception-center')).toBeVisible();
-    const dashboard = page.getByTestId('admin-priority-actions');
+    const dashboard = page.getByTestId('wiw-mobile-admin-dashboard');
     await expect(dashboard).toBeVisible();
-    await expect(dashboard.getByRole('button', { name: 'Zeiterfassung', exact: true })).toBeVisible();
-    await expect(dashboard.getByRole('button', { name: 'Personal & Kunden', exact: true })).toBeVisible();
+    await expect(dashboard.getByRole('button', { name: 'Weitere Arbeitszeit Hinweise', exact: true })).toBeVisible();
+    await expect(dashboard.getByRole('button', { name: 'Mitarbeiteraktivität', exact: true })).toBeVisible();
     await expect(page.locator('.mobile-tabbar button')).toHaveCount(4);
     await expectNoHorizontalPageOverflow(page);
 

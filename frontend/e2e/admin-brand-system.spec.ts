@@ -28,7 +28,7 @@ async function openAdminHome(page: any, width: number, height: number) {
   await page.goto('/');
 }
 
-for (const width of [1440, 1024, 390]) {
+for (const width of [1440, 1024]) {
   test(`admin brand navigation ${width}`, async ({ page }) => {
     await openAdminHome(page, width, 1000);
     await expect(page.locator('.ap-workspace-header')).toBeVisible();
@@ -72,4 +72,20 @@ test('settings form retains editable fields and cancel action', async ({ page })
   await page.screenshot({path: 'test-results/settings-location-form.png'});
   await modal.getByRole('button', {name: 'Abbrechen', exact: true}).click();
   await expect(modal).toBeHidden();
+});
+
+test('mobile design is preserved and desktop styling is removed on resize', async ({ page }) => {
+  await openAdminHome(page, 1440, 1000);
+  await expect(page.locator('.ap-workspace-header')).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('[data-admin-web="true"]')).toHaveCount(0);
+  await expect(page.locator('body')).not.toHaveAttribute('data-ap-admin-web', 'true');
+  await expect(page.locator('.ap-workspace-header')).toHaveCount(0);
+  await expect(page.getByTestId('wiw-mobile-admin-dashboard')).toBeVisible();
+  await expect(page.getByTestId('admin-priority-actions')).toBeHidden();
+  await expect(page.locator('.admin-attention-hero h1')).toHaveText('Nur das, was heute Aufmerksamkeit braucht.');
+  await page.screenshot({ path: 'test-results/restored-mobile.png' });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await expect(page.locator('.ap-workspace-header')).toBeVisible();
+  await expect(page.getByTestId('admin-priority-actions')).toBeVisible();
 });
