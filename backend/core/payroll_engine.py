@@ -95,7 +95,11 @@ def _entry_metrics(entry: TimeEntry, current_tz) -> dict:
     """
     local_start, local_end, corrected_rollover = _effective_local_interval(entry, current_tz)
     gross_minutes = max(0, int((local_end - local_start).total_seconds() // 60))
-    worked_minutes = max(0, gross_minutes - int(entry.effective_break_minutes))
+    worked_minutes = (
+        max(0, gross_minutes - int(entry.effective_break_minutes))
+        if corrected_rollover
+        else max(0, int(entry.worked_minutes))
+    )
     factor = (Decimal(worked_minutes) / Decimal(gross_minutes)) if gross_minutes else Decimal('0')
 
     night_gross = 0
