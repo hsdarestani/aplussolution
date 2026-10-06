@@ -129,12 +129,15 @@ def sync_working_time(start: date, end: date, *, include_inactive_workers: bool 
         row.worker_id: row
         for row in WorkingTimeSetting.objects.select_related('worker').all()
     }
+    # Closed entries define when an employee first has an attendance month.
+    # Approval controls whether those minutes count toward IST, not whether the
+    # month exists at all. This preserves the existing review workflow where an
+    # unapproved closed entry yields a zero-IST monthly record until approval.
     history_bounds = {
         row['worker_id']: row
         for row in (
             TimeEntry.objects
             .filter(clock_out__isnull=False)
-            .filter(Q(approved=True) | (Q(wiw_time_id__isnull=False) & ~Q(wiw_time_id='')))
             .values('worker_id')
             .annotate(first_clock_in=Min('clock_in'), last_clock_out=Max('clock_out'))
         )
