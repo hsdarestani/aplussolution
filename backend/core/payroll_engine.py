@@ -134,7 +134,7 @@ def sync_working_time(start: date, end: date, *, include_inactive_workers: bool 
         for row in (
             TimeEntry.objects
             .filter(clock_out__isnull=False)
-            .filter(Q(approved=True) | Q(wiw_time_id__isnull=False))
+            .filter(Q(approved=True) | (Q(wiw_time_id__isnull=False) & ~Q(wiw_time_id='')))
             .values('worker_id')
             .annotate(first_clock_in=Min('clock_in'), last_clock_out=Max('clock_out'))
         )
