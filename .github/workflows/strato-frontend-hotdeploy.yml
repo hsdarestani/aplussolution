@@ -20,6 +20,7 @@ env:
 
 jobs:
   deploy-frontend:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[frontend-only]')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
