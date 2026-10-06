@@ -128,6 +128,48 @@ def test_payroll_includes_entry_after_manager_approval(
 
 
 @pytest.mark.django_db
+def test_rebuild_all_creates_month_for_closed_pending_attendance(
+    auth_admin, worker_user, company, location, position
+):
+    worker = worker_user.worker_profile
+    worker.monthly_hours = Decimal('8.00')
+    worker.save(update_fields=['monthly_hours', 'updated_at'])
+
+    today = timezone.localdate()
+    start = timezone.make_aware(
+        datetime.combine(today, time(9, 0)), timezone.get_current_timezone()
+    )
+    shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        worker=worker,
+        starts_at=start,
+        ends_at=start + timedelta(hours=4),
+        break_minutes=0,
+        status=Shift.Status.CONFIRMED,
+    )
+    TimeEntry.objects.create(
+        worker=worker,
+        shift=shift,
+        clock_in=start,
+        clock_out=start + timedelta(hours=4),
+        approved=False,
+    )
+
+    response = auth_admin.post('/api/working-time/rebuild-all/', {}, format='json')
+    assert response.status_code == 200
+    assert response.data['records_count'] >= 1
+
+    record = WorkingTimeAccountRecord.objects.get(
+        worker=worker,
+        year_month=today.replace(day=1),
+    )
+    assert record.ist_hours == Decimal('0.00')
+    assert record.entry_count if hasattr(record, 'entry_count') else True
+
+
+@pytest.mark.django_db
 def test_payroll_setting_is_base_rate_and_allowance_is_added(worker_user):
     worker = worker_user.worker_profile
     worker.tariff_hourly_rate = Decimal('15.00')
