@@ -84,6 +84,14 @@ type View =
   | 'settings'
   | 'akte';
 
+const APP_VIEWS: View[] = ['dashboard', 'schedule', 'time', 'contracts', 'documents', 'orders', 'people', 'messages', 'ranking', 'ratings', 'profile', 'operations', 'payroll', 'settings', 'akte'];
+
+const initialViewFromUrl = (): View => {
+  if (typeof window === 'undefined') return 'dashboard';
+  const requested = new URLSearchParams(window.location.search).get('view') as View | null;
+  return requested && APP_VIEWS.includes(requested) ? requested : 'dashboard';
+};
+
 const icons: Record<string, string> = {
   dashboard: homeOutline,
   schedule: calendarOutline,
@@ -3160,7 +3168,7 @@ function Legal({ deletePage = false }: { deletePage?: boolean }) {
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
-  const [view, setView] = useState<View>('dashboard');
+  const [view, setView] = useState<View>(initialViewFromUrl);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileViewport, setMobileViewport] = useState(() =>
     typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches
@@ -3193,8 +3201,7 @@ export default function App() {
   useEffect(() => {
     const syncViewFromUrl = () => {
       const requested = new URLSearchParams(window.location.search).get('view') as View | null;
-      const allowed: View[] = ['dashboard', 'schedule', 'time', 'contracts', 'documents', 'orders', 'people', 'messages', 'ranking', 'ratings', 'profile', 'operations', 'payroll', 'settings', 'akte'];
-      if (requested && allowed.includes(requested)) {
+      if (requested && APP_VIEWS.includes(requested)) {
         setView(requested);
         setMobileMenuOpen(false);
       }
@@ -3347,7 +3354,6 @@ export default function App() {
     messages: 'Mitteilungen',
   };
   const navigateTo = (next: View) => {
-    setView(next);
     setMobileMenuOpen(false);
     const url = new URL(window.location.href);
     url.searchParams.set('view', next);
@@ -3355,6 +3361,16 @@ export default function App() {
       url.searchParams.delete('akte_kind');
       url.searchParams.delete('akte_id');
     }
+
+    // Payroll is a dedicated desktop workspace. A full navigation keeps the URL
+    // and rendered workspace in lockstep even if an Ionic click/portal enhancer
+    // has stale local state from a previously open dashboard tab.
+    if (next === 'payroll' && view !== 'payroll') {
+      window.location.assign(`${url.pathname}${url.search}`);
+      return;
+    }
+
+    setView(next);
     window.history.replaceState({ ...(window.history.state || {}), view: next }, '', `${url.pathname}${url.search}`);
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
