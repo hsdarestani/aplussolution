@@ -491,6 +491,7 @@ def worktime_record_update(request, pk):
     )
     record = update_record(
         record,
+        paid_total_hours=request.data.get('paid_total_hours'),
         paid_hours=request.data.get('paid_hours'),
         manual_adjustment=request.data.get('manual_adjustment'),
     )
@@ -499,7 +500,8 @@ def worktime_record_update(request, pk):
         period=record.year_month,
     ).first()
     audit(request, 'working_time.record_adjusted', record, {
-        'paid_hours': str(record.paid_hours),
+        'paid_total_hours': str(record.paid_total_hours) if record.paid_total_hours is not None else None,
+        'legacy_paid_hours': str(record.paid_hours),
         'manual_adjustment': str(record.manual_adjustment),
     })
     return Response(record_dict(record, statement))
