@@ -65,7 +65,7 @@ type PayrollRow = {
   entries?: PayrollEntry[];
 };
 
-type Draft = { paid_hours: string; manual_adjustment: string };
+type Draft = { paid_total_hours: string; manual_adjustment: string };
 
 const number = (value: unknown) => {
   const parsed = Number(String(value ?? '0').replace(',', '.'));
@@ -82,7 +82,12 @@ const employmentLabel = (value?: string) => value === 'minijob' ? 'Minijob' : va
 const dateLabel = (value?: string | null) => value ? new Date(value).toLocaleDateString('de-DE', { timeZone: BUSINESS_TIME_ZONE }) : 'Keine Angabe';
 const timeLabel = (value?: string | null) => value ? new Date(value).toLocaleTimeString('de-DE', { timeZone: BUSINESS_TIME_ZONE, hour: '2-digit', minute: '2-digit' }) : 'Keine Angabe';
 const hoursFromMinutes = (value?: number) => decimal(number(value) / 60);
-const currentMonth = () => new Intl.DateTimeFormat('en-CA', { timeZone: BUSINESS_TIME_ZONE, year: 'numeric', month: '2-digit' }).format(new Date()).slice(0, 7);
+const currentMonth = () => {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: BUSINESS_TIME_ZONE, year: 'numeric', month: '2-digit' }).formatToParts(new Date());
+  const year = parts.find(part => part.type === 'year')?.value || '';
+  const month = parts.find(part => part.type === 'month')?.value || '';
+  return year && month ? `${year}-${month}` : '';
+};
 
 export default function PayrollWorkspaceEnhancer() {
   const [target, setTarget] = useState<Element | null>(null);
@@ -115,7 +120,7 @@ export default function PayrollWorkspaceEnhancer() {
       const response: any = await api('working-time/records/');
       const nextRows = (response?.results || response || []) as PayrollRow[];
       setRows(nextRows);
-      setDrafts(Object.fromEntries(nextRows.map(row => [row.id, { paid_hours: row.paid_hours, manual_adjustment: row.manual_adjustment }])));
+      setDrafts(Object.fromEntries(nextRows.map(row => [row.id, { paid_total_hours: row.paid_total_hours ?? row.soll_hours, manual_adjustment: row.manual_adjustment }])));
       const newestMonth = Array.from(new Set(nextRows.map(row => row.year_month))).sort().reverse()[0];
       setMonth(current => current || newestMonth || 'all');
     } catch (error: any) {
@@ -169,13 +174,13 @@ export default function PayrollWorkspaceEnhancer() {
   }
 
   async function saveRow(row: PayrollRow) {
-    const draft = drafts[row.id] || { paid_hours: row.paid_hours, manual_adjustment: row.manual_adjustment };
+    const draft = drafts[row.id] || { paid_total_hours: row.paid_total_hours ?? row.soll_hours, manual_adjustment: row.manual_adjustment };
     setBusyId(row.id);
     setMessage('');
     try {
       await api(`working-time/records/${row.id}/`, {
         method: 'PATCH',
-        body: JSON.stringify({ paid_hours: draft.paid_hours, manual_adjustment: draft.manual_adjustment }),
+        body: JSON.stringify({ paid_total_hours: draft.paid_total_hours, manual_adjustment: draft.manual_adjustment }),
       });
       setDetails(current => {
         const next = { ...current };
@@ -288,7 +293,7 @@ export default function PayrollWorkspaceEnhancer() {
 
       <div className="payroll-record-list" data-testid="payroll-record-list">
         {visibleRows.map(row => {
-          const draft = drafts[row.id] || { paid_hours: row.paid_hours, manual_adjustment: row.manual_adjustment };
+          const draft = drafts[row.id] || { paid_total_hours: row.paid_total_hours ?? row.soll_hours, manual_adjustment: row.manual_adjustment };
           const expanded = expandedId === row.id;
           const detail = details[row.id];
           const statement = row.payroll_statement;
@@ -327,12 +332,12 @@ export default function PayrollWorkspaceEnhancer() {
                 <div><span>Sonntag</span><b>{decimal(row.sunday_hours)} Std.</b></div>
                 <div><span>Zuschläge</span><b>{money(row.surcharge_amount)}</b></div>
                 <div><span>Soll</span><b>{decimal(row.soll_hours)} Std.</b></div>
-                <div><span>Zusätzlich ausgezahlt</span><b>{decimal(row.paid_hours)} Std.</b></div>
+                <div><span>Offene Stunden im Monat</span><b className={number(row.monthly_balance_hours) < 0 ? 'negative' : 'positive'}>{decimal(row.monthly_balance_hours)} Std.</b></div>
               </div>
 
               <div className="payroll-edit-row">
-                <label>Zusätzlich ausgezahlte Stunden
-                  <input aria-label={`Auszahlung ${row.employee_name} ${row.year_month}`} type="number" min="0" step="0.25" value={draft.paid_hours} onChange={event => setDrafts({ ...drafts, [row.id]: { ...draft, paid_hours: event.target.value } })} />
+                <label>Bezahlte Stunden gesamt
+                  <input aria-label={`Bezahlte Stunden ${row.employee_name} ${row.year_month}`} type="number" min="0" step="0.25" value={draft.paid_total_hours} onChange={event => setDrafts({ ...drafts, [row.id]: { ...draft, paid_total_hours: event.target.value } })} />
                 </label>
                 <label>Korrektur Stunden
                   <input aria-label={`Korrektur ${row.employee_name} ${row.year_month}`} type="number" step="0.25" value={draft.manual_adjustment} onChange={event => setDrafts({ ...drafts, [row.id]: { ...draft, manual_adjustment: event.target.value } })} />
@@ -373,7 +378,7 @@ export default function PayrollWorkspaceEnhancer() {
         {!visibleRows.length && !loading && <div className="payroll-empty">Keine passenden Monatsdaten gefunden.</div>}
       </div>
 
-      <p className="payroll-footnote">Bezahlt gesamt bedeutet Sollstunden plus zusätzlich ausgezahlte Stunden. Der kumulierte Saldo zeigt damit die noch offenen positiven oder negativen Stunden. Lexware Betrag ist der tatsächlich importierte Bankabfluss und wird nicht in Stunden umgerechnet.</p>
+      <p className="payroll-footnote">Saldo wird aus tatsächlich gearbeiteten Stunden minus tatsächlich bezahlten Stunden berechnet. SOLL bleibt ein separater Vertragsvergleich. Der Lexware Betrag ist der importierte Bankabfluss und wird nicht automatisch in Stunden umgerechnet.</p>
     </div>,
     target,
   );
