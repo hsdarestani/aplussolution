@@ -387,3 +387,49 @@ def test_closed_month_keeps_historical_contract_and_rate_snapshot(
     assert record.soll_hours == Decimal('38.00')
     assert record.hourly_rate == Decimal('15.00')
     assert record.employment_type_snapshot == 'minijob'
+
+
+@pytest.mark.django_db
+def test_lexware_import_matches_inactive_former_employee(auth_admin, worker_user):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    worker = worker_user.worker_profile
+    worker.active = False
+    worker.save(update_fields=['active', 'updated_at'])
+    period = date(2026, 4, 1)
+    upload = SimpleUploadedFile(
+        'bank.csv',
+        b'Betrag;Datum;Verwendungszweck\n500,00;15.04.2026;Gehalt Anna Becker\n',
+        content_type='text/csv',
+    )
+    response = auth_admin.post(
+        '/api/working-time/lexware-import/',
+        {'period': '2026-04', 'file': upload},
+        format='multipart',
+    )
+    assert response.status_code == 200
+    assert response.data['employees'][0]['worker_id'] == str(worker.id)
+    assert PayrollStatement.objects.get(worker=worker, period=period).transferred_amount == Decimal('500.00')
+
+
+@pytest.mark.django_db
+def test_lexware_import_rejects_ambiguous_employee_name(auth_admin, worker_user, second_worker):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    second_worker.user.first_name = 'Anna'
+    second_worker.user.last_name = 'Becker'
+    second_worker.user.save(update_fields=['first_name', 'last_name'])
+    upload = SimpleUploadedFile(
+        'bank.csv',
+        b'Betrag;Datum;Verwendungszweck\n500,00;15.04.2026;Gehalt Anna Becker\n',
+        content_type='text/csv',
+    )
+    response = auth_admin.post(
+        '/api/working-time/lexware-import/',
+        {'period': '2026-04', 'file': upload},
+        format='multipart',
+    )
+    assert response.status_code == 200
+    assert response.data['employees'] == []
+    assert response.data['unmatched_count'] == 1
+    assert not PayrollStatement.objects.filter(period=date(2026, 4, 1)).exists()
