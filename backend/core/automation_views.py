@@ -513,7 +513,7 @@ def worktime_rebuild_all(request):
     authoritative = (
         TimeEntry.objects
         .filter(clock_out__isnull=False)
-        .filter(Q(approved=True) | Q(wiw_time_id__isnull=False))
+        .filter(Q(approved=True) | (Q(wiw_time_id__isnull=False) & ~Q(wiw_time_id='')))
         .order_by('clock_in')
     )
     first = authoritative.first()
