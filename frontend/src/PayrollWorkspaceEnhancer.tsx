@@ -245,6 +245,10 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     setMonth('all');
   }, [selectedWorkerId, months, month]);
 
+  useEffect(() => {
+    if (month && month !== 'all') setLexwarePeriod(month);
+  }, [month]);
+
   const selectedEmployee = employeeOptions.find(item => item.worker_id === selectedWorkerId);
   const selectedSetting = settingsRows.find(item => item.worker_id === selectedWorkerId);
   const summary = {
@@ -438,7 +442,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         <div><span>Bezahlt</span><strong>{decimal(summary.paid)} Std.</strong><small>bestätigte Stunden</small></div>
         <div><span>Saldo</span><strong className={summary.saldo < 0 ? 'negative' : 'positive'}>{decimal(summary.saldo)} Std.</strong><small>offenes Zeitkonto</small></div>
         <div><span>Brutto vorbereitet</span><strong>{money(summary.gross)}</strong><small>inklusive Zuschläge</small></div>
-        <div><span>Lexware überwiesen</span><strong>{money(summary.transferred)}</strong><small>Bankabfluss</small></div>
+        <div><span>Lexware Auszahlung</span><strong>{money(summary.transferred)}</strong><small>Zahlungsliste oder Bankexport</small></div>
       </section>
 
       {settingsOpen && <section className="payroll-settings-panel">
@@ -489,7 +493,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
                 <span>{row.employee_number || 'Ohne Personalnummer'}</span>
               </div>
               <div className="payroll-record-gross">
-                <small>Lexware überwiesen</small>
+                <small>{statement?.source === 'lexware_bank_export' ? 'Lexware überwiesen' : 'Lexware Zahlungsliste'}</small>
                 <b>{statement?.transferred_amount ? money(statement.transferred_amount) : 'Noch nicht importiert'}</b>
               </div>
             </header>
