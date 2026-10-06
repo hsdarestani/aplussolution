@@ -88,8 +88,9 @@ def repair_misdated_lexware_import(apps, schema_editor):
 
     source_statements = list(PayrollStatement.objects.filter(period=SOURCE_PERIOD))
     for source in source_statements:
-        worker_id = worker_id
-        raw_items = list(source.raw_data or [])
+        worker_id = source.worker_id
+        raw_value = source.raw_data or []
+        raw_items = [item for item in raw_value if isinstance(item, dict)] if isinstance(raw_value, (list, tuple)) else []
         moved = [
             item for item in raw_items
             if str(item.get('source_file') or '') in SOURCE_FILES
@@ -107,7 +108,8 @@ def repair_misdated_lexware_import(apps, schema_editor):
             period=TARGET_PERIOD,
             defaults={'source': 'lexware_import'},
         )
-        existing_target = list(target.raw_data or [])
+        target_raw = target.raw_data or []
+        existing_target = [item for item in target_raw if isinstance(item, dict)] if isinstance(target_raw, (list, tuple)) else []
         by_key = {
             str(item.get('key')): item
             for item in existing_target
