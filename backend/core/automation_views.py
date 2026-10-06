@@ -433,8 +433,6 @@ def worktime_sync(request):
     return Response({'status': log.status, 'message': log.message, 'records_count': log.records_count, 'metadata': log.metadata})
 
 
-@api_view(['GET'])
-@permission_classes([IsAdminOrManager])
 def _payroll_statement_map(rows):
     worker_ids = {row.worker_id for row in rows}
     periods = {row.year_month for row in rows}
