@@ -254,8 +254,9 @@ def test_one_time_lexware_bank_import_links_transfer_to_employee_month(
 
     period = timezone.localdate().replace(day=1)
     csv_body = (
-        'Buchungsdatum;Empfänger;Verwendungszweck;Betrag\n'
-        f'05.{period:%m.%Y};Anna Becker;Gehalt {period:%m/%Y};-500,00\n'
+        '"EXTF";700;21;"Buchungsstapel";13;;;;;;;1001;456;;;;;;;1;;0;"EUR"\n'
+        'Umsatz (ohne Soll/Haben-Kz);Soll/Haben-Kennzeichen;Belegdatum;Buchungstext\n'
+        f'500,00;S;05{period:%m};Gehalt Anna Becker {period:%m/%Y}\n'
     ).encode('utf-8')
     upload = SimpleUploadedFile('lexware.csv', csv_body, content_type='text/csv')
 
