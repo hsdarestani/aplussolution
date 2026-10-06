@@ -9,6 +9,11 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.AddField(
+            model_name='workingtimeaccountrecord',
+            name='paid_total_hours',
+            field=models.DecimalField(blank=True, decimal_places=2, max_digits=10, null=True),
+        ),
+        migrations.AddField(
             model_name='workingtimesetting',
             name='night_surcharge_percent',
             field=models.DecimalField(decimal_places=2, default=0, max_digits=6),
