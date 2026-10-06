@@ -360,6 +360,41 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     }
   }
 
+  async function downloadArbeitszeitWord() {
+    if (!selectedWorkerId) {
+      setMessage('Bitte zuerst einen Mitarbeiter auswählen.');
+      return;
+    }
+    setBusyId('export:arbeitszeit-word');
+    setMessage('');
+    try {
+      const result = await apiBlob(`working-time/docx/${selectedWorkerId}/`);
+      triggerBlobDownload(result.blob, result.filename || '01_Arbeitszeitnachweis.docx');
+    } catch (error: any) {
+      setMessage(error?.message || 'Arbeitszeitnachweis konnte nicht erstellt werden.');
+    } finally {
+      setBusyId('');
+    }
+  }
+
+  async function downloadLexwareWord() {
+    if (!month || month === 'all') {
+      setMessage('Bitte zuerst einen Monat auswählen.');
+      return;
+    }
+    setBusyId('export:lexware-word');
+    setMessage('');
+    try {
+      const workerQuery = selectedWorkerId ? `&worker=${encodeURIComponent(selectedWorkerId)}` : '';
+      const result = await apiBlob(`working-time/lexware-docx/?month=${encodeURIComponent(month)}${workerQuery}`);
+      triggerBlobDownload(result.blob, result.filename || `03_Lexware_Abgleich_${month}.docx`);
+    } catch (error: any) {
+      setMessage(error?.message || 'Lexware Abgleich konnte nicht erstellt werden.');
+    } finally {
+      setBusyId('');
+    }
+  }
+
   async function downloadPayrollPdf(row: PayrollRow) {
     setBusyId(`pdf:${row.worker_id}`);
     setMessage('');
@@ -427,8 +462,9 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
           <p>Ein Mitarbeiter. Eine nachvollziehbare Monatsakte. Ist Zeiten, Dienstplan und tatsächliche Zahlung bleiben getrennt und trotzdem direkt vergleichbar.</p>
         </div>
         <div className="payroll-hero-actions">
-          <button type="button" className="payroll-secondary" onClick={() => void downloadExport('xlsx')} disabled={busyId === 'export:xlsx'}>Excel</button>
-          <button type="button" className="payroll-secondary" onClick={() => void downloadExport('csv')} disabled={busyId === 'export:csv'}>CSV</button>
+          <button type="button" className="payroll-secondary" onClick={() => void downloadArbeitszeitWord()} disabled={!selectedWorkerId || busyId === 'export:arbeitszeit-word'}>01 Word Arbeitszeit</button>
+          <button type="button" className="payroll-secondary" onClick={() => void downloadExport('xlsx')} disabled={busyId === 'export:xlsx'}>02 Excel Gesamt</button>
+          <button type="button" className="payroll-secondary" onClick={() => void downloadLexwareWord()} disabled={month === 'all' || busyId === 'export:lexware-word'}>03 Word Lexware</button>
           <button type="button" onClick={() => setSettingsOpen(value => !value)}>{settingsOpen ? 'Stammdaten schließen' : 'Stammdaten'}</button>
         </div>
       </header>}
