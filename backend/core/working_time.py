@@ -14,6 +14,10 @@ from django.db import transaction
 from django.http import HttpResponse
 from django.utils import timezone
 from openpyxl import Workbook
+from docx import Document
+from docx.enum.section import WD_ORIENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Cm, Pt
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4, landscape
@@ -22,6 +26,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from .models import (
+    EmployeeMasterData,
     PayrollStatement,
     User,
     WorkerProfile,
