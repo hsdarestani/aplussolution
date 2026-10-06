@@ -41,3 +41,13 @@ for (const width of [1440, 1024, 390]) {
     await expect(page.locator('.ap-workspace-header h1')).toHaveText(/Personal|Mitarbeiter/);
   });
 }
+
+test('desktop modules share the brand frame and preserve navigation', async ({ page }) => {
+  await openAdminHome(page, 1440, 1000);
+  for (const label of ['Dienstplan', 'Zeiterfassung', 'Lohn & Dokumente', 'Mitteilungen', 'Anfragen, Berichte & Verwaltung', 'Personal & Kunden', 'Einstellungen', 'Verträge & ANÜ']) {
+    await page.locator('.app > aside ion-item').filter({ hasText: label }).click();
+    await expect(page.locator('.ap-workspace-header h1')).toHaveText(label);
+    await expect(page.locator('.app-main')).toBeVisible();
+    await page.screenshot({ path: `test-results/module-${label.replace(/[^a-zA-Z]/g, '')}.png`, fullPage: true });
+  }
+});

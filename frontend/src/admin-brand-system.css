@@ -135,3 +135,16 @@ ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] .
 .ap-brand-signature span { font-size: 8px; letter-spacing: .09em; }
 .ap-brand-signature b { font-size: 11px; font-weight: 500; color: #a5bbc5; }
 ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] .app > aside { overflow-y: auto; scrollbar-width: thin; scrollbar-color: #486271 transparent; height: 100vh; }
+/* Module surfaces use the same materials rather than separate theme variants. */
+ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] :is(.operations-panel,.doc-center-panel,.akte-section,.folder-card,.template-card,.dc-template,.doc-stat,.operations-stat,.payroll-panel,.auev-panel) { background: #fff !important; border: 1px solid #dfe5e5 !important; border-radius: 14px !important; box-shadow: none !important; }
+ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] :is(.operations-hero,.doc-center-hero,.akte-hero) { background: #102e40 !important; color: #fff !important; border: 0 !important; border-radius: 18px !important; box-shadow: none !important; }
+ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] :is(.operations-tabs,.doc-center-tabs,.akte-tabs) { padding: 6px; background: #e9eeeb !important; border-radius: 11px; }
+ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] :is(.operations-tabs,.doc-center-tabs,.akte-tabs) button { border-radius: 8px; box-shadow: none !important; }
+ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] :is(.operations-tabs,.doc-center-tabs,.akte-tabs) button.active { background: #fff !important; color: #102e40 !important; }
+ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] .list-toolbar-v4 { padding: 14px; background: #fff; border: 1px solid #dfe5e5; border-radius: 12px; }
+ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] :is(.operations-head,.doc-panel-head,.section-head) { padding-bottom: 14px; border-bottom: 1px solid #edf0ef; margin-bottom: 14px; }
+ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] ion-button[color='success']:not([fill='clear']):not([fill='outline']) { --background: #237256 !important; --color: #fff; }
+ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] ion-button[color='warning']:not([fill='clear']):not([fill='outline']) { --background: #f2ddb1 !important; --color: #594117; }
+ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] :is(ion-input,ion-textarea,ion-select).ion-focused { --border-color: #102e40; --background: #fff; }
+ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] :is(.admin-priority-actions button strong) { font-size: 14px; line-height: 1.4; }
+ion-app.mobile-first-app-shell-v1[data-admin-web='true'][data-role][data-view] :is(.admin-priority-actions button small) { font-size: 11px; line-height: 1.5; }
