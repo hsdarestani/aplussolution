@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { api } from './api';
+import { api, apiBlob } from './api';
 import { BUSINESS_TIME_ZONE } from './berlinLocale';
 import './payroll-workspace.css';
 
@@ -213,6 +213,24 @@ export default function PayrollWorkspaceEnhancer() {
     }
   }
 
+  async function downloadPayrollPdf(row: PayrollRow) {
+    setBusyId(`pdf:${row.worker_id}`);
+    setMessage('');
+    try {
+      const result = await apiBlob(`working-time/pdf/${row.worker_id}/`);
+      const url = URL.createObjectURL(result.blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = result.filename || `Arbeitszeitkonto_${row.employee_number || row.worker_id}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error: any) {
+      setMessage(error?.message || 'PDF konnte nicht erstellt werden.');
+    } finally {
+      setBusyId('');
+    }
+  }
+
   async function importLexware() {
     if (!lexwareFile || !lexwarePeriod) {
       setMessage('Bitte Abrechnungsmonat und Lexware Datei auswählen.');
@@ -349,6 +367,13 @@ export default function PayrollWorkspaceEnhancer() {
                 <div><span>Lexware Betrag</span><b>{statement?.transferred_amount ? money(statement.transferred_amount) : 'Keine Daten'}</b></div>
                 <div><span>Zahlungsdatum</span><b>{statement?.payment_date ? dateLabel(statement.payment_date) : 'Keine Daten'}</b></div>
                 <div><span>Quelle</span><b>{statement?.source === 'lexware_bank_export' ? 'Lexware Bankexport' : statement?.source || 'Keine Daten'}</b></div>
+              </div>
+
+              <div className="payroll-document-actions">
+                <button type="button" onClick={() => void downloadPayrollPdf(row)} disabled={busyId === `pdf:${row.worker_id}`}>
+                  {busyId === `pdf:${row.worker_id}` ? 'PDF wird erstellt' : 'PDF Arbeitszeitkonto'}
+                </button>
+                <span>Enthält Monatsübersicht und Tagesnachweis mit Kunde, Plan, Ist, Pause, Nacht, Samstag und Sonntag.</span>
               </div>
 
               <div className="payroll-daily">
