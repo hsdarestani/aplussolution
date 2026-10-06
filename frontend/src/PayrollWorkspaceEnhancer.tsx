@@ -62,6 +62,8 @@ type PayrollRow = {
   carryover_previous: string;
   paid_hours: string;
   paid_total_hours?: string;
+  balance_basis?: 'paid_hours' | 'soll_salary' | string;
+  balance_reference_hours?: string;
   monthly_balance_hours?: string;
   manual_adjustment: string;
   saldo_cumulative: string;
@@ -255,7 +257,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   const selectedSetting = settingsRows.find(item => item.worker_id === selectedWorkerId);
   const summary = {
     ist: summaryRows.reduce((sum, row) => sum + number(row.ist_hours), 0),
-    paid: summaryRows.reduce((sum, row) => sum + number(row.paid_total_hours ?? row.soll_hours), 0),
+    paid: summaryRows.reduce((sum, row) => sum + number(row.balance_reference_hours ?? row.paid_total_hours ?? row.soll_hours), 0),
     saldo: selectedWorkerId && month === 'all'
       ? number(workerRows[0]?.saldo_cumulative)
       : summaryRows.reduce((sum, row) => sum + number(row.monthly_balance_hours ?? row.saldo_cumulative), 0),
@@ -500,7 +502,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
 
       <section className="payroll-summary" aria-label="Lohnübersicht">
         <div><span>Gearbeitet</span><strong>{decimal(summary.ist)} Std.</strong><small>Ist Zeit</small></div>
-        <div><span>Bezahlt</span><strong>{decimal(summary.paid)} Std.</strong><small>bestätigte Stunden</small></div>
+        <div><span>Bezahlt oder Soll</span><strong>{decimal(summary.paid)} Std.</strong><small>bei Gehalt gilt die vertragliche Sollzeit</small></div>
         <div><span>Saldo</span><strong className={summary.saldo < 0 ? 'negative' : 'positive'}>{decimal(summary.saldo)} Std.</strong><small>offenes Zeitkonto</small></div>
         <div><span>Brutto vorbereitet</span><strong>{money(summary.gross)}</strong><small>inklusive Zuschläge</small></div>
         <div><span>Lexware Auszahlung</span><strong>{money(summary.transferred)}</strong><small>Zahlungsliste oder Bankexport</small></div>
@@ -590,7 +592,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
 
             <div className="payroll-metrics">
               <div><span>IST</span><b>{decimal(row.ist_hours)} Std.</b></div>
-              <div><span>Bezahlt</span><b>{decimal(row.paid_total_hours ?? row.soll_hours)} Std.</b></div>
+              <div><span>{row.balance_basis === 'soll_salary' ? 'Sollbasis' : 'Bezahlt'}</span><b>{decimal(row.balance_reference_hours ?? row.paid_total_hours ?? row.soll_hours)} Std.</b></div>
               <div><span>Monatssaldo</span><b className={number(row.monthly_balance_hours) < 0 ? 'negative' : 'positive'}>{decimal(row.monthly_balance_hours)} Std.</b></div>
               <div><span>Saldo gesamt</span><b className={number(row.saldo_cumulative) < 0 ? 'negative' : 'positive'}>{decimal(row.saldo_cumulative)} Std.</b></div>
               <div><span>Stundensatz</span><b>{money(row.hourly_rate)}</b></div>
@@ -610,9 +612,13 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
 
             {expanded && <div className="payroll-card-details">
               <div className="payroll-edit-row">
-                <label>Bezahlte Stunden gesamt
-                  <input aria-label={`Bezahlte Stunden ${row.employee_name} ${row.year_month}`} type="number" min="0" step="0.25" value={draft.paid_total_hours} onChange={event => setDrafts({ ...drafts, [row.id]: { ...draft, paid_total_hours: event.target.value } })} />
-                </label>
+                {row.balance_basis === 'soll_salary'
+                  ? <label>Saldo Basis
+                      <input type="text" value={`Gehalt: Soll ${decimal(row.balance_reference_hours ?? row.soll_hours)} Std.`} disabled />
+                    </label>
+                  : <label>Bezahlte Stunden gesamt
+                      <input aria-label={`Bezahlte Stunden ${row.employee_name} ${row.year_month}`} type="number" min="0" step="0.25" value={draft.paid_total_hours} onChange={event => setDrafts({ ...drafts, [row.id]: { ...draft, paid_total_hours: event.target.value } })} />
+                    </label>}
                 <label>Korrektur Stunden
                   <input aria-label={`Korrektur ${row.employee_name} ${row.year_month}`} type="number" step="0.25" value={draft.manual_adjustment} onChange={event => setDrafts({ ...drafts, [row.id]: { ...draft, manual_adjustment: event.target.value } })} />
                 </label>
