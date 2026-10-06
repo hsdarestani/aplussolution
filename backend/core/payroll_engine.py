@@ -8,6 +8,7 @@ from django.db.models import Max, Min, Q
 from django.utils import timezone
 
 from .models import (
+    EmployeeMasterData,
     TimeEntry,
     WorkerProfile,
     WorkingTimeAccountRecord,
@@ -178,6 +179,11 @@ def sync_working_time(start: date, end: date, *, include_inactive_workers: bool 
         worker_queryset = worker_queryset.filter(active=True)
     workers = list(worker_queryset)
 
+    master_map = {
+        item.worker_id: dict(item.data or {})
+        for item in EmployeeMasterData.objects.filter(worker_id__in=[worker.id for worker in workers])
+    }
+
     settings_map = {
         row.worker_id: row
         for row in WorkingTimeSetting.objects.select_related('worker').all()
@@ -257,6 +263,10 @@ def sync_working_time(start: date, end: date, *, include_inactive_workers: bool 
                 or settings.WORKING_TIME_DEFAULT_MONTHLY_LIMIT
             )
             _base_rate, _allowance, effective_rate = effective_hourly_rate(worker, row_setting)
+            master_data = master_map.get(worker.id, {})
+            compensation_type = str(master_data.get('compensation_type') or '').strip().lower()
+            is_salary = compensation_type == 'salary'
+            monthly_salary = dec(master_data.get('monthly_salary')) if master_data.get('monthly_salary') not in (None, '') else None
             night_percent = dec(row_setting.night_surcharge_percent if row_setting else 0)
             saturday_percent = dec(row_setting.saturday_surcharge_percent if row_setting else 0)
             sunday_percent = dec(row_setting.sunday_surcharge_percent if row_setting else 0)
@@ -296,14 +306,27 @@ def sync_working_time(start: date, end: date, *, include_inactive_workers: bool 
                 ist = hours_by_key.get((str(worker.id), month), Decimal('0')).quantize(TWO)
                 difference = (ist - month_limit).quantize(TWO)
                 legacy_paid_extra = existing.paid_hours if existing else Decimal('0')
-                paid_total = (
-                    existing.paid_total_hours
-                    if existing and existing.paid_total_hours is not None
-                    else (month_limit + legacy_paid_extra)
-                ).quantize(TWO)
+                if is_salary:
+                    paid_total = (
+                        existing.paid_total_hours
+                        if existing and existing.paid_total_hours is not None
+                        else Decimal('0.00')
+                    ).quantize(TWO)
+                    balance_reference = month_limit
+                else:
+                    paid_total = (
+                        existing.paid_total_hours
+                        if existing and existing.paid_total_hours is not None
+                        else (month_limit + legacy_paid_extra)
+                    ).quantize(TWO)
+                    balance_reference = paid_total
                 manual = existing.manual_adjustment if existing else Decimal('0')
-                saldo = (carry + ist + manual - paid_total).quantize(TWO)
-                gross = (ist * month_rate).quantize(TWO)
+                saldo = (carry + ist + manual - balance_reference).quantize(TWO)
+                gross = (
+                    monthly_salary.quantize(TWO)
+                    if is_salary and monthly_salary is not None
+                    else (ist * month_rate).quantize(TWO)
+                )
 
                 raw_entries = grouped.get((str(worker.id), month), [])
                 previous_raw = {
