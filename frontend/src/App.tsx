@@ -3473,7 +3473,7 @@ export default function App() {
                 <div><span className="ap-eyebrow">A+ SOLUTION / WORKSPACE</span><h1>{currentLabel}</h1></div>
                 <div className="ap-workspace-meta"><time dateTime={new Date().toISOString().slice(0, 10)}>{new Date().toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin', weekday: 'long', day: '2-digit', month: 'long' })}</time><button type="button" onClick={() => navigateTo('profile')} aria-label="Profil öffnen"><span>{user.name[0]}</span><b>{user.name}</b></button></div>
               </header>}
-              <React.Fragment key={`resume-${resumeGeneration}`}>
+              <React.Fragment key={view === 'payroll' ? 'payroll-stable' : `resume-${resumeGeneration}`}>
                 {isManager(user) && view !== 'time' && !(view === 'schedule' && mobileViewport) && <GlobalSearch onNavigate={navigateTo} />}
                 {content}
               </React.Fragment>
