@@ -138,8 +138,35 @@ jobs:
           stale_compose_ids=$(docker ps -a --format '{{.ID}} {{.Names}}' \
             | awk '$2 ~ /^[0-9a-f]+_aplussolution-(backend|frontend|caddy|celery|celery-beat|db|redis)-1$/ {print $1}')
           if [ -n "$stale_compose_ids" ]; then
-            docker rm -f $stale_compose_ids
+            docker rm -f $stale_compose_ids || true
           fi
+
+          # Recreate only stateless application services from a clean name
+          # state. A previous cancelled deploy can leave Docker removing one of
+          # these containers in the background. Waiting for their names to be
+          # released avoids the "removal already in progress" race without
+          # touching PostgreSQL, Redis or any persistent volume.
+          docker compose stop backend frontend caddy celery celery-beat || true
+          docker compose rm -sf backend frontend caddy celery celery-beat || true
+          for attempt in $(seq 1 30); do
+            remaining=0
+            for service in backend frontend caddy celery celery-beat; do
+              name="aplussolution-$service-1"
+              if docker ps -a --format '{{.Names}}' | grep -qx "$name"; then
+                docker rm -f "$name" >/dev/null 2>&1 || true
+                remaining=1
+              fi
+            done
+            [ "$remaining" -eq 0 ] && break
+            sleep 2
+          done
+          for service in backend frontend caddy celery celery-beat; do
+            name="aplussolution-$service-1"
+            if docker ps -a --format '{{.Names}}' | grep -qx "$name"; then
+              echo "Container name is still reserved after cleanup: $name" >&2
+              exit 1
+            fi
+          done
 
           docker compose up -d --build --remove-orphans
           docker compose up -d --force-recreate --no-deps caddy
