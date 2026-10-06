@@ -69,6 +69,12 @@ describe('PayrollWorkspaceEnhancer', () => {
     apiBlobMock.mockResolvedValue({ blob: new Blob(['pdf']), filename: 'Arbeitszeitkonto.pdf' });
     apiMock.mockImplementation((path: string, options?: RequestInit) => {
       if (path === 'working-time/records/' && !options) return Promise.resolve({ results: [row] });
+      if (path === 'working-time/settings/' && !options) return Promise.resolve({
+        employees: [
+          { worker_id: 'worker-1', employee_name: 'Anna Becker' },
+          { worker_id: 'worker-2', employee_name: 'Berta Klein' },
+        ],
+      });
       if (path === 'working-time/records/rec-1/details/') return Promise.resolve(detail);
       if (path === 'working-time/records/rec-1/' && options?.method === 'PATCH') {
         return Promise.resolve({ ...row, paid_total_hours: '45.00', saldo_cumulative: '5.00' });
@@ -82,6 +88,10 @@ describe('PayrollWorkspaceEnhancer', () => {
 
     const workspace = await screen.findByTestId('payroll-workspace');
     expect(within(workspace).getByText('Anna Becker')).toBeInTheDocument();
+    const employeeSelect = within(workspace).getByLabelText('Mitarbeiter auswählen');
+    expect(employeeSelect.tagName).toBe('SELECT');
+    expect(within(employeeSelect).getByRole('option', { name: 'Alle Mitarbeiter' })).toBeInTheDocument();
+    expect(within(employeeSelect).getByRole('option', { name: 'Berta Klein' })).toBeInTheDocument();
     expect(within(workspace).getAllByText(/900,00/).length).toBeGreaterThanOrEqual(1);
     expect(within(workspace).getAllByText(/500,00/).length).toBeGreaterThanOrEqual(1);
     expect(within(workspace).getByText(/17,50/)).toBeInTheDocument();
