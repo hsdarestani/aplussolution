@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Max, Min, Q
 from django.utils import timezone
 
 from .models import (
@@ -86,7 +87,7 @@ def _surcharge_amount(minutes: int, hourly_rate: Decimal, percent: Decimal) -> D
     ).quantize(TWO)
 
 
-def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
+def sync_working_time(start: date, end: date, *, include_inactive_workers: bool = False) -> WorkingTimeSyncLog:
     """Rebuild payroll records from actual A+ attendance.
 
     Approved native A+ entries and imported historical WIW time rows are
@@ -119,10 +120,24 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
         if not entry.approved and not entry.wiw_time_id
     ])
 
-    workers = list(WorkerProfile.objects.select_related('user').filter(active=True))
+    worker_queryset = WorkerProfile.objects.select_related('user')
+    if not include_inactive_workers:
+        worker_queryset = worker_queryset.filter(active=True)
+    workers = list(worker_queryset)
+
     settings_map = {
         row.worker_id: row
         for row in WorkingTimeSetting.objects.select_related('worker').all()
+    }
+    history_bounds = {
+        row['worker_id']: row
+        for row in (
+            TimeEntry.objects
+            .filter(clock_out__isnull=False)
+            .filter(Q(approved=True) | Q(wiw_time_id__isnull=False))
+            .values('worker_id')
+            .annotate(first_clock_in=Min('clock_in'), last_clock_out=Max('clock_out'))
+        )
     }
 
     grouped = defaultdict(list)
@@ -162,7 +177,21 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
     with transaction.atomic():
         for worker in workers:
             row_setting = settings_map.get(worker.id)
-            if row_setting and (not row_setting.active or row_setting.excluded):
+            if row_setting and row_setting.excluded:
+                continue
+            if row_setting and not row_setting.active and not include_inactive_workers:
+                continue
+
+            bounds = history_bounds.get(worker.id)
+            if not bounds or not bounds.get('first_clock_in'):
+                continue
+            first_month = timezone.localtime(bounds['first_clock_in'], current_tz).date().replace(day=1)
+            last_month = timezone.localtime(bounds['last_clock_out'], current_tz).date().replace(day=1)
+            worker_range_start = max(start.replace(day=1), first_month)
+            worker_range_end = end
+            if include_inactive_workers and not worker.active:
+                worker_range_end = min(worker_range_end, last_month)
+            if worker_range_end < worker_range_start:
                 continue
 
             monthly_limit = dec(
@@ -177,13 +206,13 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
 
             prior = (
                 WorkingTimeAccountRecord.objects
-                .filter(worker=worker, year_month__lt=start.replace(day=1))
+                .filter(worker=worker, year_month__lt=worker_range_start)
                 .order_by('-year_month')
                 .first()
             )
             carry = prior.saldo_cumulative if prior else Decimal('0.00')
 
-            for month in iter_months(start, end):
+            for month in iter_months(worker_range_start, worker_range_end):
                 existing = WorkingTimeAccountRecord.objects.filter(
                     worker=worker,
                     year_month=month,
@@ -254,6 +283,7 @@ def sync_working_time(start: date, end: date) -> WorkingTimeSyncLog:
                 'approved_entries': len(approved_entries),
                 'approved_or_historical_entries': len(approved_entries),
                 'excluded_unapproved_entries': excluded_unapproved,
+                'include_inactive_workers': include_inactive_workers,
             },
         )
 
