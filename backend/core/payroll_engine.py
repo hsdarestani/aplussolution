@@ -38,6 +38,54 @@ def _overlap_minutes(start: datetime, end: datetime, window_start: datetime, win
     return max(0, int((overlap_end - overlap_start).total_seconds() // 60))
 
 
+def _effective_local_interval(entry: TimeEntry, current_tz) -> tuple[datetime, datetime, bool]:
+    """Return the local payroll interval and whether a one-day rollover was repaired.
+
+    Imported/native attendance can occasionally contain a clock-out date one
+    calendar day too late while its clock time still matches the planned shift
+    end. We repair only a very strong signal: raw attendance exceeds 18 hours,
+    the planned shift is at most 18 hours, and moving the clock-out time back
+    one day yields a plausible duration whose end is within six hours of the
+    planned end. The source timestamp stays on TimeEntry for audit.
+    """
+    local_start = timezone.localtime(entry.clock_in, current_tz)
+    local_end = timezone.localtime(entry.clock_out, current_tz)
+    raw_duration = local_end - local_start
+
+    if entry.shift_id and raw_duration > timedelta(hours=18):
+        planned_start = timezone.localtime(entry.shift.starts_at, current_tz)
+        planned_end = timezone.localtime(entry.shift.ends_at, current_tz)
+        planned_duration = planned_end - planned_start
+        if timedelta(0) < planned_duration <= timedelta(hours=18):
+            candidate = timezone.make_aware(
+                datetime.combine(local_start.date(), local_end.time().replace(tzinfo=None)),
+                current_tz,
+            )
+            if candidate <= local_start:
+                candidate += timedelta(days=1)
+
+            planned_candidate_end = timezone.make_aware(
+                datetime.combine(local_start.date(), planned_end.time().replace(tzinfo=None)),
+                current_tz,
+            )
+            planned_candidate_start = timezone.make_aware(
+                datetime.combine(local_start.date(), planned_start.time().replace(tzinfo=None)),
+                current_tz,
+            )
+            if planned_candidate_end <= planned_candidate_start:
+                planned_candidate_end += timedelta(days=1)
+
+            candidate_duration = candidate - local_start
+            end_delta = abs(candidate - planned_candidate_end)
+            if (
+                timedelta(0) < candidate_duration <= timedelta(hours=18)
+                and end_delta <= timedelta(hours=6)
+            ):
+                return local_start, candidate, True
+
+    return local_start, local_end, False
+
+
 def _entry_metrics(entry: TimeEntry, current_tz) -> dict:
     """Return payroll/audit metrics from the same approved TimeEntry used for IST.
 
@@ -45,10 +93,9 @@ def _entry_metrics(entry: TimeEntry, current_tz) -> dict:
     existing attendance report, category minutes are therefore reduced
     proportionally by the unpaid break.
     """
-    local_start = timezone.localtime(entry.clock_in, current_tz)
-    local_end = timezone.localtime(entry.clock_out, current_tz)
+    local_start, local_end, corrected_rollover = _effective_local_interval(entry, current_tz)
     gross_minutes = max(0, int((local_end - local_start).total_seconds() // 60))
-    worked_minutes = max(0, int(entry.worked_minutes))
+    worked_minutes = max(0, gross_minutes - int(entry.effective_break_minutes))
     factor = (Decimal(worked_minutes) / Decimal(gross_minutes)) if gross_minutes else Decimal('0')
 
     night_gross = 0
@@ -76,6 +123,8 @@ def _entry_metrics(entry: TimeEntry, current_tz) -> dict:
         'night_minutes': int((Decimal(night_gross) * factor).quantize(Decimal('1'))),
         'saturday_minutes': int((Decimal(saturday_gross) * factor).quantize(Decimal('1'))),
         'sunday_minutes': int((Decimal(sunday_gross) * factor).quantize(Decimal('1'))),
+        'clock_out_rollover_corrected': corrected_rollover,
+        'effective_local_clock_out': local_end.isoformat(),
     }
 
 
@@ -148,10 +197,10 @@ def sync_working_time(start: date, end: date, *, include_inactive_workers: bool 
 
     for entry in approved_entries:
         local_clock_in = timezone.localtime(entry.clock_in, current_tz)
-        local_clock_out = timezone.localtime(entry.clock_out, current_tz)
+        metrics = _entry_metrics(entry, current_tz)
+        local_clock_out = datetime.fromisoformat(metrics['effective_local_clock_out'])
         month = local_clock_in.date().replace(day=1)
         key = (str(entry.worker_id), month)
-        metrics = _entry_metrics(entry, current_tz)
         hours_by_key[key] += Decimal(metrics['worked_minutes']) / Decimal('60')
         shift = entry.shift
         grouped[key].append({
@@ -168,6 +217,7 @@ def sync_working_time(start: date, end: date, *, include_inactive_workers: bool 
             'planned_break_minutes': int(shift.break_minutes) if shift else 0,
             'clock_in': entry.clock_in.isoformat(),
             'clock_out': entry.clock_out.isoformat(),
+            'source_clock_out': entry.clock_out.isoformat(),
             'local_clock_in': local_clock_in.isoformat(),
             'local_clock_out': local_clock_out.isoformat(),
             **metrics,
