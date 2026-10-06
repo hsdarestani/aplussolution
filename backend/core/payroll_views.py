@@ -202,7 +202,8 @@ def _row_value(row: dict, candidates: tuple[str, ...]):
 
 def _employee_matchers():
     matchers = []
-    for worker in WorkerProfile.objects.select_related('user').filter(active=True):
+    # Historical payroll uploads must also match former/inactive employees.
+    for worker in WorkerProfile.objects.select_related('user').all():
         first = _norm(worker.user.first_name)
         last = _norm(worker.user.last_name)
         full = _norm(worker.user.get_full_name())
@@ -221,11 +222,22 @@ def _employee_matchers():
 
 def _find_worker(row: dict, matchers):
     text = _norm(' '.join(str(value or '') for key, value in row.items() if not key.startswith('_')))
+    # Match whole normalized aliases, never arbitrary substrings of IBANs or
+    # reference numbers. Ambiguous names require manual reconciliation.
+    haystack = f' {text} '
+    candidates = []
     for worker, aliases in matchers:
-        for alias in aliases:
-            if len(alias) >= 4 and alias in text:
-                return worker
-    return None
+        hits = [
+            alias for alias in aliases
+            if len(alias) >= 4 and not alias.isdigit() and f' {alias} ' in haystack
+        ]
+        if hits:
+            candidates.append((max(map(len, hits)), worker))
+    if not candidates:
+        return None
+    max_length = max(length for length, _ in candidates)
+    winners = [worker for length, worker in candidates if length == max_length]
+    return winners[0] if len(winners) == 1 else None
 
 
 @api_view(['POST'])
