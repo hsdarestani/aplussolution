@@ -46,7 +46,7 @@ def test_calendar_subscription_forces_https_for_public_host(auth_worker):
     assert response.status_code == 200
     payload = response.data
     assert payload['feed_url'].startswith('https://app.aplus-solution.de/api/calendar/feed/')
-    assert payload['webcal_url'].startswith('webcal://app.aplus-solution.de/api/calendar/feed/')
+    assert payload['webcal_url'].startswith('webcals://app.aplus-solution.de/api/calendar/feed/')
     assert 'cid=https%3A%2F%2Fapp.aplus-solution.de%2Fapi%2Fcalendar%2Ffeed%2F' in payload['google_url']
 
 
