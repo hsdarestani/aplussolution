@@ -66,6 +66,7 @@ type PayrollRow = {
 };
 
 type Draft = { paid_total_hours: string; manual_adjustment: string };
+type EmployeeOption = { worker_id: string; employee_name: string };
 
 const number = (value: unknown) => {
   const parsed = Number(String(value ?? '0').replace(',', '.'));
@@ -95,7 +96,8 @@ export default function PayrollWorkspaceEnhancer() {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [details, setDetails] = useState<Record<string, PayrollRow>>({});
   const [month, setMonth] = useState('');
-  const [employeeQuery, setEmployeeQuery] = useState('');
+  const [selectedWorkerId, setSelectedWorkerId] = useState('');
+  const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
   const [expandedId, setExpandedId] = useState('');
   const [busyId, setBusyId] = useState('');
   const [loading, setLoading] = useState(false);
@@ -117,9 +119,22 @@ export default function PayrollWorkspaceEnhancer() {
     setLoading(true);
     setMessage('');
     try {
-      const response: any = await api('working-time/records/');
+      const [response, settingsResponse]: any[] = await Promise.all([
+        api('working-time/records/'),
+        api('working-time/settings/'),
+      ]);
       const nextRows = (response?.results || response || []) as PayrollRow[];
+      const configuredEmployees = Array.isArray(settingsResponse?.employees)
+        ? settingsResponse.employees
+            .map((item: any) => ({ worker_id: String(item.worker_id || ''), employee_name: String(item.employee_name || '') }))
+            .filter((item: EmployeeOption) => item.worker_id && item.employee_name)
+        : [];
+      const rowEmployees = nextRows.map(item => ({ worker_id: item.worker_id, employee_name: item.employee_name }));
+      const uniqueEmployees = Array.from(
+        new Map([...configuredEmployees, ...rowEmployees].map(item => [item.worker_id, item])).values(),
+      ).sort((a, b) => a.employee_name.localeCompare(b.employee_name, 'de'));
       setRows(nextRows);
+      setEmployeeOptions(uniqueEmployees);
       setDrafts(Object.fromEntries(nextRows.map(row => [row.id, { paid_total_hours: row.paid_total_hours ?? row.soll_hours, manual_adjustment: row.manual_adjustment }])));
       const newestMonth = Array.from(new Set(nextRows.map(row => row.year_month))).sort().reverse()[0];
       setMonth(current => current || newestMonth || 'all');
@@ -135,13 +150,10 @@ export default function PayrollWorkspaceEnhancer() {
   }, [target]);
 
   const months = useMemo(() => Array.from(new Set(rows.map(row => row.year_month))).sort().reverse(), [rows]);
-  const visibleRows = useMemo(() => {
-    const query = employeeQuery.trim().toLocaleLowerCase('de-DE');
-    return rows.filter(row =>
-      (month === 'all' || !month || row.year_month === month)
-      && (!query || row.employee_name.toLocaleLowerCase('de-DE').includes(query))
-    );
-  }, [rows, month, employeeQuery]);
+  const visibleRows = useMemo(() => rows.filter(row =>
+    (month === 'all' || !month || row.year_month === month)
+    && (!selectedWorkerId || row.worker_id === selectedWorkerId)
+  ), [rows, month, selectedWorkerId]);
 
   const summaryRows = useMemo(() => {
     if (month && month !== 'all') return rows.filter(row => row.year_month === month);
@@ -271,7 +283,10 @@ export default function PayrollWorkspaceEnhancer() {
             </select>
           </label>
           <label className="payroll-employee-filter">Mitarbeiter
-            <input aria-label="Mitarbeiter suchen" type="search" placeholder="Name suchen" value={employeeQuery} onChange={event => { setEmployeeQuery(event.target.value); setExpandedId(''); }} />
+            <select aria-label="Mitarbeiter auswählen" value={selectedWorkerId} onChange={event => { setSelectedWorkerId(event.target.value); setExpandedId(''); }}>
+              <option value="">Alle Mitarbeiter</option>
+              {employeeOptions.map(item => <option key={item.worker_id} value={item.worker_id}>{item.employee_name}</option>)}
+            </select>
           </label>
           <button type="button" onClick={() => void loadRows()} disabled={loading}>{loading ? 'Lädt' : 'Aktualisieren'}</button>
         </div>
