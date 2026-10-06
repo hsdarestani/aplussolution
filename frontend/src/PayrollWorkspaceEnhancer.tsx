@@ -600,7 +600,12 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
               <div><span>{row.balance_basis === 'soll_salary' ? 'Sollbasis' : 'Bezahlt'}</span><b>{decimal(row.balance_reference_hours ?? row.paid_total_hours ?? row.soll_hours)} Std.</b></div>
               <div><span>Monatssaldo</span><b className={number(row.monthly_balance_hours) < 0 ? 'negative' : 'positive'}>{decimal(row.monthly_balance_hours)} Std.</b></div>
               <div><span>Saldo gesamt</span><b className={number(row.saldo_cumulative) < 0 ? 'negative' : 'positive'}>{decimal(row.saldo_cumulative)} Std.</b></div>
-              <div><span>Stundensatz</span><b>{money(row.hourly_rate)}</b></div>
+              <div>
+                <span>{row.balance_basis === 'soll_salary' ? 'Gehalt' : 'Stundensatz'}</span>
+                <b>{row.balance_basis === 'soll_salary'
+                  ? money(statement?.lexware_monthly_salary ?? row.gross_amount)
+                  : money(row.hourly_rate)}</b>
+              </div>
               <div><span>Brutto</span><b>{money(row.gross_with_surcharges ?? row.gross_amount)}</b></div>
               <div><span>Nacht</span><b>{decimal(row.night_hours)} Std.</b></div>
               <div><span>Samstag</span><b>{decimal(row.saturday_hours)} Std.</b></div>
