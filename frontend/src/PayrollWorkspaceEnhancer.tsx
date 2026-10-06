@@ -142,6 +142,8 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   const [lexwarePeriod, setLexwarePeriod] = useState(currentMonth());
   const [lexwareFiles, setLexwareFiles] = useState<File[]>([]);
   const [lexwareBusy, setLexwareBusy] = useState(false);
+  const [masterDataFile, setMasterDataFile] = useState<File | null>(null);
+  const [masterDataBusy, setMasterDataBusy] = useState(false);
   const [historyBusy, setHistoryBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
@@ -467,11 +469,38 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
           <button type="button" onClick={() => void rebuildHistory()} disabled={historyBusy}>{historyBusy ? 'Berechnet' : 'Neu berechnen'}</button>
         </div>
         <div className="payroll-tool-card payroll-lexware-card">
+          <span className="payroll-tool-index">S</span>
+          <div><b>Lexware Stammdaten</b><small>Beschäftigungsart, Eintritt, Wochenstunden, Lohn/Gehalt, Bank, Steuer und Versicherung sicher in der Personalakte speichern.</small></div>
+          <div className="payroll-lexware-fields">
+            <input aria-label="Lexware Stammdaten Datei" type="file" accept=".json,application/json" onChange={event => setMasterDataFile(event.target.files?.[0] || null)} />
+            <button type="button" onClick={() => void importMasterData()} disabled={masterDataBusy || !masterDataFile}>{masterDataBusy ? 'Speichert' : 'Stammdaten übernehmen'}</button>
+          </div>
+        </div>
+        <div className="payroll-tool-card payroll-lexware-card">
           <span className="payroll-tool-index">L</span>
           <div><b>Lexware übernehmen</b><small>Lohnabrechnungen PDF, Zahlungsliste PDF oder CSV/ZIP gemeinsam importieren.</small></div>
           <div className="payroll-lexware-fields">
             <input aria-label="Lexware Abrechnungsmonat" type="month" value={lexwarePeriod} onChange={event => setLexwarePeriod(event.target.value)} />
-            <input aria-label="Lexware Dateien" type="file" multiple accept=".pdf,.csv,.zip,application/pdf,text/csv,application/zip" onChange={event => setLexwareFiles(Array.from(event.target.files || []))} />
+            <input
+              aria-label="Lexware Dateien"
+              type="file"
+              multiple
+              accept=".pdf,.csv,.zip,application/pdf,text/csv,application/zip"
+              onChange={event => {
+                const files = Array.from(event.target.files || []);
+                setLexwareFiles(files);
+                const periods = Array.from(new Set(files
+                  .map(file => file.name.match(/(20[0-9]{2})[-_](0[1-9]|1[0-2])/))
+                  .filter(Boolean)
+                  .map(match => `${match?.[1]}-${match?.[2]}`)));
+                if (periods.length === 1 && periods[0]) {
+                  setLexwarePeriod(periods[0]);
+                  setMessage(`Abrechnungsmonat automatisch erkannt: ${monthLabel(periods[0])}.`);
+                } else if (periods.length > 1) {
+                  setMessage('Die ausgewählten Lexware Dateien gehören zu unterschiedlichen Abrechnungsmonaten.');
+                }
+              }}
+            />
             <button type="button" onClick={() => void importLexware()} disabled={lexwareBusy || !lexwareFiles.length}>{lexwareBusy ? 'Importiert' : `Übernehmen${lexwareFiles.length ? ` (${lexwareFiles.length})` : ''}`}</button>
           </div>
         </div>
@@ -602,3 +631,27 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   if (!target) return null;
   return createPortal(workspace, target);
 }
+  async function importMasterData() {
+    if (!masterDataFile) {
+      setMessage('Bitte Lexware Stammdaten JSON auswählen.');
+      return;
+    }
+    setMasterDataBusy(true);
+    setMessage('');
+    try {
+      const form = new FormData();
+      form.append('file', masterDataFile);
+      const result: any = await api('workers/master-data/import/', { method: 'POST', body: form });
+      await loadRows();
+      const imported = result?.employees?.length || 0;
+      const unmatched = result?.unmatched?.length || 0;
+      setMessage(`Lexware Stammdaten gespeichert: ${imported} Mitarbeiter. ${unmatched} nicht zugeordnet.`);
+      setMasterDataFile(null);
+    } catch (error: any) {
+      setMessage(error?.message || 'Lexware Stammdaten konnten nicht importiert werden.');
+    } finally {
+      setMasterDataBusy(false);
+    }
+  }
+
+
