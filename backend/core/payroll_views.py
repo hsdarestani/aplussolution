@@ -16,11 +16,12 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import PayrollStatement, User, WorkerProfile, WorkingTimeSetting
+from .models import PayrollStatement, User, WorkerProfile, WorkingTimeAccountRecord, WorkingTimeSetting
 from .permissions import IsAdminOrManager
 from .serializers import PayrollStatementSerializer
 from .services import audit
-from .working_time import dec, settings_rows
+from .working_time import dec, settings_rows, update_record
+from .lexware_pdf import parse_lexware_pdf
 
 
 class PayrollViewSet(viewsets.ModelViewSet):
