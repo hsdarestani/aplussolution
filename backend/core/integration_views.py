@@ -1,4 +1,5 @@
 import hashlib
+from difflib import SequenceMatcher
 import json
 import re
 import unicodedata
@@ -69,6 +70,8 @@ def import_lexware_employee_master_data(request):
     workers = list(WorkerProfile.objects.select_related('user').all())
     by_name = {}
     by_number = {}
+    by_email = {}
+    worker_name_keys = []
     for worker in workers:
         names = {
             worker.user.get_full_name(),
@@ -79,8 +82,11 @@ def import_lexware_employee_master_data(request):
             key = _lexware_name(name)
             if key:
                 by_name.setdefault(key, worker)
+                worker_name_keys.append((key, worker))
         if worker.employee_number:
             by_number[str(worker.employee_number).strip().lower()] = worker
+        if worker.user.email:
+            by_email.setdefault(worker.user.email.strip().lower(), worker)
 
     imported = []
     unmatched = []
@@ -91,15 +97,41 @@ def import_lexware_employee_master_data(request):
             continue
         worker = None
         employee_number = str(item.get('employee_number') or '').strip().lower()
+        data = dict(item.get('data') or {})
         if employee_number:
             worker = by_number.get(employee_number)
         if not worker:
             worker = by_name.get(_lexware_name(item.get('name')))
         if not worker:
+            for candidate_email in (
+                item.get('email'),
+                data.get('email'),
+                data.get('self_service_email'),
+            ):
+                email_key = str(candidate_email or '').strip().lower()
+                if email_key and email_key in by_email:
+                    worker = by_email[email_key]
+                    break
+        if not worker:
+            wanted = _lexware_name(item.get('name'))
+            if wanted:
+                scored = []
+                seen_worker_ids = set()
+                for candidate_key, candidate_worker in worker_name_keys:
+                    if candidate_worker.id in seen_worker_ids:
+                        continue
+                    score = SequenceMatcher(None, wanted, candidate_key).ratio()
+                    scored.append((score, candidate_worker))
+                    seen_worker_ids.add(candidate_worker.id)
+                scored.sort(key=lambda row: row[0], reverse=True)
+                if scored:
+                    best_score, best_worker = scored[0]
+                    second_score = scored[1][0] if len(scored) > 1 else 0
+                    if best_score >= 0.90 and best_score - second_score >= 0.05:
+                        worker = best_worker
+        if not worker:
             unmatched.append(str(item.get('name') or item.get('employee_number') or 'Unbekannt'))
             continue
-
-        data = dict(item.get('data') or {})
 
         # Reuse payroll evidence that was already imported before the master
         # data upload. This lets one final Stammdaten import also pick up
