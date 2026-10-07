@@ -240,6 +240,15 @@ def _find_worker(row: dict, matchers):
         if len(unique) == 1:
             return next(iter(unique.values()))
 
+        first_token = canonical_name.split()[0] if canonical_name.split() else ''
+        if first_token:
+            first_name_candidates = {}
+            for worker, aliases in matchers:
+                if any(first_token in alias.split() for alias in aliases if alias):
+                    first_name_candidates[worker.id] = worker
+            if len(first_name_candidates) == 1:
+                return next(iter(first_name_candidates.values()))
+
     # Match whole normalized aliases, never arbitrary substrings of IBANs or
     # reference numbers. Ambiguous names require manual reconciliation.
     haystack = f' {text} '
