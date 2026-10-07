@@ -22,6 +22,7 @@ from .serializers import PayrollStatementSerializer
 from .services import audit
 from .working_time import dec, settings_rows, update_record
 from .lexware_pdf import parse_lexware_pdf
+from .lexware_aliases import aliases_for_target
 from .wiw_sync import calculate_completeness
 
 
@@ -218,6 +219,9 @@ def _employee_matchers():
         if first and last:
             aliases.add(f'{first} {last}')
             aliases.add(f'{last} {first}')
+        canonical_keys = {alias for alias in aliases if alias}
+        for canonical_key in canonical_keys:
+            aliases.update(aliases_for_target(canonical_key))
         matchers.append((worker, sorted(aliases, key=len, reverse=True)))
     return matchers
 
