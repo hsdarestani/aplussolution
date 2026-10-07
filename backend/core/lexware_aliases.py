@@ -16,10 +16,12 @@ LEXWARE_EMPLOYEE_ALIAS_TARGETS = {
 
 def aliases_for_target(target_normalized: str) -> set[str]:
     target = str(target_normalized or "").strip()
+    target_tokens = set(target.split())
     return {
         alias
         for alias, canonical in LEXWARE_EMPLOYEE_ALIAS_TARGETS.items()
         if canonical == target
+        or (canonical and set(canonical.split()).issubset(target_tokens))
     }
 
 
