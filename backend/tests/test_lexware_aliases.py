@@ -82,3 +82,93 @@ def test_confirmed_lexware_aliases_match_payroll_evidence():
         matched = _find_worker({"employee_name": lexware_name}, matchers)
         assert matched is not None
         assert matched.id == worker.id
+
+
+@pytest.mark.django_db
+def test_lexware_sharp_s_name_matches_ascii_app_name(auth_admin):
+    user = User.objects.create_user(
+        "marie-krass@example.com",
+        "StrongPass123!",
+        first_name="Marie",
+        last_name="Krass",
+        role=User.Role.WORKER,
+    )
+    worker = WorkerProfile.objects.create(
+        user=user,
+        employee_number="MARIE-KRASS",
+        active=True,
+    )
+    upload = SimpleUploadedFile(
+        "lexware-stammdaten.json",
+        json.dumps({
+            "employees": [{
+                "name": "Marie Kraß",
+                "data": {
+                    "compensation_type": "hourly",
+                    "hourly_rate": "16.00",
+                    "alias_test_marker": "sharp-s-matched",
+                },
+            }],
+        }).encode("utf-8"),
+        content_type="application/json",
+    )
+
+    response = auth_admin.post(
+        "/api/workers/master-data/import/",
+        {"file": upload},
+        format="multipart",
+    )
+
+    assert response.status_code == 200
+    assert response.data["unmatched"] == []
+    assert response.data["employees"][0]["worker_id"] == str(worker.id)
+
+    matchers = _employee_matchers()
+    matched = _find_worker({"employee_name": "Marie Kraß"}, matchers)
+    assert matched is not None
+    assert matched.id == worker.id
+
+
+@pytest.mark.django_db
+def test_ashkan_confirmed_alias_matches_worker_with_additional_name_tokens(auth_admin):
+    user = User.objects.create_user(
+        "ashkan-asadian@example.com",
+        "StrongPass123!",
+        first_name="Ashkan",
+        last_name="Asadian Example",
+        role=User.Role.WORKER,
+    )
+    worker = WorkerProfile.objects.create(
+        user=user,
+        employee_number="ASHKAN-ASADIAN",
+        active=True,
+    )
+    upload = SimpleUploadedFile(
+        "lexware-stammdaten.json",
+        json.dumps({
+            "employees": [{
+                "name": "Ashkan Asadian Ghaferokhi",
+                "data": {
+                    "compensation_type": "salary",
+                    "monthly_salary": "3000.00",
+                    "alias_test_marker": "ashkan-matched",
+                },
+            }],
+        }).encode("utf-8"),
+        content_type="application/json",
+    )
+
+    response = auth_admin.post(
+        "/api/workers/master-data/import/",
+        {"file": upload},
+        format="multipart",
+    )
+
+    assert response.status_code == 200
+    assert response.data["unmatched"] == []
+    assert response.data["employees"][0]["worker_id"] == str(worker.id)
+
+    matchers = _employee_matchers()
+    matched = _find_worker({"employee_name": "Ashkan Asadian Ghaferokhi"}, matchers)
+    assert matched is not None
+    assert matched.id == worker.id
