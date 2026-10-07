@@ -21,23 +21,30 @@
         const dayShifts = map[day] || [];
         return <section className="wiw-day-section wiw-day-visual" id={preview ? undefined : `wiw-employee-day-${day}`} key={day}>
           <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayShifts.length}</em></header>
-          {dayShifts.map((shift, index) => {
-            const assigned = firstAssignedWorker(shift);
-            const workerName = assigned?.name ? shortPersonName(assigned.name) : assignedNames(shift);
-            const fullWorkerName = assigned?.name || assignedNames(shift) || worker.name || worker.email || 'Mitarbeiter';
-            const content = <>
-              <div className="wiw-card-line primary">
-                <span className="wiw-card-person"><WorkerAvatar worker={assigned} /><b>{workerName || worker.name || worker.email || 'Mitarbeiter'}</b></span>
-                <span>{time(shift.starts_at)}–{time(shift.ends_at)}</span>
-              </div>
-              <div className="wiw-card-line secondary"><span>{positionShortLabel(shift.position_name)}</span><small>{shift.location_name || 'Einsatzort'}</small></div>
-            </>;
-            return <React.Fragment key={String(shift.id)}>
-              {index > 0 && clientKey(dayShifts[index - 1]) !== clientKey(shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}
-              {preview
-                ? <div className={`wiw-shift-card is-filled${!isOwnShift(shift) ? ' peer-shift' : ''}`} style={shiftCardStyle(shift)}>{content}</div>
-                : <button type="button" aria-label={`${fullWorkerName} ${shift.position_name || 'Einsatz'} ${shift.location_name || 'Einsatzort'}`} className={`wiw-shift-card is-filled${!isOwnShift(shift) ? ' peer-shift' : ''}`} style={shiftCardStyle(shift)} onClick={() => setSelected(shift)}>{content}</button>}
-            </React.Fragment>;
+          {dayShifts.flatMap((shift, shiftIndex) => {
+            const assigned = assignedWorkersForDisplay(shift);
+            const workersToRender = assigned.length ? assigned : [undefined];
+            return workersToRender.map((assignedWorker: any, workerIndex: number) => {
+              const workerName = assignedWorker?.name ? shortPersonName(assignedWorker.name) : assignedNames(shift);
+              const fullWorkerName = assignedWorker?.name || assignedNames(shift) || worker.name || worker.email || 'Mitarbeiter';
+              const peer = assignedWorker ? !assignedWorker.is_me : !isOwnShift(shift);
+              const content = <>
+                <div className="wiw-card-line primary">
+                  <span className="wiw-card-person"><WorkerAvatar worker={assignedWorker} /><b>{workerName || worker.name || worker.email || 'Mitarbeiter'}</b></span>
+                  <span>{time(shift.starts_at)}–{time(shift.ends_at)}</span>
+                </div>
+                <div className="wiw-card-line secondary"><span>{positionShortLabel(shift.position_name)}</span><small>{shift.location_name || 'Einsatzort'}</small></div>
+              </>;
+              const showDivider = workerIndex === 0
+                && shiftIndex > 0
+                && clientKey(dayShifts[shiftIndex - 1]) !== clientKey(shift);
+              return <React.Fragment key={`${String(shift.id)}:${assignedWorker?.slot_id || workerIndex}`}>
+                {showDivider ? <div className="wiw-client-divider" aria-hidden="true" /> : null}
+                {preview
+                  ? <div className={`wiw-shift-card is-filled${peer ? ' peer-shift' : ''}`} style={shiftCardStyle(shift)}>{content}</div>
+                  : <button type="button" aria-label={`${fullWorkerName} ${shift.position_name || 'Einsatz'} ${shift.location_name || 'Einsatzort'}`} className={`wiw-shift-card is-filled${peer ? ' peer-shift' : ''}`} style={shiftCardStyle(shift)} onClick={() => setSelected(assignedWorker ? { ...shift, _selected_worker: assignedWorker } : shift)}>{content}</button>}
+              </React.Fragment>;
+            });
           })}
           {!dayShifts.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
         </section>;
