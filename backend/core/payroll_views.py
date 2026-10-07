@@ -93,7 +93,7 @@ def worktime_settings(request):
 
 
 def _norm(value) -> str:
-    text = unicodedata.normalize('NFKD', str(value or ''))
+    text = unicodedata.normalize('NFKD', str(value or '').replace('ß', 'ss').replace('ẞ', 'SS'))
     text = ''.join(ch for ch in text if not unicodedata.combining(ch))
     return re.sub(r'[^a-z0-9]+', ' ', text.lower()).strip()
 
