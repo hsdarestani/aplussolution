@@ -84,7 +84,7 @@ function assignedNames(shift: any) {
 function isOwnShift(shift: any) {
   return Boolean((shift?.assigned_workers || []).some((assigned: any) => assigned?.is_me));
 }
-function assignedWorkersForDisplay(shift: any) {
+// Service schedules can contain multiple claimed slots on one parent Shift; render every worker card.\nfunction assignedWorkersForDisplay(shift: any) {
   const assigned = Array.isArray(shift?.assigned_workers) ? shift.assigned_workers : [];
   return assigned.map((worker: any) => ({
     ...worker,
