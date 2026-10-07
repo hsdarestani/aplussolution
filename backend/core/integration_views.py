@@ -245,6 +245,35 @@ def import_lexware_employee_master_data(request):
                             by_name.setdefault(candidate_key, worker)
                             worker_name_keys.append((candidate_key, worker))
 
+        # Last-resort matching for an explicitly confirmed alias: if the
+        # canonical first name occurs in exactly one existing payroll worker,
+        # use that worker. This remains intentionally strict and is never used
+        # for ordinary fuzzy/unconfirmed names.
+        if not worker:
+            source_name = _lexware_name(item.get('name'))
+            canonical_name = canonical_target(source_name)
+            if canonical_name and canonical_name != source_name:
+                first_token = canonical_name.split()[0] if canonical_name.split() else ''
+                if first_token:
+                    first_name_candidates = {}
+                    for candidate_worker in workers:
+                        candidate_master = master_by_worker.get(str(candidate_worker.id), {})
+                        candidate_wiw = candidate_worker.wiw_payload if isinstance(candidate_worker.wiw_payload, dict) else {}
+                        candidate_identities = {
+                            _lexware_name(candidate_worker.user.get_full_name()),
+                            _lexware_name(candidate_worker.user.first_name),
+                            _lexware_name(candidate_worker.user.last_name),
+                            _lexware_name(str(candidate_worker.user.email or '').split('@', 1)[0]),
+                            _lexware_name(candidate_master.get('name') or ''),
+                            _lexware_name(candidate_master.get('first_name') or ''),
+                            _lexware_name(candidate_wiw.get('name') or candidate_wiw.get('full_name') or ''),
+                            _lexware_name(candidate_wiw.get('first_name') or candidate_wiw.get('firstname') or ''),
+                        }
+                        if any(first_token in identity.split() for identity in candidate_identities if identity):
+                            first_name_candidates[str(candidate_worker.id)] = candidate_worker
+                    if len(first_name_candidates) == 1:
+                        worker = next(iter(first_name_candidates.values()))
+
         if not worker:
             unmatched.append(str(item.get('name') or item.get('employee_number') or 'Unbekannt'))
             continue
