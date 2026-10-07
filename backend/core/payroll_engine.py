@@ -141,7 +141,7 @@ def _surcharge_amount(minutes: int, hourly_rate: Decimal, percent: Decimal) -> D
     ).quantize(TWO)
 
 
-def sync_working_time(start: date, end: date, *, include_inactive_workers: bool = False) -> WorkingTimeSyncLog:
+def sync_working_time(start: date, end: date, *, include_inactive_workers: bool = False, refresh_contract_terms: bool = False) -> WorkingTimeSyncLog:
     """Rebuild payroll records from actual A+ attendance.
 
     Approved native A+ entries and imported historical WIW time rows are
@@ -288,9 +288,13 @@ def sync_working_time(start: date, end: date, *, include_inactive_workers: bool 
                 closed_month = month < current_month
 
                 month_limit = (
-                    dec(existing.soll_hours)
-                    if existing and closed_month
-                    else monthly_limit
+                    monthly_limit
+                    if refresh_contract_terms
+                    else (
+                        dec(existing.soll_hours)
+                        if existing and closed_month
+                        else monthly_limit
+                    )
                 )
                 month_rate = (
                     dec(existing.hourly_rate)
@@ -298,9 +302,13 @@ def sync_working_time(start: date, end: date, *, include_inactive_workers: bool 
                     else effective_rate
                 )
                 employment_snapshot = (
-                    existing.employment_type_snapshot
-                    if existing and existing.employment_type_snapshot
-                    else worker.employment_type
+                    worker.employment_type
+                    if refresh_contract_terms
+                    else (
+                        existing.employment_type_snapshot
+                        if existing and existing.employment_type_snapshot
+                        else worker.employment_type
+                    )
                 )
 
                 ist = hours_by_key.get((str(worker.id), month), Decimal('0')).quantize(TWO)
@@ -336,9 +344,14 @@ def sync_working_time(start: date, end: date, *, include_inactive_workers: bool 
                 }
                 for raw in raw_entries:
                     previous = previous_raw.get(str(raw.get('id'))) or {}
-                    row_night_percent = dec(previous.get('night_surcharge_percent', night_percent))
-                    row_saturday_percent = dec(previous.get('saturday_surcharge_percent', saturday_percent))
-                    row_sunday_percent = dec(previous.get('sunday_surcharge_percent', sunday_percent))
+                    if refresh_contract_terms:
+                        row_night_percent = night_percent
+                        row_saturday_percent = saturday_percent
+                        row_sunday_percent = sunday_percent
+                    else:
+                        row_night_percent = dec(previous.get('night_surcharge_percent', night_percent))
+                        row_saturday_percent = dec(previous.get('saturday_surcharge_percent', saturday_percent))
+                        row_sunday_percent = dec(previous.get('sunday_surcharge_percent', sunday_percent))
                     raw['night_surcharge_percent'] = str(row_night_percent)
                     raw['saturday_surcharge_percent'] = str(row_saturday_percent)
                     raw['sunday_surcharge_percent'] = str(row_sunday_percent)
@@ -390,6 +403,7 @@ def sync_working_time(start: date, end: date, *, include_inactive_workers: bool 
                 'approved_entries': len(approved_entries),
                 'approved_or_historical_entries': len(approved_entries),
                 'excluded_unapproved_entries': excluded_unapproved,
+                'refresh_contract_terms': refresh_contract_terms,
                 'include_inactive_workers': include_inactive_workers,
             },
         )
