@@ -24,6 +24,55 @@ def _service_worker_ids() -> list:
     return [worker.id for worker in workers if _is_service_worker(worker)]
 
 
+def _expand_service_shift_cards(rows, visible_worker_ids, requester_worker_id):
+    """Return one employee card per claimed visible worker.
+
+    Older native app builds render only the first assigned_workers entry of a
+    Shift. A multi-person Service shift therefore hid every later worker even
+    though the backend returned them. Keep the wire contract backward compatible
+    by expanding only the employee Service endpoint into one card-like row per
+    claimed visible worker.
+
+    The requester's own row keeps the real Shift id so existing actions such as
+    time reporting and release remain fully functional. Read-only peer rows use
+    their stable ShiftSlot id as the display id and carry source_shift_id for
+    newer clients that want the parent Shift identity.
+    """
+    visible = {str(value) for value in visible_worker_ids}
+    requester = str(requester_worker_id)
+    expanded = []
+
+    for raw in rows:
+        row = dict(raw)
+        source_shift_id = str(row.get('id') or '')
+        workers = [
+            dict(item)
+            for item in (row.get('assigned_workers') or [])
+            if str(item.get('id') or '') in visible
+        ]
+        if not workers:
+            continue
+
+        slot_cards = {
+            str(card.get('id')): dict(card)
+            for card in (row.get('slot_cards') or [])
+            if card.get('id')
+        }
+        for assigned in workers:
+            clone = dict(row)
+            slot_id = str(assigned.get('slot_id') or '')
+            is_me = str(assigned.get('id') or '') == requester or bool(assigned.get('is_me'))
+            clone['source_shift_id'] = source_shift_id
+            clone['id'] = source_shift_id if is_me else (slot_id or source_shift_id)
+            clone['assigned_workers'] = [assigned]
+            clone['slot_cards'] = [slot_cards[slot_id]] if slot_id in slot_cards else []
+            clone['filled_count'] = 1
+            clone['open_count'] = 0
+            expanded.append(clone)
+
+    return expanded
+
+
 @api_view(['GET'])
 def employee_schedule(request):
     """Worker Dienstplan with Service-peer visibility.
@@ -64,6 +113,8 @@ def employee_schedule(request):
     )
 
     data = ShiftApiSerializer(qs, many=True, context={'request': request}).data
+    if service_schedule:
+        data = _expand_service_shift_cards(data, visible_worker_ids, worker.id)
     return Response({
         'service_schedule': service_schedule,
         'shifts': data,
