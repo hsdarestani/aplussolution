@@ -329,6 +329,52 @@
   font-size:.72rem;
   font-weight:800;
 }
+.payroll-reconciliation{
+  margin:12px 18px 0;
+  display:grid;
+  grid-template-columns:minmax(180px,.85fr) repeat(3,minmax(150px,1fr));
+  gap:8px;
+}
+.payroll-reconciliation>div{
+  min-width:0;
+  padding:10px 11px;
+  border:1px solid var(--payroll-line);
+  border-radius:11px;
+  background:#fbfcfc;
+}
+.payroll-reconciliation span,.payroll-reconciliation b,.payroll-reconciliation small{display:block}
+.payroll-reconciliation span{
+  font-size:.6rem;
+  color:var(--payroll-muted);
+  font-weight:900;
+  letter-spacing:.05em;
+}
+.payroll-reconciliation b{
+  margin-top:3px;
+  font-size:.76rem;
+  color:var(--payroll-navy);
+}
+.payroll-reconciliation small{
+  margin-top:3px;
+  font-size:.61rem;
+  line-height:1.35;
+  color:#82909a;
+}
+.payroll-reconciliation-match>div,.payroll-reconciliation-item.payroll-reconciliation-match{
+  border-color:#bbdfcb;
+  background:#f4fbf7;
+}
+.payroll-reconciliation-match b{color:#087443}
+.payroll-reconciliation-pruefen>div,.payroll-reconciliation-item.payroll-reconciliation-pruefen{
+  border-color:#f0d9a9;
+  background:#fffaf0;
+}
+.payroll-reconciliation-pruefen b{color:#7a5b24}
+.payroll-reconciliation-abweichung>div,.payroll-reconciliation-item.payroll-reconciliation-abweichung{
+  border-color:#f0b8b3;
+  background:#fff6f5;
+}
+.payroll-reconciliation-abweichung b{color:#b42318}
 .payroll-metrics{
   display:grid;
   grid-template-columns:repeat(6,minmax(0,1fr));
@@ -514,6 +560,7 @@ body[data-ap-admin-web="true"] aside ion-item.ap-nav-subitem.active{
 @media(max-width:1180px){
   .payroll-summary{grid-template-columns:repeat(3,minmax(0,1fr))}
   .payroll-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .payroll-reconciliation{grid-template-columns:repeat(2,minmax(0,1fr))}
   .payroll-settings-grid{grid-template-columns:repeat(3,minmax(120px,1fr))}
   .payroll-tool-row{grid-template-columns:1fr}
 }
@@ -534,6 +581,7 @@ body[data-ap-admin-web="true"] aside ion-item.ap-nav-subitem.active{
   .payroll-record-card>header{grid-template-columns:1fr 1fr}
   .payroll-record-gross{grid-column:2;grid-row:1/3}
   .payroll-metrics{grid-template-columns:repeat(3,minmax(0,1fr));padding:0 12px}
+  .payroll-reconciliation{margin:12px 12px 0}
   .payroll-edit-row{grid-template-columns:1fr 1fr}
   .payroll-edit-row button{grid-column:1/-1}
   .payroll-empty-state{grid-template-columns:auto 1fr}
@@ -554,6 +602,7 @@ body[data-ap-admin-web="true"] aside ion-item.ap-nav-subitem.active{
   .payroll-record-card>header{grid-template-columns:1fr;padding:14px}
   .payroll-record-gross{grid-column:auto;grid-row:auto;text-align:left}
   .payroll-metrics{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 10px}
+  .payroll-reconciliation{grid-template-columns:1fr;margin:10px 10px 0}
   .payroll-record-actions{padding:12px 14px;flex-direction:column}
   .payroll-record-actions button{width:100%}
   .payroll-card-details{padding:14px}
