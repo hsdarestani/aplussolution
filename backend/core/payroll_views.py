@@ -22,7 +22,7 @@ from .serializers import PayrollStatementSerializer
 from .services import audit
 from .working_time import dec, settings_rows, update_record
 from .lexware_pdf import parse_lexware_pdf
-from .lexware_aliases import aliases_for_target
+from .lexware_aliases import aliases_for_target, canonical_target
 from .wiw_sync import calculate_completeness
 
 
@@ -228,6 +228,18 @@ def _employee_matchers():
 
 def _find_worker(row: dict, matchers):
     text = _norm(' '.join(str(value or '') for key, value in row.items() if not key.startswith('_')))
+    employee_name = _norm(row.get('employee_name') or '')
+    canonical_name = canonical_target(employee_name) if employee_name else ''
+    if canonical_name and canonical_name != employee_name:
+        exact_candidates = []
+        canonical_tokens = set(canonical_name.split())
+        for worker, aliases in matchers:
+            if any(set(alias.split()).issuperset(canonical_tokens) for alias in aliases if alias):
+                exact_candidates.append(worker)
+        unique = {worker.id: worker for worker in exact_candidates}
+        if len(unique) == 1:
+            return next(iter(unique.values()))
+
     # Match whole normalized aliases, never arbitrary substrings of IBANs or
     # reference numbers. Ambiguous names require manual reconciliation.
     haystack = f' {text} '
