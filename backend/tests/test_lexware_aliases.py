@@ -211,3 +211,42 @@ def test_confirmed_alias_can_attach_existing_non_worker_user(auth_admin):
     worker = WorkerProfile.objects.get(user=user)
     assert worker.employee_number == "LEX-ASHKAN-001"
     assert user.role == User.Role.ADMIN
+
+
+@pytest.mark.django_db
+def test_confirmed_alias_matches_existing_account_from_email_or_wiw_without_employee_number(auth_admin):
+    user = User.objects.create_user(
+        "ashkan.asadian@example.com",
+        "StrongPass123!",
+        first_name="",
+        last_name="",
+        role=User.Role.ADMIN,
+    )
+    user.wiw_payload = {"name": "Ashkan Asadian"}
+    user.save(update_fields=["wiw_payload"])
+
+    upload = SimpleUploadedFile(
+        "lexware-stammdaten.json",
+        json.dumps({
+            "employees": [{
+                "name": "Ashkan Asadian Ghaferokhi",
+                "data": {
+                    "compensation_type": "salary",
+                    "monthly_salary": "3000.00"
+                }
+            }]
+        }).encode("utf-8"),
+        content_type="application/json",
+    )
+
+    response = auth_admin.post(
+        "/api/workers/master-data/import/",
+        {"file": upload},
+        format="multipart",
+    )
+
+    assert response.status_code == 200
+    assert response.data["unmatched"] == []
+    worker = WorkerProfile.objects.get(user=user)
+    assert worker.employee_number.startswith("LEX-")
+    assert user.role == User.Role.ADMIN
