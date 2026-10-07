@@ -137,6 +137,54 @@ def import_lexware_employee_master_data(request):
                     second_score = scored[1][0] if len(scored) > 1 else 0
                     if best_score >= 0.90 and best_score - second_score >= 0.05:
                         worker = best_worker
+
+        # A payroll person can already exist as an A+ login (for example an
+        # administrator) without having a WorkerProfile yet. For explicitly
+        # confirmed Lexware aliases only, attach a payroll WorkerProfile to the
+        # unique matching existing user instead of leaving the person unmatched.
+        if not worker:
+            source_name = _lexware_name(item.get('name'))
+            canonical_name = canonical_target(source_name)
+            if canonical_name and canonical_name != source_name:
+                wanted_tokens = set(canonical_name.split())
+                user_matches = []
+                for candidate_user in User.objects.all():
+                    candidate_names = {
+                        _lexware_name(candidate_user.get_full_name()),
+                        _lexware_name(f'{candidate_user.first_name} {candidate_user.last_name}'),
+                        _lexware_name(f'{candidate_user.last_name} {candidate_user.first_name}'),
+                    }
+                    if any(
+                        wanted_tokens and wanted_tokens.issubset(set(candidate_name.split()))
+                        for candidate_name in candidate_names
+                        if candidate_name
+                    ):
+                        user_matches.append(candidate_user)
+                unique_users = {candidate.id: candidate for candidate in user_matches}
+                if len(unique_users) == 1:
+                    matched_user = next(iter(unique_users.values()))
+                    try:
+                        worker = matched_user.worker_profile
+                    except WorkerProfile.DoesNotExist:
+                        raw_employee_number = str(item.get('employee_number') or '').strip()
+                        if raw_employee_number:
+                            worker = WorkerProfile.objects.create(
+                                user=matched_user,
+                                employee_number=raw_employee_number,
+                                active=True,
+                            )
+                            workers.append(worker)
+                            by_number[raw_employee_number.lower()] = worker
+                            for candidate_name in {
+                                matched_user.get_full_name(),
+                                f'{matched_user.first_name} {matched_user.last_name}',
+                                f'{matched_user.last_name} {matched_user.first_name}',
+                            }:
+                                candidate_key = _lexware_name(candidate_name)
+                                if candidate_key:
+                                    by_name.setdefault(candidate_key, worker)
+                                    worker_name_keys.append((candidate_key, worker))
+
         if not worker:
             unmatched.append(str(item.get('name') or item.get('employee_number') or 'Unbekannt'))
             continue
