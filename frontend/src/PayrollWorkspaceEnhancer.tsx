@@ -210,7 +210,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
       if (standalone && autoBuild && !nextRows.length && !autoBuildAttempted.current) {
         autoBuildAttempted.current = true;
         setMessage('Arbeitszeitdaten werden aus den vorhandenen Ist Zeiten aufgebaut.');
-        const rebuilt: any = await api('working-time/rebuild-all/', { method: 'POST', body: '{}' });
+        const rebuilt: any = await api('working-time/rebuild-all/', { method: 'POST', body: JSON.stringify({ refresh_contract_terms: true }) });
         if (!rebuilt?.records_count) {
           setEmptyReason(rebuilt?.detail || 'Es wurden keine abgeschlossenen oder freigegebenen Ist Zeiten gefunden.');
         }
@@ -446,9 +446,11 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
       const rebuilt: any = await api('working-time/rebuild-all/', { method: 'POST', body: '{}' });
       await loadRows();
       const imported = result?.employees?.length || 0;
-      const unmatched = result?.unmatched?.length || 0;
+      const unmatchedNames = Array.isArray(result?.unmatched) ? result.unmatched : [];
+      const unmatched = unmatchedNames.length;
       const rebuiltCount = rebuilt?.records_count || 0;
-      setMessage(`Lexware Stammdaten gespeichert: ${imported} Mitarbeiter. ${unmatched} nicht zugeordnet. Arbeitszeitkonten automatisch neu berechnet: ${rebuiltCount}.`);
+      const unmatchedText = unmatched ? ` Nicht zugeordnet: ${unmatchedNames.join(', ')}.` : '';
+      setMessage(`Lexware Stammdaten gespeichert: ${imported} Mitarbeiter. ${unmatched} nicht zugeordnet. Arbeitszeitkonten mit Vertragsdaten automatisch neu berechnet: ${rebuiltCount}.${unmatchedText}`);
       setMasterDataFile(null);
     } catch (error: any) {
       setMessage(error?.message || 'Lexware Stammdaten konnten nicht importiert werden.');
