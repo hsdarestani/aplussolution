@@ -14,6 +14,7 @@ from rest_framework.response import Response
 
 from .document_catalog import DOCUMENT_CATALOG, WIW_SUPPORTED_MASTER_FIELDS, WIW_UNSUPPORTED_LEGAL_FIELDS
 from .document_engine import import_template_bundle, seed_document_catalog
+from .lexware_aliases import aliases_for_target, canonical_target
 from .models import EmployeeMasterData, IntegrationSyncRun, PayrollStatement, User, WebhookEvent, WorkerProfile, WorkingTimeSetting
 from .permissions import IsAdminOrManager
 from .serializers import EmployeeMasterDataSerializer, IntegrationSyncRunSerializer
@@ -78,11 +79,17 @@ def import_lexware_employee_master_data(request):
             f'{worker.user.first_name} {worker.user.last_name}',
             f'{worker.user.last_name} {worker.user.first_name}',
         }
+        canonical_keys = set()
         for name in names:
             key = _lexware_name(name)
             if key:
+                canonical_keys.add(key)
                 by_name.setdefault(key, worker)
                 worker_name_keys.append((key, worker))
+        for canonical_key in canonical_keys:
+            for alias in aliases_for_target(canonical_key):
+                by_name.setdefault(alias, worker)
+                worker_name_keys.append((alias, worker))
         if worker.employee_number:
             by_number[str(worker.employee_number).strip().lower()] = worker
         if worker.user.email:
@@ -101,7 +108,8 @@ def import_lexware_employee_master_data(request):
         if employee_number:
             worker = by_number.get(employee_number)
         if not worker:
-            worker = by_name.get(_lexware_name(item.get('name')))
+            wanted_name = _lexware_name(item.get('name'))
+            worker = by_name.get(wanted_name) or by_name.get(canonical_target(wanted_name))
         if not worker:
             for candidate_email in (
                 item.get('email'),
