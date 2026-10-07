@@ -412,6 +412,12 @@ def worktime_settings(request):
         setting, _ = WorkingTimeSetting.objects.get_or_create(worker=worker)
         setting.monthly_limit = max(Decimal('0'), dec(row.get('monthly_limit')))
         setting.hourly_rate = max(Decimal('0'), dec(row.get('hourly_rate')))
+        if 'night_surcharge_percent' in row:
+            setting.night_surcharge_percent = max(Decimal('0'), dec(row.get('night_surcharge_percent')))
+        if 'saturday_surcharge_percent' in row:
+            setting.saturday_surcharge_percent = max(Decimal('0'), dec(row.get('saturday_surcharge_percent')))
+        if 'sunday_surcharge_percent' in row:
+            setting.sunday_surcharge_percent = max(Decimal('0'), dec(row.get('sunday_surcharge_percent')))
         setting.active = bool(row.get('active', True))
         setting.excluded = bool(row.get('excluded', False))
         setting.notes = str(row.get('notes') or '')
