@@ -11,6 +11,7 @@ LEXWARE_EMPLOYEE_ALIAS_TARGETS = {
     "mohammad musa jamali": "musa jamali",
     "aikaterini gentsou": "katerina gentsou",
     "ashkan asadian ghaferokhi": "ashkan asadian",
+    "ashkan asadian ghahferokhi": "ashkan asadian",
     "yohannes kifle": "yohannes kiffle",
 }
 
