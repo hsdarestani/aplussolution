@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api, apiBlob } from './api';
 import { saveSchedulePdf } from './saveSchedulePdf';
 import './shift-plan-attachments.css';
@@ -124,12 +125,14 @@ export function ShiftPlanAttachments({
   useEffect(() => {
     if (!preview) return;
     const previousOverflow = document.body.style.overflow;
+    document.body.classList.add('shift-plan-preview-open');
     document.body.style.overflow = 'hidden';
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') closePreview();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => {
+      document.body.classList.remove('shift-plan-preview-open');
       document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', onKeyDown);
     };
@@ -272,7 +275,7 @@ export function ShiftPlanAttachments({
         {canUpload && !compact && plan.delete_url ? <button type="button" className="shift-plan-delete" disabled={busy} onClick={() => void removePlan(plan)} aria-label="Einsatzplan löschen">Löschen</button> : null}
       </div>)}
     </div> : null}
-    {preview ? <div
+    {preview ? createPortal(<div
       className="shift-plan-preview"
       role="dialog"
       aria-modal="true"
@@ -314,7 +317,7 @@ export function ShiftPlanAttachments({
           <button type="button" className="primary" onClick={() => void shareOrSavePlan(preview.plan)}>Speichern / Teilen</button>
         </div>
       </div>
-    </div> : null}
+    </div>, document.body) : null}
     {message && !compact ? <small className="shift-plan-message">{message}</small> : null}
   </div>;
 }

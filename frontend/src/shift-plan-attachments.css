@@ -94,7 +94,7 @@
 .shift-plan-scope-actions button.primary,.shift-plan-preview-actions button.primary{background:#173f74;color:#fff;border-color:#173f74}
 .shift-plan-scope-actions button:disabled{opacity:.5;cursor:not-allowed}
 
-.shift-plan-preview{position:fixed;inset:0;z-index:10030;background:rgba(10,20,34,.68);display:grid;place-items:center;padding:max(16px,env(safe-area-inset-top)) 12px max(16px,env(safe-area-inset-bottom));overscroll-behavior:contain}
+.shift-plan-preview{position:fixed;inset:0;width:100vw;height:100dvh;z-index:2147483000;background:rgba(10,20,34,.82);display:grid;place-items:center;padding:max(16px,env(safe-area-inset-top)) 12px max(16px,env(safe-area-inset-bottom));overscroll-behavior:contain;isolation:isolate;box-sizing:border-box}
 .shift-plan-preview-card{width:min(920px,100%);height:min(88vh,900px);border-radius:18px;background:#fff;display:grid;grid-template-rows:auto minmax(0,1fr) auto;overflow:hidden;box-shadow:0 22px 70px rgba(0,0,0,.32);isolation:isolate}
 .shift-plan-preview-head{position:relative;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border-bottom:1px solid rgba(20,50,80,.1);background:#fff}
 .shift-plan-preview-head b{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.86rem}
@@ -105,14 +105,14 @@
 .shift-plan-preview-zoom .shift-plan-preview-zoom-value{min-width:54px;font-size:.7rem;letter-spacing:.01em}
 .shift-plan-preview-close{position:relative;z-index:2147483647;border:0;background:#e9eef4;color:#173f74;border-radius:999px;width:44px;height:44px;display:grid;place-items:center;font-size:1.55rem;line-height:1;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 .shift-plan-preview-stage{position:relative;z-index:1;min-width:0;min-height:0;overflow:auto;background:#e9edf2;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-x pan-y pinch-zoom}
-.shift-plan-preview-stage iframe{display:block;min-width:100%;min-height:100%;border:0;background:#e9edf2;transform-origin:0 0}
+.shift-plan-preview-stage iframe{display:block;border:0;background:#e9edf2;transform-origin:0 0;margin:0 auto}
 .shift-plan-preview-actions{position:relative;z-index:20;display:flex;justify-content:flex-end;gap:8px;padding:10px 12px;border-top:1px solid rgba(20,50,80,.1);background:#fff}
 .shift-plan-preview-actions button{min-height:42px;border:1px solid rgba(23,63,116,.14);border-radius:10px;background:#fff;color:#24445f;padding:9px 12px;font:inherit;font-size:.74rem;font-weight:800;cursor:pointer;touch-action:manipulation}
 
 @media(max-width:700px){
   .shift-plan-scope-options{grid-template-columns:1fr}
-  .shift-plan-preview{padding:0}
-  .shift-plan-preview-card{width:100%;height:100%;max-height:none;border-radius:0}
+  .shift-plan-preview{padding:0;background:#fff}
+  .shift-plan-preview-card{width:100vw;height:100dvh;max-height:none;border-radius:0;box-shadow:none}
   .shift-plan-preview-head{padding:max(8px,env(safe-area-inset-top)) 8px 8px}
   .shift-plan-preview-head b{font-size:.74rem}
   .shift-plan-preview-head-actions{gap:6px}
@@ -123,3 +123,9 @@
   .shift-plan-preview-actions{padding:8px 8px max(8px,env(safe-area-inset-bottom));display:grid;grid-template-columns:1fr 1.25fr}
   .shift-plan-preview-actions button{width:100%;min-height:46px}
 }
+
+
+/* Attachment previews are portaled directly to document.body. Keep every app
+   navigation/filter layer below the full-screen viewer while it is open. */
+body.shift-plan-preview-open{overflow:hidden!important;overscroll-behavior:none}
+body.shift-plan-preview-open .shift-plan-preview{z-index:2147483000!important}
