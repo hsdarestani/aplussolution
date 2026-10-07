@@ -1,0 +1,178 @@
+name: Diagnose Yohannes schedule visibility
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-yohannes-schedule.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+
+      - name: Inspect production assignment and visibility
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from datetime import datetime, time, timedelta
+          from zoneinfo import ZoneInfo
+          from django.db.models import Q
+          from django.utils import timezone
+          from core.models import User, WorkerProfile, Shift
+          from core.shift_slots import ShiftSlot
+          from core.shift_rules import normalized_groups
+
+          berlin = ZoneInfo('Europe/Berlin')
+          target_date = datetime(2026, 10, 7, tzinfo=berlin).date()
+          start = datetime.combine(target_date, time.min, tzinfo=berlin)
+          end = start + timedelta(days=1)
+
+          print('=== USERS / WORKERS matching Yohannes or Kiffle ===')
+          users = User.objects.filter(
+              Q(first_name__icontains='Yohannes') |
+              Q(last_name__icontains='Yohannes') |
+              Q(first_name__icontains='Kiffle') |
+              Q(last_name__icontains='Kiffle') |
+              Q(email__icontains='yohannes') |
+              Q(email__icontains='kiffle')
+          ).order_by('id')
+          for u in users:
+              wp = WorkerProfile.objects.filter(user=u).first()
+              print({
+                  'user_id': str(u.id),
+                  'email': u.email,
+                  'name': u.get_full_name(),
+                  'role': u.role,
+                  'user_active': u.is_active,
+                  'user_wiw_id': getattr(u, 'wiw_id', None),
+                  'worker_id': str(wp.id) if wp else None,
+                  'worker_active': wp.active if wp else None,
+                  'worker_wiw_user_id': wp.wiw_user_id if wp else None,
+                  'schedule_groups': wp.schedule_groups if wp else None,
+                  'normalized_groups': normalized_groups(wp.schedule_groups) if wp else None,
+                  'employee_number': wp.employee_number if wp else None,
+              })
+
+          print('\n=== 07.10.2026 shifts around Stadthaus / 17:00 ===')
+          shifts = Shift.objects.filter(
+              starts_at__gte=start.astimezone(ZoneInfo('UTC')),
+              starts_at__lt=end.astimezone(ZoneInfo('UTC')),
+          ).filter(
+              Q(location__name__icontains='Stadthaus') |
+              Q(starts_at__hour__in=[14,15,16,17,18,19])
+          ).select_related('client','location','position','worker').order_by('starts_at','id')
+
+          for s in shifts:
+              local_start = s.starts_at.astimezone(berlin)
+              local_end = s.ends_at.astimezone(berlin)
+              slots = list(ShiftSlot.objects.filter(shift=s).select_related('worker__user').order_by('created_at'))
+              if not ('Stadthaus' in (s.location.name or '') or local_start.hour == 17):
+                  continue
+              print({
+                  'shift_id': str(s.id),
+                  'wiw_shift_id': s.wiw_shift_id,
+                  'time': f'{local_start:%Y-%m-%d %H:%M}-{local_end:%H:%M}',
+                  'location': s.location.name if s.location_id else None,
+                  'position': s.position.name if s.position_id else None,
+                  'status': s.status,
+                  'shift_worker_id': str(s.worker_id) if s.worker_id else None,
+                  'shift_worker_name': s.worker.user.get_full_name() if s.worker_id else None,
+                  'shift_worker_wiw_user_id': s.worker.wiw_user_id if s.worker_id else None,
+                  'slots': [
+                      {
+                          'slot_id': str(slot.id),
+                          'status': slot.status,
+                          'worker_id': str(slot.worker_id) if slot.worker_id else None,
+                          'worker_name': slot.worker.user.get_full_name() if slot.worker_id else None,
+                          'worker_email': slot.worker.user.email if slot.worker_id else None,
+                          'worker_wiw_user_id': slot.worker.wiw_user_id if slot.worker_id else None,
+                          'groups': slot.worker.schedule_groups if slot.worker_id else None,
+                      }
+                      for slot in slots
+                  ],
+              })
+
+          print('\n=== SERVICE WORKERS matching names shown on screenshot ===')
+          names = ['Claire', 'Ksenia', 'Simon', 'Francesco', 'Marie', 'Yohannes']
+          for name in names:
+              matches = WorkerProfile.objects.filter(
+                  Q(user__first_name__icontains=name) |
+                  Q(user__last_name__icontains=name)
+              ).select_related('user').order_by('id')
+              for wp in matches:
+                  print({
+                      'query': name,
+                      'worker_id': str(wp.id),
+                      'name': wp.user.get_full_name(),
+                      'email': wp.user.email,
+                      'active': wp.active,
+                      'user_active': wp.user.is_active,
+                      'wiw_user_id': wp.wiw_user_id,
+                      'groups': wp.schedule_groups,
+                      'normalized_groups': normalized_groups(wp.schedule_groups),
+                  })
+
+          print('\n=== VISIBILITY CHECK FOR EACH YOHANNES WORKER PROFILE ===')
+          yworkers = WorkerProfile.objects.filter(
+              Q(user__first_name__icontains='Yohannes') |
+              Q(user__last_name__icontains='Yohannes') |
+              Q(user__first_name__icontains='Kiffle') |
+              Q(user__last_name__icontains='Kiffle') |
+              Q(user__email__icontains='yohannes') |
+              Q(user__email__icontains='kiffle')
+          ).select_related('user')
+          service_worker_ids = [
+              wp.id for wp in WorkerProfile.objects.filter(active=True, user__is_active=True)
+              if 'service' in set(normalized_groups(wp.schedule_groups))
+          ]
+          for wp in yworkers:
+              visible_worker_ids = [wp.id]
+              service_schedule = 'service' in set(normalized_groups(wp.schedule_groups))
+              if service_schedule:
+                  visible_worker_ids = list(service_worker_ids)
+                  if wp.id not in visible_worker_ids:
+                      visible_worker_ids.append(wp.id)
+              qs = Shift.objects.filter(
+                  slots__worker_id__in=visible_worker_ids,
+                  slots__status=ShiftSlot.Status.CLAIMED,
+                  starts_at__gte=start.astimezone(ZoneInfo('UTC')),
+                  starts_at__lt=end.astimezone(ZoneInfo('UTC')),
+              ).distinct().select_related('location','position').order_by('starts_at')
+              print({
+                  'login_worker_id': str(wp.id),
+                  'login_name': wp.user.get_full_name(),
+                  'login_email': wp.user.email,
+                  'service_schedule': service_schedule,
+                  'visible_worker_ids_count': len(visible_worker_ids),
+                  'visible_shift_ids': [str(x.id) for x in qs],
+                  'visible_labels': [
+                      f"{x.starts_at.astimezone(berlin):%H:%M} {x.location.name if x.location_id else ''}"
+                      for x in qs
+                  ],
+              })
+          PY
+          REMOTE
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
