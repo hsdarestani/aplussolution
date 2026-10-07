@@ -30,7 +30,7 @@ def configured():
 
 
 def _lexware_name(value):
-    normalized = unicodedata.normalize('NFKD', str(value or ''))
+    normalized = unicodedata.normalize('NFKD', str(value or '').replace('ß', 'ss').replace('ẞ', 'SS'))
     normalized = ''.join(ch for ch in normalized if not unicodedata.combining(ch))
     return re.sub(r'[^a-z0-9]+', ' ', normalized.lower()).strip()
 
