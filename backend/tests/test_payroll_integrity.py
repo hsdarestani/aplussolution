@@ -1110,3 +1110,32 @@ def test_payroll_reconciliation_compares_night_weekend_hours(worker_user):
     changed = record_dict(record, statement)
     assert changed['surcharge_reconciliation']['night']['status'] == 'ABWEICHUNG'
     assert changed['reconciliation_status'] == 'ABWEICHUNG'
+
+
+@pytest.mark.django_db
+def test_worktime_settings_persists_surcharge_percentages(auth_admin, worker_user):
+    worker = worker_user.worker_profile
+    response = auth_admin.post(
+        '/api/working-time/settings/',
+        {
+            'employees': [{
+                'worker_id': str(worker.id),
+                'monthly_limit': '80.00',
+                'hourly_rate': '16.00',
+                'night_surcharge_percent': '25.00',
+                'saturday_surcharge_percent': '20.00',
+                'sunday_surcharge_percent': '50.00',
+                'active': True,
+                'excluded': False,
+            }],
+        },
+        format='json',
+    )
+
+    assert response.status_code == 200
+    setting = WorkingTimeSetting.objects.get(worker=worker)
+    assert setting.monthly_limit == Decimal('80.00')
+    assert setting.hourly_rate == Decimal('16.00')
+    assert setting.night_surcharge_percent == Decimal('25.00')
+    assert setting.saturday_surcharge_percent == Decimal('20.00')
+    assert setting.sunday_surcharge_percent == Decimal('50.00')
