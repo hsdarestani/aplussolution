@@ -461,6 +461,7 @@ def record_dict(
     gross_with_surcharges = (row.gross_amount + surcharge_amount).quantize(TWO)
     employment_type = row.employment_type_snapshot or row.worker.employment_type
     minijob_limit = _minijob_limit(row.year_month) if employment_type == WorkerProfile.EmploymentType.MINI else None
+    payroll_statement = statement_dict(statement)
     result = {
         'id': str(row.id),
         'worker_id': str(row.worker_id),
@@ -495,12 +496,52 @@ def record_dict(
         'entry_count': len(row.raw_entries or []),
         'source': row.source,
         'synced_at': row.synced_at.isoformat() if row.synced_at else None,
-        'payroll_statement': statement_dict(statement),
+        'payroll_statement': payroll_statement,
         'minijob_limit': str(minijob_limit) if minijob_limit is not None else None,
         # Informational only. Use base gross here because treatment of supplements
         # in the Minijob earnings test depends on the payroll/tax classification.
         'minijob_warning': bool(minijob_limit is not None and row.gross_amount > minijob_limit),
     }
+
+    contract_issues = []
+    app_compensation = _compensation_type(row.worker)
+    lexware_compensation = str(
+        (payroll_statement or {}).get('lexware_compensation_type') or ''
+    ).strip().lower()
+    compensation_labels = {
+        'salary': 'Gehalt',
+        'hourly': 'Stundenlohn',
+    }
+    if lexware_compensation:
+        if app_compensation and lexware_compensation != app_compensation:
+            contract_issues.append(
+                'Vergütungsart stimmt nicht überein: '
+                f"A+ {compensation_labels.get(app_compensation, app_compensation)}, "
+                f"Lexware {compensation_labels.get(lexware_compensation, lexware_compensation)}."
+            )
+        elif not app_compensation:
+            contract_issues.append(
+                'Vergütungsart in A+ fehlt. '
+                f"Lexware weist {compensation_labels.get(lexware_compensation, lexware_compensation)} aus."
+            )
+
+    master_data = _worker_master_data(row.worker)
+    lexware_employment = str(master_data.get('employment_type_lexware') or '').strip().lower()
+    if 'minijob' in lexware_employment and employment_type != WorkerProfile.EmploymentType.MINI:
+        contract_issues.append(
+            f'Lexware Stammdaten weisen Minijob aus, A+ ist als {employment_type} gespeichert.'
+        )
+    if result['minijob_warning']:
+        contract_issues.append(
+            f"Minijob prüfen: Grundbrutto {row.gross_amount} € liegt über {minijob_limit} €."
+        )
+
+    result['contract_issues'] = contract_issues
+    result['surcharge_reconciliation'] = _surcharge_reconciliation(result)
+    reconciliation_status, reconciliation_issues = _reconciliation_status(result)
+    result['reconciliation_status'] = reconciliation_status
+    result['reconciliation_issues'] = reconciliation_issues
+
     if include_entries:
         result['entries'] = row.raw_entries or []
     return result
@@ -549,6 +590,8 @@ def export_csv(queryset) -> HttpResponse:
         'Nachtstunden', 'Samstagsstunden', 'Sonntagsstunden', 'Zuschläge',
         'Brutto inkl. Zuschläge', 'Lexware Brutto', 'Lexware Netto',
         'Lexware Auszahlung', 'Lexware Zahlungsdatum', 'Vergütungsart',
+        'Abgleich Status', 'Prüfhinweise', 'Nacht Abgleich',
+        'Samstag Abgleich', 'Sonntag Abgleich',
     ])
     for row in rows:
         statement = statements.get((str(row.worker_id), row.year_month))
@@ -566,6 +609,11 @@ def export_csv(queryset) -> HttpResponse:
             payroll.get('lexware_payout_amount') or payroll.get('transferred_amount') or '',
             payroll.get('payment_date') or '',
             payroll.get('lexware_compensation_type') or '',
+            data.get('reconciliation_status') or '',
+            ' | '.join(data.get('reconciliation_issues') or []),
+            (data.get('surcharge_reconciliation') or {}).get('night', {}).get('status') or '',
+            (data.get('surcharge_reconciliation') or {}).get('saturday', {}).get('status') or '',
+            (data.get('surcharge_reconciliation') or {}).get('sunday', {}).get('status') or '',
         ])
     response = HttpResponse('\ufeff' + output.getvalue(), content_type='text/csv; charset=utf-8')
     response['Content-Disposition'] = 'attachment; filename="arbeitszeit-lohnkonto.csv"'
@@ -585,6 +633,8 @@ def export_xlsx(queryset) -> HttpResponse:
         'Nachtstunden', 'Samstagsstunden', 'Sonntagsstunden', 'Zuschläge',
         'Brutto inkl. Zuschläge', 'Lexware Brutto', 'Lexware Netto',
         'Lexware Auszahlung', 'Lexware Zahlungsdatum', 'Vergütungsart',
+        'Abgleich Status', 'Prüfhinweise', 'Nacht Abgleich',
+        'Samstag Abgleich', 'Sonntag Abgleich',
     ]
     ws.append(headers)
     for row in rows:
@@ -605,6 +655,11 @@ def export_xlsx(queryset) -> HttpResponse:
             float(payroll.get('lexware_payout_amount') or payroll.get('transferred_amount')) if (payroll.get('lexware_payout_amount') or payroll.get('transferred_amount')) else None,
             payroll.get('payment_date') or '',
             payroll.get('lexware_compensation_type') or '',
+            data.get('reconciliation_status') or '',
+            ' | '.join(data.get('reconciliation_issues') or []),
+            (data.get('surcharge_reconciliation') or {}).get('night', {}).get('status') or '',
+            (data.get('surcharge_reconciliation') or {}).get('saturday', {}).get('status') or '',
+            (data.get('surcharge_reconciliation') or {}).get('sunday', {}).get('status') or '',
         ])
     for column in ws.columns:
         ws.column_dimensions[column[0].column_letter].width = min(max(len(str(cell.value or '')) for cell in column) + 2, 32)
@@ -657,7 +712,7 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
     ]
 
     data = [[
-        'Monat', 'Ist', 'Soll', 'Bezahlt', 'Monatssaldo', 'Übertrag', 'Saldo',
+        'Monat', 'Ist', 'Soll', 'Basis', 'Monatssaldo', 'Übertrag', 'Saldo',
         'Nacht', 'Sa.', 'So.', 'Zuschläge', 'Brutto', 'Überwiesen',
     ]]
     for row in rows:
@@ -665,7 +720,7 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
         payroll = item.get('payroll_statement') or {}
         data.append([
             row.year_month.strftime('%m/%Y'), item['ist_hours'], item['soll_hours'],
-            item['paid_total_hours'], item['monthly_balance_hours'], item['carryover_previous'],
+            item['balance_reference_hours'], item['monthly_balance_hours'], item['carryover_previous'],
             item['saldo_cumulative'], item['night_hours'], item['saturday_hours'], item['sunday_hours'],
             f"{item['surcharge_amount']} €", f"{item['gross_with_surcharges']} €",
             f"{payroll.get('transferred_amount')} €" if payroll.get('transferred_amount') else '–',
@@ -702,10 +757,16 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
         item = record_dict(row, statement)
         payroll = item.get('payroll_statement') or {}
         story.append(Paragraph(row.year_month.strftime('%m/%Y'), styles['WTMonth']))
+        basis_label = 'Sollbasis' if item.get('balance_basis') == 'soll_salary' else 'Bezahlt'
+        compensation_text = (
+            f"Gehalt: {payroll.get('lexware_monthly_salary') or row.gross_amount} €"
+            if item.get('balance_basis') == 'soll_salary'
+            else f"Stundensatz: {item['hourly_rate']} €"
+        )
         story.append(Paragraph(
-            f"Gearbeitet: {item['ist_hours']} Std. · Bezahlt: {item['paid_total_hours']} Std. · "
+            f"Gearbeitet: {item['ist_hours']} Std. · {basis_label}: {item['balance_reference_hours']} Std. · "
             f"Saldo Monat: {item['monthly_balance_hours']} Std. · Saldo kumuliert: {item['saldo_cumulative']} Std. · "
-            f"Stundensatz: {item['hourly_rate']} € · Brutto mit Zuschlägen: {item['gross_with_surcharges']} € · "
+            f"{compensation_text} · Brutto mit Zuschlägen: {item['gross_with_surcharges']} € · "
             f"Lexware überwiesen: {payroll.get('transferred_amount') or '–'} €",
             styles['BodyText'],
         ))
@@ -842,7 +903,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
             row.year_month.strftime('%m/%Y'),
             item['ist_hours'],
             item['soll_hours'],
-            item['paid_total_hours'],
+            item['balance_reference_hours'],
             item['monthly_balance_hours'],
             item['saldo_cumulative'],
             f"{item['hourly_rate']} €",
@@ -856,7 +917,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
         ])
     _docx_table(
         document,
-        ['Monat', 'Ist', 'Soll', 'Bezahlt', 'Saldo Monat', 'Saldo gesamt', 'Satz', 'Nacht', 'Sa', 'So', 'Zuschläge', 'Lexware Brutto', 'Lexware Netto', 'Auszahlung'],
+        ['Monat', 'Ist', 'Soll', 'Basis', 'Saldo Monat', 'Saldo gesamt', 'Satz', 'Nacht', 'Sa', 'So', 'Zuschläge', 'Lexware Brutto', 'Lexware Netto', 'Auszahlung'],
         monthly_rows,
     )
 
@@ -875,7 +936,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
         run.font.size = Pt(14)
         document.add_paragraph(
             f"Ist {item['ist_hours']} Std. | Soll {item['soll_hours']} Std. | "
-            f"Bezahlt {item['paid_total_hours']} Std. | Monatssaldo {item['monthly_balance_hours']} Std. | "
+            f"Basis {item['balance_reference_hours']} Std. | Monatssaldo {item['monthly_balance_hours']} Std. | "
             f"Saldo gesamt {item['saldo_cumulative']} Std."
         )
         daily = []
@@ -920,6 +981,41 @@ def _supplement_hours(payroll: dict, keyword: str) -> Decimal | None:
     return sum(values, Decimal('0.00')).quantize(TWO)
 
 
+def _surcharge_reconciliation(item: dict) -> dict:
+    payroll = item.get('payroll_statement') or {}
+    result = {}
+    statuses = []
+    for key, output_key, label, keyword in (
+        ('night_hours', 'night', 'Nacht', 'nacht'),
+        ('saturday_hours', 'saturday', 'Samstag', 'samstag'),
+        ('sunday_hours', 'sunday', 'Sonntag', 'sonntag'),
+    ):
+        app_hours = dec(item.get(key))
+        lexware_hours = _supplement_hours(payroll, keyword)
+        if lexware_hours is None:
+            status = 'MATCH' if app_hours == 0 else 'PRÜFEN'
+        elif abs(app_hours - lexware_hours) <= Decimal('0.10'):
+            status = 'MATCH'
+        else:
+            status = 'ABWEICHUNG'
+        statuses.append(status)
+        result[output_key] = {
+            'label': label,
+            'status': status,
+            'aplus_hours': str(app_hours),
+            'lexware_hours': str(lexware_hours) if lexware_hours is not None else None,
+        }
+
+    result['overall'] = (
+        'ABWEICHUNG'
+        if 'ABWEICHUNG' in statuses
+        else 'PRÜFEN'
+        if 'PRÜFEN' in statuses
+        else 'MATCH'
+    )
+    return result
+
+
 def _reconciliation_status(item: dict) -> tuple[str, list[str]]:
     payroll = item.get('payroll_statement') or {}
     issues = []
@@ -954,6 +1050,12 @@ def _reconciliation_status(item: dict) -> tuple[str, list[str]]:
             issues.append(f'{label} A+ {app_hours} Std. ≠ Lexware {lex_hours} Std.')
         elif lex_hours is None and app_hours > 0:
             issues.append(f'{label} in A+ vorhanden, Lexware Zuschlag nicht nachgewiesen')
+
+    contract_issues = list(item.get('contract_issues') or [])
+    if contract_issues:
+        issues.extend(issue for issue in contract_issues if issue not in issues)
+        if any(issue.startswith('Vergütungsart stimmt nicht') for issue in contract_issues):
+            hard_difference = True
 
     if hard_difference:
         return 'ABWEICHUNG', issues
