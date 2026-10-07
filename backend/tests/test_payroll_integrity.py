@@ -986,3 +986,127 @@ def test_lexware_import_rejects_ambiguous_employee_name(auth_admin, worker_user,
     assert response.data['employees'] == []
     assert response.data['unmatched_count'] == 1
     assert not PayrollStatement.objects.filter(period=date(2026, 4, 1)).exists()
+
+
+@pytest.mark.django_db
+def test_payroll_reconciliation_exposes_contract_warnings(worker_user):
+    worker = worker_user.worker_profile
+    worker.employment_type = 'minijob'
+    worker.save(update_fields=['employment_type', 'updated_at'])
+    EmployeeMasterData.objects.update_or_create(
+        worker=worker,
+        defaults={'data': {'compensation_type': 'hourly', 'hourly_rate': '16.00'}},
+    )
+    period = date(2026, 9, 1)
+    record = WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=period,
+        ist_hours=Decimal('38.00'),
+        soll_hours=Decimal('38.00'),
+        paid_total_hours=Decimal('38.00'),
+        saldo_cumulative=Decimal('0.00'),
+        hourly_rate=Decimal('16.00'),
+        gross_amount=Decimal('2975.00'),
+    )
+    statement = PayrollStatement.objects.create(
+        worker=worker,
+        period=period,
+        gross_amount=Decimal('2975.00'),
+        net_amount=Decimal('2049.81'),
+        transferred_amount=Decimal('2099.81'),
+        source='lexware_pdf_bundle',
+        raw_data=[{
+            'kind': 'payslip',
+            'compensation_type': 'salary',
+            'monthly_salary': '2975.00',
+            'gross_amount': '2975.00',
+            'net_amount': '2049.81',
+            'payout_amount': '2099.81',
+            'supplements': [],
+        }],
+    )
+
+    from core.working_time import record_dict
+    data = record_dict(record, statement)
+
+    assert data['minijob_warning'] is True
+    assert any('Vergütungsart stimmt nicht überein' in item for item in data['contract_issues'])
+    assert any('Minijob prüfen' in item for item in data['contract_issues'])
+    assert data['reconciliation_status'] == 'ABWEICHUNG'
+
+
+@pytest.mark.django_db
+def test_payroll_reconciliation_compares_night_weekend_hours(worker_user):
+    worker = worker_user.worker_profile
+    worker.employment_type = 'teilzeit'
+    worker.save(update_fields=['employment_type', 'updated_at'])
+    EmployeeMasterData.objects.update_or_create(
+        worker=worker,
+        defaults={'data': {'compensation_type': 'hourly', 'hourly_rate': '16.00'}},
+    )
+    period = date(2026, 9, 1)
+    record = WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=period,
+        ist_hours=Decimal('8.00'),
+        soll_hours=Decimal('8.00'),
+        paid_total_hours=Decimal('8.00'),
+        saldo_cumulative=Decimal('0.00'),
+        hourly_rate=Decimal('16.00'),
+        gross_amount=Decimal('128.00'),
+        raw_entries=[{
+            'worked_minutes': 480,
+            'break_minutes': 0,
+            'night_minutes': 120,
+            'saturday_minutes': 60,
+            'sunday_minutes': 0,
+            'night_surcharge_amount': '8.00',
+            'saturday_surcharge_amount': '4.00',
+            'sunday_surcharge_amount': '0.00',
+        }],
+    )
+    statement = PayrollStatement.objects.create(
+        worker=worker,
+        period=period,
+        gross_amount=Decimal('140.00'),
+        net_amount=Decimal('140.00'),
+        transferred_amount=Decimal('140.00'),
+        source='lexware_pdf_bundle',
+        raw_data=[{
+            'kind': 'payslip',
+            'compensation_type': 'hourly',
+            'quantity': '8.00',
+            'hourly_rate': '16.00',
+            'payout_amount': '140.00',
+            'supplements': [
+                {'label': 'Nachtzuschlag', 'hours': '2.00', 'percent': '25', 'amount': '8.00'},
+                {'label': 'Samstagszuschlag', 'hours': '1.00', 'percent': '25', 'amount': '4.00'},
+            ],
+        }],
+    )
+
+    from core.working_time import record_dict
+    data = record_dict(record, statement)
+
+    assert data['surcharge_reconciliation']['overall'] == 'MATCH'
+    assert data['surcharge_reconciliation']['night']['status'] == 'MATCH'
+    assert data['surcharge_reconciliation']['saturday']['status'] == 'MATCH'
+    assert data['surcharge_reconciliation']['sunday']['status'] == 'MATCH'
+    assert data['reconciliation_status'] == 'MATCH'
+
+    statement.raw_data = [{
+        'kind': 'payslip',
+        'compensation_type': 'hourly',
+        'quantity': '8.00',
+        'hourly_rate': '16.00',
+        'payout_amount': '140.00',
+        'supplements': [
+            {'label': 'Nachtzuschlag', 'hours': '1.00', 'percent': '25', 'amount': '4.00'},
+            {'label': 'Samstagszuschlag', 'hours': '1.00', 'percent': '25', 'amount': '4.00'},
+        ],
+    }]
+    statement.save(update_fields=['raw_data', 'updated_at'])
+
+    changed = record_dict(record, statement)
+    assert changed['surcharge_reconciliation']['night']['status'] == 'ABWEICHUNG'
+    assert changed['reconciliation_status'] == 'ABWEICHUNG'
