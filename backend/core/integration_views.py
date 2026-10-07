@@ -121,7 +121,7 @@ def import_lexware_employee_master_data(request):
                     worker = by_email[email_key]
                     break
         if not worker:
-            wanted = _lexware_name(item.get('name'))
+            wanted = canonical_target(_lexware_name(item.get('name')))
             if wanted:
                 scored = []
                 seen_worker_ids = set()
