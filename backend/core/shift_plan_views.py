@@ -221,13 +221,11 @@ def _attachment_or_404(attachment_id):
 
 
 def _pdf_preview_html(document, filename):
-    """Render an authenticated PDF as self-contained HTML for mobile WebViews.
+    """Render an authenticated PDF as image pages inside the app WebView.
 
-    iOS WKWebView promotes raw PDFs to its native PDF controller. That controller
-    sits above the app UI, which is why our own close and zoom controls cannot
-    reliably receive touches. Rendering the preview to page images keeps the
-    document inside the app's iframe while the download endpoint still returns
-    the untouched original PDF.
+    The app already owns the preview header, close action and zoom controls.
+    Keeping this HTML content-only avoids duplicate controls while also
+    preventing WKWebView from promoting the PDF into its native PDF viewer.
     """
     file_handle = document.file.open('rb')
     try:
@@ -254,53 +252,22 @@ def _pdf_preview_html(document, filename):
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5,user-scalable=yes,viewport-fit=cover">
 <title>{safe_name}</title>
 <style>
-html,body{{margin:0;width:100%;height:100%;background:#e9edf2;color:#173f74;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
-body{{display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden}}
-.toolbar{{position:relative;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:max(8px,env(safe-area-inset-top)) 10px 8px;background:#fff;border-bottom:1px solid rgba(23,63,116,.12)}}
-.name{{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:700}}
-.zoom{{display:flex;align-items:center;gap:5px;flex:0 0 auto}}
-.zoom button{{border:1px solid rgba(23,63,116,.12);background:#f5f7fa;color:#173f74;border-radius:9px;min-width:40px;height:40px;font:inherit;font-weight:800;font-size:16px}}
-.zoom button.value{{min-width:58px;font-size:12px}}
-.viewer{{overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:12px;touch-action:pan-x pan-y pinch-zoom}}
-.page{{display:flex;justify-content:center;margin:0 auto 12px;min-width:100%}}
-.page img{{display:block;width:100%;height:auto;max-width:none;background:#fff;box-shadow:0 3px 14px rgba(0,0,0,.16);transform-origin:top left}}
-.empty{{padding:20px}}
+html,body{{margin:0;width:100%;min-height:100%;background:#e9edf2}}
+body{{box-sizing:border-box;padding:12px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
+.viewer{{width:100%;box-sizing:border-box}}
+.page{{display:block;margin:0 auto 12px;width:100%}}
+.page img{{display:block;width:100%;height:auto;background:#fff;box-shadow:0 3px 14px rgba(0,0,0,.16)}}
+.empty{{padding:20px;color:#173f74}}
 </style>
 </head>
 <body>
-<header class="toolbar">
-  <div class="name">{safe_name}</div>
-  <div class="zoom" aria-label="PDF Zoom">
-    <button type="button" id="minus" aria-label="Verkleinern">−</button>
-    <button type="button" id="reset" class="value" aria-label="Zoom zurücksetzen">100%</button>
-    <button type="button" id="plus" aria-label="Vergrößern">+</button>
-  </div>
-</header>
-<main class="viewer" id="viewer">{pages_html}</main>
-<script>
-(() => {{
-  let zoom = 1;
-  const images = Array.from(document.querySelectorAll('.page img'));
-  const value = document.getElementById('reset');
-  const apply = () => {{
-    images.forEach((image) => image.style.width = Math.round(zoom * 100) + '%');
-    value.textContent = Math.round(zoom * 100) + '%';
-    document.getElementById('minus').disabled = zoom <= .75;
-    document.getElementById('plus').disabled = zoom >= 3;
-  }};
-  document.getElementById('minus').addEventListener('click', () => {{ zoom = Math.max(.75, zoom - .25); apply(); }});
-  document.getElementById('plus').addEventListener('click', () => {{ zoom = Math.min(3, zoom + .25); apply(); }});
-  value.addEventListener('click', () => {{ zoom = 1; apply(); }});
-  apply();
-}})();
-</script>
+<main class="viewer">{pages_html}</main>
 </body>
 </html>"""
     response = HttpResponse(html, content_type='text/html; charset=utf-8')
     response['Cache-Control'] = 'private, no-store'
     response['X-Content-Type-Options'] = 'nosniff'
     return response
-
 
 def _pdf_response(request, attachment_id, as_attachment):
     attachment = _attachment_or_404(attachment_id)

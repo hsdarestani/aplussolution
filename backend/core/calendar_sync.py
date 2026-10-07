@@ -106,9 +106,20 @@ def calendar_subscription(request):
     encoded_feed = quote(feed_url, safe='')
     calendar_name = quote('A+ Solution Dienstplan', safe='')
 
+    # iOS 26 reliably validates HTTPS .ics links when they are handed directly
+    # to Calendar. The currently released app otherwise rewrites feed_url into
+    # webcals:// on the client. Returning an empty feed_url only for iOS makes
+    # that released client fall back to this canonical HTTPS URL without a new
+    # App Store build. Google and Outlook also fall back to their server URLs.
+    user_agent = str(request.META.get('HTTP_USER_AGENT') or '').lower()
+    is_ios = 'iphone' in user_agent or 'ipad' in user_agent
+    client_feed_url = '' if is_ios else feed_url
+    apple_url = feed_url if is_ios else webcal_url
+
     response = Response({
-        'feed_url': feed_url,
-        'webcal_url': webcal_url,
+        'feed_url': client_feed_url,
+        'https_feed_url': feed_url,
+        'webcal_url': apple_url,
         'google_url': f'https://calendar.google.com/calendar/render?cid={encoded_feed}',
         'outlook_url': f'https://outlook.live.com/calendar/0/addfromweb?url={encoded_feed}&name={calendar_name}',
         'automatic': True,

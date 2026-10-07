@@ -51,6 +51,24 @@ def test_calendar_subscription_forces_https_for_public_host(auth_worker):
 
 
 @pytest.mark.django_db
+@override_settings(ALLOWED_HOSTS=['testserver', 'app.aplus-solution.de'])
+def test_ios_calendar_subscription_uses_direct_https_link(auth_worker):
+    response = auth_worker.get(
+        '/api/calendar/subscription/',
+        HTTP_HOST='app.aplus-solution.de',
+        HTTP_USER_AGENT='Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X)',
+    )
+
+    assert response.status_code == 200
+    payload = response.data
+    assert payload['feed_url'] == ''
+    assert payload['https_feed_url'].startswith('https://app.aplus-solution.de/api/calendar/feed/')
+    assert payload['webcal_url'] == payload['https_feed_url']
+    assert 'calendar.google.com' in payload['google_url']
+    assert response['Cache-Control'].startswith('private, no-store')
+
+
+@pytest.mark.django_db
 def test_calendar_subscription_is_worker_only(auth_admin):
     response = auth_admin.get('/api/calendar/subscription/')
     assert response.status_code == 403
