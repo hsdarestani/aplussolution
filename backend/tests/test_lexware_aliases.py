@@ -172,3 +172,42 @@ def test_ashkan_confirmed_alias_matches_worker_with_additional_name_tokens(auth_
     matched = _find_worker({"employee_name": "Ashkan Asadian Ghaferokhi"}, matchers)
     assert matched is not None
     assert matched.id == worker.id
+
+
+@pytest.mark.django_db
+def test_confirmed_alias_can_attach_existing_non_worker_user(auth_admin):
+    user = User.objects.create_user(
+        "ashkan-existing@example.com",
+        "StrongPass123!",
+        first_name="Ashkan",
+        last_name="Asadian",
+        role=User.Role.ADMIN,
+    )
+    assert not WorkerProfile.objects.filter(user=user).exists()
+
+    upload = SimpleUploadedFile(
+        "lexware-stammdaten.json",
+        json.dumps({
+            "employees": [{
+                "name": "Ashkan Asadian Ghaferokhi",
+                "employee_number": "LEX-ASHKAN-001",
+                "data": {
+                    "compensation_type": "salary",
+                    "monthly_salary": "3000.00",
+                },
+            }],
+        }).encode("utf-8"),
+        content_type="application/json",
+    )
+
+    response = auth_admin.post(
+        "/api/workers/master-data/import/",
+        {"file": upload},
+        format="multipart",
+    )
+
+    assert response.status_code == 200
+    assert response.data["unmatched"] == []
+    worker = WorkerProfile.objects.get(user=user)
+    assert worker.employee_number == "LEX-ASHKAN-001"
+    assert user.role == User.Role.ADMIN
