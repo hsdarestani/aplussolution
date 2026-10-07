@@ -88,3 +88,58 @@ def test_non_service_worker_keeps_own_shift_scope(worker_user, second_worker, co
     ids = {str(row['id']) for row in response.data['shifts']}
     assert ids == {str(own_shift.id)}
     assert str(peer_shift.id) not in ids
+
+
+@pytest.mark.django_db
+def test_service_schedule_expands_multi_worker_shift_for_legacy_mobile(
+    worker_user, company, location, position
+):
+    requester = worker_user.worker_profile
+    requester.schedule_groups = ['service']
+    requester.save(update_fields=['schedule_groups'])
+
+    peer1_user = User.objects.create_user(
+        'peer-one@example.com', 'StrongPass123!', first_name='Anna', last_name='Eins', role=User.Role.WORKER
+    )
+    peer1 = WorkerProfile.objects.create(
+        user=peer1_user, employee_number='MA-SERVICE-A', schedule_groups=['service'], active=True
+    )
+    peer2_user = User.objects.create_user(
+        'peer-two@example.com', 'StrongPass123!', first_name='Yohannes', last_name='Kiffle', role=User.Role.WORKER
+    )
+    peer2 = WorkerProfile.objects.create(
+        user=peer2_user, employee_number='MA-SERVICE-B', schedule_groups=['service'], active=True
+    )
+
+    starts_at = timezone.now() + timedelta(hours=3)
+    shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        starts_at=starts_at,
+        ends_at=starts_at + timedelta(hours=5),
+        status=Shift.Status.CONFIRMED,
+        required_count=2,
+        schedule_groups=['service'],
+    )
+    slots = list(shift.slots.exclude(status=ShiftSlot.Status.CANCELLED).order_by('created_at'))
+    for slot, peer in zip(slots, [peer1, peer2]):
+        slot.worker = peer
+        slot.status = ShiftSlot.Status.CLAIMED
+        slot.source = 'admin_assignment'
+        slot.claimed_at = timezone.now()
+        slot.save(update_fields=['worker', 'status', 'source', 'claimed_at', 'updated_at'])
+
+    client = APIClient()
+    client.force_authenticate(worker_user)
+    response = client.get('/api/employee/schedule/')
+
+    assert response.status_code == 200
+    rows = [
+        row for row in response.data['shifts']
+        if str(row.get('source_shift_id') or row['id']) == str(shift.id)
+    ]
+    assert len(rows) == 2
+    assert {row['assigned_workers'][0]['name'] for row in rows} == {'Anna Eins', 'Yohannes Kiffle'}
+    assert len({str(row['id']) for row in rows}) == 2
+    assert all(len(row['assigned_workers']) == 1 for row in rows)
