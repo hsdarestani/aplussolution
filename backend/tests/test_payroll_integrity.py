@@ -503,6 +503,115 @@ def test_lexware_employee_master_data_import_updates_personal_and_payroll_settin
 
 
 @pytest.mark.django_db
+def test_lexware_master_data_import_can_match_by_self_service_email(
+    auth_admin, worker_user
+):
+    import json
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    worker = worker_user.worker_profile
+    worker.user.email = 'francesco@example.com'
+    worker.user.first_name = 'Legacy'
+    worker.user.last_name = 'Name'
+    worker.user.save(update_fields=['email', 'first_name', 'last_name'])
+
+    upload = SimpleUploadedFile(
+        'lexware-stammdaten.json',
+        json.dumps({
+            'employees': [{
+                'name': 'Francesco Trulli',
+                'app_employment_type': 'vollzeit',
+                'data': {
+                    'self_service_email': 'francesco@example.com',
+                    'weekly_hours': '38.50',
+                    'compensation_type': 'salary',
+                    'monthly_salary': '2975.00',
+                },
+            }],
+        }).encode('utf-8'),
+        content_type='application/json',
+    )
+
+    response = auth_admin.post(
+        '/api/workers/master-data/import/',
+        {'file': upload},
+        format='multipart',
+    )
+    assert response.status_code == 200
+    assert len(response.data['employees']) == 1
+    assert response.data['unmatched'] == []
+
+    worker.refresh_from_db()
+    assert worker.employment_type == 'vollzeit'
+    assert worker.monthly_hours == Decimal('166.83')
+    assert worker.master_data.data['compensation_type'] == 'salary'
+    assert worker.master_data.data['monthly_salary'] == '2975.00'
+
+
+@pytest.mark.django_db
+def test_refresh_contract_terms_replaces_stale_closed_month_snapshot(
+    worker_user, company, location, position
+):
+    worker = worker_user.worker_profile
+    worker.employment_type = 'vollzeit'
+    worker.monthly_hours = Decimal('166.83')
+    worker.save(update_fields=['employment_type', 'monthly_hours', 'updated_at'])
+    EmployeeMasterData.objects.create(
+        worker=worker,
+        data={'compensation_type': 'salary', 'monthly_salary': '2975.00'},
+    )
+    WorkingTimeSetting.objects.create(
+        worker=worker,
+        monthly_limit=Decimal('166.83'),
+        hourly_rate=Decimal('0.00'),
+    )
+
+    start = timezone.make_aware(
+        datetime(2026, 9, 1, 8, 0),
+        timezone.get_current_timezone(),
+    )
+    shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        worker=worker,
+        starts_at=start,
+        ends_at=start + timedelta(hours=8),
+        break_minutes=0,
+        status=Shift.Status.CONFIRMED,
+    )
+    TimeEntry.objects.create(
+        worker=worker,
+        shift=shift,
+        clock_in=start,
+        clock_out=start + timedelta(hours=8),
+        approved=True,
+    )
+    stale = WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=date(2026, 9, 1),
+        ist_hours=Decimal('8.00'),
+        soll_hours=Decimal('0.00'),
+        paid_total_hours=Decimal('0.00'),
+        employment_type_snapshot='minijob',
+        saldo_cumulative=Decimal('8.00'),
+    )
+
+    sync_working_time(
+        date(2026, 9, 1),
+        date(2026, 9, 30),
+        refresh_contract_terms=True,
+    )
+    stale.refresh_from_db()
+
+    assert stale.soll_hours == Decimal('166.83')
+    assert stale.employment_type_snapshot == 'vollzeit'
+    assert stale.saldo_cumulative == Decimal('-158.83')
+    assert stale.gross_amount == Decimal('2975.00')
+
+
+@pytest.mark.django_db
 def test_editable_worktime_docx_export(auth_admin, worker_user):
     import io
     import zipfile
