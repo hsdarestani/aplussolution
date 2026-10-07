@@ -30,6 +30,20 @@ type PayrollStatement = {
   lexware_supplements?: LexwareSupplement[];
 };
 
+type ReconciliationItem = {
+  label?: string;
+  status?: string;
+  aplus_hours?: string;
+  lexware_hours?: string | null;
+};
+
+type SurchargeReconciliation = {
+  overall?: string;
+  night?: ReconciliationItem;
+  saturday?: ReconciliationItem;
+  sunday?: ReconciliationItem;
+};
+
 type PayrollEntry = {
   id: string;
   client_name?: string;
@@ -77,6 +91,10 @@ type PayrollRow = {
   entry_count?: number;
   minijob_limit?: string | null;
   minijob_warning?: boolean;
+  contract_issues?: string[];
+  reconciliation_status?: string;
+  reconciliation_issues?: string[];
+  surcharge_reconciliation?: SurchargeReconciliation;
   payroll_statement?: PayrollStatement | null;
   source: string;
   entries?: PayrollEntry[];
@@ -443,7 +461,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
       const form = new FormData();
       form.append('file', masterDataFile);
       const result: any = await api('workers/master-data/import/', { method: 'POST', body: form });
-      const rebuilt: any = await api('working-time/rebuild-all/', { method: 'POST', body: '{}' });
+      const rebuilt: any = await api('working-time/rebuild-all/', { method: 'POST', body: JSON.stringify({ refresh_contract_terms: true }) });
       await loadRows();
       const imported = result?.employees?.length || 0;
       const unmatchedNames = Array.isArray(result?.unmatched) ? result.unmatched : [];
@@ -579,8 +597,12 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
           const expanded = expandedId === row.id;
           const detail = details[row.id];
           const statement = row.payroll_statement;
-          const payrollMasterMismatch = statement?.lexware_compensation_type === 'salary'
-            && row.balance_basis !== 'soll_salary';
+          const reconciliationStatus = row.reconciliation_status || 'PRÜFEN';
+          const reconciliationClass = reconciliationStatus === 'MATCH'
+            ? 'match'
+            : reconciliationStatus === 'ABWEICHUNG'
+              ? 'abweichung'
+              : 'pruefen';
           return <article className={`payroll-record-card ${expanded ? 'is-expanded' : ''}`} key={row.id}>
             <header>
               <div className="payroll-record-month"><span>{monthLabel(row.year_month)}</span><small>{employmentLabel(row.employment_type)}</small></div>
@@ -594,8 +616,27 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
               </div>
             </header>
 
-            {payrollMasterMismatch && <div className="payroll-warning">Lexware weist Gehalt aus, aber die A+ Stammdaten sind noch nicht auf Gehalt/Sollzeit umgestellt. Lexware Stammdaten übernehmen; die Historie wird danach automatisch neu berechnet.</div>}
-            {row.minijob_warning && <div className="payroll-warning">Prüfung nötig: Grundbrutto liegt über {money(row.minijob_limit)}. Die Minijob Einstufung wird nicht automatisch geändert.</div>}
+            {!!row.contract_issues?.length && row.contract_issues.map((issue, index) =>
+              <div className="payroll-warning" key={`${row.id}:contract:${index}`}>{issue}</div>
+            )}
+
+            <div className={`payroll-reconciliation payroll-reconciliation-${reconciliationClass}`}>
+              <div className="payroll-reconciliation-overall">
+                <span>LEXWARE ABGLEICH</span>
+                <b>{reconciliationStatus}</b>
+                <small>{row.reconciliation_issues?.length ? `${row.reconciliation_issues.length} Prüfhinweis(e)` : 'Nachweise stimmen überein'}</small>
+              </div>
+              {(['night', 'saturday', 'sunday'] as const).map(key => {
+                const item = row.surcharge_reconciliation?.[key];
+                if (!item) return null;
+                const itemClass = item.status === 'MATCH' ? 'match' : item.status === 'ABWEICHUNG' ? 'abweichung' : 'pruefen';
+                return <div className={`payroll-reconciliation-item payroll-reconciliation-${itemClass}`} key={key}>
+                  <span>{item.label}</span>
+                  <b>{item.status}</b>
+                  <small>A+ {decimal(item.aplus_hours)} Std. · Lexware {item.lexware_hours == null ? 'kein Nachweis' : `${decimal(item.lexware_hours)} Std.`}</small>
+                </div>;
+              })}
+            </div>
 
             <div className="payroll-metrics">
               <div><span>IST</span><b>{decimal(row.ist_hours)} Std.</b></div>
@@ -700,7 +741,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         </section>}
       </div>
 
-      <footer className="payroll-footnote">Der Saldo basiert auf tatsächlichen Ist Stunden, bestätigten bezahlten Stunden und manuellen Korrekturen. Sollstunden bleiben ein Vertragsvergleich. Ein Lexware Bankbetrag wird nicht automatisch in Stunden umgerechnet.</footer>
+      <footer className="payroll-footnote">Der Saldo basiert auf tatsächlichen Ist Stunden und manuellen Korrekturen. Bei Stundenlohn werden die tatsächlich bezahlten Stunden verwendet, bei Gehalt die vertragliche Sollzeit. Ein Lexware Bankbetrag wird nicht automatisch in Stunden umgerechnet.</footer>
     </div>
   );
 
