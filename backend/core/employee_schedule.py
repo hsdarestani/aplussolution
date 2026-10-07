@@ -58,12 +58,13 @@ def _expand_service_shift_cards(rows, visible_worker_ids, requester_worker_id):
             for card in (row.get('slot_cards') or [])
             if card.get('id')
         }
+        single_worker = len(workers) == 1
         for assigned in workers:
             clone = dict(row)
             slot_id = str(assigned.get('slot_id') or '')
             is_me = str(assigned.get('id') or '') == requester or bool(assigned.get('is_me'))
             clone['source_shift_id'] = source_shift_id
-            clone['id'] = source_shift_id if is_me else (slot_id or source_shift_id)
+            clone['id'] = source_shift_id if (single_worker or is_me) else (slot_id or source_shift_id)
             clone['assigned_workers'] = [assigned]
             clone['slot_cards'] = [slot_cards[slot_id]] if slot_id in slot_cards else []
             clone['filled_count'] = 1
