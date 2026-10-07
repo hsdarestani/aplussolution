@@ -84,13 +84,12 @@ function assignedNames(shift: any) {
 function isOwnShift(shift: any) {
   return Boolean((shift?.assigned_workers || []).some((assigned: any) => assigned?.is_me));
 }
-function firstAssignedWorker(shift: any) {
-  const assigned = Array.isArray(shift?.assigned_workers) ? shift.assigned_workers[0] : undefined;
-  if (!assigned) return undefined;
-  return {
-    ...assigned,
-    avatar: assigned.avatar || assigned.photo_url || assigned.photo || assigned.image || undefined,
-  };
+function assignedWorkersForDisplay(shift: any) {
+  const assigned = Array.isArray(shift?.assigned_workers) ? shift.assigned_workers : [];
+  return assigned.map((worker: any) => ({
+    ...worker,
+    avatar: worker.avatar || worker.photo_url || worker.photo || worker.image || undefined,
+  }));
 }
 function workerInitials(value?: string) {
   const parts = String(value || '').trim().split(/\s+/).filter(Boolean);
@@ -423,6 +422,9 @@ export default function WiwEmployeeScheduleMobile() {
   if (!active || !mobile || !worker) return null;
   const host = document.querySelector('.app-main') || document.body;
   const selectedEnded = Boolean(selected?.ends_at && new Date(selected.ends_at).getTime() <= Date.now());
+  const selectedIsOwn = selected?._selected_worker
+    ? Boolean(selected._selected_worker.is_me)
+    : isOwnShift(selected);
 
   const screen = selected ? (
     <div className="wiw-employee-shift-detail" data-testid="wiw-employee-shift-detail">
@@ -437,7 +439,11 @@ export default function WiwEmployeeScheduleMobile() {
         <DetailRow icon={briefcaseOutline}>{selected.client_name || 'A+'}</DetailRow>
         <DetailRow icon={briefcaseOutline}>{selected.position_name || 'Einsatz'}</DetailRow>
         <DetailRow icon={locationOutline}>{selected.location_name || 'Einsatzort'}</DetailRow>
-        <DetailRow icon={personOutline}>{mode === 'mine' ? (assignedNames(selected) || worker.name || worker.email || 'Mitarbeiter') : 'OpenShift'}</DetailRow>
+        <DetailRow icon={personOutline}>{mode === 'mine'
+          ? (selected?._selected_worker?.name
+            ? shortPersonName(selected._selected_worker.name)
+            : (assignedNames(selected) || worker.name || worker.email || 'Mitarbeiter'))
+          : 'OpenShift'}</DetailRow>
         <DetailRow icon={colorPaletteOutline}>Standardfarbe</DetailRow>
       </div>
       <ShiftPlanAttachments shift={selected} />
@@ -529,21 +535,33 @@ export default function WiwEmployeeScheduleMobile() {
           const header = formatDayHeader(day);
           const dayShifts = byDay[day] || [];
           return <section className="wiw-day-section wiw-day-visual" id={`wiw-employee-day-${day}`} key={day}>
-            <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayShifts.length}</em></header>
-            {dayShifts.map((shift, index) => {
-              const assigned = firstAssignedWorker(shift);
-              const workerName = assigned?.name ? shortPersonName(assigned.name) : assignedNames(shift);
+            <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{mode === 'open' ? dayShifts.length : dayShifts.reduce((sum, shift) => sum + Math.max(1, assignedWorkersForDisplay(shift).length), 0)}</em></header>
+            {dayShifts.flatMap((shift, shiftIndex) => {
               const openShift = mode === 'open';
-              return <React.Fragment key={String(shift.id)}>
-                {index > 0 && clientKey(dayShifts[index - 1]) !== clientKey(shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}
-                <button type="button" className={`wiw-shift-card ${openShift ? 'is-open' : 'is-filled'}${!openShift && !isOwnShift(shift) ? ' peer-shift' : ''}`} style={shiftCardStyle(shift)} onClick={() => setSelected(shift)}>
-                  <div className="wiw-card-line primary">
-                    <span className="wiw-card-person"><WorkerAvatar worker={openShift ? undefined : assigned} /><b>{openShift ? 'OpenShift' : (workerName || worker.name || worker.email || 'Mitarbeiter')}{openShift ? <span className="wiw-open-alert">!</span> : null}</b></span>
-                    <span>{time(shift.starts_at)}–{time(shift.ends_at)}</span>
-                  </div>
-                  <div className="wiw-card-line secondary"><span className={openShift ? 'open' : ''}>{positionShortLabel(shift.position_name)}</span><small>{shift.location_name || 'Einsatzort'}</small></div>
-                </button>
-              </React.Fragment>;
+              const assigned = openShift ? [undefined] : assignedWorkersForDisplay(shift);
+              const workersToRender = assigned.length ? assigned : [undefined];
+              return workersToRender.map((assignedWorker: any, workerIndex: number) => {
+                const workerName = assignedWorker?.name ? shortPersonName(assignedWorker.name) : assignedNames(shift);
+                const peer = !openShift && assignedWorker ? !assignedWorker.is_me : !openShift && !isOwnShift(shift);
+                const showDivider = workerIndex === 0
+                  && shiftIndex > 0
+                  && clientKey(dayShifts[shiftIndex - 1]) !== clientKey(shift);
+                return <React.Fragment key={`${String(shift.id)}:${assignedWorker?.slot_id || workerIndex}`}>
+                  {showDivider ? <div className="wiw-client-divider" aria-hidden="true" /> : null}
+                  <button
+                    type="button"
+                    className={`wiw-shift-card ${openShift ? 'is-open' : 'is-filled'}${peer ? ' peer-shift' : ''}`}
+                    style={shiftCardStyle(shift)}
+                    onClick={() => setSelected(assignedWorker ? { ...shift, _selected_worker: assignedWorker } : shift)}
+                  >
+                    <div className="wiw-card-line primary">
+                      <span className="wiw-card-person"><WorkerAvatar worker={openShift ? undefined : assignedWorker} /><b>{openShift ? 'OpenShift' : (workerName || worker.name || worker.email || 'Mitarbeiter')}{openShift ? <span className="wiw-open-alert">!</span> : null}</b></span>
+                      <span>{time(shift.starts_at)}–{time(shift.ends_at)}</span>
+                    </div>
+                    <div className="wiw-card-line secondary"><span className={openShift ? 'open' : ''}>{positionShortLabel(shift.position_name)}</span><small>{shift.location_name || 'Einsatzort'}</small></div>
+                  </button>
+                </React.Fragment>;
+              });
             })}
             {mode !== 'open' && !dayShifts.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
           </section>;
