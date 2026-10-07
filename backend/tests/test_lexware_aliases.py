@@ -250,3 +250,48 @@ def test_confirmed_alias_matches_existing_account_from_email_or_wiw_without_empl
     worker = WorkerProfile.objects.get(user=user)
     assert worker.employee_number.startswith("LEX-")
     assert user.role == User.Role.ADMIN
+
+
+@pytest.mark.django_db
+def test_confirmed_alias_can_fall_back_to_unique_first_name(auth_admin):
+    user = User.objects.create_user(
+        "ashkan-legacy@example.com",
+        "StrongPass123!",
+        first_name="Ashkan",
+        last_name="Legacy",
+        role=User.Role.WORKER,
+    )
+    worker = WorkerProfile.objects.create(
+        user=user,
+        employee_number="ASHKAN-LEGACY",
+        active=True,
+    )
+
+    upload = SimpleUploadedFile(
+        "lexware-stammdaten.json",
+        json.dumps({
+            "employees": [{
+                "name": "Ashkan Asadian Ghaferokhi",
+                "data": {
+                    "compensation_type": "salary",
+                    "monthly_salary": "3000.00"
+                }
+            }]
+        }).encode("utf-8"),
+        content_type="application/json",
+    )
+
+    response = auth_admin.post(
+        "/api/workers/master-data/import/",
+        {"file": upload},
+        format="multipart",
+    )
+
+    assert response.status_code == 200
+    assert response.data["unmatched"] == []
+    assert response.data["employees"][0]["worker_id"] == str(worker.id)
+
+    matchers = _employee_matchers()
+    matched = _find_worker({"employee_name": "Ashkan Asadian Ghaferokhi"}, matchers)
+    assert matched is not None
+    assert matched.id == worker.id
