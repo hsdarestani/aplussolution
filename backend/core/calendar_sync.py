@@ -68,15 +68,20 @@ def _assigned_shifts(worker: WorkerProfile):
 
 
 def _public_calendar_feed_url(request, token: str) -> str:
-    feed_url = request.build_absolute_uri(f'/api/calendar/feed/{token}.ics')
-    host = request.get_host().split(':', 1)[0].strip('[]').lower()
+    raw_host = (
+        request.META.get('HTTP_X_FORWARDED_HOST')
+        or request.get_host()
+    ).split(',', 1)[0].strip()
+    host_only = raw_host.split(':', 1)[0].strip('[]').lower()
+    path = f'/api/calendar/feed/{token}.ics'
 
-    # Calendar clients such as iOS reject insecure subscription feeds. In
-    # production Cloudflare/Caddy can terminate TLS before Django, so an
-    # internal HTTP hop must never leak into the public calendar URL.
-    if feed_url.startswith('http://') and host.endswith(CALENDAR_HTTPS_HOST_SUFFIXES):
-        feed_url = 'https://' + feed_url[len('http://'):]
-    return feed_url
+    # Never derive the public production scheme from the internal proxy hop.
+    # Apple Calendar rejects an HTTP subscription before it even fetches the
+    # feed. Build the public HTTPS URL directly for every production hostname.
+    if host_only.endswith(CALENDAR_HTTPS_HOST_SUFFIXES):
+        return f'https://{raw_host}{path}'
+
+    return request.build_absolute_uri(path)
 
 
 @api_view(['GET'])
@@ -101,14 +106,20 @@ def calendar_subscription(request):
     encoded_feed = quote(feed_url, safe='')
     calendar_name = quote('A+ Solution Dienstplan', safe='')
 
-    return Response({
+    response = Response({
         'feed_url': feed_url,
         'webcal_url': webcal_url,
         'google_url': f'https://calendar.google.com/calendar/render?cid={encoded_feed}',
         'outlook_url': f'https://outlook.live.com/calendar/0/addfromweb?url={encoded_feed}&name={calendar_name}',
         'automatic': True,
+        'secure_transport': feed_url.startswith('https://'),
         'refresh_note': 'Änderungen werden über das abonnierte Kalenderfeed automatisch übernommen. Das Aktualisierungsintervall bestimmt der jeweilige Kalenderanbieter.',
     })
+    # A previously cached subscription payload containing http:// must never be
+    # reused after the server-side HTTPS fix.
+    response['Cache-Control'] = 'private, no-store, max-age=0'
+    response['Pragma'] = 'no-cache'
+    return response
 
 
 @api_view(['GET'])

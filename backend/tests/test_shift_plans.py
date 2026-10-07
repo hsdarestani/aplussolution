@@ -215,7 +215,12 @@ def test_targeted_plan_is_visible_only_to_selected_worker_and_can_be_deleted():
     first_list = first_api.get(f'/api/shifts/{shift1.id}/plans/')
     assert first_list.status_code == 200
     assert len(first_list.data) == 1
-    assert first_api.get(f'/api/shift-plans/attachments/{attachment_id}/view/').status_code == 200
+    preview = first_api.get(f'/api/shift-plans/attachments/{attachment_id}/view/')
+    assert preview.status_code == 200
+    assert preview['Content-Type'].startswith('text/html')
+    preview_html = preview.content.decode('utf-8')
+    assert 'data:image/png;base64,' in preview_html
+    assert 'PDF Zoom' in preview_html
 
     second_api = APIClient()
     second_api.force_authenticate(second_user)

@@ -1,6 +1,9 @@
+import base64
+from html import escape
 from pathlib import Path
 
-from django.http import FileResponse
+import fitz
+from django.http import FileResponse, HttpResponse
 from rest_framework.decorators import api_view
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
@@ -217,6 +220,88 @@ def _attachment_or_404(attachment_id):
     ).filter(pk=attachment_id).first()
 
 
+def _pdf_preview_html(document, filename):
+    """Render an authenticated PDF as self-contained HTML for mobile WebViews.
+
+    iOS WKWebView promotes raw PDFs to its native PDF controller. That controller
+    sits above the app UI, which is why our own close and zoom controls cannot
+    reliably receive touches. Rendering the preview to page images keeps the
+    document inside the app's iframe while the download endpoint still returns
+    the untouched original PDF.
+    """
+    file_handle = document.file.open('rb')
+    try:
+        pdf_bytes = file_handle.read()
+    finally:
+        file_handle.close()
+
+    pages = []
+    with fitz.open(stream=pdf_bytes, filetype='pdf') as pdf:
+        for page_number, page in enumerate(pdf, start=1):
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0), alpha=False)
+            encoded = base64.b64encode(pixmap.tobytes('png')).decode('ascii')
+            pages.append(
+                f'<section class="page"><img alt="Seite {page_number}" '
+                f'src="data:image/png;base64,{encoded}"></section>'
+            )
+
+    safe_name = escape(filename)
+    pages_html = ''.join(pages) or '<p class="empty">Keine Seiten gefunden.</p>'
+    html = f"""<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5,user-scalable=yes,viewport-fit=cover">
+<title>{safe_name}</title>
+<style>
+html,body{{margin:0;width:100%;height:100%;background:#e9edf2;color:#173f74;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
+body{{display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden}}
+.toolbar{{position:relative;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:max(8px,env(safe-area-inset-top)) 10px 8px;background:#fff;border-bottom:1px solid rgba(23,63,116,.12)}}
+.name{{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:700}}
+.zoom{{display:flex;align-items:center;gap:5px;flex:0 0 auto}}
+.zoom button{{border:1px solid rgba(23,63,116,.12);background:#f5f7fa;color:#173f74;border-radius:9px;min-width:40px;height:40px;font:inherit;font-weight:800;font-size:16px}}
+.zoom button.value{{min-width:58px;font-size:12px}}
+.viewer{{overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:12px;touch-action:pan-x pan-y pinch-zoom}}
+.page{{display:flex;justify-content:center;margin:0 auto 12px;min-width:100%}}
+.page img{{display:block;width:100%;height:auto;max-width:none;background:#fff;box-shadow:0 3px 14px rgba(0,0,0,.16);transform-origin:top left}}
+.empty{{padding:20px}}
+</style>
+</head>
+<body>
+<header class="toolbar">
+  <div class="name">{safe_name}</div>
+  <div class="zoom" aria-label="PDF Zoom">
+    <button type="button" id="minus" aria-label="Verkleinern">−</button>
+    <button type="button" id="reset" class="value" aria-label="Zoom zurücksetzen">100%</button>
+    <button type="button" id="plus" aria-label="Vergrößern">+</button>
+  </div>
+</header>
+<main class="viewer" id="viewer">{pages_html}</main>
+<script>
+(() => {{
+  let zoom = 1;
+  const images = Array.from(document.querySelectorAll('.page img'));
+  const value = document.getElementById('reset');
+  const apply = () => {{
+    images.forEach((image) => image.style.width = Math.round(zoom * 100) + '%');
+    value.textContent = Math.round(zoom * 100) + '%';
+    document.getElementById('minus').disabled = zoom <= .75;
+    document.getElementById('plus').disabled = zoom >= 3;
+  }};
+  document.getElementById('minus').addEventListener('click', () => {{ zoom = Math.max(.75, zoom - .25); apply(); }});
+  document.getElementById('plus').addEventListener('click', () => {{ zoom = Math.min(3, zoom + .25); apply(); }});
+  value.addEventListener('click', () => {{ zoom = 1; apply(); }});
+  apply();
+}})();
+</script>
+</body>
+</html>"""
+    response = HttpResponse(html, content_type='text/html; charset=utf-8')
+    response['Cache-Control'] = 'private, no-store'
+    response['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
 def _pdf_response(request, attachment_id, as_attachment):
     attachment = _attachment_or_404(attachment_id)
     if not attachment:
@@ -226,13 +311,20 @@ def _pdf_response(request, attachment_id, as_attachment):
 
     document = attachment.document
     filename = Path(document.original_name or 'Einsatzplan.pdf').name
+
+    if not as_attachment:
+        try:
+            return _pdf_preview_html(document, filename)
+        except Exception:
+            return Response({'detail': 'Die PDF Vorschau konnte nicht erstellt werden.'}, status=500)
+
     try:
         file_handle = document.file.open('rb')
     except Exception:
         return Response({'detail': 'Die PDF Datei ist aktuell nicht verfügbar.'}, status=404)
     return FileResponse(
         file_handle,
-        as_attachment=as_attachment,
+        as_attachment=True,
         filename=filename,
         content_type='application/pdf',
     )
