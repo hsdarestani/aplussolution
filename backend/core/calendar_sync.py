@@ -47,6 +47,29 @@ def _ics_escape(value) -> str:
     )
 
 
+def _fold_ical_line(line: str) -> str:
+    """Fold an ICS content line at 75 UTF-8 octets, without splitting chars.
+
+    Apple Calendar validates physical content lines. Long shift notes and
+    non-ASCII names must be folded according to RFC 5545 section 3.1.
+    """
+    pieces = []
+    part = ''
+    byte_count = 0
+    for character in line:
+        size = len(character.encode('utf-8'))
+        if byte_count + size > 75:
+            pieces.append(part)
+            part = ' ' + character
+            byte_count = 1 + size
+        else:
+            part += character
+            byte_count += size
+    if part:
+        pieces.append(part)
+    return '\r\n'.join(pieces)
+
+
 def _utc_stamp(value) -> str:
     return value.astimezone(datetime_timezone.utc).strftime('%Y%m%dT%H%M%SZ')
 
@@ -176,7 +199,7 @@ def calendar_feed(request, token):
         ])
 
     lines.append('END:VCALENDAR')
-    response = HttpResponse('\r\n'.join(lines) + '\r\n', content_type='text/calendar; charset=utf-8')
+    response = HttpResponse('\r\n'.join(_fold_ical_line(line) for line in lines) + '\r\n', content_type='text/calendar; charset=utf-8')
     response['Content-Disposition'] = 'inline; filename="aplus-dienstplan.ics"'
     response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     response['X-Robots-Tag'] = 'noindex, nofollow'
