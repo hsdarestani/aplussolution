@@ -435,8 +435,13 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     setBusyId(`export:${format}`);
     setMessage('');
     try {
-      const query = selectedWorkerId ? `?worker=${encodeURIComponent(selectedWorkerId)}` : '';
-      const result = await apiBlob(`working-time/export/${format}/${query}`);
+      const reportYear = month && month !== 'all'
+        ? month.slice(0, 4)
+        : (lexwareReadiness?.year ? String(lexwareReadiness.year) : currentMonth().slice(0, 4));
+      const params = new URLSearchParams({ year: reportYear });
+      if (selectedWorkerId) params.set('worker', selectedWorkerId);
+      if (month && month !== 'all') params.set('month', month);
+      const result = await apiBlob(`working-time/export/${format}/?${params.toString()}`);
       triggerBlobDownload(result.blob, result.filename || `arbeitszeit-lohnkonto.${format}`);
     } catch (error: any) {
       setMessage(error?.message || 'Export konnte nicht erstellt werden.');
@@ -453,7 +458,10 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     setBusyId('export:arbeitszeit-word');
     setMessage('');
     try {
-      const result = await apiBlob(`working-time/docx/${selectedWorkerId}/`);
+      const reportYear = month && month !== 'all'
+        ? month.slice(0, 4)
+        : (lexwareReadiness?.year ? String(lexwareReadiness.year) : currentMonth().slice(0, 4));
+      const result = await apiBlob(`working-time/docx/${selectedWorkerId}/?year=${encodeURIComponent(reportYear)}`);
       triggerBlobDownload(result.blob, result.filename || '01_Arbeitszeitnachweis.docx');
     } catch (error: any) {
       setMessage(error?.message || 'Arbeitszeitnachweis konnte nicht erstellt werden.');
@@ -488,7 +496,10 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     setBusyId('export:worker-pdf');
     setMessage('');
     try {
-      const result = await apiBlob(`working-time/pdf/${selectedWorkerId}/`);
+      const reportYear = month && month !== 'all'
+        ? month.slice(0, 4)
+        : (lexwareReadiness?.year ? String(lexwareReadiness.year) : currentMonth().slice(0, 4));
+      const result = await apiBlob(`working-time/pdf/${selectedWorkerId}/?year=${encodeURIComponent(reportYear)}`);
       triggerBlobDownload(result.blob, result.filename || '04_Pruefnachweis_Mitarbeiter.pdf');
     } catch (error: any) {
       setMessage(error?.message || 'Prüfnachweis konnte nicht erstellt werden.');
