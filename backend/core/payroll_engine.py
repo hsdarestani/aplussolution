@@ -434,7 +434,11 @@ def sync_working_time(
                     ).quantize(TWO)
                     balance_reference = paid_total
                 manual = existing.manual_adjustment if existing else Decimal('0')
-                is_open_month = month >= current_month and statement is None
+                is_open_month = (
+                    month >= current_month
+                    and statement is None
+                    and ist == Decimal('0.00')
+                )
                 saldo = (
                     carry
                     if is_open_month
