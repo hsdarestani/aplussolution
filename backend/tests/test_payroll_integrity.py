@@ -1843,6 +1843,7 @@ def test_zero_payout_correction_uses_original_monthly_payout_for_reconciliation(
         'kind': 'payslip',
         'period': '2026-07',
         'compensation_type': 'hourly',
+        'person_group': '101',
         'quantity': '167.50',
         'hourly_rate': '17.12',
         'gross_amount': '2889.00',
