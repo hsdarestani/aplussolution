@@ -579,7 +579,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
                 aria-label="Lexware Dateien"
                 type="file"
                 multiple
-                accept=".pdf,.csv,.zip,application/pdf,text/csv,application/zip"
+                accept=".pdf,.csv,.zip,.xml,application/pdf,text/csv,application/zip,application/xml,text/xml"
                 onChange={event => {
                   const files = Array.from(event.target.files || []);
                   setLexwareFiles(files);
@@ -623,7 +623,13 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
                 <span>{row.employee_number || 'Ohne Personalnummer'}</span>
               </div>
               <div className="payroll-record-gross">
-                <small>{statement?.source === 'lexware_bank_export' ? 'Lexware überwiesen' : 'Lexware Zahlungsliste'}</small>
+                <small>{
+                  statement?.source === 'lexware_bank_export'
+                    ? 'Bankzahlung'
+                    : statement?.source === 'lexware_sepa_xml' || statement?.source === 'lexware_sepa_bundle'
+                      ? 'Lexware SEPA'
+                      : 'Lexware Zahlungsliste'
+                }</small>
                 <b>{statement?.transferred_amount ? money(statement.transferred_amount) : 'Noch nicht importiert'}</b>
               </div>
             </header>
