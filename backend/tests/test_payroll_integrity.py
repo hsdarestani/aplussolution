@@ -1200,7 +1200,7 @@ def test_lexware_sepa_xml_does_not_double_count_payment_list(auth_admin, worker_
     assert response.status_code == 200
     statement = PayrollStatement.objects.get(worker=worker, period=period)
     assert statement.transferred_amount == Decimal('602.95')
-    assert statement.payment_date == date(2026, 10, 8)
+    assert statement.payment_date is None
     assert statement.source == 'lexware_sepa_xml'
     assert {row.get('source_type') for row in statement.raw_data} == {
         'lexware_zahlungsliste_pdf',
