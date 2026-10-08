@@ -446,9 +446,13 @@ def sync_working_time(
                     else (carry + ist + manual - balance_reference).quantize(TWO)
                 )
                 gross = (
-                    monthly_salary.quantize(TWO)
-                    if is_salary and monthly_salary is not None
-                    else (ist * month_rate).quantize(TWO)
+                    Decimal('0.00')
+                    if is_open_month
+                    else (
+                        monthly_salary.quantize(TWO)
+                        if is_salary and monthly_salary is not None
+                        else (ist * month_rate).quantize(TWO)
+                    )
                 )
 
                 raw_entries = grouped.get((str(worker.id), month), [])
