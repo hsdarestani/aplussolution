@@ -486,29 +486,52 @@ def lexware_bank_import(request):
         payslip_items = [item for item in merged if item.get('kind') == 'payslip']
         latest_payslip = payslip_items[-1] if payslip_items else None
 
-        if payment_items:
-            total = sum((dec(item.get('amount')) for item in payment_items), Decimal('0.00')).quantize(Decimal('0.01'))
+        # Do not double count the same salary when several Lexware payment
+        # evidences are imported. Prefer actual bank export, then SEPA order,
+        # then the Lexware payment list.
+        payment_items_by_source = defaultdict(list)
+        for item in payment_items:
+            payment_items_by_source[str(item.get('source_type') or 'legacy')].append(item)
+        preferred_payment_items = []
+        for source_type in (
+            'lexware_bank_export',
+            'lexware_sepa_xml',
+            'lexware_zahlungsliste_pdf',
+            'legacy',
+        ):
+            if payment_items_by_source.get(source_type):
+                preferred_payment_items = payment_items_by_source[source_type]
+                break
+
+        if preferred_payment_items:
+            total = sum(
+                (dec(item.get('amount')) for item in preferred_payment_items),
+                Decimal('0.00'),
+            ).quantize(Decimal('0.01'))
             statement.transferred_amount = total
         dates = [
             _parse_bank_date(item.get('payment_date'), period)
-            for item in payment_items if item.get('payment_date')
+            for item in preferred_payment_items if item.get('payment_date')
         ]
+        dates = [value for value in dates if value]
         if dates:
-            statement.payment_date = max(value for value in dates if value)
+            statement.payment_date = max(dates)
 
         if latest_payslip:
             statement.gross_amount = _parse_money(latest_payslip.get('gross_amount'))
             statement.net_amount = _parse_money(latest_payslip.get('net_amount'))
 
         source_types = {str(item.get('source_type') or '') for item in merged}
-        if 'lexware_payslip_pdf' in source_types and 'lexware_zahlungsliste_pdf' in source_types:
+        if 'lexware_bank_export' in source_types:
+            statement.source = 'lexware_bank_export'
+        elif 'lexware_sepa_xml' in source_types:
+            statement.source = 'lexware_sepa_bundle' if 'lexware_payslip_pdf' in source_types else 'lexware_sepa_xml'
+        elif 'lexware_payslip_pdf' in source_types and 'lexware_zahlungsliste_pdf' in source_types:
             statement.source = 'lexware_pdf_bundle'
         elif 'lexware_payslip_pdf' in source_types:
             statement.source = 'lexware_payslip_pdf'
         elif 'lexware_zahlungsliste_pdf' in source_types:
             statement.source = 'lexware_zahlungsliste_pdf'
-        elif 'lexware_bank_export' in source_types:
-            statement.source = 'lexware_bank_export'
         else:
             statement.source = 'lexware_import'
 
@@ -618,5 +641,6 @@ def lexware_bank_import(request):
         'employees': imported,
         'unmatched_count': len(unmatched),
         'unmatched_preview': unmatched[:20],
+        'archived_documents': archived_documents,
     })
 
