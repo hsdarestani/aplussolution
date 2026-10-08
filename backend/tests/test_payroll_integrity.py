@@ -2016,6 +2016,7 @@ def test_open_current_payroll_month_does_not_accrue_full_salary_deficit(
     data = record_dict(record)
 
     assert record.saldo_cumulative == Decimal('0.00')
+    assert record.gross_amount == Decimal('0.00')
     assert data['is_open_month'] is True
     assert data['balance_basis'] == 'open_month'
     assert data['monthly_balance_hours'] == '0.00'
