@@ -28,6 +28,7 @@ import {
 import { api, apiBlob } from './api';
 import ScheduleDatePicker from './ScheduleDatePicker';
 import { saveSchedulePdf } from './saveSchedulePdf';
+import { openPdfDocument } from './openPdfDocument';
 import { ShiftPlanAttachments, ShiftPlanBulkUpload } from './ShiftPlanAttachments';
 import { isHotelClientName, schedulePalette } from './scheduleClientPalette';
 import './wiw-schedule-mobile.css';
@@ -1312,7 +1313,10 @@ export default function WiwScheduleMobile() {
       if (pdf.clients.length) params.set('clients', pdf.clients.join(','));
       if (pdf.groups.length) params.set('groups', pdf.groups.join(','));
       const result = await apiBlob(`reports/schedule.pdf?${params.toString()}`);
-      await saveSchedulePdf(result.blob, result.filename);
+      // Native full-screen PDF preview with pinch zoom; web keeps download.
+      if (!(await openPdfDocument(result.blob, result.filename))) {
+        await saveSchedulePdf(result.blob, result.filename);
+      }
       setPdfOpen(false);
       setToast('Dienstplan-PDF erstellt.');
     } catch (error: any) {
