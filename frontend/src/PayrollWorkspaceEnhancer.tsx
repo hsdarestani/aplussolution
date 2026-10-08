@@ -466,11 +466,16 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
       const periods = Array.isArray(result?.detected_periods) && result.detected_periods.length
         ? result.detected_periods.map((item: string) => monthLabel(item)).join(', ')
         : (lexwarePeriod ? monthLabel(lexwarePeriod) : '');
+      const unmatchedRows = Number(result?.unmatched_count || 0);
+      const unmatchedUnique = Number(result?.unmatched_unique_count ?? unmatchedRows);
       setMessage(
         `Lexware Import abgeschlossen${periods ? ` (${periods})` : ''}. ` +
         `${result?.files || lexwareFiles.length} Datei(en), ` +
         `${result?.employees?.length || 0} Mitarbeiter Monatszuordnungen, ` +
-        `${archived} Nachweise archiviert, ${result?.unmatched_count || 0} nicht zugeordnet.`
+        `${archived} Nachweise archiviert. ` +
+        (unmatchedRows
+          ? `${unmatchedUnique} eindeutige nicht zugeordnete Fälle (${unmatchedRows} Nachweiszeilen).`
+          : 'Alle Nachweise zugeordnet.')
       );
       setLexwareFiles([]);
     } catch (error: any) {
