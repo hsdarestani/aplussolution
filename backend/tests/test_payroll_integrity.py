@@ -1751,6 +1751,8 @@ def test_older_lexware_import_does_not_regress_current_master_rate(auth_admin, w
         return buffer.getvalue()
 
     worker = worker_user.worker_profile
+    worker.tariff_hourly_rate = Decimal('20.00')
+    worker.save(update_fields=['tariff_hourly_rate', 'updated_at'])
 
     september = SimpleUploadedFile(
         'Lohnabrechnungen_2026-09.pdf',
@@ -1803,4 +1805,4 @@ def test_older_lexware_import_does_not_regress_current_master_rate(auth_admin, w
     assert master.data['lexware_latest_payroll_period'] == '2026-09'
     assert master.data['compensation_type'] == 'salary'
     assert master.data['lexware_monthly_salary'] == '2975.00'
-    assert worker.tariff_hourly_rate != Decimal('15.50')
+    assert worker.tariff_hourly_rate == Decimal('20.00')
