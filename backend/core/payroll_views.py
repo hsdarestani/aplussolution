@@ -707,14 +707,18 @@ def lexware_bank_import(request):
 
                 item = dict(row)
                 item['source_file'] = name
-                item['source_type'] = (
-                    'lexware_payslip_pdf'
-                    if row.get('kind') == 'payslip'
-                    else 'lexware_zahlungsliste_pdf'
+                source_type_by_kind = {
+                    'payslip': 'lexware_payslip_pdf',
+                    'payment': 'lexware_zahlungsliste_pdf',
+                    'absence_evidence': 'lexware_u1_pdf',
+                }
+                item['source_type'] = source_type_by_kind.get(
+                    str(row.get('kind') or ''),
+                    'lexware_pdf',
                 )
                 target_period_text = (
                     str(row.get('period') or '').strip()
-                    if row.get('kind') == 'payslip'
+                    if row.get('kind') in {'payslip', 'absence_evidence'}
                     else file_period_text
                 ) or file_period_text
                 if not re.fullmatch(r'\d{4}-\d{2}', target_period_text):
