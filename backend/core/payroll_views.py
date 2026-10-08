@@ -12,6 +12,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.decorators import api_view, parser_classes, permission_classes
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -54,6 +55,166 @@ class PayrollViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         obj = serializer.save()
         audit(self.request, 'payrollstatement.updated', obj)
+
+
+def _lexware_document_kind(title: str) -> str:
+    value = _norm(title)
+    checks = (
+        ('lohnabrechnungen', 'lohnabrechnung'),
+        ('zahlungsliste', 'zahlungsliste'),
+        ('lohnjournal', 'lohnjournal'),
+        ('sepa', 'sepa'),
+        ('meldebescheinigungen', 'meldebescheinigung'),
+        ('u1', 'erstattungsantrag u1'),
+        ('lohnkonto_uv', 'lohnkonto uv'),
+        ('lohnkonto', 'lohnkonto'),
+        ('lohnsteuerbescheinigungen', 'lohnsteuerbescheinigung'),
+        ('beitragsabrechnung', 'beitragsabrechnung'),
+        ('beitragserlaeuterung', 'beitragserlaeuterung'),
+        ('beitragsnachweise', 'beitragsnachweise'),
+        ('buchungsuebersicht', 'buchungsubersicht'),
+        ('mitgliedsbestaetigung', 'mitgliedsbestaetigung'),
+        ('lohnsteueranmeldung', 'lohnsteueranmeldung'),
+        ('restbeitragsschuld', 'restbeitragsschuld'),
+    )
+    for kind, token in checks:
+        if token in value:
+            if kind == 'lohnkonto' and 'uv' in value:
+                continue
+            return kind
+    return 'other'
+
+
+def lexware_readiness_payload(year: int) -> dict:
+    today = timezone.localdate()
+    if year < today.year:
+        last_closed_month = 12
+    elif year == today.year:
+        last_closed_month = max(0, today.month - 1)
+    else:
+        last_closed_month = 0
+
+    expected_periods = [f'{year}-{month:02d}' for month in range(1, last_closed_month + 1)]
+    documents = list(
+        Document.objects
+        .filter(folder=Document.Folder.PAYROLL, title__icontains='Lexware')
+        .values_list('title', flat=True)
+    )
+
+    monthly_docs = {
+        period: {
+            'lohnabrechnungen': False,
+            'zahlungsliste': False,
+            'lohnjournal': False,
+            'sepa': False,
+            'meldebescheinigungen': False,
+        }
+        for period in expected_periods
+    }
+    annual = {
+        'lohnkonto': False,
+        'lohnkonto_uv': False,
+        'lohnsteuerbescheinigungen': False,
+    }
+    optional_counts = defaultdict(int)
+
+    for title in documents:
+        kind = _lexware_document_kind(title)
+        period_match = re.search(rf'\b{year}[-_](0[1-9]|1[0-2])\b', str(title))
+        if period_match:
+            period = f'{year}-{period_match.group(1)}'
+            if period in monthly_docs and kind in monthly_docs[period]:
+                monthly_docs[period][kind] = True
+        if kind in annual:
+            annual[kind] = True
+        elif kind not in {'other', 'lohnabrechnungen', 'zahlungsliste', 'lohnjournal', 'sepa', 'meldebescheinigungen'}:
+            optional_counts[kind] += 1
+
+    statement_rows = list(
+        PayrollStatement.objects
+        .filter(period__year=year)
+        .values('period', 'raw_data')
+    )
+    statement_stats = defaultdict(lambda: {
+        'statements': 0,
+        'with_payslip': 0,
+        'with_payment': 0,
+        'with_correction': 0,
+    })
+    for row in statement_rows:
+        period = row['period'].strftime('%Y-%m')
+        items = list(row.get('raw_data') or [])
+        stats = statement_stats[period]
+        stats['statements'] += 1
+        if any(item.get('kind') == 'payslip' for item in items):
+            stats['with_payslip'] += 1
+        if any(item.get('kind') == 'payment' for item in items):
+            stats['with_payment'] += 1
+        if any(item.get('kind') == 'payslip' and item.get('is_correction') for item in items):
+            stats['with_correction'] += 1
+
+    months = []
+    complete_months = 0
+    for period in expected_periods:
+        docs = monthly_docs[period]
+        core_complete = all(docs.values())
+        if core_complete:
+            complete_months += 1
+        months.append({
+            'period': period,
+            'documents': docs,
+            'core_complete': core_complete,
+            **statement_stats.get(period, {
+                'statements': 0,
+                'with_payslip': 0,
+                'with_payment': 0,
+                'with_correction': 0,
+            }),
+        })
+
+    missing = [
+        {'period': item['period'], 'kind': kind}
+        for item in months
+        for kind, present in item['documents'].items()
+        if not present
+    ]
+    annual_complete = annual['lohnkonto'] and annual['lohnkonto_uv']
+    no_additional_import_required = (
+        bool(expected_periods)
+        and complete_months == len(expected_periods)
+        and annual_complete
+    )
+    return {
+        'year': year,
+        'expected_through': expected_periods[-1] if expected_periods else None,
+        'expected_months': len(expected_periods),
+        'complete_months': complete_months,
+        'core_documents_expected': len(expected_periods) * 5,
+        'core_documents_present': sum(
+            int(value)
+            for period in monthly_docs.values()
+            for value in period.values()
+        ),
+        'annual_documents': annual,
+        'annual_complete': annual_complete,
+        'optional_documents': dict(optional_counts),
+        'months': months,
+        'missing': missing,
+        'no_additional_import_required': no_additional_import_required,
+    }
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminOrManager])
+def lexware_readiness(request):
+    raw_year = str(request.query_params.get('year') or timezone.localdate().year)
+    try:
+        year = int(raw_year)
+        if year < 2000 or year > 2100:
+            raise ValueError
+    except ValueError:
+        return Response({'detail': 'Jahr muss im Format JJJJ angegeben werden.'}, status=400)
+    return Response(lexware_readiness_payload(year))
 
 
 @api_view(['GET', 'POST'])
