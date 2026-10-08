@@ -155,21 +155,30 @@ def lexware_readiness_payload(year: int) -> dict:
 
     months = []
     complete_months = 0
+    parsed_complete_months = 0
     for period in expected_periods:
         docs = monthly_docs[period]
         core_complete = all(docs.values())
+        stats = statement_stats.get(period, {
+            'statements': 0,
+            'with_payslip': 0,
+            'with_payment': 0,
+            'with_correction': 0,
+        })
+        parsed_complete = (
+            int(stats.get('with_payslip') or 0) > 0
+            and int(stats.get('with_payment') or 0) > 0
+        )
         if core_complete:
             complete_months += 1
+        if parsed_complete:
+            parsed_complete_months += 1
         months.append({
             'period': period,
             'documents': docs,
             'core_complete': core_complete,
-            **statement_stats.get(period, {
-                'statements': 0,
-                'with_payslip': 0,
-                'with_payment': 0,
-                'with_correction': 0,
-            }),
+            'parsed_complete': parsed_complete,
+            **stats,
         })
 
     missing = [
@@ -182,6 +191,7 @@ def lexware_readiness_payload(year: int) -> dict:
     no_additional_import_required = (
         bool(expected_periods)
         and complete_months == len(expected_periods)
+        and parsed_complete_months == len(expected_periods)
         and annual_complete
     )
     return {
@@ -189,6 +199,7 @@ def lexware_readiness_payload(year: int) -> dict:
         'expected_through': expected_periods[-1] if expected_periods else None,
         'expected_months': len(expected_periods),
         'complete_months': complete_months,
+        'parsed_complete_months': parsed_complete_months,
         'core_documents_expected': len(expected_periods) * 5,
         'core_documents_present': sum(
             int(value)
