@@ -464,6 +464,23 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     }
   }
 
+  async function downloadAuditWord() {
+    const reportYear = month && month !== 'all'
+      ? month.slice(0, 4)
+      : (lexwareReadiness?.year ? String(lexwareReadiness.year) : currentMonth().slice(0, 4));
+    setBusyId('export:audit-word');
+    setMessage('');
+    try {
+      const workerQuery = selectedWorkerId ? `&worker=${encodeURIComponent(selectedWorkerId)}` : '';
+      const result = await apiBlob(`working-time/audit-docx/?year=${encodeURIComponent(reportYear)}${workerQuery}`);
+      triggerBlobDownload(result.blob, result.filename || `05_Pruefbericht_Arbeitszeit_Lexware_${reportYear}.docx`);
+    } catch (error: any) {
+      setMessage(error?.message || 'Prüfbericht konnte nicht erstellt werden.');
+    } finally {
+      setBusyId('');
+    }
+  }
+
   async function downloadPayrollPdf(row: PayrollRow) {
     setBusyId(`pdf:${row.worker_id}`);
     setMessage('');
@@ -579,6 +596,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
           <button type="button" className="payroll-secondary" onClick={() => void downloadExport('xlsx')} disabled={busyId === 'export:xlsx'}>02 Excel Gesamt</button>
           <button type="button" className="payroll-secondary" onClick={() => void downloadLexwareWord()} disabled={month === 'all' || busyId === 'export:lexware-word'}>03 Word Lexware</button>
           <button type="button" className="payroll-secondary" onClick={() => void downloadSelectedWorkerPdf()} disabled={!selectedWorkerId || busyId === 'export:worker-pdf'}>04 PDF Prüfnachweis</button>
+          <button type="button" className="payroll-secondary" onClick={() => void downloadAuditWord()} disabled={busyId === 'export:audit-word'}>05 Word Prüfbericht</button>
           <button type="button" onClick={() => setSettingsOpen(value => !value)}>{settingsOpen ? 'Stammdaten schließen' : 'Stammdaten'}</button>
         </div>
       </header>}
