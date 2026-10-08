@@ -625,6 +625,7 @@ def record_dict(
         row.year_month >= timezone.localdate().replace(day=1)
         and statement is None
         and dec(row.ist_hours) == Decimal('0.00')
+        and dec(row.manual_adjustment) == Decimal('0.00')
     )
     if is_open_month:
         balance_reference = Decimal('0.00')
