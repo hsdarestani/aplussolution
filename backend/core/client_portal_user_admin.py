@@ -121,13 +121,14 @@ def client_portal_user_detail(request, pk, user_pk):
     except (DjangoValidationError, ValueError) as exc:
         return Response({'detail': str(exc)}, status=400)
 
+    existing_access = ClientPortalAccess.objects.filter(user=user).first()
+    if existing_access and existing_access.client_id != client.id:
+        return Response({'detail': 'Dieser Zugang ist einem anderen Kunden zugeordnet.'}, status=409)
+
     with transaction.atomic():
         user.first_name, user.last_name, user.is_active = first_name, last_name, active
         user.save(update_fields=['first_name', 'last_name', 'is_active'])
         # Never transfer the identity between customer accounts.
-        access = ClientPortalAccess.objects.filter(user=user).first()
-        if access and access.client_id != client.id:
-            return Response({'detail': 'Dieser Zugang ist einem anderen Kunden zugeordnet.'}, status=409)
         ClientPortalAccess.objects.update_or_create(
             user=user, defaults={
                 'client': client, 'label': f'{first_name} {last_name}', 'read_only': read_only,
