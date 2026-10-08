@@ -5,7 +5,7 @@ import { FileViewer } from '@capacitor/file-viewer';
 export function pdfFilename(value: string) {
   const safe = String(value || 'Dienstplan.pdf')
     .replace(/[^a-zA-Z0-9._-]/g, '_')
-    .replace(/^\.+/, '')
+    .replace(/^[._-]+/, '')
     .slice(-120);
   return (safe || 'Dienstplan.pdf').replace(/\.pdf$/i, '') + '.pdf';
 }
