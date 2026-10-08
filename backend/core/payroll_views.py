@@ -418,34 +418,45 @@ def lexware_bank_import(request):
     if not uploads:
         return Response({'detail': 'Bitte Lexware PDF, CSV, ZIP oder SEPA XML auswählen.'}, status=400)
 
-    period_text = str(request.data.get('period') or '').strip()
-    if not re.fullmatch(r'\d{4}-\d{2}', period_text):
-        return Response({'detail': 'Abrechnungsmonat muss im Format JJJJ-MM angegeben werden.'}, status=400)
-    try:
-        period = datetime.strptime(period_text, '%Y-%m').date().replace(day=1)
-    except ValueError:
-        return Response({'detail': 'Ungültiger Abrechnungsmonat.'}, status=400)
+    uploads = _expand_lexware_package_uploads(uploads)
 
-    # Lexware standard filenames include the payroll month, e.g.
-    # Lohnabrechnungen_2026-09.pdf. Never silently book a September document
-    # into October just because the month picker was left unchanged.
-    detected_periods = set()
-    for upload in uploads:
-        source_name = str(getattr(upload, 'name', '') or '')
-        match = re.search(r'(20[0-9]{2})[-_](0[1-9]|1[0-2])', source_name)
-        if match:
-            detected_periods.add(f'{match.group(1)}-{match.group(2)}')
-    if len(detected_periods) > 1:
+    period_text = str(request.data.get('period') or '').strip()
+    auto_period = period_text.lower() == 'auto'
+    requested_year = str(request.data.get('year') or '').strip()
+    if requested_year and not re.fullmatch(r'20[0-9]{2}', requested_year):
+        return Response({'detail': 'Jahr muss im Format JJJJ angegeben werden.'}, status=400)
+
+    period = None
+    if not auto_period:
+        if not re.fullmatch(r'\d{4}-\d{2}', period_text):
+            return Response({'detail': 'Abrechnungsmonat muss im Format JJJJ-MM angegeben werden.'}, status=400)
+        try:
+            period = datetime.strptime(period_text, '%Y-%m').date().replace(day=1)
+        except ValueError:
+            return Response({'detail': 'Ungültiger Abrechnungsmonat.'}, status=400)
+
+    detected_periods = {
+        detected for detected in (
+            _filename_period(str(getattr(upload, 'name', '') or ''))
+            for upload in uploads
+        )
+        if detected
+    }
+    if not auto_period and len(detected_periods) > 1:
         return Response({
             'detail': 'Die ausgewählten Lexware Dateien gehören zu unterschiedlichen Abrechnungsmonaten.',
             'detected_periods': sorted(detected_periods),
         }, status=400)
-    if detected_periods and period_text not in detected_periods:
+    if not auto_period and detected_periods and period_text not in detected_periods:
         detected = next(iter(detected_periods))
         return Response({
             'detail': f'Die Lexware Datei gehört zu {detected}, ausgewählt ist aber {period_text}. Bitte den Abrechnungsmonat korrigieren.',
             'detected_period': detected,
         }, status=400)
+    if auto_period and not requested_year and detected_periods:
+        years = {value[:4] for value in detected_periods}
+        if len(years) == 1:
+            requested_year = next(iter(years))
 
     matchers = _employee_matchers()
     grouped = defaultdict(list)
