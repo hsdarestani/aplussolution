@@ -376,7 +376,14 @@ def sync_working_time(
                     item for item in list(statement.raw_data or [])
                     if item.get('kind') == 'payslip'
                 ] if statement else []
-                statement_payslip = statement_payslips[-1] if statement_payslips else {}
+                statement_payslip = (
+                    max(
+                        enumerate(statement_payslips),
+                        key=lambda pair: (bool(pair[1].get('is_correction')), pair[0]),
+                    )[1]
+                    if statement_payslips
+                    else {}
+                )
                 month_compensation_type = str(
                     statement_payslip.get('compensation_type')
                     or default_compensation_type
