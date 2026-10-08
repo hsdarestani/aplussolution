@@ -438,6 +438,7 @@ def sync_working_time(
                     month >= current_month
                     and statement is None
                     and ist == Decimal('0.00')
+                    and manual == Decimal('0.00')
                 )
                 saldo = (
                     carry
