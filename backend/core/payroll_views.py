@@ -195,6 +195,82 @@ def _bank_rows(upload) -> list[dict]:
     return _read_csv(name, payload)
 
 
+
+def _xml_local_name(element) -> str:
+    return str(getattr(element, 'tag', '') or '').rsplit('}', 1)[-1]
+
+
+def _xml_child(node, name):
+    if node is None:
+        return None
+    for child in list(node):
+        if _xml_local_name(child) == name:
+            return child
+    return None
+
+
+def _xml_path_text(node, *path) -> str:
+    current = node
+    for name in path:
+        current = _xml_child(current, name)
+        if current is None:
+            return ''
+    return str(current.text or '').strip()
+
+
+def _sepa_rows(name: str, payload: bytes) -> list[dict]:
+    try:
+        root = ET.fromstring(payload)
+    except ET.ParseError:
+        return []
+
+    rows = []
+    for payment_info in root.iter():
+        if _xml_local_name(payment_info) != 'PmtInf':
+            continue
+        execution_date = _xml_path_text(payment_info, 'ReqdExctnDt', 'Dt')
+        for tx in list(payment_info):
+            if _xml_local_name(tx) != 'CdtTrfTxInf':
+                continue
+            employee_name = _xml_path_text(tx, 'Cdtr', 'Nm')
+            iban = _xml_path_text(tx, 'CdtrAcct', 'Id', 'IBAN')
+            amount = _xml_path_text(tx, 'Amt', 'InstdAmt')
+            purpose = _xml_path_text(tx, 'RmtInf', 'Ustrd')
+            if not employee_name or not amount:
+                continue
+            rows.append({
+                'employee_name': employee_name,
+                'amount': amount,
+                'iban': iban,
+                'purpose': purpose,
+                'payment_date': execution_date or None,
+                '_source_file': name,
+            })
+    return rows
+
+
+def _archive_lexware_upload(upload, period_text: str, user) -> str | None:
+    name = str(getattr(upload, 'name', '') or 'Lexware Datei').strip()
+    title = f'Lexware {period_text} · {name}'[:250]
+    if Document.objects.filter(title=title, folder=Document.Folder.PAYROLL).exists():
+        return None
+    try:
+        upload.seek(0)
+        Document.objects.create(
+            title=title,
+            file=upload,
+            folder=Document.Folder.PAYROLL,
+            visibility=Document.Visibility.ADMIN,
+            uploaded_by=user,
+        )
+        return title
+    finally:
+        try:
+            upload.seek(0)
+        except Exception:
+            pass
+
+
 def _row_value(row: dict, candidates: tuple[str, ...]):
     normalized = {_norm(key): value for key, value in row.items() if not key.startswith('_')}
     for candidate in candidates:
