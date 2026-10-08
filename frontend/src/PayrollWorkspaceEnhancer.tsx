@@ -268,14 +268,18 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         && Number(readinessResponse?.optional_documents?.u1 || 0) > 0
       ) {
         archiveBackfillAttempted.current = true;
-        const backfillYear = String(readinessResponse?.year || currentMonth().slice(0, 4));
-        const backfill: any = await api('working-time/lexware-backfill/', {
-          method: 'POST',
-          body: JSON.stringify({ year: backfillYear }),
-        });
-        if (Number(backfill?.attached || 0) > 0) {
-          ({ response, settingsResponse, readinessResponse } = await fetchWorkspaceData());
-          nextRows = (response?.results || response || []) as PayrollRow[];
+        try {
+          const backfillYear = String(readinessResponse?.year || currentMonth().slice(0, 4));
+          const backfill: any = await api('working-time/lexware-backfill/', {
+            method: 'POST',
+            body: JSON.stringify({ year: backfillYear }),
+          });
+          if (Number(backfill?.attached || 0) > 0) {
+            ({ response, settingsResponse, readinessResponse } = await fetchWorkspaceData());
+            nextRows = (response?.results || response || []) as PayrollRow[];
+          }
+        } catch {
+          // Archive enrichment is best effort and must never block the payroll workspace.
         }
       }
 
