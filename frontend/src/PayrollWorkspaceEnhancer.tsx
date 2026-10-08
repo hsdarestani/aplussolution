@@ -73,6 +73,7 @@ type PayrollEntry = {
   night_minutes?: number;
   saturday_minutes?: number;
   sunday_minutes?: number;
+  notes?: string;
   clock_out_rollover_corrected?: boolean;
   source?: string;
 };
@@ -913,7 +914,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
                 {!detail && <div className="payroll-detail-loading">Tagesdetails werden geladen.</div>}
                 {!!detail?.entries?.length && <div className="payroll-daily-table" role="table" aria-label={`Tagesnachweis ${row.employee_name} ${row.year_month}`}>
                   <div className="payroll-daily-row payroll-daily-header" role="row">
-                    <span>Datum</span><span>Kunde</span><span>Plan</span><span>Ist</span><span>Pause</span><span>Netto</span><span>Nacht</span><span>Sa</span><span>So</span>
+                    <span>Datum</span><span>Kunde</span><span>Plan</span><span>Ist</span><span>Pause</span><span>Netto</span><span>Nacht</span><span>Sa</span><span>So</span><span>Notiz</span>
                   </div>
                   {detail.entries.map(entry => <div className="payroll-daily-row" role="row" key={entry.id}>
                     <span>{dateLabel(entry.local_clock_in)}</span>
@@ -925,6 +926,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
                     <span>{hoursFromMinutes(entry.night_minutes)}</span>
                     <span>{hoursFromMinutes(entry.saturday_minutes)}</span>
                     <span>{hoursFromMinutes(entry.sunday_minutes)}</span>
+                    <span>{entry.notes || '–'}</span>
                   </div>)}
                 </div>}
                 {detail && !detail.entries?.length && <div className="payroll-empty compact">Keine Tageszeiten in diesem Monat.</div>}
