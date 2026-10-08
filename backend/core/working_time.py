@@ -813,6 +813,7 @@ def export_csv(queryset) -> HttpResponse:
         'Abgleich Status', 'Prüfhinweise', 'Nacht Abgleich',
         'Samstag Abgleich', 'Sonntag Abgleich',
         'Abwesenheit Tage', 'Urlaub Tage', 'Krank Tage', 'Sonstige Abwesenheit Tage',
+        'Lexware Krank Stunden', 'Lexware U1 Erstattung',
     ])
     for row in rows:
         statement = statements.get((str(row.worker_id), row.year_month))
@@ -843,6 +844,8 @@ def export_csv(queryset) -> HttpResponse:
             data.get('vacation_days') or 0,
             data.get('sick_days') or 0,
             data.get('other_absence_days') or 0,
+            payroll.get('lexware_sick_hours') or '',
+            payroll.get('lexware_u1_reimbursement') or '',
         ])
     response = HttpResponse('\ufeff' + output.getvalue(), content_type='text/csv; charset=utf-8')
     response['Content-Disposition'] = 'attachment; filename="arbeitszeit-lohnkonto.csv"'
@@ -866,6 +869,7 @@ def export_xlsx(queryset) -> HttpResponse:
         'Abgleich Status', 'Prüfhinweise', 'Nacht Abgleich',
         'Samstag Abgleich', 'Sonntag Abgleich',
         'Abwesenheit Tage', 'Urlaub Tage', 'Krank Tage', 'Sonstige Abwesenheit Tage',
+        'Lexware Krank Stunden', 'Lexware U1 Erstattung',
     ]
     ws.append(headers)
     for row in rows:
@@ -899,6 +903,8 @@ def export_xlsx(queryset) -> HttpResponse:
             int(data.get('vacation_days') or 0),
             int(data.get('sick_days') or 0),
             int(data.get('other_absence_days') or 0),
+            float(payroll.get('lexware_sick_hours')) if payroll.get('lexware_sick_hours') else None,
+            float(payroll.get('lexware_u1_reimbursement')) if payroll.get('lexware_u1_reimbursement') else None,
         ])
     for column in ws.columns:
         ws.column_dimensions[column[0].column_letter].width = min(max(len(str(cell.value or '')) for cell in column) + 2, 32)
