@@ -1208,3 +1208,84 @@ def test_lexware_sepa_xml_does_not_double_count_payment_list(auth_admin, worker_
     }
     assert len(response.data['archived_documents']) == 2
     assert Document.objects.filter(folder='payroll', visibility='admin').count() >= 2
+
+
+@pytest.mark.django_db
+def test_cross_month_correction_payslip_updates_original_period(auth_admin, worker_user):
+    import io
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from reportlab.pdfgen import canvas
+
+    buffer = io.BytesIO()
+    doc = canvas.Canvas(buffer)
+
+    def page(lines):
+        y = 800
+        for line in lines:
+            doc.drawString(40, y, line)
+            y -= 18
+        doc.showPage()
+
+    page([
+        'Korrekturabrechnung für Juni 2026 - Anna Becker',
+        'erstellt mit Lexware Seite 1 von 1',
+        'Personal-Nr. Geburtsdatum Steuerklasse Konfession',
+        '14 01.01.1990 1 ohne',
+        'Entgelt',
+        'Bezeichnung Kennz Menge Faktor Prozentsatz Betrag',
+        'Lohn LSG 10,00 15,50 € 155,00 €',
+        'Gesamtbrutto 155,00 €',
+        'Netto 140,00 €',
+        'Persönliche Be-/Abzüge',
+        'Vorschuss aus Überzahlung 15,00 €',
+        'Bereits abgerechnete Auszahlung -155,00 €',
+        'Auszahlungsbetrag 0,00 €',
+    ])
+    page([
+        'Abrechnung für Juli 2026 - Anna Becker',
+        'erstellt mit Lexware Seite 1 von 1',
+        'Personal-Nr. Geburtsdatum Steuerklasse Konfession',
+        '14 01.01.1990 1 ohne',
+        'Entgelt',
+        'Bezeichnung Kennz Menge Faktor Prozentsatz Betrag',
+        'Lohn LSG 20,00 15,50 € 310,00 €',
+        'Gesamtbrutto 310,00 €',
+        'Netto 310,00 €',
+        'Auszahlungsbetrag 310,00 €',
+    ])
+    doc.save()
+
+    upload = SimpleUploadedFile(
+        'Lohnabrechnungen_2026-07.pdf',
+        buffer.getvalue(),
+        content_type='application/pdf',
+    )
+
+    response = auth_admin.post(
+        '/api/working-time/lexware-import/',
+        {'period': '2026-07', 'file': upload},
+        format='multipart',
+    )
+
+    assert response.status_code == 200
+    june = PayrollStatement.objects.get(
+        worker=worker_user.worker_profile,
+        period=date(2026, 6, 1),
+    )
+    july = PayrollStatement.objects.get(
+        worker=worker_user.worker_profile,
+        period=date(2026, 7, 1),
+    )
+    assert june.gross_amount == Decimal('155.00')
+    assert june.net_amount == Decimal('140.00')
+    assert june.raw_data[0]['is_correction'] is True
+    assert june.raw_data[0]['period'] == '2026-06'
+    assert june.raw_data[0]['personal_adjustments'] == [
+        {'label': 'Vorschuss aus Überzahlung', 'amount': '15.00'},
+        {'label': 'Bereits abgerechnete Auszahlung', 'amount': '-155.00'},
+    ]
+    assert july.gross_amount == Decimal('310.00')
+    assert july.net_amount == Decimal('310.00')
+    assert july.raw_data[0]['is_correction'] is False
+    assert july.raw_data[0]['period'] == '2026-07'
