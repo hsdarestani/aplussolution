@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api, apiBlob } from './api';
 import { saveSchedulePdf } from './saveSchedulePdf';
+import { openPdfDocument } from './openPdfDocument';
 import './shift-plan-attachments.css';
 
 type Plan = {
@@ -172,6 +173,9 @@ export function ShiftPlanAttachments({
     setMessage('');
     try {
       const result = await apiBlob(planPath(plan.view_url || plan.download_url));
+      // Present PDF using iOS native document viewer, outside the app shell.
+      // Keep the browser-only iframe fallback for desktop web users.
+      if (await openPdfDocument(result.blob, result.filename || plan.name)) return;
       const url = URL.createObjectURL(result.blob);
       setPreviewZoom(1);
       setPreview((current) => {
