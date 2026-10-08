@@ -447,6 +447,23 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     }
   }
 
+  async function downloadSelectedWorkerPdf() {
+    if (!selectedWorkerId) {
+      setMessage('Bitte zuerst einen Mitarbeiter auswählen.');
+      return;
+    }
+    setBusyId('export:worker-pdf');
+    setMessage('');
+    try {
+      const result = await apiBlob(`working-time/pdf/${selectedWorkerId}/`);
+      triggerBlobDownload(result.blob, result.filename || '04_Pruefnachweis_Mitarbeiter.pdf');
+    } catch (error: any) {
+      setMessage(error?.message || 'Prüfnachweis konnte nicht erstellt werden.');
+    } finally {
+      setBusyId('');
+    }
+  }
+
   async function downloadPayrollPdf(row: PayrollRow) {
     setBusyId(`pdf:${row.worker_id}`);
     setMessage('');
@@ -561,6 +578,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
           <button type="button" className="payroll-secondary" onClick={() => void downloadArbeitszeitWord()} disabled={!selectedWorkerId || busyId === 'export:arbeitszeit-word'}>01 Word Arbeitszeit</button>
           <button type="button" className="payroll-secondary" onClick={() => void downloadExport('xlsx')} disabled={busyId === 'export:xlsx'}>02 Excel Gesamt</button>
           <button type="button" className="payroll-secondary" onClick={() => void downloadLexwareWord()} disabled={month === 'all' || busyId === 'export:lexware-word'}>03 Word Lexware</button>
+          <button type="button" className="payroll-secondary" onClick={() => void downloadSelectedWorkerPdf()} disabled={!selectedWorkerId || busyId === 'export:worker-pdf'}>04 PDF Prüfnachweis</button>
           <button type="button" onClick={() => setSettingsOpen(value => !value)}>{settingsOpen ? 'Stammdaten schließen' : 'Stammdaten'}</button>
         </div>
       </header>}
