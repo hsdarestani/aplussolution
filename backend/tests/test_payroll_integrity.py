@@ -2121,3 +2121,35 @@ def test_lexware_readiness_marks_complete_closed_month_package():
     assert january['core_complete'] is True
     assert readiness['annual_documents']['lohnkonto'] is True
     assert readiness['annual_documents']['lohnkonto_uv'] is True
+
+
+@pytest.mark.django_db
+def test_payroll_audit_docx_generates_with_absence_columns(worker_user):
+    from core.working_time import payroll_audit_docx
+
+    worker = worker_user.worker_profile
+    WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=date(2026, 9, 1),
+        ist_hours=Decimal('20.00'),
+        soll_hours=Decimal('20.00'),
+        paid_total_hours=Decimal('20.00'),
+        saldo_cumulative=Decimal('0.00'),
+        hourly_rate=Decimal('15.50'),
+        gross_amount=Decimal('310.00'),
+    )
+    payload = payroll_audit_docx(
+        WorkingTimeAccountRecord.objects.filter(worker=worker, year_month__year=2026),
+        2026,
+        {
+            'core_documents_present': 45,
+            'core_documents_expected': 45,
+            'complete_months': 9,
+            'expected_months': 9,
+            'annual_complete': True,
+            'no_additional_import_required': True,
+            'months': [],
+        },
+    )
+
+    assert payload[:2] == b'PK'
