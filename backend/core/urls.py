@@ -139,6 +139,7 @@ urlpatterns = [
     path('working-time/records/<uuid:pk>/details/', automation_views.worktime_record_detail),
     path('working-time/rebuild-all/', automation_views.worktime_rebuild_all),
     path('working-time/lexware-import/', payroll_views.lexware_bank_import),
+    path('working-time/lexware-readiness/', payroll_views.lexware_readiness),
     path('working-time/export/<str:file_format>/', automation_views.worktime_export),
     path('working-time/pdf/<uuid:worker_id>/', automation_views.worktime_pdf),
     path('working-time/docx/<uuid:worker_id>/', automation_views.worktime_docx),
