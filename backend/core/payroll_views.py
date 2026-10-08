@@ -819,6 +819,21 @@ def lexware_bank_import(request):
             'evidence_items': len(merged),
         })
 
+    unmatched_unique = []
+    seen_unmatched = set()
+    for item in unmatched:
+        label = ' '.join(str(item.get('text') or '').split()).strip()
+        if not label:
+            continue
+        key = _normalize(label)
+        if key in seen_unmatched:
+            continue
+        seen_unmatched.add(key)
+        unmatched_unique.append({
+            'text': label,
+            'file': item.get('file') or '',
+        })
+
     audit(request, 'payroll.lexware_imported', request.user, {
         'period': period_text,
         'year': requested_year,
@@ -826,6 +841,7 @@ def lexware_bank_import(request):
         'rows': parsed_rows,
         'files': len(uploads),
         'unmatched': len(unmatched),
+        'unmatched_unique': len(unmatched_unique),
     })
     return Response({
         'status': 'ok',
@@ -836,7 +852,8 @@ def lexware_bank_import(request):
         'rows': parsed_rows,
         'employees': imported,
         'unmatched_count': len(unmatched),
-        'unmatched_preview': unmatched[:20],
+        'unmatched_unique_count': len(unmatched_unique),
+        'unmatched_preview': unmatched_unique[:20],
         'archived_documents': archived_documents,
         'archived_only': archived_only,
         'skipped_historical_corrections': skipped_historical_corrections,
