@@ -667,7 +667,14 @@ def lexware_bank_import(request):
             or (not item.get('kind') and item.get('amount') is not None)
         ]
         payslip_items = [item for item in merged if item.get('kind') == 'payslip']
-        latest_payslip = payslip_items[-1] if payslip_items else None
+        latest_payslip = (
+            max(
+                enumerate(payslip_items),
+                key=lambda pair: (bool(pair[1].get('is_correction')), pair[0]),
+            )[1]
+            if payslip_items
+            else None
+        )
 
         # Do not double count the same salary when several Lexware payment
         # evidences are imported. Prefer actual bank export, then SEPA order,
