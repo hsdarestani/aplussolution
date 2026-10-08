@@ -541,6 +541,18 @@ def record_dict(
     }
 
     contract_issues = []
+    master_data = _worker_master_data(row.worker)
+    latest_master_period = str(master_data.get('lexware_latest_payroll_period') or '').strip()
+    is_current_master_period = (
+        not latest_master_period
+        or row.year_month.strftime('%Y-%m') == latest_master_period
+    )
+
+    # Current master data must not be compared against old payroll months.
+    # Employees can legitimately move from hourly/minijob to salary/full-time,
+    # as happened in the imported 2026 history. Historical Lexware payslips are
+    # authoritative for their own month; only the latest payroll month is
+    # checked against the current A+ master data.
     app_compensation = _compensation_type(row.worker)
     lexware_compensation = str(
         (payroll_statement or {}).get('lexware_compensation_type') or ''
@@ -549,7 +561,7 @@ def record_dict(
         'salary': 'Gehalt',
         'hourly': 'Stundenlohn',
     }
-    if lexware_compensation:
+    if is_current_master_period and lexware_compensation:
         if app_compensation and lexware_compensation != app_compensation:
             contract_issues.append(
                 'Vergütungsart stimmt nicht überein: '
@@ -562,9 +574,12 @@ def record_dict(
                 f"Lexware weist {compensation_labels.get(lexware_compensation, lexware_compensation)} aus."
             )
 
-    master_data = _worker_master_data(row.worker)
     lexware_employment = str(master_data.get('employment_type_lexware') or '').strip().lower()
-    if 'minijob' in lexware_employment and employment_type != WorkerProfile.EmploymentType.MINI:
+    if (
+        is_current_master_period
+        and 'minijob' in lexware_employment
+        and employment_type != WorkerProfile.EmploymentType.MINI
+    ):
         contract_issues.append(
             f'Lexware Stammdaten weisen Minijob aus, A+ ist als {employment_type} gespeichert.'
         )
