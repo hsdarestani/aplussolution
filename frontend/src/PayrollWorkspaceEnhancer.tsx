@@ -601,7 +601,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
           </div>
           <div className="payroll-tool-card payroll-lexware-card">
             <span className="payroll-tool-index">L</span>
-            <div><b>Lexware übernehmen</b><small>Lohnabrechnungen PDF, Zahlungsliste PDF oder CSV/ZIP gemeinsam importieren.</small></div>
+            <div><b>Lexware übernehmen</b><small>Einzelmonat oder komplettes Jahrespaket als ZIP. PDF, SEPA XML und Bankdateien werden automatisch dem richtigen Monat zugeordnet.</small></div>
             <div className="payroll-lexware-fields">
               <input aria-label="Lexware Abrechnungsmonat" type="month" value={lexwarePeriod} onChange={event => setLexwarePeriod(event.target.value)} />
               <input
