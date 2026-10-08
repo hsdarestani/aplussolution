@@ -226,10 +226,95 @@ def parse_payment_list(payload: bytes) -> list[dict]:
     return results
 
 
+def _named_period(text: str, prefix: str) -> str:
+    match = re.search(
+        rf'{prefix}\s+([A-Za-zÄÖÜäöüß]+)\s+(20\d{{2}})',
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return ''
+    month_name = match.group(1).lower().replace('ä', 'ae')
+    month = _GERMAN_MONTHS.get(month_name) or _GERMAN_MONTHS.get(match.group(1).lower())
+    return f'{match.group(2)}-{month}' if month else ''
+
+
+def parse_u1(payload: bytes) -> list[dict]:
+    results = []
+    for page_number, text in enumerate(_pages(payload), start=1):
+        if not re.search(r'Erstattungsantrag\s+U1', text, flags=re.IGNORECASE):
+            continue
+        employee_match = re.search(
+            r'(?m)^([^\n,]+),\s*PNr:\s*([^,\s]+)',
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not employee_match:
+            continue
+        employee_name = ' '.join(employee_match.group(1).split())
+        personal_number = employee_match.group(2).strip()
+
+        period = _named_period(text, r'Erstattungsantrag\s+U1(?:-Krankheit)?')
+        date_match = re.search(
+            r'Erstattungszeitraum\s+von\s+Erstattungszeitraum\s+bis\s+Erstattungsbetrag\s+'
+            r'(\d{2}\.\d{2}\.\d{4})\s+(\d{2}\.\d{2}\.\d{4})\s+(' + _MONEY + r')\s*€',
+            ' '.join(text.split()),
+            flags=re.IGNORECASE,
+        )
+        if not date_match:
+            dates = re.findall(r'\b\d{2}\.\d{2}\.\d{4}\b', text)
+            start_date = dates[0] if len(dates) > 0 else ''
+            end_date = dates[1] if len(dates) > 1 else ''
+            reimbursement = None
+        else:
+            start_date = date_match.group(1)
+            end_date = date_match.group(2)
+            reimbursement = _money(date_match.group(3))
+
+        hourly_match = re.search(r'Entgelt\s+(' + _MONEY + r')\s*€\s*Stundenlohn', text, flags=re.IGNORECASE)
+        absence_match = re.search(r'Ausfallzeit\s+([0-9]+(?:,[0-9]+)?)\s*Stunden', text, flags=re.IGNORECASE)
+        work_match = re.search(
+            r'Arbeitszeit\s+([0-9]+(?:,[0-9]+)?)\s*h\s*wöchentlich\s*/\s*([0-9]+(?:,[0-9]+)?)\s*h\s*täglich',
+            text,
+            flags=re.IGNORECASE,
+        )
+        continued_match = re.search(r'Fortgezahltes\s+Entgelt\s+(' + _MONEY + r')\s*€', text, flags=re.IGNORECASE)
+        rate_match = re.search(r'Erstattungssatz\s+([0-9]+(?:,[0-9]+)?)\s*%', text, flags=re.IGNORECASE)
+
+        if reimbursement is None:
+            amount_match = re.search(
+                r'Erstattungsbetrag\s+(?:soll|wurde).*?(' + _MONEY + r')\s*€',
+                text,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            reimbursement = _money(amount_match.group(1)) if amount_match else None
+
+        results.append({
+            'kind': 'absence_evidence',
+            'absence_type': 'sick',
+            'employee_name': employee_name,
+            'personal_number': personal_number,
+            'period': period,
+            'date_from': start_date,
+            'date_to': end_date,
+            'reimbursement_amount': str(reimbursement) if reimbursement is not None else None,
+            'hourly_rate': str(_money(hourly_match.group(1))) if hourly_match else None,
+            'absence_hours': str(_money(absence_match.group(1))) if absence_match else None,
+            'weekly_hours': str(_money(work_match.group(1))) if work_match else None,
+            'daily_hours': str(_money(work_match.group(2))) if work_match else None,
+            'continued_pay': str(_money(continued_match.group(1))) if continued_match else None,
+            'reimbursement_percent': str(_money(rate_match.group(1))) if rate_match else None,
+            'page': page_number,
+        })
+    return results
+
+
 def parse_lexware_pdf(payload: bytes) -> tuple[str, list[dict]]:
     pages = _pages(payload)
     text = '\n'.join(pages)
     normalized = text.lower()
+    if 'erstattungsantrag u1' in normalized:
+        return 'u1', parse_u1(payload)
     if 'zahlungsliste' in normalized:
         return 'zahlungsliste', parse_payment_list(payload)
     if 'abrechnung für' in normalized:
