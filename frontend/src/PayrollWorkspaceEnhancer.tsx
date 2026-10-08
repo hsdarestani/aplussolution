@@ -530,7 +530,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     setBusyId(`pdf:${row.worker_id}`);
     setMessage('');
     try {
-      const result = await apiBlob(`working-time/pdf/${row.worker_id}/`);
+      const result = await apiBlob(`working-time/pdf/${row.worker_id}/?year=${encodeURIComponent(row.year_month.slice(0, 4))}`);
       triggerBlobDownload(result.blob, result.filename || `Arbeitszeitkonto_${row.employee_number || row.worker_id}.pdf`);
     } catch (error: any) {
       setMessage(error?.message || 'PDF konnte nicht erstellt werden.');
