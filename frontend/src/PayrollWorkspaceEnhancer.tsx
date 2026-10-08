@@ -430,19 +430,48 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   }
 
   async function importLexware() {
-    if (!lexwareFiles.length || !lexwarePeriod) {
-      setMessage('Bitte Abrechnungsmonat und mindestens eine Lexware Datei auswählen.');
+    if (!lexwareFiles.length) {
+      setMessage('Bitte mindestens eine Lexware Datei auswählen.');
       return;
     }
+    const detectedPeriods = Array.from(new Set(lexwareFiles
+      .map(file => file.name.match(/(20[0-9]{2})[-_](0[1-9]|1[0-2])/))
+      .filter(Boolean)
+      .map(match => `${match?.[1]}-${match?.[2]}`)));
+    const containsPackageZip = lexwareFiles.some(file => file.name.toLowerCase().endsWith('.zip'));
+    const autoMode = containsPackageZip || detectedPeriods.length > 1;
+    if (!autoMode && !lexwarePeriod) {
+      setMessage('Bitte Abrechnungsmonat auswählen.');
+      return;
+    }
+
     setLexwareBusy(true);
     setMessage('');
     try {
       const form = new FormData();
-      form.append('period', lexwarePeriod);
+      form.append('period', autoMode ? 'auto' : lexwarePeriod);
+      const years = Array.from(new Set([
+        ...detectedPeriods.map(item => item.slice(0, 4)),
+        ...lexwareFiles
+          .map(file => file.name.match(/(20[0-9]{2})/))
+          .filter(Boolean)
+          .map(match => String(match?.[1] || '')),
+      ].filter(Boolean)));
+      if (autoMode && years.length === 1) form.append('year', years[0]);
       lexwareFiles.forEach(file => form.append('files', file));
+
       const result: any = await api('working-time/lexware-import/', { method: 'POST', body: form });
       await loadRows();
-      setMessage(`Lexware Import abgeschlossen. ${result?.files || lexwareFiles.length} Datei(en), ${result?.employees?.length || 0} Mitarbeiter zugeordnet, ${result?.unmatched_count || 0} nicht zugeordnet.`);
+      const archived = Array.isArray(result?.archived_documents) ? result.archived_documents.length : 0;
+      const periods = Array.isArray(result?.detected_periods) && result.detected_periods.length
+        ? result.detected_periods.map((item: string) => monthLabel(item)).join(', ')
+        : (lexwarePeriod ? monthLabel(lexwarePeriod) : '');
+      setMessage(
+        `Lexware Import abgeschlossen${periods ? ` (${periods})` : ''}. ` +
+        `${result?.files || lexwareFiles.length} Datei(en), ` +
+        `${result?.employees?.length || 0} Mitarbeiter Monatszuordnungen, ` +
+        `${archived} Nachweise archiviert, ${result?.unmatched_count || 0} nicht zugeordnet.`
+      );
       setLexwareFiles([]);
     } catch (error: any) {
       setMessage(error?.message || 'Lexware Import konnte nicht verarbeitet werden.');
@@ -591,7 +620,9 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
                     setLexwarePeriod(periods[0]);
                     setMessage(`Abrechnungsmonat automatisch erkannt: ${monthLabel(periods[0])}.`);
                   } else if (periods.length > 1) {
-                    setMessage('Die ausgewählten Lexware Dateien gehören zu unterschiedlichen Abrechnungsmonaten.');
+                    setMessage(`Jahresimport erkannt: ${periods.length} Abrechnungsmonate werden automatisch getrennt verarbeitet.`);
+                  } else if (files.some(file => file.name.toLowerCase().endsWith('.zip'))) {
+                    setMessage('Lexware Jahrespaket erkannt. Monate werden beim Import automatisch aus den enthaltenen Dateien erkannt.');
                   }
                 }}
               />
