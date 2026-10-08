@@ -168,9 +168,14 @@ def parse_payment_list(payload: bytes) -> list[dict]:
     for page_number, text in enumerate(_pages(payload), start=1):
         for line in text.splitlines():
             clean = ' '.join(line.split())
-            if 'Lohn & Gehalt' not in clean:
+            if not re.search(r'\bLohn\s*(?:&|und)\s*Gehalt\b', clean, flags=re.IGNORECASE):
                 continue
-            parts = re.split(r'\s+Lohn\s*&\s*Gehalt\s+', clean, maxsplit=1, flags=re.IGNORECASE)
+            parts = re.split(
+                r'\s+Lohn\s*(?:&|und)\s*Gehalt\s+',
+                clean,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )
             if len(parts) != 2:
                 continue
             employee_name = parts[0].strip()
