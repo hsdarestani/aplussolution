@@ -589,6 +589,13 @@ def lexware_bank_import(request):
                 archived_documents.append(archived_title)
             continue
 
+        if not file_period_text or file_period is None:
+            unmatched.append({'file': name, 'text': 'Abrechnungsmonat für Bankdatei nicht erkennbar'})
+            archived_title = _archive_lexware_upload(upload, archive_period_label, request.user)
+            if archived_title:
+                archived_documents.append(archived_title)
+            continue
+
         try:
             rows = _bank_rows(upload)
         except Exception as exc:
@@ -612,7 +619,7 @@ def lexware_bank_import(request):
 
             payment_date = _parse_bank_date(_row_value(row, (
                 'Buchungsdatum', 'Belegdatum', 'Datum', 'Wertstellung', 'Date', 'Transaction date',
-            )), period)
+            )), file_period)
             purpose = str(_row_value(row, (
                 'Verwendungszweck', 'Buchungstext', 'Beschreibung', 'Text', 'Purpose',
                 'Auftraggeber/Empfänger', 'Zahlungspflichtiger/Zahlungsempfänger',
@@ -623,7 +630,7 @@ def lexware_bank_import(request):
             )) or '')
             amount = abs(amount).quantize(Decimal('0.01'))
             key_source = f'{row.get("_source_file",name)}|{payment_date}|{amount}|{recipient}|{purpose}'
-            grouped[(worker.id, period_text)].append({
+            grouped[(worker.id, file_period_text)].append({
                 'kind': 'payment',
                 'key': hashlib.sha256(key_source.encode('utf-8')).hexdigest(),
                 'amount': str(amount),
