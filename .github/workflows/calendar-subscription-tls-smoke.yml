@@ -1,0 +1,33 @@
+name: Apple Calendar public feed TLS smoke
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/calendar-subscription-tls-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate externally reachable HTTPS feed
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://app.aplus-solution.de/api/calendar/feed/not-a-valid-token.ics'
+          # A public feed must pass TLS hostname verification and reach Django.
+          # 404 is expected for a deliberately invalid token; 200/redirect,
+          # certificate errors and origin failures are not accepted.
+          code=$(curl --silent --show-error --location --max-time 20 --output /tmp/feed-response --write-out '%{http_code}' "$url")
+          echo "App feed HTTPS HTTP status: $code"
+          test "$code" = "404"
+      - name: Verify backup calendar hostname certificate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://solution.smarbiz.sbs/api/calendar/feed/not-a-valid-token.ics'
+          code=$(curl --silent --show-error --location --max-time 20 --output /tmp/backup-feed-response --write-out '%{http_code}' "$url")
+          echo "Fallback feed HTTPS HTTP status: $code"
+          test "$code" = "404"
