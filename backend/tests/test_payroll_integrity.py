@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from django.utils import timezone
 
-from core.models import EmployeeMasterData, PayrollStatement, Shift, TimeEntry, WorkingTimeAccountRecord, WorkingTimeSetting
+from core.models import Document, EmployeeMasterData, PayrollStatement, Shift, TimeEntry, TimeOffRequest, WorkingTimeAccountRecord, WorkingTimeSetting
 from core.native_cutover import sync_working_time
 from core.payroll_engine import effective_hourly_rate
 
@@ -2021,3 +2021,104 @@ def test_open_current_payroll_month_does_not_accrue_full_salary_deficit(
     assert data['monthly_balance_hours'] == '0.00'
     assert data['saldo_cumulative'] == '0.00'
     assert data['reconciliation_status'] == 'LAUFEND'
+
+
+def test_lexware_u1_parser_extracts_sickness_evidence():
+    import io
+
+    from reportlab.pdfgen import canvas
+    from core.lexware_pdf import parse_lexware_pdf
+
+    buffer = io.BytesIO()
+    doc = canvas.Canvas(buffer)
+    lines = [
+        'Erstattungsantrag U1-Krankheit September 2026',
+        'A+ Solution GmbH, Carl-Sonnenschein Strasse 57, 65936 Frankfurt am Main',
+        'Arina Martynko, PNr: 6, Zwingenberger Strasse 3, 68519 Viernheim',
+        'Erstattungszeitraum von Erstattungszeitraum bis Erstattungsbetrag',
+        '15.09.2026 16.09.2026 73,05 €',
+        'Entgelt 16,19 € Stundenlohn',
+        'Ausfallzeit 5,64 Stunden',
+        'Arbeitszeit 19,77 h wöchentlich / 2,82 h täglich',
+        'Fortgezahltes Entgelt 91,31 €',
+        'Erstattungssatz 80 %',
+    ]
+    for index, line in enumerate(lines):
+        doc.drawString(40, 800 - index * 18, line)
+    doc.save()
+
+    document_type, rows = parse_lexware_pdf(buffer.getvalue())
+
+    assert document_type == 'u1'
+    assert len(rows) == 1
+    assert rows[0]['employee_name'] == 'Arina Martynko'
+    assert rows[0]['period'] == '2026-09'
+    assert rows[0]['date_from'] == '15.09.2026'
+    assert rows[0]['date_to'] == '16.09.2026'
+    assert rows[0]['absence_hours'] == '5.64'
+    assert rows[0]['continued_pay'] == '91.31'
+    assert rows[0]['reimbursement_amount'] == '73.05'
+
+
+@pytest.mark.django_db
+def test_absence_summary_is_visible_without_changing_saldo(worker_user):
+    from core.working_time import absence_summary_map, record_dict
+
+    worker = worker_user.worker_profile
+    TimeOffRequest.objects.create(
+        worker=worker,
+        starts_on=date(2026, 9, 15),
+        ends_on=date(2026, 9, 16),
+        reason='Krankheit',
+        status=TimeOffRequest.Status.APPROVED,
+    )
+    record = WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=date(2026, 9, 1),
+        ist_hours=Decimal('20.00'),
+        soll_hours=Decimal('20.00'),
+        paid_total_hours=Decimal('20.00'),
+        saldo_cumulative=Decimal('0.00'),
+        hourly_rate=Decimal('15.50'),
+        gross_amount=Decimal('310.00'),
+    )
+    summary = absence_summary_map([record])
+    data = record_dict(
+        record,
+        absence_summary=summary[(str(worker.id), date(2026, 9, 1))],
+    )
+
+    assert data['absence_days'] == 2
+    assert data['sick_days'] == 2
+    assert data['vacation_days'] == 0
+    assert data['saldo_cumulative'] == '0.00'
+
+
+@pytest.mark.django_db
+def test_lexware_readiness_marks_complete_closed_month_package(auth_admin):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from core.payroll_views import lexware_readiness_payload
+
+    for filename in (
+        'Lohnabrechnungen_2026-01.pdf',
+        'Zahlungsliste_2026-01.pdf',
+        '2026-01_Lohnjournal.pdf',
+        'SEPA_Ueberweisungstraeger_2026-01.xml',
+        'Meldebescheinigungen_2026-01.pdf',
+        'Lohnkonto.pdf',
+        'Lohnkonto-UV_2026.pdf',
+    ):
+        Document.objects.create(
+            title=f'Lexware 2026-01 · {filename}' if '2026-01' in filename else f'Lexware 2026 · {filename}',
+            file=SimpleUploadedFile(filename, b'test'),
+            folder=Document.Folder.PAYROLL,
+            visibility=Document.Visibility.ADMIN,
+            uploaded_by=auth_admin.handler._force_user,
+        )
+
+    readiness = lexware_readiness_payload(2026)
+
+    january = next(item for item in readiness['months'] if item['period'] == '2026-01')
+    assert january['core_complete'] is True
+    assert readiness['annual_documents']['lohnkonto'] is True
+    assert readiness['annual_documents']['lohnkonto_uv'] is True
