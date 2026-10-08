@@ -1343,12 +1343,25 @@ def test_full_year_zip_import_splits_months_and_archives_unknown_pdfs(auth_admin
         'A+ Solution GmbH',
         'Gesamtsumme 123,45',
     ])
+    prior_year_correction = make_pdf([
+        'Korrekturabrechnung für Dezember 2025 - Anna Becker',
+        'Personal-Nr. Geburtsdatum Steuerklasse Konfession',
+        'MA-001 01.01.1990 1 ohne',
+        'Entgelt',
+        'Bezeichnung Kennz Menge Faktor Prozentsatz Betrag',
+        'Lohn LSG 10,00 15,50 € 155,00 €',
+        'Gesamtbrutto 155,00 €',
+        'Netto 155,00 €',
+        'Bereits abgerechnete Auszahlung -155,00 €',
+        'Auszahlungsbetrag 0,00 €',
+    ])
 
     bundle = io.BytesIO()
     with zipfile.ZipFile(bundle, 'w', zipfile.ZIP_DEFLATED) as archive:
         archive.writestr('01/Zahlungsliste_2026-01.pdf', january)
         archive.writestr('02/Zahlungsliste_2026-02.pdf', february)
         archive.writestr('01/2026-01_Lohnjournal.pdf', journal)
+        archive.writestr('02/Lohnabrechnungen_2026-02.pdf', prior_year_correction)
 
     upload = SimpleUploadedFile(
         'Aplus_Lexware_2026.zip',
@@ -1370,4 +1383,10 @@ def test_full_year_zip_import_splits_months_and_archives_unknown_pdfs(auth_admin
     assert february_statement.transferred_amount == Decimal('234.56')
     assert response.data['detected_periods'] == ['2026-01', '2026-02']
     assert '2026-01_Lohnjournal.pdf' in response.data['archived_only']
-    assert Document.objects.filter(folder='payroll', visibility='admin').count() == 3
+    assert not PayrollStatement.objects.filter(worker=worker, period=date(2025, 12, 1)).exists()
+    assert response.data['skipped_historical_corrections'] == [{
+        'file': 'Lohnabrechnungen_2026-02.pdf',
+        'employee_name': 'Anna Becker',
+        'period': '2025-12',
+    }]
+    assert Document.objects.filter(folder='payroll', visibility='admin').count() == 4
