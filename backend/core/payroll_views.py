@@ -426,7 +426,7 @@ def lexware_bank_import(request):
                 payment_date = _parse_bank_date(row.get('payment_date'), period)
                 amount = abs(amount).quantize(Decimal('0.01'))
                 key_source = f"{name}|{period_text}|sepa|{row.get('employee_name')}|{row.get('iban')}|{amount}|{payment_date}"
-                grouped[worker.id].append({
+                grouped[(worker.id, period_text)].append({
                     'kind': 'payment',
                     'key': hashlib.sha256(key_source.encode('utf-8')).hexdigest(),
                     'amount': str(amount),
@@ -437,7 +437,7 @@ def lexware_bank_import(request):
                     'source_file': name,
                     'source_type': 'lexware_sepa_xml',
                 })
-                source_files[worker.id].add(name)
+                source_files[(worker.id, period_text)].add(name)
             archived_title = _archive_lexware_upload(upload, period_text, request.user)
             if archived_title:
                 archived_documents.append(archived_title)
@@ -472,19 +472,27 @@ def lexware_bank_import(request):
                     if row.get('kind') == 'payslip'
                     else 'lexware_zahlungsliste_pdf'
                 )
+                target_period_text = (
+                    str(row.get('period') or '').strip()
+                    if row.get('kind') == 'payslip'
+                    else period_text
+                ) or period_text
+                if not re.fullmatch(r'\d{4}-\d{2}', target_period_text):
+                    target_period_text = period_text
                 key_source = '|'.join([
                     name,
-                    period_text,
+                    target_period_text,
                     str(row.get('kind') or ''),
                     str(row.get('employee_name') or ''),
                     str(row.get('personal_number') or ''),
                     str(row.get('amount') or ''),
                     str(row.get('gross_amount') or ''),
                     str(row.get('payout_amount') or ''),
+                    str(row.get('is_correction') or ''),
                 ])
                 item['key'] = hashlib.sha256(key_source.encode('utf-8')).hexdigest()
-                grouped[worker.id].append(item)
-                source_files[worker.id].add(name)
+                grouped[(worker.id, target_period_text)].append(item)
+                source_files[(worker.id, target_period_text)].add(name)
             archived_title = _archive_lexware_upload(upload, period_text, request.user)
             if archived_title:
                 archived_documents.append(archived_title)
@@ -524,7 +532,7 @@ def lexware_bank_import(request):
             )) or '')
             amount = abs(amount).quantize(Decimal('0.01'))
             key_source = f'{row.get("_source_file",name)}|{payment_date}|{amount}|{recipient}|{purpose}'
-            grouped[worker.id].append({
+            grouped[(worker.id, period_text)].append({
                 'kind': 'payment',
                 'key': hashlib.sha256(key_source.encode('utf-8')).hexdigest(),
                 'amount': str(amount),
@@ -534,18 +542,19 @@ def lexware_bank_import(request):
                 'source_file': row.get('_source_file', name),
                 'source_type': 'lexware_bank_export',
             })
-            source_files[worker.id].add(name)
+            source_files[(worker.id, period_text)].add(name)
 
         archived_title = _archive_lexware_upload(upload, period_text, request.user)
         if archived_title:
             archived_documents.append(archived_title)
 
     imported = []
-    for worker_id, items in grouped.items():
+    for (worker_id, statement_period_text), items in grouped.items():
         worker = WorkerProfile.objects.select_related('user').get(pk=worker_id)
+        statement_period = datetime.strptime(statement_period_text, '%Y-%m').date().replace(day=1)
         statement, _ = PayrollStatement.objects.get_or_create(
             worker=worker,
-            period=period,
+            period=statement_period,
             defaults={'source': 'lexware_import'},
         )
         existing = list(statement.raw_data or [])
@@ -586,7 +595,7 @@ def lexware_bank_import(request):
             ).quantize(Decimal('0.01'))
             statement.transferred_amount = total
         dates = [
-            _parse_bank_date(item.get('payment_date'), period)
+            _parse_bank_date(item.get('payment_date'), statement_period)
             for item in preferred_payment_items if item.get('payment_date')
         ]
         dates = [value for value in dates if value]
@@ -611,7 +620,7 @@ def lexware_bank_import(request):
         else:
             statement.source = 'lexware_import'
 
-        current_refs = sorted(source_files.get(worker_id) or [])
+        current_refs = sorted(source_files.get((worker_id, statement_period_text)) or [])
         if current_refs:
             statement.source_reference = ', '.join(current_refs)[:255]
         statement.raw_data = merged
@@ -638,9 +647,11 @@ def lexware_bank_import(request):
                 'compensation_type': compensation_type,
                 'lexware_monthly_salary': latest_payslip.get('monthly_salary'),
                 'hourly_rate': latest_payslip.get('hourly_rate'),
-                'lexware_latest_payroll_period': period_text,
                 'lexware_supplements': supplements,
             }
+            current_latest_period = str(master_data.get('lexware_latest_payroll_period') or '')
+            if not current_latest_period or statement_period_text >= current_latest_period:
+                observed['lexware_latest_payroll_period'] = statement_period_text
             for key, value in observed.items():
                 if value not in (None, '', []):
                     master_data[key] = value
@@ -679,7 +690,7 @@ def lexware_bank_import(request):
                     setting_fields.append('hourly_rate')
                 record = WorkingTimeAccountRecord.objects.filter(
                     worker=worker,
-                    year_month=period,
+                    year_month=statement_period,
                 ).first()
                 if record:
                     update_record(record, paid_total_hours=auto_paid_hours)
@@ -690,7 +701,7 @@ def lexware_bank_import(request):
         imported.append({
             'worker_id': str(worker.id),
             'employee_name': str(worker.user),
-            'period': period_text,
+            'period': statement_period_text,
             'transferred_amount': str(statement.transferred_amount) if statement.transferred_amount is not None else None,
             'gross_amount': str(statement.gross_amount) if statement.gross_amount is not None else None,
             'net_amount': str(statement.net_amount) if statement.net_amount is not None else None,
