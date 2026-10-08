@@ -951,6 +951,105 @@ def test_payroll_balance_skips_months_without_closed_attendance(
 
 
 @pytest.mark.django_db
+def test_rebuild_uses_lexware_compensation_type_per_month(
+    worker_user, company, location, position
+):
+    worker = worker_user.worker_profile
+    worker.monthly_hours = Decimal('100.00')
+    worker.employment_type = 'vollzeit'
+    worker.save(update_fields=['monthly_hours', 'employment_type', 'updated_at'])
+    EmployeeMasterData.objects.create(
+        worker=worker,
+        data={'compensation_type': 'salary', 'monthly_salary': '2000.00'},
+    )
+    WorkingTimeSetting.objects.create(
+        worker=worker,
+        monthly_limit=Decimal('100.00'),
+        hourly_rate=Decimal('20.00'),
+    )
+
+    tz = timezone.get_current_timezone()
+    for work_day in (date(2026, 1, 5), date(2026, 9, 5)):
+        start = timezone.make_aware(datetime.combine(work_day, time(8, 0)), tz)
+        shift = Shift.objects.create(
+            client=company,
+            location=location,
+            position=position,
+            worker=worker,
+            starts_at=start,
+            ends_at=start + timedelta(hours=8),
+            break_minutes=0,
+            status=Shift.Status.CONFIRMED,
+        )
+        TimeEntry.objects.create(
+            worker=worker,
+            shift=shift,
+            clock_in=start,
+            clock_out=start + timedelta(hours=8),
+            approved=True,
+        )
+
+    PayrollStatement.objects.create(
+        worker=worker,
+        period=date(2026, 1, 1),
+        gross_amount=Decimal('160.00'),
+        net_amount=Decimal('160.00'),
+        transferred_amount=Decimal('160.00'),
+        source='lexware_payslip_pdf',
+        raw_data=[{
+            'kind': 'payslip',
+            'period': '2026-01',
+            'compensation_type': 'hourly',
+            'quantity': '8.00',
+            'hourly_rate': '20.00',
+            'gross_amount': '160.00',
+            'net_amount': '160.00',
+            'payout_amount': '160.00',
+            'supplements': [],
+        }],
+    )
+    PayrollStatement.objects.create(
+        worker=worker,
+        period=date(2026, 9, 1),
+        gross_amount=Decimal('2000.00'),
+        net_amount=Decimal('1500.00'),
+        transferred_amount=Decimal('1500.00'),
+        source='lexware_payslip_pdf',
+        raw_data=[{
+            'kind': 'payslip',
+            'period': '2026-09',
+            'compensation_type': 'salary',
+            'quantity': '1.00',
+            'monthly_salary': '2000.00',
+            'gross_amount': '2000.00',
+            'net_amount': '1500.00',
+            'payout_amount': '1500.00',
+            'supplements': [],
+        }],
+    )
+
+    sync_working_time(
+        date(2026, 1, 1),
+        date(2026, 9, 30),
+        include_inactive_workers=True,
+        reset_carry=True,
+    )
+
+    january = WorkingTimeAccountRecord.objects.get(
+        worker=worker,
+        year_month=date(2026, 1, 1),
+    )
+    september = WorkingTimeAccountRecord.objects.get(
+        worker=worker,
+        year_month=date(2026, 9, 1),
+    )
+    assert january.paid_total_hours == Decimal('8.00')
+    assert january.saldo_cumulative == Decimal('0.00')
+    assert september.carryover_previous == Decimal('0.00')
+    assert september.saldo_cumulative == Decimal('-92.00')
+
+
+@pytest.mark.django_db
 def test_scoped_payroll_rebuild_resets_prior_year_carry(
     auth_admin, worker_user, company, location, position
 ):
