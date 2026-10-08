@@ -229,7 +229,8 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
       if (standalone && autoBuild && !nextRows.length && !autoBuildAttempted.current) {
         autoBuildAttempted.current = true;
         setMessage('Arbeitszeitdaten werden aus den vorhandenen Ist Zeiten aufgebaut.');
-        const rebuilt: any = await api('working-time/rebuild-all/', { method: 'POST', body: JSON.stringify({ refresh_contract_terms: true }) });
+        const rebuildYear = String(new Date().getFullYear());
+        const rebuilt: any = await api('working-time/rebuild-all/', { method: 'POST', body: JSON.stringify({ refresh_contract_terms: true, year: rebuildYear }) });
         if (!rebuilt?.records_count) {
           setEmptyReason(rebuilt?.detail || 'Es wurden keine abgeschlossenen oder freigegebenen Ist Zeiten gefunden.');
         }
@@ -328,11 +329,17 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     setMessage('');
     setEmptyReason('');
     try {
-      const result: any = await api('working-time/rebuild-all/', { method: 'POST', body: '{}' });
+      const rebuildYear = month && month !== 'all'
+        ? month.slice(0, 4)
+        : (months[0]?.slice(0, 4) || String(new Date().getFullYear()));
+      const result: any = await api('working-time/rebuild-all/', {
+        method: 'POST',
+        body: JSON.stringify({ year: rebuildYear }),
+      });
       setDetails({});
       await loadRows();
       setMessage(result?.records_count
-        ? `Gesamthistorie ab ${dateLabel(result.start)} neu berechnet. ${result.records_count} Monatskonten aktualisiert.`
+        ? `Historie ${rebuildYear} neu berechnet. ${result.records_count} Monatskonten aktualisiert. Saldo startet für dieses Prüfjahr bei 0.`
         : result?.detail || 'Keine Arbeitszeiten zum Neuaufbau gefunden.');
     } catch (error: any) {
       setMessage(error?.message || 'Gesamthistorie konnte nicht neu berechnet werden.');
@@ -496,7 +503,13 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
       const form = new FormData();
       form.append('file', masterDataFile);
       const result: any = await api('workers/master-data/import/', { method: 'POST', body: form });
-      const rebuilt: any = await api('working-time/rebuild-all/', { method: 'POST', body: JSON.stringify({ refresh_contract_terms: true }) });
+      const rebuildYear = month && month !== 'all'
+        ? month.slice(0, 4)
+        : (months[0]?.slice(0, 4) || String(new Date().getFullYear()));
+      const rebuilt: any = await api('working-time/rebuild-all/', {
+        method: 'POST',
+        body: JSON.stringify({ refresh_contract_terms: true, year: rebuildYear }),
+      });
       await loadRows();
       const imported = result?.employees?.length || 0;
       const unmatchedNames = Array.isArray(result?.unmatched) ? result.unmatched : [];
