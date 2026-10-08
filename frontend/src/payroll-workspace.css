@@ -404,6 +404,11 @@
   background:#fffaf0;
 }
 .payroll-reconciliation-pruefen b{color:#7a5b24}
+.payroll-reconciliation-laufend>div,.payroll-reconciliation-item.payroll-reconciliation-laufend{
+  border-color:#c9dce7;
+  background:#f5f9fb;
+}
+.payroll-reconciliation-laufend b{color:#315d73}
 .payroll-reconciliation-abweichung>div,.payroll-reconciliation-item.payroll-reconciliation-abweichung{
   border-color:#f0b8b3;
   background:#fff6f5;
