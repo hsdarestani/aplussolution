@@ -692,13 +692,21 @@ def lexware_bank_import(request):
                 Decimal('0.00'),
             ).quantize(Decimal('0.01'))
             statement.transferred_amount = total
-        dates = [
-            _parse_bank_date(item.get('payment_date'), statement_period)
-            for item in preferred_payment_items if item.get('payment_date')
-        ]
-        dates = [value for value in dates if value]
-        if dates:
-            statement.payment_date = max(dates)
+        preferred_source_type = (
+            str(preferred_payment_items[0].get('source_type') or '')
+            if preferred_payment_items else ''
+        )
+        # Only a real bank export proves the actual booking date. Historical
+        # SEPA files regenerated in Lexware may carry today's execution date,
+        # which must not be written back as the original salary payment date.
+        if preferred_source_type == 'lexware_bank_export':
+            dates = [
+                _parse_bank_date(item.get('payment_date'), statement_period)
+                for item in preferred_payment_items if item.get('payment_date')
+            ]
+            dates = [value for value in dates if value]
+            if dates:
+                statement.payment_date = max(dates)
 
         if latest_payslip:
             statement.gross_amount = _parse_money(latest_payslip.get('gross_amount'))
