@@ -314,14 +314,36 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     () => selectedWorkerId ? rows.filter(row => row.worker_id === selectedWorkerId) : rows,
     [rows, selectedWorkerId],
   );
-  const months = useMemo(() => Array.from(new Set(workerRows.map(row => row.year_month))).sort().reverse(), [workerRows]);
-  const visibleRows = useMemo(() => workerRows.filter(row => month === 'all' || !month || row.year_month === month), [workerRows, month]);
-  const summaryRows = useMemo(() => {
-    if (month && month !== 'all') return workerRows.filter(row => row.year_month === month);
-    if (selectedWorkerId) return workerRows;
-    const newest = months[0];
-    return newest ? rows.filter(row => row.year_month === newest) : [];
-  }, [rows, workerRows, selectedWorkerId, month, months]);
+  const reviewYear = String(
+    lexwareReadiness?.year
+    || currentMonth().slice(0, 4)
+    || new Date().getFullYear()
+  );
+  const reviewThrough = lexwareReadiness?.expected_through || '';
+  const months = useMemo(
+    () => Array.from(new Set(workerRows.map(row => row.year_month))).sort().reverse(),
+    [workerRows],
+  );
+  const reviewRows = useMemo(
+    () => workerRows.filter(row =>
+      row.year_month.startsWith(`${reviewYear}-`)
+      && !row.is_open_month
+      && (!reviewThrough || row.year_month <= reviewThrough)
+    ),
+    [workerRows, reviewYear, reviewThrough],
+  );
+  const visibleRows = useMemo(
+    () => month === 'all' || !month
+      ? reviewRows
+      : workerRows.filter(row => row.year_month === month),
+    [workerRows, reviewRows, month],
+  );
+  const summaryRows = useMemo(
+    () => month && month !== 'all'
+      ? workerRows.filter(row => row.year_month === month)
+      : reviewRows,
+    [workerRows, reviewRows, month],
+  );
 
   useEffect(() => {
     if (month === 'all' || !month || months.includes(month)) return;
@@ -335,11 +357,19 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   const selectedEmployee = employeeOptions.find(item => item.worker_id === selectedWorkerId);
   const selectedSetting = settingsRows.find(item => item.worker_id === selectedWorkerId);
   const closedSummaryRows = summaryRows.filter(row => !row.is_open_month);
+  const latestSaldoByWorker = useMemo(() => {
+    const latest = new Map<string, PayrollRow>();
+    for (const row of reviewRows) {
+      const current = latest.get(row.worker_id);
+      if (!current || row.year_month > current.year_month) latest.set(row.worker_id, row);
+    }
+    return latest;
+  }, [reviewRows]);
   const summary = {
     ist: summaryRows.reduce((sum, row) => sum + number(row.ist_hours), 0),
     paid: summaryRows.reduce((sum, row) => sum + number(row.balance_reference_hours ?? row.paid_total_hours ?? row.soll_hours), 0),
-    saldo: selectedWorkerId && month === 'all'
-      ? number(workerRows[0]?.saldo_cumulative)
+    saldo: month === 'all'
+      ? Array.from(latestSaldoByWorker.values()).reduce((sum, row) => sum + number(row.saldo_cumulative), 0)
       : summaryRows.reduce((sum, row) => sum + number(row.monthly_balance_hours ?? row.saldo_cumulative), 0),
     gross: closedSummaryRows.reduce((sum, row) => sum + number(row.gross_with_surcharges ?? row.gross_amount), 0),
     transferred: closedSummaryRows.reduce((sum, row) => sum + number(row.payroll_statement?.transferred_amount), 0),
@@ -658,7 +688,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
           </label>
           <label>Monat
             <select aria-label="Arbeitszeitkonto Monat" value={month} onChange={event => { setMonth(event.target.value); setExpandedId(''); }}>
-              <option value="all">Alle Monate</option>
+              <option value="all">Prüfjahr {reviewYear}</option>
               {months.map(item => <option key={item} value={item}>{monthLabel(item)}</option>)}
             </select>
           </label>
@@ -667,7 +697,9 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         <div className="payroll-filter-context">
           <span>{selectedEmployee?.employee_name || 'Gesamte Belegschaft'}</span>
           <b>{visibleRows.length} Monatskonten</b>
-          <small>{month === 'all' ? 'Gesamter verfügbarer Zeitraum' : monthLabel(month)}</small>
+          <small>{month === 'all'
+            ? `Prüfjahr ${reviewYear}${reviewThrough ? ` · abgeschlossen bis ${monthLabel(reviewThrough)}` : ''}`
+            : monthLabel(month)}</small>
         </div>
       </section>
 
