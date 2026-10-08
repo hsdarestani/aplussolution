@@ -26,6 +26,17 @@ def _pages(payload: bytes) -> list[str]:
 
 
 def _employee_name_from_payslip(text: str) -> str:
+    # Prefer the payslip header itself. Requiring the Lexware footer made the
+    # parser brittle for generated/test PDFs and for exports where the footer
+    # is extracted in a different order.
+    match = re.search(
+        r'(?mi)^(?:Korrekturabrechnung|Abrechnung)\s+für\s+'
+        r'[A-Za-zÄÖÜäöüß]+\s+20\d{2}\s*-\s*([^\n]+)',
+        text,
+    )
+    if match:
+        return ' '.join(match.group(1).split())
+
     match = re.search(
         r'Abrechnung\s+für\s+.+?\s+\d{4}\s*-\s*(.+?)\s*\nerstellt\s+mit\s+Lexware',
         text,
