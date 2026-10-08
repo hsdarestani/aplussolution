@@ -308,10 +308,25 @@ def sync_working_time(start: date, end: date, client=None) -> WorkingTimeSyncLog
     return log
 
 
-def _paid_total(row: WorkingTimeAccountRecord) -> Decimal:
+def _statement_payslip(statement: PayrollStatement | None) -> dict:
+    if not statement:
+        return {}
+    payslips = [
+        item for item in list(statement.raw_data or [])
+        if item.get('kind') == 'payslip'
+    ]
+    return payslips[-1] if payslips else {}
+
+
+def _statement_compensation_type(statement: PayrollStatement | None) -> str:
+    return str(_statement_payslip(statement).get('compensation_type') or '').strip().lower()
+
+
+def _paid_total(row: WorkingTimeAccountRecord, statement: PayrollStatement | None = None) -> Decimal:
     if row.paid_total_hours is not None:
         return dec(row.paid_total_hours)
-    if _compensation_type(row.worker) == 'salary':
+    compensation_type = _statement_compensation_type(statement) or _compensation_type(row.worker)
+    if compensation_type == 'salary':
         return Decimal('0.00')
     return (dec(row.soll_hours) + dec(row.paid_hours)).quantize(TWO)
 
@@ -324,10 +339,14 @@ def _compensation_type(worker: WorkerProfile) -> str:
         return str((master.data or {}).get('compensation_type') or '').strip().lower() if master else ''
 
 
-def _balance_reference(row: WorkingTimeAccountRecord) -> tuple[Decimal, str]:
-    if _compensation_type(row.worker) == 'salary':
+def _balance_reference(
+    row: WorkingTimeAccountRecord,
+    statement: PayrollStatement | None = None,
+) -> tuple[Decimal, str]:
+    compensation_type = _statement_compensation_type(statement) or _compensation_type(row.worker)
+    if compensation_type == 'salary':
         return dec(row.soll_hours), 'soll_salary'
-    return _paid_total(row), 'paid_hours'
+    return _paid_total(row, statement), 'paid_hours'
 
 
 def update_record(
@@ -454,8 +473,8 @@ def record_dict(
     include_entries: bool = False,
 ) -> dict:
     totals = _entry_totals(row.raw_entries or [])
-    paid_total = _paid_total(row)
-    balance_reference, balance_basis = _balance_reference(row)
+    paid_total = _paid_total(row, statement)
+    balance_reference, balance_basis = _balance_reference(row, statement)
     monthly_balance = (row.ist_hours + row.manual_adjustment - balance_reference).quantize(TWO)
     surcharge_amount = totals['surcharge_amount']
     gross_with_surcharges = (row.gross_amount + surcharge_amount).quantize(TWO)
