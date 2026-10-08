@@ -532,10 +532,23 @@ def record_dict(
     totals = _entry_totals(row.raw_entries or [])
     paid_total = _paid_total(row, statement)
     balance_reference, balance_basis = _balance_reference(row, statement)
-    monthly_balance = (row.ist_hours + row.manual_adjustment - balance_reference).quantize(TWO)
+    payroll_statement = statement_dict(statement)
+    is_open_month = (
+        row.year_month >= timezone.localdate().replace(day=1)
+        and statement is None
+    )
+    if is_open_month:
+        balance_reference = Decimal('0.00')
+        balance_basis = 'open_month'
+        monthly_balance = Decimal('0.00')
+        displayed_saldo = dec(row.carryover_previous)
+    else:
+        monthly_balance = (
+            row.ist_hours + row.manual_adjustment - balance_reference
+        ).quantize(TWO)
+        displayed_saldo = dec(row.saldo_cumulative)
     surcharge_amount = totals['surcharge_amount']
     gross_with_surcharges = (row.gross_amount + surcharge_amount).quantize(TWO)
-    payroll_statement = statement_dict(statement)
     employment_type = row.employment_type_snapshot or row.worker.employment_type
     # Lexware person group 109 is an authoritative Minijob marker for that
     # payroll month. A non-109 group is equally authoritative that the month
@@ -572,7 +585,8 @@ def record_dict(
         'balance_reference_hours': str(balance_reference),
         'monthly_balance_hours': str(monthly_balance),
         'manual_adjustment': str(row.manual_adjustment),
-        'saldo_cumulative': str(row.saldo_cumulative),
+        'saldo_cumulative': str(displayed_saldo),
+        'is_open_month': is_open_month,
         'hourly_rate': str(row.hourly_rate),
         'gross_amount': str(row.gross_amount),
         'gross_with_surcharges': str(gross_with_surcharges),
@@ -645,9 +659,13 @@ def record_dict(
 
     result['contract_issues'] = contract_issues
     result['surcharge_reconciliation'] = _surcharge_reconciliation(result)
-    reconciliation_status, reconciliation_issues = _reconciliation_status(result)
-    result['reconciliation_status'] = reconciliation_status
-    result['reconciliation_issues'] = reconciliation_issues
+    if is_open_month:
+        result['reconciliation_status'] = 'LAUFEND'
+        result['reconciliation_issues'] = []
+    else:
+        reconciliation_status, reconciliation_issues = _reconciliation_status(result)
+        result['reconciliation_status'] = reconciliation_status
+        result['reconciliation_issues'] = reconciliation_issues
 
     if include_entries:
         result['entries'] = row.raw_entries or []
