@@ -70,6 +70,28 @@ def test_ios_calendar_subscription_opens_native_webcal_with_https_feed(auth_work
 
 
 @pytest.mark.django_db
+def test_calendar_feed_folds_multibyte_long_notes(auth_worker, shift):
+    from core.calendar_sync import _fold_ical_line
+
+    note = ('Überweisung München — ' * 12) + '✓'
+    shift.notes = note
+    shift.status = Shift.Status.CONFIRMED
+    shift.starts_at = timezone.now() + timedelta(days=1)
+    shift.ends_at = shift.starts_at + timedelta(hours=4)
+    shift.save(update_fields=['notes', 'status', 'starts_at', 'ends_at', 'updated_at'])
+
+    subscription = auth_worker.get('/api/calendar/subscription/')
+    url = subscription.data['https_feed_url']
+    response = Client().get(urlsplit(url).path)
+    assert response.status_code == 200
+    content = response.content.decode('utf-8')
+    physical_lines = content.split('\r\n')
+    assert all(len(line.encode('utf-8')) <= 75 for line in physical_lines)
+    assert '\r\n ' in content
+    assert _fold_ical_line('SUMMARY:Köln').startswith('SUMMARY:Köln')
+
+
+@pytest.mark.django_db
 def test_calendar_subscription_is_worker_only(auth_admin):
     response = auth_admin.get('/api/calendar/subscription/')
     assert response.status_code == 403
