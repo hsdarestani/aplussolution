@@ -700,7 +700,13 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
                 return <div className={`payroll-reconciliation-item payroll-reconciliation-${itemClass}`} key={key}>
                   <span>{item.label}</span>
                   <b>{item.status}</b>
-                  <small>A+ {decimal(item.aplus_hours)} Std. · Lexware {item.lexware_hours == null ? 'kein Nachweis' : `${decimal(item.lexware_hours)} Std.`}</small>
+                  <small>
+                    A+ {decimal(item.aplus_hours)} Std. / {money(item.aplus_amount)}
+                    {' · '}
+                    Lexware {item.lexware_hours == null
+                      ? 'kein Zuschlag'
+                      : `${decimal(item.lexware_hours)} Std. / ${money(item.lexware_amount)}`}
+                  </small>
                 </div>;
               })}
             </div>
