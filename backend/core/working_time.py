@@ -1540,6 +1540,7 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
         summary_rows.extend([
             ['Lexware Kernnachweise', f"{readiness.get('core_documents_present', 0)} / {readiness.get('core_documents_expected', 0)}"],
             ['Vollständige Lexware Monate', f"{readiness.get('complete_months', 0)} / {readiness.get('expected_months', 0)}"],
+            ['Technisch eingelesene Monate', f"{readiness.get('parsed_complete_months', 0)} / {readiness.get('expected_months', 0)}"],
             ['Jahresnachweise', 'vollständig' if readiness.get('annual_complete') else 'prüfen'],
             ['Weiterer Import nötig', 'Nein' if readiness.get('no_additional_import_required') else 'Ja'],
         ])
@@ -1621,7 +1622,7 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
                 'Ja' if docs.get('sepa') else 'Nein',
                 'Ja' if docs.get('meldebescheinigungen') else 'Nein',
                 item.get('statements') or 0,
-                'Vollständig' if item.get('core_complete') else 'Prüfen',
+                'Vollständig' if item.get('core_complete') and item.get('parsed_complete') else 'Prüfen',
             ])
         _docx_table(
             document,
