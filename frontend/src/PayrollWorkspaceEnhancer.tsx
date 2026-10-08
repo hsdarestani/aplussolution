@@ -28,6 +28,18 @@ type PayrollStatement = {
   lexware_payout_amount?: string | null;
   lexware_personal_number?: string;
   lexware_supplements?: LexwareSupplement[];
+  lexware_sick_hours?: string;
+  lexware_sick_continued_pay?: string;
+  lexware_u1_reimbursement?: string;
+  lexware_absence_evidence?: Array<{
+    absence_type?: string;
+    date_from?: string;
+    date_to?: string;
+    absence_hours?: string;
+    continued_pay?: string;
+    reimbursement_amount?: string;
+    reimbursement_percent?: string;
+  }>;
 };
 
 type ReconciliationItem = {
@@ -190,6 +202,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [lexwareReadiness, setLexwareReadiness] = useState<LexwareReadiness | null>(null);
   const autoBuildAttempted = useRef(false);
+  const archiveBackfillAttempted = useRef(false);
 
   useEffect(() => {
     if (standalone) return;
@@ -249,6 +262,22 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     try {
       let { response, settingsResponse, readinessResponse } = await fetchWorkspaceData();
       let nextRows = (response?.results || response || []) as PayrollRow[];
+
+      if (
+        !archiveBackfillAttempted.current
+        && Number(readinessResponse?.optional_documents?.u1 || 0) > 0
+      ) {
+        archiveBackfillAttempted.current = true;
+        const backfillYear = String(readinessResponse?.year || currentMonth().slice(0, 4));
+        const backfill: any = await api('working-time/lexware-backfill/', {
+          method: 'POST',
+          body: JSON.stringify({ year: backfillYear }),
+        });
+        if (Number(backfill?.attached || 0) > 0) {
+          ({ response, settingsResponse, readinessResponse } = await fetchWorkspaceData());
+          nextRows = (response?.results || response || []) as PayrollRow[];
+        }
+      }
 
       if (standalone && autoBuild && !nextRows.length && !autoBuildAttempted.current) {
         autoBuildAttempted.current = true;
@@ -810,6 +839,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
               <div><span>Abwesenheit</span><b>{row.absence_days || 0} Tg.</b></div>
               <div><span>Urlaub</span><b>{row.vacation_days || 0} Tg.</b></div>
               <div><span>Krank</span><b>{row.sick_days || 0} Tg.</b></div>
+              {number(statement?.lexware_sick_hours) > 0 && <div><span>Lexware Krank</span><b>{decimal(statement?.lexware_sick_hours)} Std.</b></div>}
               <div><span>Soll</span><b>{decimal(row.soll_hours)} Std.</b></div>
               <div><span>Einträge</span><b>{row.entry_count || 0}</b></div>
             </div>
@@ -846,6 +876,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
                       ? `Gehalt ${money(statement.lexware_monthly_salary)}`
                       : 'Keine Daten'
                 }</b></div>
+                {number(statement?.lexware_sick_hours) > 0 && <div><span>Krankheit Lexware</span><b>{decimal(statement?.lexware_sick_hours)} Std. · U1 {money(statement?.lexware_u1_reimbursement)}</b></div>}
                 <div><span>Quelle</span><b>{
                   statement?.source === 'lexware_pdf_bundle' ? 'Lexware PDFs'
                   : statement?.source === 'lexware_payslip_pdf' ? 'Lohnabrechnung PDF'
