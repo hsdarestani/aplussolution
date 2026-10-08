@@ -2154,3 +2154,67 @@ def test_payroll_audit_docx_generates_with_absence_columns(worker_user):
     )
 
     assert payload[:2] == b'PK'
+
+
+@pytest.mark.django_db
+def test_payroll_excel_contains_filterable_daily_evidence_and_notes(
+    worker_user, company, location, position
+):
+    import io
+
+    from openpyxl import load_workbook
+    from core.working_time import export_xlsx
+
+    worker = worker_user.worker_profile
+    tz = timezone.get_current_timezone()
+    start = timezone.make_aware(datetime(2026, 9, 5, 8, 0), tz)
+    shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        worker=worker,
+        starts_at=start,
+        ends_at=start + timedelta(hours=8),
+        break_minutes=30,
+        status=Shift.Status.CONFIRMED,
+        notes='Event 4711 Eingang West',
+    )
+    record = WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=date(2026, 9, 1),
+        ist_hours=Decimal('7.50'),
+        soll_hours=Decimal('7.50'),
+        paid_total_hours=Decimal('7.50'),
+        saldo_cumulative=Decimal('0.00'),
+        hourly_rate=Decimal('15.50'),
+        gross_amount=Decimal('116.25'),
+        raw_entries=[{
+            'id': 'entry-1',
+            'shift_id': str(shift.id),
+            'client_name': company.name,
+            'location_name': location.name,
+            'position_name': position.name,
+            'planned_start': start.isoformat(),
+            'planned_end': (start + timedelta(hours=8)).isoformat(),
+            'local_clock_in': start.isoformat(),
+            'local_clock_out': (start + timedelta(hours=8)).isoformat(),
+            'break_minutes': 30,
+            'worked_minutes': 450,
+            'night_minutes': 0,
+            'saturday_minutes': 0,
+            'sunday_minutes': 0,
+        }],
+    )
+
+    response = export_xlsx(
+        WorkingTimeAccountRecord.objects.filter(pk=record.pk)
+    )
+    workbook = load_workbook(io.BytesIO(response.content))
+    assert 'Tagesnachweise' in workbook.sheetnames
+    sheet = workbook['Tagesnachweise']
+    headers = [cell.value for cell in sheet[1]]
+    assert headers[:6] == ['Mitarbeiter', 'Monat', 'Datum', 'Kunde', 'Ort', 'Service']
+    assert 'Notiz' in headers
+    note_column = headers.index('Notiz') + 1
+    assert sheet.cell(row=2, column=note_column).value == 'Event 4711 Eingang West'
+    assert sheet.auto_filter.ref
