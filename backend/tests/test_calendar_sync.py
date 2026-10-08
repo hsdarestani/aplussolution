@@ -46,13 +46,13 @@ def test_calendar_subscription_forces_https_for_public_host(auth_worker):
     assert response.status_code == 200
     payload = response.data
     assert payload['feed_url'].startswith('https://app.aplus-solution.de/api/calendar/feed/')
-    assert payload['webcal_url'].startswith('webcals://app.aplus-solution.de/api/calendar/feed/')
+    assert payload['webcal_url'].startswith('webcal://app.aplus-solution.de/api/calendar/feed/')
     assert 'cid=https%3A%2F%2Fapp.aplus-solution.de%2Fapi%2Fcalendar%2Ffeed%2F' in payload['google_url']
 
 
 @pytest.mark.django_db
 @override_settings(ALLOWED_HOSTS=['testserver', 'app.aplus-solution.de'])
-def test_ios_calendar_subscription_uses_direct_https_link(auth_worker):
+def test_ios_calendar_subscription_opens_native_webcal_with_https_feed(auth_worker):
     response = auth_worker.get(
         '/api/calendar/subscription/',
         HTTP_HOST='app.aplus-solution.de',
@@ -63,7 +63,8 @@ def test_ios_calendar_subscription_uses_direct_https_link(auth_worker):
     payload = response.data
     assert payload['feed_url'] == ''
     assert payload['https_feed_url'].startswith('https://app.aplus-solution.de/api/calendar/feed/')
-    assert payload['webcal_url'] == payload['https_feed_url']
+    assert payload['webcal_url'].startswith('webcal://app.aplus-solution.de/api/calendar/feed/')
+    assert payload['webcal_url'].endswith('.ics')
     assert 'calendar.google.com' in payload['google_url']
     assert response['Cache-Control'].startswith('private, no-store')
 
