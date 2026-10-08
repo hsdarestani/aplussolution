@@ -951,6 +951,70 @@ def test_payroll_balance_skips_months_without_closed_attendance(
 
 
 @pytest.mark.django_db
+def test_scoped_payroll_rebuild_resets_prior_year_carry(
+    auth_admin, worker_user, company, location, position
+):
+    worker = worker_user.worker_profile
+    worker.monthly_hours = Decimal('100.00')
+    worker.employment_type = 'vollzeit'
+    worker.save(update_fields=['monthly_hours', 'employment_type', 'updated_at'])
+    EmployeeMasterData.objects.create(
+        worker=worker,
+        data={'compensation_type': 'salary', 'monthly_salary': '2000.00'},
+    )
+    WorkingTimeSetting.objects.create(
+        worker=worker,
+        monthly_limit=Decimal('100.00'),
+        hourly_rate=Decimal('0.00'),
+    )
+    WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=date(2025, 12, 1),
+        ist_hours=Decimal('0.00'),
+        soll_hours=Decimal('100.00'),
+        paid_total_hours=Decimal('0.00'),
+        saldo_cumulative=Decimal('-500.00'),
+        source='aplus_time_entries',
+    )
+
+    tz = timezone.get_current_timezone()
+    start = timezone.make_aware(datetime(2026, 9, 5, 8, 0), tz)
+    shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        worker=worker,
+        starts_at=start,
+        ends_at=start + timedelta(hours=8),
+        break_minutes=0,
+        status=Shift.Status.CONFIRMED,
+    )
+    TimeEntry.objects.create(
+        worker=worker,
+        shift=shift,
+        clock_in=start,
+        clock_out=start + timedelta(hours=8),
+        approved=True,
+    )
+
+    response = auth_admin.post(
+        '/api/working-time/rebuild-all/',
+        {'year': '2026'},
+        format='json',
+    )
+
+    assert response.status_code == 200
+    september = WorkingTimeAccountRecord.objects.get(
+        worker=worker,
+        year_month=date(2026, 9, 1),
+    )
+    assert september.carryover_previous == Decimal('0.00')
+    assert september.saldo_cumulative == Decimal('-92.00')
+    assert response.data['year'] == '2026'
+    assert response.data['metadata']['reset_carry'] is True
+
+
+@pytest.mark.django_db
 def test_closed_month_keeps_historical_contract_and_rate_snapshot(
     worker_user, company, location, position
 ):
