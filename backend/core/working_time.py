@@ -929,6 +929,52 @@ def export_xlsx(queryset) -> HttpResponse:
         ])
     for column in ws.columns:
         ws.column_dimensions[column[0].column_letter].width = min(max(len(str(cell.value or '')) for cell in column) + 2, 32)
+    ws.freeze_panes = 'A2'
+    ws.auto_filter.ref = ws.dimensions
+
+    # Detailed daily evidence for Ashkan: one filterable table with employee,
+    # date, customer, location, service and notes. This is the audit-friendly
+    # "all entered hours" view and intentionally keeps plan and actual separate.
+    detail_ws = wb.create_sheet('Tagesnachweise')
+    detail_headers = [
+        'Mitarbeiter', 'Monat', 'Datum', 'Kunde', 'Ort', 'Service',
+        'Plan Beginn', 'Plan Ende', 'Ist Beginn', 'Ist Ende', 'Pause Min.',
+        'Netto Std.', 'Nacht Std.', 'Samstag Std.', 'Sonntag Std.', 'Notiz',
+    ]
+    detail_ws.append(detail_headers)
+    shift_notes = _shift_note_map(rows)
+    for row in rows:
+        for entry in sorted(
+            list(row.raw_entries or []),
+            key=lambda item: str(item.get('local_clock_in') or item.get('clock_in') or ''),
+        ):
+            local_in = parse_dt(entry.get('local_clock_in') or entry.get('clock_in'))
+            detail_ws.append([
+                str(row.worker.user),
+                row.year_month.strftime('%Y-%m'),
+                local_in.strftime('%d.%m.%Y') if local_in else '',
+                entry.get('client_name') or '',
+                entry.get('location_name') or '',
+                entry.get('position_name') or '',
+                _pdf_clock(entry.get('planned_start')),
+                _pdf_clock(entry.get('planned_end')),
+                _pdf_clock(entry.get('local_clock_in') or entry.get('clock_in')),
+                _pdf_clock(entry.get('local_clock_out') or entry.get('clock_out')),
+                int(entry.get('break_minutes') or 0),
+                float((Decimal(int(entry.get('worked_minutes') or 0)) / Decimal('60')).quantize(TWO)),
+                float((Decimal(int(entry.get('night_minutes') or 0)) / Decimal('60')).quantize(TWO)),
+                float((Decimal(int(entry.get('saturday_minutes') or 0)) / Decimal('60')).quantize(TWO)),
+                float((Decimal(int(entry.get('sunday_minutes') or 0)) / Decimal('60')).quantize(TWO)),
+                shift_notes.get(str(entry.get('shift_id') or ''), ''),
+            ])
+    detail_ws.freeze_panes = 'A2'
+    detail_ws.auto_filter.ref = detail_ws.dimensions
+    for column in detail_ws.columns:
+        detail_ws.column_dimensions[column[0].column_letter].width = min(
+            max(len(str(cell.value or '')) for cell in column) + 2,
+            40,
+        )
+
     buffer = io.BytesIO()
     wb.save(buffer)
     response = HttpResponse(buffer.getvalue(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
