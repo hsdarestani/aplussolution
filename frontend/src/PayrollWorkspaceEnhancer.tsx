@@ -166,6 +166,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   const [masterDataBusy, setMasterDataBusy] = useState(false);
   const [historyBusy, setHistoryBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [dataCareOpen, setDataCareOpen] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const autoBuildAttempted = useRef(false);
 
@@ -545,48 +546,59 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         </div>}
       </section>}
 
-      <section className="payroll-tool-row">
-        <div className="payroll-tool-card">
-          <span className="payroll-tool-index">A</span>
-          <div><b>Historie neu berechnen</b><small>Alle vorhandenen echten Arbeitszeiten werden vom ersten Arbeitsmonat bis heute neu aufgebaut.</small></div>
-          <button type="button" onClick={() => void rebuildHistory()} disabled={historyBusy}>{historyBusy ? 'Berechnet' : 'Neu berechnen'}</button>
-        </div>
-        <div className="payroll-tool-card payroll-lexware-card">
-          <span className="payroll-tool-index">S</span>
-          <div><b>Lexware Stammdaten</b><small>Beschäftigungsart, Eintritt, Wochenstunden, Lohn/Gehalt, Bank, Steuer und Versicherung sicher in der Personalakte speichern.</small></div>
-          <div className="payroll-lexware-fields">
-            <input aria-label="Lexware Stammdaten Datei" type="file" accept=".json,application/json" onChange={event => setMasterDataFile(event.target.files?.[0] || null)} />
-            <button type="button" onClick={() => void importMasterData()} disabled={masterDataBusy || !masterDataFile}>{masterDataBusy ? 'Speichert' : 'Stammdaten übernehmen'}</button>
+      <section className="payroll-data-care">
+        <button
+          type="button"
+          className="payroll-data-care-toggle"
+          aria-expanded={dataCareOpen}
+          onClick={() => setDataCareOpen(value => !value)}
+        >
+          <span>⋯</span>
+          {dataCareOpen ? 'Datenpflege schließen' : 'Datenpflege & Import'}
+        </button>
+        {dataCareOpen && <div className="payroll-tool-row payroll-tool-row-collapsed">
+          <div className="payroll-tool-card">
+            <span className="payroll-tool-index">A</span>
+            <div><b>Historie neu berechnen</b><small>Alle vorhandenen echten Arbeitszeiten werden vom ersten Arbeitsmonat bis heute neu aufgebaut.</small></div>
+            <button type="button" onClick={() => void rebuildHistory()} disabled={historyBusy}>{historyBusy ? 'Berechnet' : 'Neu berechnen'}</button>
           </div>
-        </div>
-        <div className="payroll-tool-card payroll-lexware-card">
-          <span className="payroll-tool-index">L</span>
-          <div><b>Lexware übernehmen</b><small>Lohnabrechnungen PDF, Zahlungsliste PDF oder CSV/ZIP gemeinsam importieren.</small></div>
-          <div className="payroll-lexware-fields">
-            <input aria-label="Lexware Abrechnungsmonat" type="month" value={lexwarePeriod} onChange={event => setLexwarePeriod(event.target.value)} />
-            <input
-              aria-label="Lexware Dateien"
-              type="file"
-              multiple
-              accept=".pdf,.csv,.zip,application/pdf,text/csv,application/zip"
-              onChange={event => {
-                const files = Array.from(event.target.files || []);
-                setLexwareFiles(files);
-                const periods = Array.from(new Set(files
-                  .map(file => file.name.match(/(20[0-9]{2})[-_](0[1-9]|1[0-2])/))
-                  .filter(Boolean)
-                  .map(match => `${match?.[1]}-${match?.[2]}`)));
-                if (periods.length === 1 && periods[0]) {
-                  setLexwarePeriod(periods[0]);
-                  setMessage(`Abrechnungsmonat automatisch erkannt: ${monthLabel(periods[0])}.`);
-                } else if (periods.length > 1) {
-                  setMessage('Die ausgewählten Lexware Dateien gehören zu unterschiedlichen Abrechnungsmonaten.');
-                }
-              }}
-            />
-            <button type="button" onClick={() => void importLexware()} disabled={lexwareBusy || !lexwareFiles.length}>{lexwareBusy ? 'Importiert' : `Übernehmen${lexwareFiles.length ? ` (${lexwareFiles.length})` : ''}`}</button>
+          <div className="payroll-tool-card payroll-lexware-card">
+            <span className="payroll-tool-index">S</span>
+            <div><b>Lexware Stammdaten</b><small>Beschäftigungsart, Eintritt, Wochenstunden, Lohn/Gehalt, Bank, Steuer und Versicherung sicher in der Personalakte speichern.</small></div>
+            <div className="payroll-lexware-fields">
+              <input aria-label="Lexware Stammdaten Datei" type="file" accept=".json,application/json" onChange={event => setMasterDataFile(event.target.files?.[0] || null)} />
+              <button type="button" onClick={() => void importMasterData()} disabled={masterDataBusy || !masterDataFile}>{masterDataBusy ? 'Speichert' : 'Stammdaten übernehmen'}</button>
+            </div>
           </div>
-        </div>
+          <div className="payroll-tool-card payroll-lexware-card">
+            <span className="payroll-tool-index">L</span>
+            <div><b>Lexware übernehmen</b><small>Lohnabrechnungen PDF, Zahlungsliste PDF oder CSV/ZIP gemeinsam importieren.</small></div>
+            <div className="payroll-lexware-fields">
+              <input aria-label="Lexware Abrechnungsmonat" type="month" value={lexwarePeriod} onChange={event => setLexwarePeriod(event.target.value)} />
+              <input
+                aria-label="Lexware Dateien"
+                type="file"
+                multiple
+                accept=".pdf,.csv,.zip,application/pdf,text/csv,application/zip"
+                onChange={event => {
+                  const files = Array.from(event.target.files || []);
+                  setLexwareFiles(files);
+                  const periods = Array.from(new Set(files
+                    .map(file => file.name.match(/(20[0-9]{2})[-_](0[1-9]|1[0-2])/))
+                    .filter(Boolean)
+                    .map(match => `${match?.[1]}-${match?.[2]}`)));
+                  if (periods.length === 1 && periods[0]) {
+                    setLexwarePeriod(periods[0]);
+                    setMessage(`Abrechnungsmonat automatisch erkannt: ${monthLabel(periods[0])}.`);
+                  } else if (periods.length > 1) {
+                    setMessage('Die ausgewählten Lexware Dateien gehören zu unterschiedlichen Abrechnungsmonaten.');
+                  }
+                }}
+              />
+              <button type="button" onClick={() => void importLexware()} disabled={lexwareBusy || !lexwareFiles.length}>{lexwareBusy ? 'Importiert' : `Übernehmen${lexwareFiles.length ? ` (${lexwareFiles.length})` : ''}`}</button>
+            </div>
+          </div>
+        </div>}
       </section>
 
       {message && <div className="payroll-message" role="status">{message}</div>}
