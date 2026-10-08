@@ -276,6 +276,7 @@ def lexware_bank_import(request):
 
     Supported evidence:
     - bank CSV/ZIP exports
+    - Lexware SEPA XML payment instructions
     - Lexware Zahlungsliste PDF
     - Lexware Lohnabrechnungen PDF
 
@@ -289,7 +290,7 @@ def lexware_bank_import(request):
         single = request.FILES.get('file')
         uploads = [single] if single else []
     if not uploads:
-        return Response({'detail': 'Bitte Lexware CSV, ZIP oder PDF auswählen.'}, status=400)
+        return Response({'detail': 'Bitte Lexware PDF, CSV, ZIP oder SEPA XML auswählen.'}, status=400)
 
     period_text = str(request.data.get('period') or '').strip()
     if not re.fullmatch(r'\d{4}-\d{2}', period_text):
@@ -325,10 +326,46 @@ def lexware_bank_import(request):
     source_files = defaultdict(set)
     unmatched = []
     parsed_rows = 0
+    archived_documents = []
 
     for upload in uploads:
         name = str(getattr(upload, 'name', '') or 'lexware')
         lower_name = name.lower()
+
+        if lower_name.endswith('.xml') or 'xml' in str(getattr(upload, 'content_type', '')).lower():
+            payload = upload.read()
+            sepa_rows = _sepa_rows(name, payload)
+            parsed_rows += len(sepa_rows)
+            if not sepa_rows:
+                unmatched.append({'file': name, 'text': 'SEPA XML konnte nicht gelesen werden'})
+            for row in sepa_rows:
+                worker = _find_worker({'employee_name': row.get('employee_name', '')}, matchers)
+                amount = _parse_money(row.get('amount'))
+                if not worker or amount in (None, Decimal('0')):
+                    unmatched.append({
+                        'file': name,
+                        'text': str(row.get('employee_name') or 'Unbekannter Mitarbeiter')[:180],
+                    })
+                    continue
+                payment_date = _parse_bank_date(row.get('payment_date'), period)
+                amount = abs(amount).quantize(Decimal('0.01'))
+                key_source = f"{name}|{period_text}|sepa|{row.get('employee_name')}|{row.get('iban')}|{amount}|{payment_date}"
+                grouped[worker.id].append({
+                    'kind': 'payment',
+                    'key': hashlib.sha256(key_source.encode('utf-8')).hexdigest(),
+                    'amount': str(amount),
+                    'payment_date': payment_date.isoformat() if payment_date else None,
+                    'recipient': row.get('employee_name') or '',
+                    'purpose': row.get('purpose') or '',
+                    'iban': row.get('iban') or '',
+                    'source_file': name,
+                    'source_type': 'lexware_sepa_xml',
+                })
+                source_files[worker.id].add(name)
+            archived_title = _archive_lexware_upload(upload, period_text, request.user)
+            if archived_title:
+                archived_documents.append(archived_title)
+            continue
 
         if lower_name.endswith('.pdf') or str(getattr(upload, 'content_type', '')).lower() == 'application/pdf':
             payload = upload.read()
@@ -372,6 +409,9 @@ def lexware_bank_import(request):
                 item['key'] = hashlib.sha256(key_source.encode('utf-8')).hexdigest()
                 grouped[worker.id].append(item)
                 source_files[worker.id].add(name)
+            archived_title = _archive_lexware_upload(upload, period_text, request.user)
+            if archived_title:
+                archived_documents.append(archived_title)
             continue
 
         try:
@@ -419,6 +459,10 @@ def lexware_bank_import(request):
                 'source_type': 'lexware_bank_export',
             })
             source_files[worker.id].add(name)
+
+        archived_title = _archive_lexware_upload(upload, period_text, request.user)
+        if archived_title:
+            archived_documents.append(archived_title)
 
     imported = []
     for worker_id, items in grouped.items():
