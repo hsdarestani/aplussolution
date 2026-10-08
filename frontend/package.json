@@ -29,7 +29,8 @@
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "@capacitor/filesystem": "^7.1.4",
-    "@capacitor/share": "^7.0.2"
+    "@capacitor/share": "^7.0.2",
+    "@capacitor/file-viewer": "1.0.0"
   },
   "devDependencies": {
     "@capacitor/android": "^7.4.2",
