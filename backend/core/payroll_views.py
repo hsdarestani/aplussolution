@@ -825,7 +825,7 @@ def lexware_bank_import(request):
         label = ' '.join(str(item.get('text') or '').split()).strip()
         if not label:
             continue
-        key = _normalize(label)
+        key = _norm(label)
         if key in seen_unmatched:
             continue
         seen_unmatched.add(key)
