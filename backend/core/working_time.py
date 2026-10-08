@@ -464,7 +464,34 @@ def statement_dict(statement: PayrollStatement | None) -> dict | None:
         return None
     raw_items = list(statement.raw_data or [])
     payslips = [item for item in raw_items if item.get('kind') == 'payslip']
-    payslip = payslips[-1] if payslips else {}
+
+    # Corrections are authoritative for payroll/accounting values, while a
+    # zero payout on a correction page usually means "already settled" rather
+    # than "nothing was transferred this month". Keep the original non-zero
+    # payout for reconciliation with Zahlungsliste/SEPA in that case.
+    indexed_payslips = list(enumerate(payslips))
+    accounting_payslip = (
+        max(
+            indexed_payslips,
+            key=lambda pair: (bool(pair[1].get('is_correction')), pair[0]),
+        )[1]
+        if indexed_payslips
+        else {}
+    )
+    payout_payslip = accounting_payslip
+    if (
+        accounting_payslip.get('is_correction')
+        and dec(accounting_payslip.get('payout_amount')) == Decimal('0.00')
+    ):
+        original_nonzero = [
+            item for item in payslips
+            if not item.get('is_correction')
+            and item.get('payout_amount') not in (None, '')
+            and dec(item.get('payout_amount')) > Decimal('0.00')
+        ]
+        if original_nonzero:
+            payout_payslip = original_nonzero[-1]
+
     return {
         'id': str(statement.id),
         'gross_amount': str(statement.gross_amount) if statement.gross_amount is not None else None,
@@ -474,13 +501,19 @@ def statement_dict(statement: PayrollStatement | None) -> dict | None:
         'source': statement.source,
         'source_reference': statement.source_reference,
         'document_url': statement.document.url if statement.document else '',
-        'lexware_compensation_type': payslip.get('compensation_type') or '',
-        'lexware_paid_hours': payslip.get('quantity') if payslip.get('compensation_type') == 'hourly' else None,
-        'lexware_hourly_rate': payslip.get('hourly_rate'),
-        'lexware_monthly_salary': payslip.get('monthly_salary'),
-        'lexware_payout_amount': payslip.get('payout_amount'),
-        'lexware_personal_number': payslip.get('personal_number') or '',
-        'lexware_supplements': payslip.get('supplements') or [],
+        'lexware_compensation_type': accounting_payslip.get('compensation_type') or '',
+        'lexware_paid_hours': accounting_payslip.get('quantity') if accounting_payslip.get('compensation_type') == 'hourly' else None,
+        'lexware_hourly_rate': accounting_payslip.get('hourly_rate'),
+        'lexware_monthly_salary': accounting_payslip.get('monthly_salary'),
+        'lexware_payout_amount': payout_payslip.get('payout_amount'),
+        'lexware_correction_payout_amount': (
+            accounting_payslip.get('payout_amount')
+            if accounting_payslip.get('is_correction')
+            else None
+        ),
+        'lexware_is_correction': bool(accounting_payslip.get('is_correction')),
+        'lexware_personal_number': accounting_payslip.get('personal_number') or '',
+        'lexware_supplements': accounting_payslip.get('supplements') or [],
     }
 
 
