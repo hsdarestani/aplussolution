@@ -1006,6 +1006,7 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
     rows = list(queryset.select_related('worker__user'))
     statements = _statement_map(rows)
     absences = absence_summary_map(rows)
+    shift_notes = _shift_note_map(rows)
     buffer = io.BytesIO()
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name='WTTitle', parent=styles['Title'], alignment=TA_CENTER, spaceAfter=12))
@@ -1094,7 +1095,7 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
             styles['BodyText'],
         ))
         story.append(Spacer(1, 6))
-        detail = [['Datum', 'Kunde / Ort', 'Plan', 'Ist', 'Pause', 'Netto', 'Nacht', 'Sa.', 'So.']]
+        detail = [['Datum', 'Kunde / Ort', 'Plan', 'Ist', 'Pause', 'Netto', 'Nacht', 'Sa.', 'So.', 'Notiz']]
         for entry in entries:
             client = str(entry.get('client_name') or 'Ohne Zuordnung')
             location = str(entry.get('location_name') or entry.get('position_name') or '')
@@ -1110,11 +1111,12 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
                 _pdf_hours(entry.get('night_minutes')),
                 _pdf_hours(entry.get('saturday_minutes')),
                 _pdf_hours(entry.get('sunday_minutes')),
+                shift_notes.get(str(entry.get('shift_id') or ''), ''),
             ])
         detail_table = Table(
             detail,
             repeatRows=1,
-            colWidths=[23 * mm, 55 * mm, 30 * mm, 30 * mm, 20 * mm, 20 * mm, 20 * mm, 17 * mm, 17 * mm],
+            colWidths=[20 * mm, 43 * mm, 28 * mm, 28 * mm, 17 * mm, 17 * mm, 16 * mm, 14 * mm, 14 * mm, 45 * mm],
         )
         detail_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#163B65')),
@@ -1194,6 +1196,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
     rows = list(queryset.select_related('worker__user'))
     statements = _statement_map(rows)
     absences = absence_summary_map(rows)
+    shift_notes = _shift_note_map(rows)
     master = _worker_master_data(worker)
     document = Document()
     _docx_style(document)
@@ -1290,10 +1293,11 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
                 _pdf_hours(entry.get('night_minutes')),
                 _pdf_hours(entry.get('saturday_minutes')),
                 _pdf_hours(entry.get('sunday_minutes')),
+                shift_notes.get(str(entry.get('shift_id') or ''), ''),
             ])
         _docx_table(
             document,
-            ['Datum', 'Kunde', 'Ort', 'Plan', 'Ist', 'Pause', 'Netto', 'Nacht', 'Sa', 'So'],
+            ['Datum', 'Kunde', 'Ort', 'Plan', 'Ist', 'Pause', 'Netto', 'Nacht', 'Sa', 'So', 'Notiz'],
             daily,
         )
 
