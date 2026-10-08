@@ -518,27 +518,45 @@ def worktime_record_update(request, pk):
 def worktime_rebuild_all(request):
     # Any closed attendance row establishes that an employee has a work month.
     # Approval controls whether its minutes count toward IST, not whether the
-    # monthly account itself exists. Using only authoritative rows here caused
-    # a completely empty payroll workspace when all imported/native rows were
-    # still waiting for approval.
+    # monthly account itself exists. Optional year scoping is used by the
+    # payroll workspace so a 2026 review does not inherit experimental or
+    # incomplete balances from older years.
     closed = TimeEntry.objects.filter(clock_out__isnull=False).order_by('clock_in')
     first = closed.first()
     if not first:
         return Response({'status': 'ok', 'records_count': 0, 'detail': 'Keine abgeschlossenen Arbeitszeiten vorhanden.'})
-    start = timezone.localtime(first.clock_in).date().replace(day=1)
-    end = timezone.localdate()
+
+    requested_year = str(request.data.get('year') or '').strip()
+    reset_carry = False
+    if requested_year:
+        try:
+            year = int(requested_year)
+            if year < 2000 or year > 2100:
+                raise ValueError
+        except ValueError:
+            return Response({'detail': 'Jahr muss im Format JJJJ angegeben werden.'}, status=400)
+        start = date(year, 1, 1)
+        end = min(timezone.localdate(), date(year, 12, 31))
+        reset_carry = True
+    else:
+        start = timezone.localtime(first.clock_in).date().replace(day=1)
+        end = timezone.localdate()
+
     refresh_contract_terms = bool(request.data.get('refresh_contract_terms'))
     log = sync_working_time(
         start,
         end,
         include_inactive_workers=True,
         refresh_contract_terms=refresh_contract_terms,
+        reset_carry=reset_carry,
     )
     audit(request, 'working_time.rebuilt_all', log, {
         'start': start.isoformat(),
         'end': end.isoformat(),
         'records': log.records_count,
         'refresh_contract_terms': refresh_contract_terms,
+        'year': requested_year or None,
+        'reset_carry': reset_carry,
     })
     return Response({
         'status': log.status,
@@ -546,6 +564,7 @@ def worktime_rebuild_all(request):
         'records_count': log.records_count,
         'start': start.isoformat(),
         'end': end.isoformat(),
+        'year': requested_year or None,
         'metadata': log.metadata,
     })
 
