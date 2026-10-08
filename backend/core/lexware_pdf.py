@@ -5,7 +5,7 @@ from decimal import Decimal
 from pypdf import PdfReader
 
 
-_MONEY = r'[0-9][0-9.]*,[0-9]{2}'
+_MONEY = r'-?[0-9][0-9.]*,[0-9]{2}'
 
 
 def _money(value: str | None) -> Decimal | None:
