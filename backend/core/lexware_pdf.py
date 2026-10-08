@@ -105,6 +105,15 @@ def _personal_number(text: str) -> str:
     return match.group(1).strip() if match else ''
 
 
+def _person_group(text: str) -> str:
+    match = re.search(
+        r'Pers\.-Grp\.[^\n]*\n\s*(\d{3})\b',
+        text,
+        flags=re.IGNORECASE,
+    )
+    return match.group(1).strip() if match else ''
+
+
 def _first_money_after(label: str, text: str) -> Decimal | None:
     match = re.search(rf'{label}\s+({_MONEY})\s*€', text, flags=re.IGNORECASE)
     return _money(match.group(1)) if match else None
@@ -161,6 +170,7 @@ def parse_payslips(payload: bytes) -> list[dict]:
             'kind': 'payslip',
             'employee_name': employee_name,
             'personal_number': _personal_number(text),
+            'person_group': _person_group(text),
             'period': _payslip_period(text),
             'is_correction': bool(re.search(r'Korrekturabrechnung\s+für', text, flags=re.IGNORECASE)),
             'compensation_type': compensation_type,
