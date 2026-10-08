@@ -538,11 +538,22 @@ def record_dict(
     payroll_statement = statement_dict(statement)
     employment_type = row.employment_type_snapshot or row.worker.employment_type
     # Lexware person group 109 is an authoritative Minijob marker for that
-    # payroll month. This prevents today's full-time status from rewriting the
-    # historical label of old Minijob months.
-    if str((payroll_statement or {}).get('lexware_person_group') or '') == '109':
+    # payroll month. A non-109 group is equally authoritative that the month
+    # must not be checked against the Minijob earnings ceiling, even if the
+    # current/snapshotted A+ employment label is stale.
+    lexware_person_group = str(
+        (payroll_statement or {}).get('lexware_person_group') or ''
+    ).strip()
+    if lexware_person_group == '109':
         employment_type = WorkerProfile.EmploymentType.MINI
-    minijob_limit = _minijob_limit(row.year_month) if employment_type == WorkerProfile.EmploymentType.MINI else None
+    is_minijob_month = (
+        lexware_person_group == '109'
+        or (
+            not lexware_person_group
+            and employment_type == WorkerProfile.EmploymentType.MINI
+        )
+    )
+    minijob_limit = _minijob_limit(row.year_month) if is_minijob_month else None
     result = {
         'id': str(row.id),
         'worker_id': str(row.worker_id),
