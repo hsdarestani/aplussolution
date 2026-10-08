@@ -113,7 +113,11 @@ def _first_money_after(label: str, text: str) -> Decimal | None:
 def parse_payslips(payload: bytes) -> list[dict]:
     results = []
     for page_number, text in enumerate(_pages(payload), start=1):
-        if 'Abrechnung für' not in text:
+        if not re.search(
+            r'\b(?:Korrekturabrechnung|Abrechnung)\s+für\b',
+            text,
+            flags=re.IGNORECASE,
+        ):
             continue
         employee_name = _employee_name_from_payslip(text)
         if not employee_name:
