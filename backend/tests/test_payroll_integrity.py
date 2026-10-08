@@ -1139,3 +1139,72 @@ def test_worktime_settings_persists_surcharge_percentages(auth_admin, worker_use
     assert setting.night_surcharge_percent == Decimal('25.00')
     assert setting.saturday_surcharge_percent == Decimal('20.00')
     assert setting.sunday_surcharge_percent == Decimal('50.00')
+
+
+@pytest.mark.django_db
+def test_lexware_sepa_xml_does_not_double_count_payment_list(auth_admin, worker_user):
+    import io
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from reportlab.pdfgen import canvas
+    from core.models import Document
+
+    def make_pdf(lines):
+        buffer = io.BytesIO()
+        doc = canvas.Canvas(buffer)
+        y = 800
+        for line in lines:
+            doc.drawString(40, y, line)
+            y -= 18
+        doc.save()
+        return buffer.getvalue()
+
+    worker = worker_user.worker_profile
+    period = date(2026, 9, 1)
+    payment = SimpleUploadedFile(
+        'Zahlungsliste_2026-09.pdf',
+        make_pdf([
+            'Zahlungsliste September 2026',
+            'Überweisung',
+            'Mitarbeiter',
+            'Empfänger Verwendungszweck IBAN Betrag',
+            'Anna Becker Lohn & Gehalt September 2026 DE79 5085 2553 0117 5072 51 602,95',
+        ]),
+        content_type='application/pdf',
+    )
+    sepa = SimpleUploadedFile(
+        'SEPA_Ueberweisungstraeger_2026-09.xml',
+        b'''<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.001.001.09">
+  <CstmrCdtTrfInitn>
+    <PmtInf>
+      <ReqdExctnDt><Dt>2026-10-08</Dt></ReqdExctnDt>
+      <CdtTrfTxInf>
+        <Amt><InstdAmt Ccy="EUR">602.95</InstdAmt></Amt>
+        <Cdtr><Nm>Anna Becker</Nm></Cdtr>
+        <CdtrAcct><Id><IBAN>DE79508525530117507251</IBAN></Id></CdtrAcct>
+        <RmtInf><Ustrd>Lohn und Gehalt September 2026</Ustrd></RmtInf>
+      </CdtTrfTxInf>
+    </PmtInf>
+  </CstmrCdtTrfInitn>
+</Document>''',
+        content_type='application/xml',
+    )
+
+    response = auth_admin.post(
+        '/api/working-time/lexware-import/',
+        {'period': '2026-09', 'files': [payment, sepa]},
+        format='multipart',
+    )
+
+    assert response.status_code == 200
+    statement = PayrollStatement.objects.get(worker=worker, period=period)
+    assert statement.transferred_amount == Decimal('602.95')
+    assert statement.payment_date == date(2026, 10, 8)
+    assert statement.source == 'lexware_sepa_xml'
+    assert {row.get('source_type') for row in statement.raw_data} == {
+        'lexware_zahlungsliste_pdf',
+        'lexware_sepa_xml',
+    }
+    assert len(response.data['archived_documents']) == 2
+    assert Document.objects.filter(folder='payroll', visibility='admin').count() >= 2
