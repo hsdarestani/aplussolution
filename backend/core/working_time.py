@@ -1363,6 +1363,7 @@ def _reconciliation_status(item: dict) -> tuple[str, list[str]]:
 def lexware_reconciliation_docx(queryset, period: date) -> bytes:
     rows = list(queryset.select_related('worker__user'))
     statements = _statement_map(rows)
+    absences = absence_summary_map(rows)
     document = Document()
     _docx_style(document)
     section = document.sections[0]
@@ -1373,7 +1374,11 @@ def lexware_reconciliation_docx(queryset, period: date) -> bytes:
     table_rows = []
     detail_blocks = []
     for row in rows:
-        item = record_dict(row, statements.get((str(row.worker_id), row.year_month)))
+        item = record_dict(
+            row,
+            statements.get((str(row.worker_id), row.year_month)),
+            absence_summary=absences.get((str(row.worker_id), row.year_month)),
+        )
         payroll = item.get('payroll_statement') or {}
         status, issues = _reconciliation_status(item)
         master = _worker_master_data(row.worker)
@@ -1393,6 +1398,10 @@ def lexware_reconciliation_docx(queryset, period: date) -> bytes:
             f"{payroll.get('gross_amount') or ''} €" if payroll.get('gross_amount') else '',
             f"{payroll.get('net_amount') or ''} €" if payroll.get('net_amount') else '',
             f"{payroll.get('lexware_payout_amount') or payroll.get('transferred_amount') or ''} €" if (payroll.get('lexware_payout_amount') or payroll.get('transferred_amount')) else '',
+            item.get('vacation_days') or 0,
+            item.get('sick_days') or 0,
+            payroll.get('lexware_sick_hours') or '',
+            payroll.get('lexware_u1_reimbursement') or '',
             status,
         ])
         if issues:
@@ -1400,7 +1409,7 @@ def lexware_reconciliation_docx(queryset, period: date) -> bytes:
 
     _docx_table(
         document,
-        ['Mitarbeiter', 'Beschäftigung', 'Ist', 'Soll', 'Bezahlt', 'Saldo', 'Vergütung', 'Brutto', 'Netto', 'Auszahlung', 'Status'],
+        ['Mitarbeiter', 'Beschäftigung', 'Ist', 'Soll', 'Bezahlt', 'Saldo', 'Vergütung', 'Brutto', 'Netto', 'Auszahlung', 'Urlaub', 'Krank', 'Lexware Krank Std.', 'U1 Erstattung', 'Status'],
         table_rows,
     )
 
@@ -1487,11 +1496,15 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
             payroll.get('gross_amount') or '',
             payroll.get('net_amount') or '',
             payroll.get('lexware_payout_amount') or payroll.get('transferred_amount') or '',
+            item.get('vacation_days') or 0,
+            item.get('sick_days') or 0,
+            payroll.get('lexware_sick_hours') or '',
+            payroll.get('lexware_u1_reimbursement') or '',
             item.get('reconciliation_status') or '',
         ])
     _docx_table(
         document,
-        ['Mitarbeiter', 'Monat', 'Beschäftigung', 'Ist', 'Basis', 'Saldo Monat', 'Saldo gesamt', 'Urlaub', 'Krank', 'Lexware Brutto', 'Lexware Netto', 'Auszahlung', 'Status'],
+        ['Mitarbeiter', 'Monat', 'Beschäftigung', 'Ist', 'Basis', 'Saldo Monat', 'Saldo gesamt', 'Urlaub', 'Krank', 'Lexware Brutto', 'Lexware Netto', 'Auszahlung', 'Lexware Krank Std.', 'U1 Erstattung', 'Status'],
         overview_rows,
     )
 
