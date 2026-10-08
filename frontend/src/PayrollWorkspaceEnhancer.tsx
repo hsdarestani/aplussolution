@@ -125,6 +125,7 @@ type LexwareReadiness = {
   expected_through?: string | null;
   expected_months: number;
   complete_months: number;
+  parsed_complete_months?: number;
   core_documents_expected: number;
   core_documents_present: number;
   annual_complete: boolean;
@@ -685,6 +686,8 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         </div>
         <small>
           {lexwareReadiness.core_documents_present}/{lexwareReadiness.core_documents_expected} Kernnachweise
+          {' · '}
+          {Number(lexwareReadiness.parsed_complete_months ?? 0)}/{lexwareReadiness.expected_months} Monate technisch eingelesen
           {' · '}
           {lexwareReadiness.annual_complete ? 'Jahresnachweise vorhanden' : 'Jahresnachweise prüfen'}
           {' · '}
