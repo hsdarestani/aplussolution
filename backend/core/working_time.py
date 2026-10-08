@@ -315,7 +315,12 @@ def _statement_payslip(statement: PayrollStatement | None) -> dict:
         item for item in list(statement.raw_data or [])
         if item.get('kind') == 'payslip'
     ]
-    return payslips[-1] if payslips else {}
+    if not payslips:
+        return {}
+    return max(
+        enumerate(payslips),
+        key=lambda pair: (bool(pair[1].get('is_correction')), pair[0]),
+    )[1]
 
 
 def _statement_compensation_type(statement: PayrollStatement | None) -> str:
