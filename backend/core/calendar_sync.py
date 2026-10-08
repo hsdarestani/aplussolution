@@ -95,31 +95,25 @@ def calendar_subscription(request):
 
     token = quote(_calendar_token(worker), safe='')
     feed_url = _public_calendar_feed_url(request, token)
-    # Preserve transport security for Apple Calendar. iOS may downgrade
-    # plain webcal:// subscriptions to HTTP, which produces the
-    # "Unsichere Verbindung" flow even when the feed itself is HTTPS.
-    webcal_url = (
-        feed_url.replace('https://', 'webcals://', 1)
-        if feed_url.startswith('https://')
-        else feed_url.replace('http://', 'webcal://', 1)
-    )
+    # webcal is the iOS Calendar subscription deep link. The receiving
+    # server upgrades its HTTP fetch to HTTPS; the actual feed URL remains
+    # HTTPS for secure transport, Google, Outlook and copy-link actions.
+    # webcals:// is not a reliably supported iOS deep-link scheme.
+    webcal_url = feed_url.replace('https://', 'webcal://', 1) if feed_url.startswith('https://') else feed_url.replace('http://', 'webcal://', 1)
     encoded_feed = quote(feed_url, safe='')
     calendar_name = quote('A+ Solution Dienstplan', safe='')
 
-    # iOS 26 reliably validates HTTPS .ics links when they are handed directly
-    # to Calendar. The currently released app otherwise rewrites feed_url into
-    # webcals:// on the client. Returning an empty feed_url only for iOS makes
-    # that released client fall back to this canonical HTTPS URL without a new
-    # App Store build. Google and Outlook also fall back to their server URLs.
+    # The already released iOS app prefers webcal_url when feed_url is
+    # empty. Keep this backwards-compatibility path until older builds are
+    # retired; the new client always reads https_feed_url for copy/Google.
     user_agent = str(request.META.get('HTTP_USER_AGENT') or '').lower()
     is_ios = 'iphone' in user_agent or 'ipad' in user_agent
     client_feed_url = '' if is_ios else feed_url
-    apple_url = feed_url if is_ios else webcal_url
 
     response = Response({
         'feed_url': client_feed_url,
         'https_feed_url': feed_url,
-        'webcal_url': apple_url,
+        'webcal_url': webcal_url,
         'google_url': f'https://calendar.google.com/calendar/render?cid={encoded_feed}',
         'outlook_url': f'https://outlook.live.com/calendar/0/addfromweb?url={encoded_feed}&name={calendar_name}',
         'automatic': True,
