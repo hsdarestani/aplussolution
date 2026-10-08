@@ -3015,16 +3015,16 @@ function Profile({ user }: { user: User }) {
     setCalendarLoading(true);
     void api('calendar/subscription/').then((payload: any) => {
       if (cancelled) return;
-      const rawFeed = String(payload?.feed_url || '');
-      const secureFeed = rawFeed.replace(/^http:\/\//i, 'https://');
-      const secureApple = secureFeed.startsWith('https://')
-        ? secureFeed.replace(/^https:\/\//i, 'webcals://')
-        : String(payload?.webcal_url || '').replace(/^webcal:\/\//i, 'webcals://');
-      const encodedFeed = encodeURIComponent(secureFeed || rawFeed);
+      // Do not turn the secure HTTPS feed into the unsupported webcals://
+      // scheme. iOS launches Calendar from webcal://; subscribers fetch the
+      // canonical feed with HTTPS after the server's TLS redirect.
+      const secureFeed = String(payload?.https_feed_url || payload?.feed_url || '').replace(/^http:\/\//i, 'https://');
+      const appleDeepLink = String(payload?.webcal_url || '').replace(/^webcals:\/\//i, 'webcal://');
+      const encodedFeed = encodeURIComponent(secureFeed);
       setCalendarSync({
         ...payload,
-        feed_url: secureFeed || rawFeed,
-        webcal_url: secureApple || payload?.webcal_url,
+        feed_url: secureFeed,
+        webcal_url: appleDeepLink || secureFeed.replace(/^https:\/\//i, 'webcal://'),
         google_url: secureFeed
           ? `https://calendar.google.com/calendar/render?cid=${encodedFeed}`
           : payload?.google_url,
@@ -3037,6 +3037,17 @@ function Profile({ user }: { user: User }) {
     }).finally(() => { if (!cancelled) setCalendarLoading(false); });
     return () => { cancelled = true; };
   }, [user.role]);
+
+  function openAppleCalendar() {
+    const url = String(calendarSync?.webcal_url || '');
+    if (!/^webcal:\/\/[a-z0-9.-]+\//i.test(url)) {
+      setToast('Kalenderabo konnte nicht geöffnet werden.');
+      return;
+    }
+    // A direct navigation from the tap invokes iOS's native calendar
+    // subscription flow without showing an intermediate link page.
+    window.location.href = url;
+  }
 
   async function copyCalendarLink() {
     if (!calendarSync?.feed_url) return;
@@ -3107,7 +3118,7 @@ function Profile({ user }: { user: User }) {
           <h3>Dienstplan mit Kalender synchronisieren</h3>
           <p>Einmal abonnieren. Danach werden deine zugewiesenen Schichten sowie spätere Änderungen und Löschungen automatisch über das Kalenderabo aktualisiert.</p>
           {calendarLoading ? <p>Kalenderlink wird geladen …</p> : calendarSync ? <>
-            <IonButton href={calendarSync.webcal_url} expand="block">iPhone / Apple Kalender</IonButton>
+            <IonButton type="button" onClick={openAppleCalendar} expand="block">iPhone / Apple Kalender</IonButton>
             <IonButton href={calendarSync.google_url} target="_blank" fill="outline" expand="block">Google Kalender</IonButton>
             <IonButton href={calendarSync.outlook_url} target="_blank" fill="outline" expand="block">Outlook Kalender</IonButton>
             <IonButton type="button" fill="clear" expand="block" onClick={() => void copyCalendarLink()}>Kalenderlink kopieren</IonButton>
