@@ -1401,6 +1401,139 @@ def lexware_reconciliation_docx(queryset, period: date) -> bytes:
     return _docx_bytes(document)
 
 
+def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> bytes:
+    rows = list(queryset.select_related('worker__user').order_by('worker__user__last_name', 'worker__user__first_name', 'year_month'))
+    statements = _statement_map(rows)
+    absences = absence_summary_map(rows)
+
+    document = Document()
+    _docx_style(document)
+    section = document.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width, section.page_height = section.page_height, section.page_width
+    _docx_title(document, 'Prüfbericht Arbeitszeit und Lexware', str(year))
+
+    items = []
+    for row in rows:
+        items.append(record_dict(
+            row,
+            statements.get((str(row.worker_id), row.year_month)),
+            absence_summary=absences.get((str(row.worker_id), row.year_month)),
+        ))
+
+    closed_items = [item for item in items if item.get('reconciliation_status') != 'LAUFEND']
+    match_count = sum(1 for item in closed_items if item.get('reconciliation_status') == 'MATCH')
+    review_count = sum(1 for item in closed_items if item.get('reconciliation_status') == 'PRÜFEN')
+    mismatch_count = sum(1 for item in closed_items if item.get('reconciliation_status') == 'ABWEICHUNG')
+
+    summary_rows = [
+        ['Monatskonten', len(items)],
+        ['Abgeschlossene Konten', len(closed_items)],
+        ['MATCH', match_count],
+        ['PRÜFEN', review_count],
+        ['ABWEICHUNG', mismatch_count],
+    ]
+    if readiness:
+        summary_rows.extend([
+            ['Lexware Kernnachweise', f"{readiness.get('core_documents_present', 0)} / {readiness.get('core_documents_expected', 0)}"],
+            ['Vollständige Lexware Monate', f"{readiness.get('complete_months', 0)} / {readiness.get('expected_months', 0)}"],
+            ['Jahresnachweise', 'vollständig' if readiness.get('annual_complete') else 'prüfen'],
+            ['Weiterer Import nötig', 'Nein' if readiness.get('no_additional_import_required') else 'Ja'],
+        ])
+    _docx_table(document, ['Prüfung', 'Ergebnis'], summary_rows)
+
+    document.add_paragraph()
+    heading = document.add_paragraph()
+    run = heading.add_run('Monatsübersicht')
+    run.bold = True
+    run.font.size = Pt(13)
+
+    overview_rows = []
+    for item in items:
+        payroll = item.get('payroll_statement') or {}
+        overview_rows.append([
+            item.get('employee_name') or '',
+            item.get('year_month') or '',
+            item.get('employment_type') or '',
+            item.get('ist_hours') or '0',
+            item.get('balance_reference_hours') or '0',
+            item.get('monthly_balance_hours') or '0',
+            item.get('saldo_cumulative') or '0',
+            item.get('vacation_days') or 0,
+            item.get('sick_days') or 0,
+            payroll.get('gross_amount') or '',
+            payroll.get('net_amount') or '',
+            payroll.get('lexware_payout_amount') or payroll.get('transferred_amount') or '',
+            item.get('reconciliation_status') or '',
+        ])
+    _docx_table(
+        document,
+        ['Mitarbeiter', 'Monat', 'Beschäftigung', 'Ist', 'Basis', 'Saldo Monat', 'Saldo gesamt', 'Urlaub', 'Krank', 'Lexware Brutto', 'Lexware Netto', 'Auszahlung', 'Status'],
+        overview_rows,
+    )
+
+    exceptions = [
+        item for item in closed_items
+        if item.get('reconciliation_status') in {'PRÜFEN', 'ABWEICHUNG'}
+        or item.get('contract_issues')
+    ]
+    document.add_paragraph()
+    heading = document.add_paragraph()
+    run = heading.add_run('Offene Prüfpunkte')
+    run.bold = True
+    run.font.size = Pt(13)
+    if not exceptions:
+        document.add_paragraph('Keine offenen Prüfpunkte in den abgeschlossenen Monatskonten.')
+    else:
+        exception_rows = []
+        for item in exceptions:
+            issues = list(item.get('reconciliation_issues') or [])
+            for issue in item.get('contract_issues') or []:
+                if issue not in issues:
+                    issues.append(issue)
+            exception_rows.append([
+                item.get('employee_name') or '',
+                item.get('year_month') or '',
+                item.get('reconciliation_status') or '',
+                ' | '.join(issues),
+            ])
+        _docx_table(document, ['Mitarbeiter', 'Monat', 'Status', 'Prüfhinweise'], exception_rows)
+
+    if readiness:
+        document.add_paragraph()
+        heading = document.add_paragraph()
+        run = heading.add_run('Lexware Datenvollständigkeit')
+        run.bold = True
+        run.font.size = Pt(13)
+        readiness_rows = []
+        for item in readiness.get('months') or []:
+            docs = item.get('documents') or {}
+            readiness_rows.append([
+                item.get('period') or '',
+                'Ja' if docs.get('lohnabrechnungen') else 'Nein',
+                'Ja' if docs.get('zahlungsliste') else 'Nein',
+                'Ja' if docs.get('lohnjournal') else 'Nein',
+                'Ja' if docs.get('sepa') else 'Nein',
+                'Ja' if docs.get('meldebescheinigungen') else 'Nein',
+                item.get('statements') or 0,
+                'Vollständig' if item.get('core_complete') else 'Prüfen',
+            ])
+        _docx_table(
+            document,
+            ['Monat', 'Abrechnung', 'Zahlungsliste', 'Lohnjournal', 'SEPA', 'Meldungen', 'Mitarbeiterkonten', 'Status'],
+            readiness_rows,
+        )
+
+    note = document.add_paragraph(
+        'Hinweis: Ist Zeiten stammen aus der tatsächlichen Zeiterfassung. Dienstplan bleibt Vergleichsdaten. '
+        'Bei Stundenlohn wird mit den in Lexware ausgewiesenen bezahlten Stunden abgeglichen. '
+        'Bei Gehalt ist die vertragliche Sollzeit die Saldo Basis. Abwesenheiten werden separat ausgewiesen '
+        'und verändern den Saldo nicht automatisch.'
+    )
+    note.runs[0].italic = True
+    return _docx_bytes(document)
+
+
 def create_backup(kind='manual') -> dict:
     backup_dir = Path(settings.MEDIA_ROOT) / 'backups' / 'working-time'
     backup_dir.mkdir(parents=True, exist_ok=True)
