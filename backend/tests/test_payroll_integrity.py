@@ -1289,3 +1289,23 @@ def test_cross_month_correction_payslip_updates_original_period(auth_admin, work
     assert july.net_amount == Decimal('310.00')
     assert july.raw_data[0]['is_correction'] is False
     assert july.raw_data[0]['period'] == '2026-07'
+
+
+def test_lexware_payment_list_accepts_und_and_ampersand_wording():
+    import io
+
+    from reportlab.pdfgen import canvas
+    from core.lexware_pdf import parse_payment_list
+
+    buffer = io.BytesIO()
+    doc = canvas.Canvas(buffer)
+    doc.drawString(40, 800, 'Anna Becker Lohn und Gehalt März 2026 DE79 5085 2553 0117 5072 51 123,45')
+    doc.drawString(40, 780, 'Max Muster Lohn & Gehalt April 2026 DE36 5055 0020 0105 2038 61 234,56')
+    doc.save()
+
+    rows = parse_payment_list(buffer.getvalue())
+
+    assert [(row['employee_name'], row['amount']) for row in rows] == [
+        ('Anna Becker', '123.45'),
+        ('Max Muster', '234.56'),
+    ]
