@@ -513,6 +513,7 @@ def statement_dict(statement: PayrollStatement | None) -> dict | None:
         ),
         'lexware_is_correction': bool(accounting_payslip.get('is_correction')),
         'lexware_personal_number': accounting_payslip.get('personal_number') or '',
+        'lexware_person_group': accounting_payslip.get('person_group') or '',
         'lexware_supplements': accounting_payslip.get('supplements') or [],
     }
 
@@ -529,9 +530,14 @@ def record_dict(
     monthly_balance = (row.ist_hours + row.manual_adjustment - balance_reference).quantize(TWO)
     surcharge_amount = totals['surcharge_amount']
     gross_with_surcharges = (row.gross_amount + surcharge_amount).quantize(TWO)
-    employment_type = row.employment_type_snapshot or row.worker.employment_type
-    minijob_limit = _minijob_limit(row.year_month) if employment_type == WorkerProfile.EmploymentType.MINI else None
     payroll_statement = statement_dict(statement)
+    employment_type = row.employment_type_snapshot or row.worker.employment_type
+    # Lexware person group 109 is an authoritative Minijob marker for that
+    # payroll month. This prevents today's full-time status from rewriting the
+    # historical label of old Minijob months.
+    if str((payroll_statement or {}).get('lexware_person_group') or '') == '109':
+        employment_type = WorkerProfile.EmploymentType.MINI
+    minijob_limit = _minijob_limit(row.year_month) if employment_type == WorkerProfile.EmploymentType.MINI else None
     result = {
         'id': str(row.id),
         'worker_id': str(row.worker_id),
