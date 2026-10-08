@@ -31,6 +31,7 @@ from .native_cutover import (
 from .permissions import IsAdminOrManager
 from .services import audit
 from .working_time import (
+    absence_summary_map,
     create_backup,
     dec,
     export_csv,
@@ -465,10 +466,15 @@ def worktime_records(request):
         queryset = queryset.filter(year_month__lt=(datetime.strptime(month_to[:7], '%Y-%m').date().replace(day=28) + timedelta(days=4)).replace(day=1))
     rows = list(queryset[:2000])
     statements = _payroll_statement_map(rows)
+    absences = absence_summary_map(rows)
     return Response({
         'count': len(rows),
         'results': [
-            record_dict(row, statements.get((str(row.worker_id), row.year_month)))
+            record_dict(
+                row,
+                statements.get((str(row.worker_id), row.year_month)),
+                absence_summary=absences.get((str(row.worker_id), row.year_month)),
+            )
             for row in rows
         ],
     })
@@ -485,7 +491,13 @@ def worktime_record_detail(request, pk):
         worker=record.worker,
         period=record.year_month,
     ).first()
-    return Response(record_dict(record, statement, include_entries=True))
+    absences = absence_summary_map([record])
+    return Response(record_dict(
+        record,
+        statement,
+        include_entries=True,
+        absence_summary=absences.get((str(record.worker_id), record.year_month)),
+    ))
 
 
 @api_view(['PATCH'])
