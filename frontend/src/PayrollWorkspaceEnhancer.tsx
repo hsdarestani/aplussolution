@@ -91,6 +91,10 @@ type PayrollRow = {
   sunday_hours?: string;
   surcharge_amount?: string;
   entry_count?: number;
+  absence_days?: number;
+  vacation_days?: number;
+  sick_days?: number;
+  other_absence_days?: number;
   minijob_limit?: string | null;
   minijob_warning?: boolean;
   contract_issues?: string[];
@@ -732,6 +736,9 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
               <div><span>Samstag</span><b>{decimal(row.saturday_hours)} Std.</b></div>
               <div><span>Sonntag</span><b>{decimal(row.sunday_hours)} Std.</b></div>
               <div><span>Zuschläge</span><b>{money(row.surcharge_amount)}</b></div>
+              <div><span>Abwesenheit</span><b>{row.absence_days || 0} Tg.</b></div>
+              <div><span>Urlaub</span><b>{row.vacation_days || 0} Tg.</b></div>
+              <div><span>Krank</span><b>{row.sick_days || 0} Tg.</b></div>
               <div><span>Soll</span><b>{decimal(row.soll_hours)} Std.</b></div>
               <div><span>Einträge</span><b>{row.entry_count || 0}</b></div>
             </div>
