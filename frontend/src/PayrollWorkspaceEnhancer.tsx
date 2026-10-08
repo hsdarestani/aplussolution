@@ -34,7 +34,9 @@ type ReconciliationItem = {
   label?: string;
   status?: string;
   aplus_hours?: string;
+  aplus_amount?: string;
   lexware_hours?: string | null;
+  lexware_amount?: string | null;
 };
 
 type SurchargeReconciliation = {
