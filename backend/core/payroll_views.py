@@ -10,6 +10,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets
 from rest_framework.decorators import api_view, parser_classes, permission_classes
@@ -342,6 +343,55 @@ def _find_worker(row: dict, matchers):
     max_length = max(length for length, _ in candidates)
     winners = [worker for length, worker in candidates if length == max_length]
     return winners[0] if len(winners) == 1 else None
+
+
+def _expand_lexware_package_uploads(uploads):
+    """Expand a Lexware year/package ZIP containing PDFs/XMLs.
+
+    Bank-export ZIPs that contain only CSV files are left untouched and continue
+    through the existing bank CSV parser.
+    """
+    expanded = []
+    for upload in uploads:
+        name = str(getattr(upload, 'name', '') or 'lexware')
+        if not name.lower().endswith('.zip'):
+            expanded.append(upload)
+            continue
+        try:
+            payload = upload.read()
+            upload.seek(0)
+            if payload[:4] != b'PK\x03\x04':
+                expanded.append(upload)
+                continue
+            with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                members = [item for item in archive.namelist() if not item.endswith('/')]
+                package_members = [
+                    item for item in members
+                    if item.lower().endswith(('.pdf', '.xml'))
+                ]
+                if not package_members:
+                    expanded.append(upload)
+                    continue
+                for member in package_members:
+                    data = archive.read(member)
+                    filename = member.rsplit('/', 1)[-1]
+                    expanded.append(SimpleUploadedFile(
+                        filename,
+                        data,
+                        content_type='application/pdf' if filename.lower().endswith('.pdf') else 'application/xml',
+                    ))
+        except Exception:
+            try:
+                upload.seek(0)
+            except Exception:
+                pass
+            expanded.append(upload)
+    return expanded
+
+
+def _filename_period(name: str) -> str:
+    match = re.search(r'(20[0-9]{2})[-_](0[1-9]|1[0-2])', str(name or ''))
+    return f'{match.group(1)}-{match.group(2)}' if match else ''
 
 
 @api_view(['POST'])
