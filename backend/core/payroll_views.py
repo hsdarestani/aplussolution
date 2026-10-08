@@ -528,7 +528,10 @@ def lexware_bank_import(request):
                 continue
 
             if document_type == 'unknown':
-                unmatched.append({'file': name, 'text': 'Unbekannter Lexware PDF Typ'})
+                archived_title = _archive_lexware_upload(upload, archive_period_label, request.user)
+                if archived_title:
+                    archived_documents.append(archived_title)
+                archived_only.append(name)
                 continue
 
             parsed_rows += len(pdf_rows)
@@ -551,10 +554,22 @@ def lexware_bank_import(request):
                 target_period_text = (
                     str(row.get('period') or '').strip()
                     if row.get('kind') == 'payslip'
-                    else period_text
-                ) or period_text
+                    else file_period_text
+                ) or file_period_text
                 if not re.fullmatch(r'\d{4}-\d{2}', target_period_text):
-                    target_period_text = period_text
+                    unmatched.append({'file': name, 'text': 'Abrechnungsmonat nicht erkennbar'})
+                    continue
+                if (
+                    auto_period
+                    and requested_year
+                    and not target_period_text.startswith(f'{requested_year}-')
+                ):
+                    skipped_historical_corrections.append({
+                        'file': name,
+                        'employee_name': row.get('employee_name') or '',
+                        'period': target_period_text,
+                    })
+                    continue
                 key_source = '|'.join([
                     name,
                     target_period_text,
