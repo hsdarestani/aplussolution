@@ -2095,7 +2095,7 @@ def test_absence_summary_is_visible_without_changing_saldo(worker_user):
 
 
 @pytest.mark.django_db
-def test_lexware_readiness_marks_complete_closed_month_package(auth_admin):
+def test_lexware_readiness_marks_complete_closed_month_package():
     from django.core.files.uploadedfile import SimpleUploadedFile
     from core.payroll_views import lexware_readiness_payload
 
@@ -2113,7 +2113,6 @@ def test_lexware_readiness_marks_complete_closed_month_package(auth_admin):
             file=SimpleUploadedFile(filename, b'test'),
             folder=Document.Folder.PAYROLL,
             visibility=Document.Visibility.ADMIN,
-            uploaded_by=auth_admin.handler._force_user,
         )
 
     readiness = lexware_readiness_payload(2026)
