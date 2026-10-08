@@ -1496,8 +1496,6 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
             payroll.get('gross_amount') or '',
             payroll.get('net_amount') or '',
             payroll.get('lexware_payout_amount') or payroll.get('transferred_amount') or '',
-            item.get('vacation_days') or 0,
-            item.get('sick_days') or 0,
             payroll.get('lexware_sick_hours') or '',
             payroll.get('lexware_u1_reimbursement') or '',
             item.get('reconciliation_status') or '',
