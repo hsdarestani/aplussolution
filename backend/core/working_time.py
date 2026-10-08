@@ -358,12 +358,22 @@ def update_record(
 ) -> WorkingTimeAccountRecord:
     # paid_total_hours is the new unambiguous field. paid_hours remains accepted
     # for compatibility with older clients and means legacy extra hours.
+    statement_map = {
+        item.period: item
+        for item in PayrollStatement.objects.filter(worker=record.worker)
+    }
+    record_statement = statement_map.get(record.year_month)
+    record_compensation = (
+        _statement_compensation_type(record_statement)
+        or _compensation_type(record.worker)
+    )
+
     if paid_total_hours is not None:
         record.paid_total_hours = max(Decimal('0'), dec(paid_total_hours))
     elif paid_hours is not None:
         record.paid_hours = max(Decimal('0'), dec(paid_hours))
         record.paid_total_hours = (record.soll_hours + record.paid_hours).quantize(TWO)
-    elif record.paid_total_hours is None and _compensation_type(record.worker) != 'salary':
+    elif record.paid_total_hours is None and record_compensation != 'salary':
         record.paid_total_hours = (record.soll_hours + record.paid_hours).quantize(TWO)
 
     if manual_adjustment is not None:
@@ -380,7 +390,7 @@ def update_record(
         record.carryover_previous
         + record.ist_hours
         + record.manual_adjustment
-        - _balance_reference(record)[0]
+        - _balance_reference(record, record_statement)[0]
     ).quantize(TWO)
     record.save(update_fields=[
         'paid_hours', 'paid_total_hours', 'manual_adjustment',
@@ -394,10 +404,18 @@ def update_record(
         .order_by('year_month')
     ):
         row.carryover_previous = carry
-        if row.paid_total_hours is None and _compensation_type(row.worker) != 'salary':
+        row_statement = statement_map.get(row.year_month)
+        row_compensation = (
+            _statement_compensation_type(row_statement)
+            or _compensation_type(row.worker)
+        )
+        if row.paid_total_hours is None and row_compensation != 'salary':
             row.paid_total_hours = (row.soll_hours + row.paid_hours).quantize(TWO)
         row.saldo_cumulative = (
-            carry + row.ist_hours + row.manual_adjustment - _balance_reference(row)[0]
+            carry
+            + row.ist_hours
+            + row.manual_adjustment
+            - _balance_reference(row, row_statement)[0]
         ).quantize(TWO)
         row.save(update_fields=[
             'paid_total_hours', 'carryover_previous', 'saldo_cumulative', 'updated_at',
