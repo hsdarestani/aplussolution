@@ -1887,3 +1887,77 @@ def test_zero_payout_correction_uses_original_monthly_payout_for_reconciliation(
     assert data['payroll_statement']['lexware_payout_amount'] == '2029.71'
     assert data['payroll_statement']['lexware_correction_payout_amount'] == '0.00'
     assert data['reconciliation_status'] == 'MATCH'
+
+
+def test_lexware_payslip_parser_reads_person_group():
+    import io
+
+    from reportlab.pdfgen import canvas
+    from core.lexware_pdf import parse_payslips
+
+    buffer = io.BytesIO()
+    doc = canvas.Canvas(buffer)
+    for index, line in enumerate([
+        'Abrechnung für Januar 2026 - Anna Becker',
+        'Personal-Nr. Geburtsdatum Steuerklasse Konfession',
+        '14 01.01.1990 - ohne',
+        'Pers.-Grp. Beitragsgruppe Eintritt Austritt',
+        '109 6500 01.10.2024 -',
+        'Entgelt',
+        'Bezeichnung Kennz Menge Faktor Prozentsatz Betrag',
+        'Lohn LSG 18,07 15,50 € 280,09 €',
+        'Gesamtbrutto 280,09 €',
+        'Netto 280,09 €',
+        'Auszahlungsbetrag 280,09 €',
+    ]):
+        doc.drawString(40, 800 - index * 18, line)
+    doc.save()
+
+    rows = parse_payslips(buffer.getvalue())
+
+    assert len(rows) == 1
+    assert rows[0]['person_group'] == '109'
+
+
+@pytest.mark.django_db
+def test_historical_person_group_109_displays_as_minijob(worker_user):
+    from core.working_time import record_dict
+
+    worker = worker_user.worker_profile
+    worker.employment_type = 'vollzeit'
+    worker.save(update_fields=['employment_type', 'updated_at'])
+    record = WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=date(2026, 1, 1),
+        ist_hours=Decimal('18.07'),
+        soll_hours=Decimal('38.00'),
+        paid_total_hours=Decimal('18.07'),
+        employment_type_snapshot='vollzeit',
+        saldo_cumulative=Decimal('0.00'),
+        hourly_rate=Decimal('15.50'),
+        gross_amount=Decimal('280.09'),
+    )
+    statement = PayrollStatement.objects.create(
+        worker=worker,
+        period=date(2026, 1, 1),
+        gross_amount=Decimal('280.09'),
+        net_amount=Decimal('280.09'),
+        transferred_amount=Decimal('280.09'),
+        source='lexware_pdf_bundle',
+        raw_data=[{
+            'kind': 'payslip',
+            'period': '2026-01',
+            'person_group': '109',
+            'compensation_type': 'hourly',
+            'quantity': '18.07',
+            'hourly_rate': '15.50',
+            'gross_amount': '280.09',
+            'net_amount': '280.09',
+            'payout_amount': '280.09',
+            'supplements': [],
+        }],
+    )
+
+    data = record_dict(record, statement)
+
+    assert data['employment_type'] == 'minijob'
