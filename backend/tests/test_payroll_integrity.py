@@ -1309,3 +1309,65 @@ def test_lexware_payment_list_accepts_und_and_ampersand_wording():
         ('Anna Becker', '123.45'),
         ('Max Muster', '234.56'),
     ]
+
+
+@pytest.mark.django_db
+def test_full_year_zip_import_splits_months_and_archives_unknown_pdfs(auth_admin, worker_user):
+    import io
+    import zipfile
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from reportlab.pdfgen import canvas
+    from core.models import Document
+
+    def make_pdf(lines):
+        buffer = io.BytesIO()
+        doc = canvas.Canvas(buffer)
+        y = 800
+        for line in lines:
+            doc.drawString(40, y, line)
+            y -= 18
+        doc.save()
+        return buffer.getvalue()
+
+    january = make_pdf([
+        'Zahlungsliste Januar 2026',
+        'Anna Becker Lohn und Gehalt Januar 2026 DE79 5085 2553 0117 5072 51 123,45',
+    ])
+    february = make_pdf([
+        'Zahlungsliste Februar 2026',
+        'Anna Becker Lohn & Gehalt Februar 2026 DE79 5085 2553 0117 5072 51 234,56',
+    ])
+    journal = make_pdf([
+        'Lohnjournal Januar 2026',
+        'A+ Solution GmbH',
+        'Gesamtsumme 123,45',
+    ])
+
+    bundle = io.BytesIO()
+    with zipfile.ZipFile(bundle, 'w', zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('01/Zahlungsliste_2026-01.pdf', january)
+        archive.writestr('02/Zahlungsliste_2026-02.pdf', february)
+        archive.writestr('01/2026-01_Lohnjournal.pdf', journal)
+
+    upload = SimpleUploadedFile(
+        'Aplus_Lexware_2026.zip',
+        bundle.getvalue(),
+        content_type='application/zip',
+    )
+
+    response = auth_admin.post(
+        '/api/working-time/lexware-import/',
+        {'period': 'auto', 'year': '2026', 'file': upload},
+        format='multipart',
+    )
+
+    assert response.status_code == 200
+    worker = worker_user.worker_profile
+    january_statement = PayrollStatement.objects.get(worker=worker, period=date(2026, 1, 1))
+    february_statement = PayrollStatement.objects.get(worker=worker, period=date(2026, 2, 1))
+    assert january_statement.transferred_amount == Decimal('123.45')
+    assert february_statement.transferred_amount == Decimal('234.56')
+    assert response.data['detected_periods'] == ['2026-01', '2026-02']
+    assert '2026-01_Lohnjournal.pdf' in response.data['archived_only']
+    assert Document.objects.filter(folder='payroll', visibility='admin').count() == 3
