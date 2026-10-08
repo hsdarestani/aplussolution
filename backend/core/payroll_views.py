@@ -217,6 +217,114 @@ def lexware_readiness(request):
     return Response(lexware_readiness_payload(year))
 
 
+@api_view(['POST'])
+@permission_classes([IsAdminOrManager])
+def lexware_backfill_archived(request):
+    raw_year = str(request.data.get('year') or timezone.localdate().year)
+    try:
+        year = int(raw_year)
+        if year < 2000 or year > 2100:
+            raise ValueError
+    except ValueError:
+        return Response({'detail': 'Jahr muss im Format JJJJ angegeben werden.'}, status=400)
+
+    matchers = _employee_matchers()
+    documents = Document.objects.filter(
+        folder=Document.Folder.PAYROLL,
+        title__icontains='u1',
+    ).order_by('created_at')
+    parsed = 0
+    attached = 0
+    unmatched = []
+
+    for document in documents:
+        try:
+            document.file.open('rb')
+            payload = document.file.read()
+        except Exception as exc:
+            unmatched.append({'file': document.title, 'text': f'Datei konnte nicht gelesen werden: {exc}'[:180]})
+            continue
+        finally:
+            try:
+                document.file.close()
+            except Exception:
+                pass
+
+        try:
+            document_type, rows = parse_lexware_pdf(payload)
+        except Exception as exc:
+            unmatched.append({'file': document.title, 'text': f'PDF konnte nicht gelesen werden: {exc}'[:180]})
+            continue
+        if document_type != 'u1':
+            continue
+
+        parsed += len(rows)
+        for row in rows:
+            period_text = str(row.get('period') or '').strip()
+            if not re.fullmatch(r'\d{4}-\d{2}', period_text) or not period_text.startswith(f'{year}-'):
+                continue
+            worker = _find_worker({'employee_name': row.get('employee_name', '')}, matchers)
+            if not worker:
+                unmatched.append({
+                    'file': document.title,
+                    'text': str(row.get('employee_name') or 'Unbekannter Mitarbeiter')[:180],
+                })
+                continue
+
+            period = datetime.strptime(period_text, '%Y-%m').date().replace(day=1)
+            statement, created = PayrollStatement.objects.get_or_create(
+                worker=worker,
+                period=period,
+                defaults={'source': 'lexware_u1_pdf'},
+            )
+            item = dict(row)
+            item['source_file'] = document.title
+            item['source_type'] = 'lexware_u1_pdf'
+            key_source = '|'.join([
+                document.title,
+                period_text,
+                str(row.get('employee_name') or ''),
+                str(row.get('date_from') or ''),
+                str(row.get('date_to') or ''),
+                str(row.get('absence_hours') or ''),
+                str(row.get('reimbursement_amount') or ''),
+            ])
+            item['key'] = hashlib.sha256(key_source.encode('utf-8')).hexdigest()
+
+            existing = list(statement.raw_data or [])
+            if any(str(existing_item.get('key') or '') == item['key'] for existing_item in existing):
+                continue
+            existing.append(item)
+            statement.raw_data = existing
+            if created or statement.source in {'', 'manual', 'lexware_import'}:
+                statement.source = 'lexware_u1_pdf'
+            refs = [
+                value.strip()
+                for value in str(statement.source_reference or '').split(',')
+                if value.strip()
+            ]
+            if document.title not in refs:
+                refs.append(document.title)
+            statement.source_reference = ', '.join(refs)[:255]
+            statement.save(update_fields=['raw_data', 'source', 'source_reference', 'updated_at'])
+            attached += 1
+
+    audit(request, 'payroll.lexware_archive_backfilled', request.user, {
+        'year': year,
+        'parsed': parsed,
+        'attached': attached,
+        'unmatched': len(unmatched),
+    })
+    return Response({
+        'status': 'ok',
+        'year': year,
+        'parsed': parsed,
+        'attached': attached,
+        'unmatched_count': len(unmatched),
+        'unmatched_preview': unmatched[:20],
+    })
+
+
 @api_view(['GET', 'POST'])
 @permission_classes([IsAdminOrManager])
 def worktime_settings(request):
