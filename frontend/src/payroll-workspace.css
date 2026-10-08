@@ -193,6 +193,31 @@
 .payroll-evidence-grid b{font-size:.82rem;color:var(--payroll-navy);margin-bottom:3px}
 .payroll-evidence-grid small{font-size:.69rem;color:var(--payroll-muted);line-height:1.42}
 
+.payroll-readiness{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:18px;
+  margin:0 0 14px;
+  padding:12px 16px;
+  border:1px solid var(--payroll-line);
+  border-radius:14px;
+  background:#fff;
+}
+.payroll-readiness>div{display:grid;gap:2px}
+.payroll-readiness span{
+  font-size:.62rem;
+  font-weight:900;
+  letter-spacing:.1em;
+  color:var(--payroll-muted);
+}
+.payroll-readiness b{font-size:.84rem;color:var(--payroll-navy)}
+.payroll-readiness small{font-size:.68rem;color:var(--payroll-muted);text-align:right}
+.payroll-readiness.is-complete{border-color:#bbdfcb;background:#f4fbf7}
+.payroll-readiness.is-complete b{color:#087443}
+.payroll-readiness.has-gaps{border-color:#f0d9a9;background:#fffaf0}
+.payroll-readiness.has-gaps b{color:#7a5b24}
+
 .payroll-summary{
   display:grid;
   grid-template-columns:repeat(5,minmax(0,1fr));
