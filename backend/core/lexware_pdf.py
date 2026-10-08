@@ -79,7 +79,18 @@ def _personal_adjustments(text: str) -> list[dict]:
         clean = ' '.join(raw_line.split())
         if not clean:
             continue
-        amount_match = re.search(rf'({_MONEY})\s*€?\s*    match = re.search(r'Personal-Nr\.[^\n]*\n\s*([^\s]+)', text, flags=re.IGNORECASE)
+        amount_match = re.search(rf'({_MONEY})\s*€?\s*$', clean)
+        if not amount_match:
+            continue
+        label = clean[:amount_match.start()].strip()
+        amount = _money(amount_match.group(1))
+        if label and amount is not None:
+            results.append({'label': label, 'amount': str(amount)})
+    return results
+
+
+def _personal_number(text: str) -> str:
+    match = re.search(r'Personal-Nr\.[^\n]*\n\s*([^\s]+)', text, flags=re.IGNORECASE)
     return match.group(1).strip() if match else ''
 
 
