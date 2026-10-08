@@ -1007,40 +1007,60 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
     return _docx_bytes(document)
 
 
-def _supplement_hours(payroll: dict, keyword: str) -> Decimal | None:
+def _supplement_totals(payroll: dict, keyword: str) -> tuple[Decimal | None, Decimal | None]:
     supplements = payroll.get('lexware_supplements') or []
-    values = []
+    hours = []
+    amounts = []
     for item in supplements:
         if keyword.lower() in str(item.get('label') or '').lower():
-            values.append(dec(item.get('hours')))
-    if not values:
-        return None
-    return sum(values, Decimal('0.00')).quantize(TWO)
+            hours.append(dec(item.get('hours')))
+            amounts.append(dec(item.get('amount')))
+    if not hours:
+        return None, None
+    return (
+        sum(hours, Decimal('0.00')).quantize(TWO),
+        sum(amounts, Decimal('0.00')).quantize(TWO),
+    )
+
+
+def _supplement_hours(payroll: dict, keyword: str) -> Decimal | None:
+    return _supplement_totals(payroll, keyword)[0]
 
 
 def _surcharge_reconciliation(item: dict) -> dict:
     payroll = item.get('payroll_statement') or {}
     result = {}
     statuses = []
-    for key, output_key, label, keyword in (
-        ('night_hours', 'night', 'Nacht', 'nacht'),
-        ('saturday_hours', 'saturday', 'Samstag', 'samstag'),
-        ('sunday_hours', 'sunday', 'Sonntag', 'sonntag'),
-    ):
-        app_hours = dec(item.get(key))
-        lexware_hours = _supplement_hours(payroll, keyword)
+    mapping = (
+        ('night_hours', 'night_surcharge_amount', 'night', 'Nacht', 'nacht'),
+        ('saturday_hours', 'saturday_surcharge_amount', 'saturday', 'Samstag', 'samstag'),
+        ('sunday_hours', 'sunday_surcharge_amount', 'sunday', 'Sonntag', 'sonntag'),
+    )
+    for hours_key, amount_key, output_key, label, keyword in mapping:
+        app_hours = dec(item.get(hours_key))
+        app_amount = dec(item.get(amount_key))
+        lexware_hours, lexware_amount = _supplement_totals(payroll, keyword)
+
         if lexware_hours is None:
-            status = 'MATCH' if app_hours == 0 else 'PRÜFEN'
-        elif abs(app_hours - lexware_hours) <= Decimal('0.10'):
-            status = 'MATCH'
+            # Time falling into a category is not itself a payroll discrepancy.
+            # Only warn when A+ actually expects a monetary supplement.
+            status = 'MATCH' if app_amount <= Decimal('0.01') else 'PRÜFEN'
         else:
-            status = 'ABWEICHUNG'
+            hours_match = abs(app_hours - lexware_hours) <= Decimal('0.10')
+            amount_match = (
+                lexware_amount is None
+                or abs(app_amount - lexware_amount) <= Decimal('0.10')
+            )
+            status = 'MATCH' if hours_match and amount_match else 'ABWEICHUNG'
+
         statuses.append(status)
         result[output_key] = {
             'label': label,
             'status': status,
             'aplus_hours': str(app_hours),
+            'aplus_amount': str(app_amount),
             'lexware_hours': str(lexware_hours) if lexware_hours is not None else None,
+            'lexware_amount': str(lexware_amount) if lexware_amount is not None else None,
         }
 
     result['overall'] = (
@@ -1075,18 +1095,25 @@ def _reconciliation_status(item: dict) -> tuple[str, list[str]]:
         elif lex_hours is None:
             issues.append('Lexware Stunden fehlen')
 
-    for key, label, keyword in (
-        ('night_hours', 'Nacht', 'nacht'),
-        ('saturday_hours', 'Samstag', 'samstag'),
-        ('sunday_hours', 'Sonntag', 'sonntag'),
+    for hours_key, amount_key, label, keyword in (
+        ('night_hours', 'night_surcharge_amount', 'Nacht', 'nacht'),
+        ('saturday_hours', 'saturday_surcharge_amount', 'Samstag', 'samstag'),
+        ('sunday_hours', 'sunday_surcharge_amount', 'Sonntag', 'sonntag'),
     ):
-        app_hours = dec(item.get(key))
-        lex_hours = _supplement_hours(payroll, keyword)
-        if lex_hours is not None and abs(app_hours - lex_hours) > Decimal('0.10'):
-            hard_difference = True
-            issues.append(f'{label} A+ {app_hours} Std. ≠ Lexware {lex_hours} Std.')
-        elif lex_hours is None and app_hours > 0:
-            issues.append(f'{label} in A+ vorhanden, Lexware Zuschlag nicht nachgewiesen')
+        app_hours = dec(item.get(hours_key))
+        app_amount = dec(item.get(amount_key))
+        lex_hours, lex_amount = _supplement_totals(payroll, keyword)
+        if lex_hours is not None:
+            if abs(app_hours - lex_hours) > Decimal('0.10'):
+                hard_difference = True
+                issues.append(f'{label} A+ {app_hours} Std. ≠ Lexware {lex_hours} Std.')
+            elif lex_amount is not None and abs(app_amount - lex_amount) > Decimal('0.10'):
+                hard_difference = True
+                issues.append(f'{label} Zuschlag A+ {app_amount} € ≠ Lexware {lex_amount} €')
+        elif app_amount > Decimal('0.01'):
+            issues.append(
+                f'{label} Zuschlag in A+ {app_amount} €, aber in Lexware nicht nachgewiesen'
+            )
 
     contract_issues = list(item.get('contract_issues') or [])
     if contract_issues:
