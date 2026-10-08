@@ -1620,3 +1620,187 @@ def test_full_year_zip_import_splits_months_and_archives_unknown_pdfs(auth_admin
         'period': '2025-12',
     }]
     assert Document.objects.filter(folder='payroll', visibility='admin').count() == 4
+
+
+@pytest.mark.django_db
+def test_zero_expected_surcharge_does_not_create_false_lexware_warning(worker_user):
+    from core.working_time import record_dict
+
+    worker = worker_user.worker_profile
+    EmployeeMasterData.objects.create(
+        worker=worker,
+        data={
+            'compensation_type': 'salary',
+            'monthly_salary': '2975.00',
+            'lexware_latest_payroll_period': '2026-09',
+        },
+    )
+    record = WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=date(2026, 9, 1),
+        ist_hours=Decimal('96.98'),
+        soll_hours=Decimal('166.83'),
+        paid_total_hours=Decimal('0.00'),
+        saldo_cumulative=Decimal('-69.85'),
+        hourly_rate=Decimal('0.00'),
+        gross_amount=Decimal('2975.00'),
+        raw_entries=[{
+            'night_minutes': 14,
+            'saturday_minutes': 465,
+            'sunday_minutes': 0,
+            'night_surcharge_amount': '0.00',
+            'saturday_surcharge_amount': '0.00',
+            'sunday_surcharge_amount': '0.00',
+        }],
+    )
+    statement = PayrollStatement.objects.create(
+        worker=worker,
+        period=date(2026, 9, 1),
+        gross_amount=Decimal('2975.00'),
+        net_amount=Decimal('2049.81'),
+        transferred_amount=Decimal('2099.81'),
+        source='lexware_payslip_pdf',
+        raw_data=[{
+            'kind': 'payslip',
+            'period': '2026-09',
+            'compensation_type': 'salary',
+            'monthly_salary': '2975.00',
+            'gross_amount': '2975.00',
+            'net_amount': '2049.81',
+            'payout_amount': '2099.81',
+            'supplements': [],
+        }],
+    )
+
+    data = record_dict(record, statement)
+
+    assert data['surcharge_reconciliation']['night']['status'] == 'MATCH'
+    assert data['surcharge_reconciliation']['saturday']['status'] == 'MATCH'
+    assert not any('Zuschlag nicht nachgewiesen' in issue for issue in data['reconciliation_issues'])
+
+
+@pytest.mark.django_db
+def test_historical_lexware_type_does_not_compare_to_current_master(worker_user):
+    from core.working_time import record_dict
+
+    worker = worker_user.worker_profile
+    EmployeeMasterData.objects.create(
+        worker=worker,
+        data={
+            'compensation_type': 'salary',
+            'monthly_salary': '2975.00',
+            'lexware_latest_payroll_period': '2026-09',
+        },
+    )
+    record = WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=date(2026, 6, 1),
+        ist_hours=Decimal('38.90'),
+        soll_hours=Decimal('38.90'),
+        paid_total_hours=Decimal('38.90'),
+        saldo_cumulative=Decimal('0.00'),
+        hourly_rate=Decimal('15.50'),
+        gross_amount=Decimal('602.95'),
+    )
+    statement = PayrollStatement.objects.create(
+        worker=worker,
+        period=date(2026, 6, 1),
+        gross_amount=Decimal('614.59'),
+        net_amount=Decimal('614.59'),
+        transferred_amount=Decimal('614.59'),
+        source='lexware_pdf_bundle',
+        raw_data=[{
+            'kind': 'payslip',
+            'period': '2026-06',
+            'compensation_type': 'hourly',
+            'quantity': '38.90',
+            'hourly_rate': '15.50',
+            'gross_amount': '614.59',
+            'net_amount': '614.59',
+            'payout_amount': '614.59',
+            'supplements': [{
+                'label': 'Nachtzuschlag 25% (steuerfrei)',
+                'hours': '3.00',
+                'hourly_rate': '15.50',
+                'percent': '25.00',
+                'amount': '11.64',
+            }],
+        }],
+    )
+
+    data = record_dict(record, statement)
+
+    assert not any('Vergütungsart stimmt nicht überein' in issue for issue in data['contract_issues'])
+
+
+@pytest.mark.django_db
+def test_older_lexware_import_does_not_regress_current_master_rate(auth_admin, worker_user):
+    import io
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from reportlab.pdfgen import canvas
+
+    def make_pdf(lines):
+        buffer = io.BytesIO()
+        doc = canvas.Canvas(buffer)
+        y = 800
+        for line in lines:
+            doc.drawString(40, y, line)
+            y -= 18
+        doc.save()
+        return buffer.getvalue()
+
+    worker = worker_user.worker_profile
+
+    september = SimpleUploadedFile(
+        'Lohnabrechnungen_2026-09.pdf',
+        make_pdf([
+            'Abrechnung für September 2026 - Anna Becker',
+            'erstellt mit Lexware Seite 1 von 1',
+            'Personal-Nr. Geburtsdatum Steuerklasse Konfession',
+            '14 01.01.1990 1 ohne',
+            'Entgelt',
+            'Bezeichnung Kennz Menge Faktor Prozentsatz Betrag',
+            'Gehalt LSG 1,00 2.975,00 € 2.975,00 €',
+            'Gesamtbrutto 2.975,00 €',
+            'Netto 2.049,81 €',
+            'Auszahlungsbetrag 2.099,81 €',
+        ]),
+        content_type='application/pdf',
+    )
+    response = auth_admin.post(
+        '/api/working-time/lexware-import/',
+        {'period': '2026-09', 'file': september},
+        format='multipart',
+    )
+    assert response.status_code == 200
+
+    january = SimpleUploadedFile(
+        'Lohnabrechnungen_2026-01.pdf',
+        make_pdf([
+            'Abrechnung für Januar 2026 - Anna Becker',
+            'erstellt mit Lexware Seite 1 von 1',
+            'Personal-Nr. Geburtsdatum Steuerklasse Konfession',
+            '14 01.01.1990 1 ohne',
+            'Entgelt',
+            'Bezeichnung Kennz Menge Faktor Prozentsatz Betrag',
+            'Lohn LSG 18,07 15,50 € 280,09 €',
+            'Gesamtbrutto 280,09 €',
+            'Netto 280,09 €',
+            'Auszahlungsbetrag 280,09 €',
+        ]),
+        content_type='application/pdf',
+    )
+    response = auth_admin.post(
+        '/api/working-time/lexware-import/',
+        {'period': '2026-01', 'file': january},
+        format='multipart',
+    )
+    assert response.status_code == 200
+
+    master = EmployeeMasterData.objects.get(worker=worker)
+    worker.refresh_from_db()
+    assert master.data['lexware_latest_payroll_period'] == '2026-09'
+    assert master.data['compensation_type'] == 'salary'
+    assert master.data['lexware_monthly_salary'] == '2975.00'
+    assert worker.tariff_hourly_rate != Decimal('15.50')
