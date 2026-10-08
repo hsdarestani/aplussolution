@@ -141,7 +141,14 @@ def _surcharge_amount(minutes: int, hourly_rate: Decimal, percent: Decimal) -> D
     ).quantize(TWO)
 
 
-def sync_working_time(start: date, end: date, *, include_inactive_workers: bool = False, refresh_contract_terms: bool = False) -> WorkingTimeSyncLog:
+def sync_working_time(
+    start: date,
+    end: date,
+    *,
+    include_inactive_workers: bool = False,
+    refresh_contract_terms: bool = False,
+    reset_carry: bool = False,
+) -> WorkingTimeSyncLog:
     """Rebuild payroll records from actual A+ attendance.
 
     Approved native A+ entries and imported historical WIW time rows are
@@ -310,12 +317,14 @@ def sync_working_time(start: date, end: date, *, include_inactive_workers: bool 
             )
 
             first_rebuilt_month = worker_months[0]
-            prior = (
-                WorkingTimeAccountRecord.objects
-                .filter(worker=worker, year_month__lt=first_rebuilt_month)
-                .order_by('-year_month')
-                .first()
-            )
+            prior = None
+            if not reset_carry:
+                prior = (
+                    WorkingTimeAccountRecord.objects
+                    .filter(worker=worker, year_month__lt=first_rebuilt_month)
+                    .order_by('-year_month')
+                    .first()
+                )
             carry = prior.saldo_cumulative if prior else Decimal('0.00')
 
             current_month = timezone.localdate().replace(day=1)
@@ -444,6 +453,7 @@ def sync_working_time(start: date, end: date, *, include_inactive_workers: bool 
                 'excluded_unapproved_entries': excluded_unapproved,
                 'refresh_contract_terms': refresh_contract_terms,
                 'include_inactive_workers': include_inactive_workers,
+                'reset_carry': reset_carry,
             },
         )
 
