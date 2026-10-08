@@ -1962,3 +1962,62 @@ def test_historical_person_group_109_displays_as_minijob(worker_user):
     data = record_dict(record, statement)
 
     assert data['employment_type'] == 'minijob'
+
+
+@pytest.mark.django_db
+def test_open_current_payroll_month_does_not_accrue_full_salary_deficit(
+    worker_user, company, location, position
+):
+    from core.working_time import record_dict
+
+    worker = worker_user.worker_profile
+    worker.monthly_hours = Decimal('100.00')
+    worker.employment_type = 'vollzeit'
+    worker.save(update_fields=['monthly_hours', 'employment_type', 'updated_at'])
+    EmployeeMasterData.objects.create(
+        worker=worker,
+        data={'compensation_type': 'salary', 'monthly_salary': '2000.00'},
+    )
+    WorkingTimeSetting.objects.create(
+        worker=worker,
+        monthly_limit=Decimal('100.00'),
+        hourly_rate=Decimal('0.00'),
+    )
+
+    today = timezone.localdate()
+    work_day = today.replace(day=max(1, min(today.day, 5)))
+    tz = timezone.get_current_timezone()
+    start = timezone.make_aware(datetime.combine(work_day, time(8, 0)), tz)
+    shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        worker=worker,
+        starts_at=start,
+        ends_at=start + timedelta(hours=8),
+        break_minutes=0,
+        status=Shift.Status.CONFIRMED,
+    )
+    TimeEntry.objects.create(
+        worker=worker,
+        shift=shift,
+        clock_in=start,
+        clock_out=start + timedelta(hours=8),
+        approved=False,
+    )
+
+    month_start = today.replace(day=1)
+    sync_working_time(month_start, today, reset_carry=True)
+
+    record = WorkingTimeAccountRecord.objects.get(
+        worker=worker,
+        year_month=month_start,
+    )
+    data = record_dict(record)
+
+    assert record.saldo_cumulative == Decimal('0.00')
+    assert data['is_open_month'] is True
+    assert data['balance_basis'] == 'open_month'
+    assert data['monthly_balance_hours'] == '0.00'
+    assert data['saldo_cumulative'] == '0.00'
+    assert data['reconciliation_status'] == 'LAUFEND'
