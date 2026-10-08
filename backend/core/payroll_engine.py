@@ -205,6 +205,19 @@ def sync_working_time(start: date, end: date, *, include_inactive_workers: bool 
     grouped = defaultdict(list)
     hours_by_key = defaultdict(lambda: Decimal('0'))
 
+    # A month only belongs to the working-time account when there is at least
+    # one closed attendance row for that employee. Older rebuild logic filled
+    # every calendar month between first and last attendance with zero IST,
+    # which created artificial negative cumulative balances for gaps where no
+    # authoritative attendance data existed.
+    closed_month_keys = {
+        (
+            entry.worker_id,
+            timezone.localtime(entry.clock_in, current_tz).date().replace(day=1),
+        )
+        for entry in closed_entries
+    }
+
     for entry in approved_entries:
         local_clock_in = timezone.localtime(entry.clock_in, current_tz)
         metrics = _entry_metrics(entry, current_tz)
@@ -271,16 +284,42 @@ def sync_working_time(start: date, end: date, *, include_inactive_workers: bool 
             saturday_percent = dec(row_setting.saturday_surcharge_percent if row_setting else 0)
             sunday_percent = dec(row_setting.sunday_surcharge_percent if row_setting else 0)
 
+            worker_months = sorted(
+                month
+                for worker_id, month in closed_month_keys
+                if worker_id == worker.id
+                and worker_range_start <= month <= worker_range_end
+            )
+            if not worker_months:
+                continue
+
+            # Remove only stale auto-generated account rows in the rebuild
+            # window. Manual/payroll evidence is untouched. A closed but still
+            # unapproved attendance row remains valid because its month is in
+            # worker_months and will intentionally show zero IST until approval.
+            (
+                WorkingTimeAccountRecord.objects
+                .filter(
+                    worker=worker,
+                    year_month__gte=worker_range_start,
+                    year_month__lte=worker_range_end,
+                    source='aplus_time_entries',
+                )
+                .exclude(year_month__in=worker_months)
+                .delete()
+            )
+
+            first_rebuilt_month = worker_months[0]
             prior = (
                 WorkingTimeAccountRecord.objects
-                .filter(worker=worker, year_month__lt=worker_range_start)
+                .filter(worker=worker, year_month__lt=first_rebuilt_month)
                 .order_by('-year_month')
                 .first()
             )
             carry = prior.saldo_cumulative if prior else Decimal('0.00')
 
             current_month = timezone.localdate().replace(day=1)
-            for month in iter_months(worker_range_start, worker_range_end):
+            for month in worker_months:
                 existing = WorkingTimeAccountRecord.objects.filter(
                     worker=worker,
                     year_month=month,
