@@ -470,6 +470,10 @@ def statement_dict(statement: PayrollStatement | None) -> dict | None:
         return None
     raw_items = list(statement.raw_data or [])
     payslips = [item for item in raw_items if item.get('kind') == 'payslip']
+    absence_evidence = [
+        item for item in raw_items
+        if item.get('kind') == 'absence_evidence'
+    ]
 
     # Corrections are authoritative for payroll/accounting values, while a
     # zero payout on a correction page usually means "already settled" rather
@@ -521,6 +525,19 @@ def statement_dict(statement: PayrollStatement | None) -> dict | None:
         'lexware_personal_number': accounting_payslip.get('personal_number') or '',
         'lexware_person_group': accounting_payslip.get('person_group') or '',
         'lexware_supplements': accounting_payslip.get('supplements') or [],
+        'lexware_absence_evidence': absence_evidence,
+        'lexware_sick_hours': str(sum(
+            (dec(item.get('absence_hours')) for item in absence_evidence if item.get('absence_type') == 'sick'),
+            Decimal('0.00'),
+        ).quantize(TWO)),
+        'lexware_sick_continued_pay': str(sum(
+            (dec(item.get('continued_pay')) for item in absence_evidence if item.get('absence_type') == 'sick'),
+            Decimal('0.00'),
+        ).quantize(TWO)),
+        'lexware_u1_reimbursement': str(sum(
+            (dec(item.get('reimbursement_amount')) for item in absence_evidence if item.get('absence_type') == 'sick'),
+            Decimal('0.00'),
+        ).quantize(TWO)),
     }
 
 
