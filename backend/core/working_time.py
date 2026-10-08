@@ -781,6 +781,7 @@ def _statement_map(rows: list[WorkingTimeAccountRecord]) -> dict[tuple[str, date
 def export_csv(queryset) -> HttpResponse:
     rows = list(queryset.select_related('worker__user'))
     statements = _statement_map(rows)
+    absences = absence_summary_map(rows)
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';')
     # Preserve the historical first eleven columns for downstream payroll
@@ -794,10 +795,15 @@ def export_csv(queryset) -> HttpResponse:
         'Lexware Auszahlung', 'Lexware Zahlungsdatum', 'Vergütungsart',
         'Abgleich Status', 'Prüfhinweise', 'Nacht Abgleich',
         'Samstag Abgleich', 'Sonntag Abgleich',
+        'Abwesenheit Tage', 'Urlaub Tage', 'Krank Tage', 'Sonstige Abwesenheit Tage',
     ])
     for row in rows:
         statement = statements.get((str(row.worker_id), row.year_month))
-        data = record_dict(row, statement)
+        data = record_dict(
+            row,
+            statement,
+            absence_summary=absences.get((str(row.worker_id), row.year_month)),
+        )
         payroll = data.get('payroll_statement') or {}
         writer.writerow([
             data['employee_name'], data['year_month'], data['ist_hours'],
@@ -816,6 +822,10 @@ def export_csv(queryset) -> HttpResponse:
             (data.get('surcharge_reconciliation') or {}).get('night', {}).get('status') or '',
             (data.get('surcharge_reconciliation') or {}).get('saturday', {}).get('status') or '',
             (data.get('surcharge_reconciliation') or {}).get('sunday', {}).get('status') or '',
+            data.get('absence_days') or 0,
+            data.get('vacation_days') or 0,
+            data.get('sick_days') or 0,
+            data.get('other_absence_days') or 0,
         ])
     response = HttpResponse('\ufeff' + output.getvalue(), content_type='text/csv; charset=utf-8')
     response['Content-Disposition'] = 'attachment; filename="arbeitszeit-lohnkonto.csv"'
@@ -825,6 +835,7 @@ def export_csv(queryset) -> HttpResponse:
 def export_xlsx(queryset) -> HttpResponse:
     rows = list(queryset.select_related('worker__user'))
     statements = _statement_map(rows)
+    absences = absence_summary_map(rows)
     wb = Workbook()
     ws = wb.active
     ws.title = 'Arbeitszeitkonto'
@@ -837,10 +848,15 @@ def export_xlsx(queryset) -> HttpResponse:
         'Lexware Auszahlung', 'Lexware Zahlungsdatum', 'Vergütungsart',
         'Abgleich Status', 'Prüfhinweise', 'Nacht Abgleich',
         'Samstag Abgleich', 'Sonntag Abgleich',
+        'Abwesenheit Tage', 'Urlaub Tage', 'Krank Tage', 'Sonstige Abwesenheit Tage',
     ]
     ws.append(headers)
     for row in rows:
-        data = record_dict(row, statements.get((str(row.worker_id), row.year_month)))
+        data = record_dict(
+            row,
+            statements.get((str(row.worker_id), row.year_month)),
+            absence_summary=absences.get((str(row.worker_id), row.year_month)),
+        )
         payroll = data.get('payroll_statement') or {}
         ws.append([
             data['employee_name'], data['year_month'], float(data['ist_hours']),
@@ -862,6 +878,10 @@ def export_xlsx(queryset) -> HttpResponse:
             (data.get('surcharge_reconciliation') or {}).get('night', {}).get('status') or '',
             (data.get('surcharge_reconciliation') or {}).get('saturday', {}).get('status') or '',
             (data.get('surcharge_reconciliation') or {}).get('sunday', {}).get('status') or '',
+            int(data.get('absence_days') or 0),
+            int(data.get('vacation_days') or 0),
+            int(data.get('sick_days') or 0),
+            int(data.get('other_absence_days') or 0),
         ])
     for column in ws.columns:
         ws.column_dimensions[column[0].column_letter].width = min(max(len(str(cell.value or '')) for cell in column) + 2, 32)
@@ -895,6 +915,7 @@ def _pdf_hours(minutes) -> str:
 def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
     rows = list(queryset.select_related('worker__user'))
     statements = _statement_map(rows)
+    absences = absence_summary_map(rows)
     buffer = io.BytesIO()
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name='WTTitle', parent=styles['Title'], alignment=TA_CENTER, spaceAfter=12))
@@ -915,19 +936,24 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
 
     data = [[
         'Monat', 'Ist', 'Soll', 'Basis', 'Monatssaldo', 'Übertrag', 'Saldo',
-        'Nacht', 'Sa.', 'So.', 'Zuschläge', 'Brutto', 'Überwiesen',
+        'Nacht', 'Sa.', 'So.', 'Abw.', 'Urlaub', 'Krank', 'Zuschläge', 'Brutto', 'Überwiesen',
     ]]
     for row in rows:
-        item = record_dict(row, statements.get((str(row.worker_id), row.year_month)))
+        item = record_dict(
+            row,
+            statements.get((str(row.worker_id), row.year_month)),
+            absence_summary=absences.get((str(row.worker_id), row.year_month)),
+        )
         payroll = item.get('payroll_statement') or {}
         data.append([
             row.year_month.strftime('%m/%Y'), item['ist_hours'], item['soll_hours'],
             item['balance_reference_hours'], item['monthly_balance_hours'], item['carryover_previous'],
             item['saldo_cumulative'], item['night_hours'], item['saturday_hours'], item['sunday_hours'],
+            item['absence_days'], item['vacation_days'], item['sick_days'],
             f"{item['surcharge_amount']} €", f"{item['gross_with_surcharges']} €",
             f"{payroll.get('transferred_amount')} €" if payroll.get('transferred_amount') else '–',
         ])
-    table = Table(data, repeatRows=1, colWidths=[20 * mm] + [19 * mm] * 12)
+    table = Table(data, repeatRows=1, colWidths=[18 * mm] + [16 * mm] * 15)
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#163B65')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -956,7 +982,11 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
             continue
         story.append(PageBreak())
         statement = statements.get((str(row.worker_id), row.year_month))
-        item = record_dict(row, statement)
+        item = record_dict(
+            row,
+            statement,
+            absence_summary=absences.get((str(row.worker_id), row.year_month)),
+        )
         payroll = item.get('payroll_statement') or {}
         story.append(Paragraph(row.year_month.strftime('%m/%Y'), styles['WTMonth']))
         basis_label = 'Sollbasis' if item.get('balance_basis') == 'soll_salary' else 'Bezahlt'
@@ -969,7 +999,8 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
             f"Gearbeitet: {item['ist_hours']} Std. · {basis_label}: {item['balance_reference_hours']} Std. · "
             f"Saldo Monat: {item['monthly_balance_hours']} Std. · Saldo kumuliert: {item['saldo_cumulative']} Std. · "
             f"{compensation_text} · Brutto mit Zuschlägen: {item['gross_with_surcharges']} € · "
-            f"Lexware überwiesen: {payroll.get('transferred_amount') or '–'} €",
+            f"Lexware überwiesen: {payroll.get('transferred_amount') or '–'} € · "
+            f"Abwesenheit: {item['absence_days']} Tage (Urlaub {item['vacation_days']}, Krank {item['sick_days']})",
             styles['BodyText'],
         ))
         story.append(Spacer(1, 6))
@@ -1072,6 +1103,7 @@ def _worker_master_data(worker: WorkerProfile) -> dict:
 def worker_docx(worker: WorkerProfile, queryset) -> bytes:
     rows = list(queryset.select_related('worker__user'))
     statements = _statement_map(rows)
+    absences = absence_summary_map(rows)
     master = _worker_master_data(worker)
     document = Document()
     _docx_style(document)
@@ -1099,7 +1131,11 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
 
     monthly_rows = []
     for row in rows:
-        item = record_dict(row, statements.get((str(row.worker_id), row.year_month)))
+        item = record_dict(
+            row,
+            statements.get((str(row.worker_id), row.year_month)),
+            absence_summary=absences.get((str(row.worker_id), row.year_month)),
+        )
         payroll = item.get('payroll_statement') or {}
         monthly_rows.append([
             row.year_month.strftime('%m/%Y'),
@@ -1113,13 +1149,16 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
             item['saturday_hours'],
             item['sunday_hours'],
             f"{item['surcharge_amount']} €",
+            item['absence_days'],
+            item['vacation_days'],
+            item['sick_days'],
             f"{payroll.get('gross_amount') or ''} €" if payroll.get('gross_amount') else '',
             f"{payroll.get('net_amount') or ''} €" if payroll.get('net_amount') else '',
             f"{payroll.get('lexware_payout_amount') or payroll.get('transferred_amount') or ''} €" if (payroll.get('lexware_payout_amount') or payroll.get('transferred_amount')) else '',
         ])
     _docx_table(
         document,
-        ['Monat', 'Ist', 'Soll', 'Basis', 'Saldo Monat', 'Saldo gesamt', 'Satz', 'Nacht', 'Sa', 'So', 'Zuschläge', 'Lexware Brutto', 'Lexware Netto', 'Auszahlung'],
+        ['Monat', 'Ist', 'Soll', 'Basis', 'Saldo Monat', 'Saldo gesamt', 'Satz', 'Nacht', 'Sa', 'So', 'Zuschläge', 'Abw.', 'Urlaub', 'Krank', 'Lexware Brutto', 'Lexware Netto', 'Auszahlung'],
         monthly_rows,
     )
 
@@ -1131,7 +1170,11 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
         if not entries:
             continue
         document.add_page_break()
-        item = record_dict(row, statements.get((str(row.worker_id), row.year_month)))
+        item = record_dict(
+            row,
+            statements.get((str(row.worker_id), row.year_month)),
+            absence_summary=absences.get((str(row.worker_id), row.year_month)),
+        )
         heading = document.add_paragraph()
         run = heading.add_run(row.year_month.strftime('%m/%Y'))
         run.bold = True
@@ -1139,7 +1182,8 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
         document.add_paragraph(
             f"Ist {item['ist_hours']} Std. | Soll {item['soll_hours']} Std. | "
             f"Basis {item['balance_reference_hours']} Std. | Monatssaldo {item['monthly_balance_hours']} Std. | "
-            f"Saldo gesamt {item['saldo_cumulative']} Std."
+            f"Saldo gesamt {item['saldo_cumulative']} Std. | "
+            f"Abwesenheit {item['absence_days']} Tage | Urlaub {item['vacation_days']} | Krank {item['sick_days']}"
         )
         daily = []
         for entry in entries:
