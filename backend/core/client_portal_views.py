@@ -184,6 +184,9 @@ def client_dashboard(request):
     if access and access.read_only:
         if access.location_scope_id:
             shifts = shifts.filter(location_id=access.location_scope_id)
+            departments = (access.capabilities or {}).get('position_ids', [])
+            if isinstance(departments, list) and departments:
+                shifts = shifts.filter(position_id__in=departments)
         else:
             shifts = shifts.none()
         return Response({
@@ -217,6 +220,9 @@ def client_shifts(request):
     qs = Shift.objects.filter(client=company).select_related('order', 'client', 'location', 'position').order_by('starts_at')
     if access and access.read_only:
         qs = qs.filter(location_id=access.location_scope_id) if access.location_scope_id else qs.none()
+        departments = (access.capabilities or {}).get('position_ids', [])
+        if isinstance(departments, list) and departments:
+            qs = qs.filter(position_id__in=departments)
     serializer = ShiftApiSerializer(qs, many=True, context={'request': request})
     return Response(serializer.data)
 

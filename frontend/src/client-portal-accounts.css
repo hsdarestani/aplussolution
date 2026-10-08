@@ -1,0 +1,29 @@
+.client-account-modal{--width:min(820px,96vw);--height:min(92vh,900px);--border-radius:18px}
+.client-account-manager{max-width:790px;margin:auto;padding:12px 4px 32px;color:var(--ion-text-color,#172337)}
+.client-account-manager header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:22px}
+.client-account-manager header small{font-size:11px;letter-spacing:.12em;opacity:.7}
+.client-account-manager h2{margin:6px 0;font-size:23px}
+.client-account-manager header p,.client-account-manager p{line-height:1.5}
+.client-account-toolbar,.client-account-row,.client-account-buttons{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.client-account-toolbar{padding:12px 0;border-bottom:1px solid #d4dae3}
+.client-account-row{padding:16px 0;border-bottom:1px solid #d4dae3;flex-wrap:wrap}
+.client-account-row p{margin:3px 0;overflow-wrap:anywhere}
+.client-account-row small{opacity:.75}
+.client-account-actions{display:flex;gap:4px;flex-wrap:wrap}
+.client-account-error,.client-account-success,.client-account-secret,.client-account-info{padding:12px;border-radius:8px;margin:12px 0}
+.client-account-error{background:#ffebea;color:#982b2b}
+.client-account-success{background:#e8f6ec;color:#1d663a}
+.client-account-secret{background:#edf3ff;border:1px solid #9baecf;color:#162e5d}
+.client-account-secret code{display:block;overflow-wrap:anywhere;margin:8px 0;font-size:15px}
+.client-account-form{padding:10px 0}
+.client-account-fields{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.client-account-form label{display:flex;flex-direction:column;gap:5px;font-size:14px;font-weight:600}
+.client-account-form input:not([type=checkbox]),.client-account-form select{width:100%;padding:11px 12px;border-radius:8px;border:1px solid #b8c1ce;background:var(--ion-background-color,#fff);color:var(--ion-text-color,#172337);min-height:42px}
+.client-account-wide{margin-top:16px}
+.client-account-positions{margin:18px 0;padding:14px;border:1px solid #cbd5e1;border-radius:10px;display:flex;flex-direction:column;gap:10px}
+.client-account-positions small{display:block;opacity:.75}
+.client-account-positions label{flex-direction:row;align-items:center;font-weight:400;gap:9px}
+.client-account-positions input{width:18px;height:18px}
+.client-account-info{background:rgba(120,140,160,.13)}
+.client-account-buttons{justify-content:flex-end;padding-top:14px}
+@media(max-width:560px){.client-account-fields{grid-template-columns:1fr}.client-account-manager header{flex-direction:column}.client-account-actions{width:100%}.client-account-modal{--width:100vw;--height:100vh;--border-radius:0}}

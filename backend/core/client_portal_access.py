@@ -43,10 +43,14 @@ def client_access_payload(user):
         'profile': not read_only,
         'shift_requests': not read_only,
     }
+    position_ids = []
     if access and isinstance(access.capabilities, dict):
-        capabilities.update({key: bool(value) for key, value in access.capabilities.items()})
-        if read_only:
-            capabilities = {key: (key == 'schedule') for key in capabilities}
+        capabilities.update({key: bool(value) for key, value in access.capabilities.items() if key in capabilities})
+        raw_positions = access.capabilities.get('position_ids', [])
+        if isinstance(raw_positions, list):
+            position_ids = [str(item) for item in raw_positions]
+    if read_only:
+        capabilities = {key: (key == 'schedule' and capabilities['schedule']) for key in capabilities}
     return {
         'client_id': str(company.id),
         'client_name': company.name,
@@ -59,4 +63,5 @@ def client_access_payload(user):
         'location_scope_id': str(location.id) if location else None,
         'location_scope_name': location.name if location else None,
         'capabilities': capabilities,
+        'position_scope_ids': position_ids,
     }

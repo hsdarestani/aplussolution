@@ -63,6 +63,7 @@ import ListToolbar from './ListToolbar';
 import DocumentCenterV5 from './DocumentCenterV5';
 import AuevBuilderPanel from './AuevBuilderPanel';
 import AktePage from './AktePage';
+import ClientPortalAccounts from './ClientPortalAccounts';
 import Settings from './Settings';
 import MobileMoreMenu from './MobileMoreMenu';
 import { akteHref, openAkte } from './entityNavigation';
@@ -544,6 +545,7 @@ function Dashboard({
 function People({ user }: { user: User }) {
   const [workers, setWorkers] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
+  const [portalAccountsClient, setPortalAccountsClient] = useState<any | null>(null);
   const [locations, setLocations] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
   const [modal, setModal] = useState('');
@@ -724,6 +726,7 @@ function People({ user }: { user: User }) {
           {clients.filter((client) => client.active).length ? clients.filter((client) => client.active).map((client) => <div className="row" key={client.id}>
             <div className="avatar">{client.name?.[0] || 'K'}</div>
             <div className="grow"><a className="entity-name-link" href={akteHref('client', client.id)} onClick={(event) => { event.preventDefault(); openAkte('client', client.id); }}>{client.name}</a><p>{client.customer_number}{client.contacts_detail?.[0]?.email ? ` · ${client.contacts_detail[0].email}` : ''}</p></div>
+            {isManager(user) && client.active && <IonButton fill="outline" size="small" onClick={() => setPortalAccountsClient(client)}>Kundenzugänge</IonButton>}
             {isManager(user) && client.active && <IonButton fill="clear" color="danger" onClick={() => archive('clients', client.id)}>Deaktivieren</IonButton>}
           </div>) : <Empty>Noch keine Kundenunternehmen angelegt.</Empty>}
         </div>}
@@ -1007,6 +1010,7 @@ function People({ user }: { user: User }) {
         </div>
       </FormModal>
 
+      <ClientPortalAccounts client={portalAccountsClient} locations={locations} positions={positions} onClose={() => setPortalAccountsClient(null)} />
       <CredentialNotice data={credentials} close={() => setCredentials(undefined)} />
       <IonToast isOpen={!!toast} message={toast} duration={1000} onDidDismiss={() => setToast('')} />
     </>
