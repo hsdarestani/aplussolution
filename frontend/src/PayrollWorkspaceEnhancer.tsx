@@ -332,14 +332,15 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
 
   const selectedEmployee = employeeOptions.find(item => item.worker_id === selectedWorkerId);
   const selectedSetting = settingsRows.find(item => item.worker_id === selectedWorkerId);
+  const closedSummaryRows = summaryRows.filter(row => !row.is_open_month);
   const summary = {
     ist: summaryRows.reduce((sum, row) => sum + number(row.ist_hours), 0),
     paid: summaryRows.reduce((sum, row) => sum + number(row.balance_reference_hours ?? row.paid_total_hours ?? row.soll_hours), 0),
     saldo: selectedWorkerId && month === 'all'
       ? number(workerRows[0]?.saldo_cumulative)
       : summaryRows.reduce((sum, row) => sum + number(row.monthly_balance_hours ?? row.saldo_cumulative), 0),
-    gross: summaryRows.reduce((sum, row) => sum + number(row.gross_with_surcharges ?? row.gross_amount), 0),
-    transferred: summaryRows.reduce((sum, row) => sum + number(row.payroll_statement?.transferred_amount), 0),
+    gross: closedSummaryRows.reduce((sum, row) => sum + number(row.gross_with_surcharges ?? row.gross_amount), 0),
+    transferred: closedSummaryRows.reduce((sum, row) => sum + number(row.payroll_statement?.transferred_amount), 0),
   };
 
   async function loadDetail(row: PayrollRow) {
