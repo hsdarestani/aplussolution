@@ -28,6 +28,7 @@ from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, 
 from .models import (
     EmployeeMasterData,
     PayrollStatement,
+    TimeOffRequest,
     User,
     WorkerProfile,
     WorkingTimeAccountRecord,
@@ -523,11 +524,81 @@ def statement_dict(statement: PayrollStatement | None) -> dict | None:
     }
 
 
+def absence_summary_map(rows: list[WorkingTimeAccountRecord]) -> dict[tuple[str, date], dict]:
+    """Approved A+ absences by employee/month.
+
+    These values are informational and never change IST or payroll saldo
+    automatically. Free-text reasons are classified conservatively.
+    """
+    if not rows:
+        return {}
+    worker_ids = {row.worker_id for row in rows}
+    first_month = min(row.year_month for row in rows)
+    last_month = max(row.year_month for row in rows)
+    last_day = next_month(last_month) - timedelta(days=1)
+    requests = TimeOffRequest.objects.filter(
+        worker_id__in=worker_ids,
+        status=TimeOffRequest.Status.APPROVED,
+        starts_on__lte=last_day,
+        ends_on__gte=first_month,
+    ).order_by('starts_on')
+
+    buckets: dict[tuple[str, date], dict] = {}
+    for request in requests:
+        reason = str(request.reason or '').strip()
+        reason_key = reason.lower()
+        if any(token in reason_key for token in ('krank', 'arbeitsunfähig', 'arbeitsunfaehig', 'au ', 'krankheit')):
+            category = 'sick'
+        elif any(token in reason_key for token in ('urlaub', 'vacation', 'ferien')):
+            category = 'vacation'
+        else:
+            category = 'other'
+
+        current = max(request.starts_on, first_month)
+        request_end = min(request.ends_on, last_day)
+        while current <= request_end:
+            month = current.replace(day=1)
+            month_end = next_month(month) - timedelta(days=1)
+            overlap_end = min(request_end, month_end)
+            key = (str(request.worker_id), month)
+            bucket = buckets.setdefault(key, {
+                'all_dates': set(),
+                'vacation_dates': set(),
+                'sick_dates': set(),
+                'other_dates': set(),
+                'details': [],
+            })
+            cursor = current
+            while cursor <= overlap_end:
+                bucket['all_dates'].add(cursor)
+                bucket[f'{category}_dates'].add(cursor)
+                cursor += timedelta(days=1)
+            bucket['details'].append({
+                'from': current.isoformat(),
+                'to': overlap_end.isoformat(),
+                'reason': reason,
+                'category': category,
+            })
+            current = overlap_end + timedelta(days=1)
+
+    result = {}
+    for key, bucket in buckets.items():
+        result[key] = {
+            'absence_days': len(bucket['all_dates']),
+            'vacation_days': len(bucket['vacation_dates']),
+            'sick_days': len(bucket['sick_dates']),
+            'other_absence_days': len(bucket['other_dates']),
+            'absence_details': bucket['details'],
+        }
+    return result
+
+
 def record_dict(
     row: WorkingTimeAccountRecord,
     statement: PayrollStatement | None = None,
     *,
     include_entries: bool = False,
+    absence_summary: dict | None = None,
 ) -> dict:
     totals = _entry_totals(row.raw_entries or [])
     paid_total = _paid_total(row, statement)
@@ -608,6 +679,11 @@ def record_dict(
         # Informational only. Use base gross here because treatment of supplements
         # in the Minijob earnings test depends on the payroll/tax classification.
         'minijob_warning': bool(minijob_limit is not None and row.gross_amount > minijob_limit),
+        'absence_days': int((absence_summary or {}).get('absence_days') or 0),
+        'vacation_days': int((absence_summary or {}).get('vacation_days') or 0),
+        'sick_days': int((absence_summary or {}).get('sick_days') or 0),
+        'other_absence_days': int((absence_summary or {}).get('other_absence_days') or 0),
+        'absence_details': list((absence_summary or {}).get('absence_details') or []),
     }
 
     contract_issues = []
