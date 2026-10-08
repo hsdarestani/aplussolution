@@ -1806,3 +1806,84 @@ def test_older_lexware_import_does_not_regress_current_master_rate(auth_admin, w
     assert master.data['compensation_type'] == 'salary'
     assert master.data['lexware_monthly_salary'] == '2975.00'
     assert worker.tariff_hourly_rate == Decimal('20.00')
+
+
+@pytest.mark.django_db
+def test_zero_payout_correction_uses_original_monthly_payout_for_reconciliation(worker_user):
+    from core.working_time import record_dict
+
+    worker = worker_user.worker_profile
+    EmployeeMasterData.objects.create(
+        worker=worker,
+        data={
+            'compensation_type': 'salary',
+            'monthly_salary': '2975.00',
+            'lexware_latest_payroll_period': '2026-09',
+        },
+    )
+    record = WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=date(2026, 7, 1),
+        ist_hours=Decimal('167.50'),
+        soll_hours=Decimal('167.50'),
+        paid_total_hours=Decimal('167.50'),
+        saldo_cumulative=Decimal('0.00'),
+        hourly_rate=Decimal('17.12'),
+        gross_amount=Decimal('2867.60'),
+        raw_entries=[{
+            'night_minutes': 300,
+            'saturday_minutes': 0,
+            'sunday_minutes': 0,
+            'night_surcharge_amount': '21.40',
+            'saturday_surcharge_amount': '0.00',
+            'sunday_surcharge_amount': '0.00',
+        }],
+    )
+    common = {
+        'kind': 'payslip',
+        'period': '2026-07',
+        'compensation_type': 'hourly',
+        'quantity': '167.50',
+        'hourly_rate': '17.12',
+        'gross_amount': '2889.00',
+        'supplements': [{
+            'label': 'Nachtzuschlag 25% (steuerfrei)',
+            'hours': '5.00',
+            'hourly_rate': '17.12',
+            'percent': '25.00',
+            'amount': '21.40',
+        }],
+    }
+    statement = PayrollStatement.objects.create(
+        worker=worker,
+        period=date(2026, 7, 1),
+        gross_amount=Decimal('2889.00'),
+        net_amount=Decimal('2006.40'),
+        transferred_amount=Decimal('2029.71'),
+        source='lexware_pdf_bundle',
+        raw_data=[
+            {
+                **common,
+                'is_correction': False,
+                'net_amount': '2029.71',
+                'payout_amount': '2029.71',
+            },
+            {
+                **common,
+                'is_correction': True,
+                'net_amount': '2006.40',
+                'payout_amount': '0.00',
+                'personal_adjustments': [
+                    {'label': 'Vorschuss aus Überzahlung', 'amount': '23.31'},
+                    {'label': 'Bereits abgerechnete Auszahlung', 'amount': '-2029.71'},
+                ],
+            },
+        ],
+    )
+
+    data = record_dict(record, statement)
+
+    assert data['payroll_statement']['net_amount'] == '2006.40'
+    assert data['payroll_statement']['lexware_payout_amount'] == '2029.71'
+    assert data['payroll_statement']['lexware_correction_payout_amount'] == '0.00'
+    assert data['reconciliation_status'] == 'MATCH'
