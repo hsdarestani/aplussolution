@@ -464,10 +464,19 @@ def lexware_bank_import(request):
     unmatched = []
     parsed_rows = 0
     archived_documents = []
+    archived_only = []
+    skipped_historical_corrections = []
 
     for upload in uploads:
         name = str(getattr(upload, 'name', '') or 'lexware')
         lower_name = name.lower()
+        file_period_text = _filename_period(name) or (period_text if not auto_period else '')
+        file_period = (
+            datetime.strptime(file_period_text, '%Y-%m').date().replace(day=1)
+            if re.fullmatch(r'\d{4}-\d{2}', file_period_text)
+            else None
+        )
+        archive_period_label = file_period_text or requested_year or 'ohne Zeitraum'
 
         if lower_name.endswith('.xml') or 'xml' in str(getattr(upload, 'content_type', '')).lower():
             payload = upload.read()
