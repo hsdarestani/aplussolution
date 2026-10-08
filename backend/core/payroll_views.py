@@ -813,6 +813,7 @@ def lexware_bank_import(request):
 
     audit(request, 'payroll.lexware_imported', request.user, {
         'period': period_text,
+        'year': requested_year,
         'employees': len(imported),
         'rows': parsed_rows,
         'files': len(uploads),
@@ -821,11 +822,15 @@ def lexware_bank_import(request):
     return Response({
         'status': 'ok',
         'period': period_text,
+        'year': requested_year or None,
+        'detected_periods': sorted(detected_periods),
         'files': len(uploads),
         'rows': parsed_rows,
         'employees': imported,
         'unmatched_count': len(unmatched),
         'unmatched_preview': unmatched[:20],
         'archived_documents': archived_documents,
+        'archived_only': archived_only,
+        'skipped_historical_corrections': skipped_historical_corrections,
     })
 
