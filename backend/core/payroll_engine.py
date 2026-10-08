@@ -434,7 +434,12 @@ def sync_working_time(
                     ).quantize(TWO)
                     balance_reference = paid_total
                 manual = existing.manual_adjustment if existing else Decimal('0')
-                saldo = (carry + ist + manual - balance_reference).quantize(TWO)
+                is_open_month = month >= current_month and statement is None
+                saldo = (
+                    carry
+                    if is_open_month
+                    else (carry + ist + manual - balance_reference).quantize(TWO)
+                )
                 gross = (
                     monthly_salary.quantize(TWO)
                     if is_salary and monthly_salary is not None
