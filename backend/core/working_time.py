@@ -28,6 +28,7 @@ from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, 
 from .models import (
     EmployeeMasterData,
     PayrollStatement,
+    Shift,
     TimeOffRequest,
     User,
     WorkerProfile,
@@ -763,7 +764,11 @@ def record_dict(
         result['reconciliation_issues'] = reconciliation_issues
 
     if include_entries:
-        result['entries'] = row.raw_entries or []
+        entries = [dict(item) for item in (row.raw_entries or [])]
+        shift_notes = _shift_note_map([row])
+        for entry in entries:
+            entry['notes'] = shift_notes.get(str(entry.get('shift_id') or ''), '')
+        result['entries'] = entries
     return result
 
 
@@ -785,6 +790,21 @@ def settings_rows() -> list[dict]:
         'excluded': item.excluded,
         'notes': item.notes,
     } for item in rows]
+
+
+def _shift_note_map(rows: list[WorkingTimeAccountRecord]) -> dict[str, str]:
+    shift_ids = {
+        str(entry.get('shift_id'))
+        for row in rows
+        for entry in (row.raw_entries or [])
+        if entry.get('shift_id')
+    }
+    if not shift_ids:
+        return {}
+    return {
+        str(item['id']): str(item['notes'] or '')
+        for item in Shift.objects.filter(id__in=shift_ids).values('id', 'notes')
+    }
 
 
 def _statement_map(rows: list[WorkingTimeAccountRecord]) -> dict[tuple[str, date], PayrollStatement]:
