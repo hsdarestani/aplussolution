@@ -107,6 +107,19 @@ type PayrollRow = {
   entries?: PayrollEntry[];
 };
 
+type LexwareReadiness = {
+  year: number;
+  expected_through?: string | null;
+  expected_months: number;
+  complete_months: number;
+  core_documents_expected: number;
+  core_documents_present: number;
+  annual_complete: boolean;
+  no_additional_import_required: boolean;
+  missing?: Array<{ period: string; kind: string }>;
+  optional_documents?: Record<string, number>;
+};
+
 type Draft = { paid_total_hours: string; manual_adjustment: string };
 type EmployeeOption = { worker_id: string; employee_name: string };
 type SettingRow = EmployeeOption & {
@@ -175,6 +188,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [dataCareOpen, setDataCareOpen] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
+  const [lexwareReadiness, setLexwareReadiness] = useState<LexwareReadiness | null>(null);
   const autoBuildAttempted = useRef(false);
 
   useEffect(() => {
@@ -187,14 +201,16 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   }, [standalone]);
 
   async function fetchWorkspaceData() {
-    const [response, settingsResponse]: any[] = await Promise.all([
+    const readinessYear = currentMonth().slice(0, 4) || String(new Date().getFullYear());
+    const [response, settingsResponse, readinessResponse]: any[] = await Promise.all([
       api('working-time/records/'),
       api('working-time/settings/'),
+      api(`working-time/lexware-readiness/?year=${encodeURIComponent(readinessYear)}`),
     ]);
-    return { response, settingsResponse };
+    return { response, settingsResponse, readinessResponse };
   }
 
-  function applyWorkspaceData(response: any, settingsResponse: any) {
+  function applyWorkspaceData(response: any, settingsResponse: any, readinessResponse?: LexwareReadiness | null) {
     const nextRows = (response?.results || response || []) as PayrollRow[];
     const configuredSettings = Array.isArray(settingsResponse?.employees)
       ? settingsResponse.employees.map((item: any) => ({
@@ -219,6 +235,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     setRows(nextRows);
     setEmployeeOptions(uniqueEmployees);
     setSettingsRows(configuredSettings);
+    setLexwareReadiness(readinessResponse || null);
     setDrafts(Object.fromEntries(nextRows.map(row => [row.id, {
       paid_total_hours: row.paid_total_hours ?? row.soll_hours,
       manual_adjustment: row.manual_adjustment,
@@ -230,7 +247,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     setMessage('');
     setEmptyReason('');
     try {
-      let { response, settingsResponse } = await fetchWorkspaceData();
+      let { response, settingsResponse, readinessResponse } = await fetchWorkspaceData();
       let nextRows = (response?.results || response || []) as PayrollRow[];
 
       if (standalone && autoBuild && !nextRows.length && !autoBuildAttempted.current) {
@@ -241,11 +258,11 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         if (!rebuilt?.records_count) {
           setEmptyReason(rebuilt?.detail || 'Es wurden keine abgeschlossenen oder freigegebenen Ist Zeiten gefunden.');
         }
-        ({ response, settingsResponse } = await fetchWorkspaceData());
+        ({ response, settingsResponse, readinessResponse } = await fetchWorkspaceData());
         nextRows = (response?.results || response || []) as PayrollRow[];
       }
 
-      applyWorkspaceData(response, settingsResponse);
+      applyWorkspaceData(response, settingsResponse, readinessResponse);
       if (nextRows.length) setMessage('');
     } catch (error: any) {
       setMessage(error?.message || 'Arbeitszeitkonto konnte nicht geladen werden.');
@@ -576,6 +593,24 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         <article><span>02</span><div><b>Dienstplan</b><small>Der geplante Einsatz bleibt als Vergleich sichtbar und verändert die Ist Stunden nicht.</small></div></article>
         <article><span>03</span><div><b>Zahlung</b><small>Bezahlte Stunden und Lexware Bankbetrag werden separat dokumentiert.</small></div></article>
       </section>
+
+      {lexwareReadiness && <section className={`payroll-readiness ${lexwareReadiness.no_additional_import_required ? 'is-complete' : 'has-gaps'}`}>
+        <div>
+          <span>LEXWARE DATENSTAND {lexwareReadiness.year}</span>
+          <b>{lexwareReadiness.no_additional_import_required
+            ? `Vollständig bis ${lexwareReadiness.expected_through ? monthLabel(lexwareReadiness.expected_through) : 'heute'}`
+            : `${lexwareReadiness.complete_months} von ${lexwareReadiness.expected_months} Monaten vollständig`}</b>
+        </div>
+        <small>
+          {lexwareReadiness.core_documents_present}/{lexwareReadiness.core_documents_expected} Kernnachweise
+          {' · '}
+          {lexwareReadiness.annual_complete ? 'Jahresnachweise vorhanden' : 'Jahresnachweise prüfen'}
+          {' · '}
+          {lexwareReadiness.no_additional_import_required
+            ? 'Kein weiterer Lexware Import für abgeschlossene Monate nötig'
+            : `${lexwareReadiness.missing?.length || 0} Nachweise fehlen`}
+        </small>
+      </section>}
 
       <section className="payroll-summary" aria-label="Lohnübersicht">
         <div><span>Gearbeitet</span><strong>{decimal(summary.ist)} Std.</strong><small>Ist Zeit</small></div>
