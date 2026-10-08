@@ -748,20 +748,32 @@ def lexware_bank_import(request):
             master, _ = EmployeeMasterData.objects.get_or_create(worker=worker)
             master_data = dict(master.data or {})
             source_map = dict(master.source_map or {})
-            observed = {
-                'lexware_personal_number': latest_payslip.get('personal_number'),
-                'compensation_type': compensation_type,
-                'lexware_monthly_salary': latest_payslip.get('monthly_salary'),
-                'hourly_rate': latest_payslip.get('hourly_rate'),
-                'lexware_supplements': supplements,
-            }
             current_latest_period = str(master_data.get('lexware_latest_payroll_period') or '')
-            if not current_latest_period or statement_period_text >= current_latest_period:
-                observed['lexware_latest_payroll_period'] = statement_period_text
-            for key, value in observed.items():
-                if value not in (None, '', []):
-                    master_data[key] = value
-                    source_map[key] = 'lexware_payslip'
+            is_latest_observation = (
+                not current_latest_period
+                or statement_period_text >= current_latest_period
+            )
+
+            # Stable identity data may be learned from any historical payslip.
+            personal_number = latest_payslip.get('personal_number')
+            if personal_number not in (None, ''):
+                master_data['lexware_personal_number'] = personal_number
+                source_map['lexware_personal_number'] = 'lexware_payslip'
+
+            # Current operational settings must never move backwards when an
+            # older month is imported or re-imported later.
+            if is_latest_observation:
+                observed = {
+                    'compensation_type': compensation_type,
+                    'lexware_monthly_salary': latest_payslip.get('monthly_salary'),
+                    'hourly_rate': latest_payslip.get('hourly_rate'),
+                    'lexware_supplements': supplements,
+                    'lexware_latest_payroll_period': statement_period_text,
+                }
+                for key, value in observed.items():
+                    if value not in (None, '', []):
+                        master_data[key] = value
+                        source_map[key] = 'lexware_payslip'
             completeness, missing = calculate_completeness(master_data)
             master.data = master_data
             master.source_map = source_map
@@ -771,25 +783,26 @@ def lexware_bank_import(request):
 
             setting, _ = WorkingTimeSetting.objects.get_or_create(worker=worker)
             setting_fields = []
-            for supplement in supplements:
-                label = str(supplement.get('label') or '').lower()
-                percent = max(Decimal('0'), dec(supplement.get('percent')))
-                if percent <= 0:
-                    continue
-                if 'nacht' in label:
-                    setting.night_surcharge_percent = percent
-                    setting_fields.append('night_surcharge_percent')
-                elif 'sonntag' in label:
-                    setting.sunday_surcharge_percent = percent
-                    setting_fields.append('sunday_surcharge_percent')
-                elif 'samstag' in label:
-                    setting.saturday_surcharge_percent = percent
-                    setting_fields.append('saturday_surcharge_percent')
+            if is_latest_observation:
+                for supplement in supplements:
+                    label = str(supplement.get('label') or '').lower()
+                    percent = max(Decimal('0'), dec(supplement.get('percent')))
+                    if percent <= 0:
+                        continue
+                    if 'nacht' in label:
+                        setting.night_surcharge_percent = percent
+                        setting_fields.append('night_surcharge_percent')
+                    elif 'sonntag' in label:
+                        setting.sunday_surcharge_percent = percent
+                        setting_fields.append('sunday_surcharge_percent')
+                    elif 'samstag' in label:
+                        setting.saturday_surcharge_percent = percent
+                        setting_fields.append('saturday_surcharge_percent')
 
             if compensation_type == 'hourly' and latest_payslip.get('quantity') is not None:
                 auto_paid_hours = max(Decimal('0'), dec(latest_payslip.get('quantity')))
                 lexware_hourly_rate = max(Decimal('0'), dec(latest_payslip.get('hourly_rate')))
-                if lexware_hourly_rate > 0:
+                if is_latest_observation and lexware_hourly_rate > 0:
                     worker.tariff_hourly_rate = lexware_hourly_rate
                     worker.save(update_fields=['tariff_hourly_rate'])
                     setting.hourly_rate = lexware_hourly_rate
