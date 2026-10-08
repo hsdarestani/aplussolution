@@ -42,6 +42,7 @@ from .working_time import (
     worker_pdf,
     worker_docx,
     lexware_reconciliation_docx,
+    payroll_audit_docx,
 )
 
 
@@ -637,6 +638,36 @@ def worktime_lexware_docx(request):
         content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     )
     response['Content-Disposition'] = f'attachment; filename="03_Lexware_Abgleich_{period.strftime("%Y-%m")}.docx"'
+    return response
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminOrManager])
+def worktime_audit_docx(request):
+    raw_year = str(request.query_params.get('year') or timezone.localdate().year)
+    try:
+        year = int(raw_year)
+        if year < 2000 or year > 2100:
+            raise ValueError
+    except ValueError:
+        return Response({'detail': 'Jahr muss im Format JJJJ angegeben werden.'}, status=400)
+
+    queryset = WorkingTimeAccountRecord.objects.filter(
+        year_month__year=year,
+    ).order_by('worker__user__last_name', 'worker__user__first_name', 'year_month')
+    worker_id = request.query_params.get('worker')
+    if worker_id:
+        queryset = queryset.filter(worker_id=worker_id)
+
+    from .payroll_views import lexware_readiness_payload
+    readiness = lexware_readiness_payload(year)
+    payload = payroll_audit_docx(queryset, year, readiness)
+    response = HttpResponse(
+        payload,
+        content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    )
+    suffix = f'_{worker_id}' if worker_id else ''
+    response['Content-Disposition'] = f'attachment; filename="05_Pruefbericht_Arbeitszeit_Lexware_{year}{suffix}.docx"'
     return response
 
 
