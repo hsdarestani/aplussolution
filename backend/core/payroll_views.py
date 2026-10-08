@@ -482,6 +482,12 @@ def lexware_bank_import(request):
             payload = upload.read()
             sepa_rows = _sepa_rows(name, payload)
             parsed_rows += len(sepa_rows)
+            if not file_period_text or file_period is None:
+                unmatched.append({'file': name, 'text': 'Abrechnungsmonat für SEPA Datei nicht erkennbar'})
+                archived_title = _archive_lexware_upload(upload, archive_period_label, request.user)
+                if archived_title:
+                    archived_documents.append(archived_title)
+                continue
             if not sepa_rows:
                 unmatched.append({'file': name, 'text': 'SEPA XML konnte nicht gelesen werden'})
             for row in sepa_rows:
@@ -493,10 +499,10 @@ def lexware_bank_import(request):
                         'text': str(row.get('employee_name') or 'Unbekannter Mitarbeiter')[:180],
                     })
                     continue
-                payment_date = _parse_bank_date(row.get('payment_date'), period)
+                payment_date = _parse_bank_date(row.get('payment_date'), file_period)
                 amount = abs(amount).quantize(Decimal('0.01'))
-                key_source = f"{name}|{period_text}|sepa|{row.get('employee_name')}|{row.get('iban')}|{amount}|{payment_date}"
-                grouped[(worker.id, period_text)].append({
+                key_source = f"{name}|{file_period_text}|sepa|{row.get('employee_name')}|{row.get('iban')}|{amount}|{payment_date}"
+                grouped[(worker.id, file_period_text)].append({
                     'kind': 'payment',
                     'key': hashlib.sha256(key_source.encode('utf-8')).hexdigest(),
                     'amount': str(amount),
@@ -507,8 +513,8 @@ def lexware_bank_import(request):
                     'source_file': name,
                     'source_type': 'lexware_sepa_xml',
                 })
-                source_files[(worker.id, period_text)].add(name)
-            archived_title = _archive_lexware_upload(upload, period_text, request.user)
+                source_files[(worker.id, file_period_text)].add(name)
+            archived_title = _archive_lexware_upload(upload, archive_period_label, request.user)
             if archived_title:
                 archived_documents.append(archived_title)
             continue
@@ -563,7 +569,7 @@ def lexware_bank_import(request):
                 item['key'] = hashlib.sha256(key_source.encode('utf-8')).hexdigest()
                 grouped[(worker.id, target_period_text)].append(item)
                 source_files[(worker.id, target_period_text)].add(name)
-            archived_title = _archive_lexware_upload(upload, period_text, request.user)
+            archived_title = _archive_lexware_upload(upload, archive_period_label, request.user)
             if archived_title:
                 archived_documents.append(archived_title)
             continue
@@ -612,9 +618,9 @@ def lexware_bank_import(request):
                 'source_file': row.get('_source_file', name),
                 'source_type': 'lexware_bank_export',
             })
-            source_files[(worker.id, period_text)].add(name)
+            source_files[(worker.id, file_period_text)].add(name)
 
-        archived_title = _archive_lexware_upload(upload, period_text, request.user)
+        archived_title = _archive_lexware_upload(upload, archive_period_label, request.user)
         if archived_title:
             archived_documents.append(archived_title)
 
