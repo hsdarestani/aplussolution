@@ -589,6 +589,19 @@ def worktime_export(request, file_format):
     worker = request.query_params.get('worker')
     if worker:
         queryset = queryset.filter(worker_id=worker)
+    year = str(request.query_params.get('year') or '').strip()
+    month = str(request.query_params.get('month') or '').strip()
+    if year:
+        try:
+            queryset = queryset.filter(year_month__year=int(year))
+        except ValueError:
+            return Response({'detail': 'Jahr muss im Format JJJJ angegeben werden.'}, status=400)
+    if month:
+        try:
+            period = datetime.strptime(month[:7], '%Y-%m').date().replace(day=1)
+        except ValueError:
+            return Response({'detail': 'Monat muss im Format JJJJ-MM angegeben werden.'}, status=400)
+        queryset = queryset.filter(year_month=period)
     if file_format == 'csv':
         return export_csv(queryset)
     if file_format == 'xlsx':
@@ -601,6 +614,12 @@ def worktime_export(request, file_format):
 def worktime_pdf(request, worker_id):
     worker = get_object_or_404(WorkerProfile.objects.select_related('user'), pk=worker_id)
     queryset = WorkingTimeAccountRecord.objects.filter(worker=worker).order_by('year_month')
+    year = str(request.query_params.get('year') or '').strip()
+    if year:
+        try:
+            queryset = queryset.filter(year_month__year=int(year))
+        except ValueError:
+            return Response({'detail': 'Jahr muss im Format JJJJ angegeben werden.'}, status=400)
     response = HttpResponse(worker_pdf(worker, queryset), content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="arbeitszeit-lohnkonto-{worker.employee_number}.pdf"'
     return response
@@ -611,6 +630,12 @@ def worktime_pdf(request, worker_id):
 def worktime_docx(request, worker_id):
     worker = get_object_or_404(WorkerProfile.objects.select_related('user'), pk=worker_id)
     queryset = WorkingTimeAccountRecord.objects.filter(worker=worker).order_by('year_month')
+    year = str(request.query_params.get('year') or '').strip()
+    if year:
+        try:
+            queryset = queryset.filter(year_month__year=int(year))
+        except ValueError:
+            return Response({'detail': 'Jahr muss im Format JJJJ angegeben werden.'}, status=400)
     response = HttpResponse(
         worker_docx(worker, queryset),
         content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
