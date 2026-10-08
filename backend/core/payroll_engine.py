@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from .models import (
     EmployeeMasterData,
+    PayrollStatement,
     TimeEntry,
     WorkerProfile,
     WorkingTimeAccountRecord,
@@ -190,6 +191,14 @@ def sync_working_time(
         item.worker_id: dict(item.data or {})
         for item in EmployeeMasterData.objects.filter(worker_id__in=[worker.id for worker in workers])
     }
+    payroll_statement_map = {
+        (item.worker_id, item.period): item
+        for item in PayrollStatement.objects.filter(
+            worker_id__in=[worker.id for worker in workers],
+            period__gte=start.replace(day=1),
+            period__lte=end.replace(day=1),
+        )
+    }
 
     settings_map = {
         row.worker_id: row
@@ -284,9 +293,12 @@ def sync_working_time(
             )
             _base_rate, _allowance, effective_rate = effective_hourly_rate(worker, row_setting)
             master_data = master_map.get(worker.id, {})
-            compensation_type = str(master_data.get('compensation_type') or '').strip().lower()
-            is_salary = compensation_type == 'salary'
-            monthly_salary = dec(master_data.get('monthly_salary')) if master_data.get('monthly_salary') not in (None, '') else None
+            default_compensation_type = str(master_data.get('compensation_type') or '').strip().lower()
+            default_monthly_salary = (
+                dec(master_data.get('monthly_salary'))
+                if master_data.get('monthly_salary') not in (None, '')
+                else None
+            )
             night_percent = dec(row_setting.night_surcharge_percent if row_setting else 0)
             saturday_percent = dec(row_setting.saturday_surcharge_percent if row_setting else 0)
             sunday_percent = dec(row_setting.sunday_surcharge_percent if row_setting else 0)
@@ -359,9 +371,43 @@ def sync_working_time(
                     )
                 )
 
+                statement = payroll_statement_map.get((worker.id, month))
+                statement_payslips = [
+                    item for item in list(statement.raw_data or [])
+                    if item.get('kind') == 'payslip'
+                ] if statement else []
+                statement_payslip = statement_payslips[-1] if statement_payslips else {}
+                month_compensation_type = str(
+                    statement_payslip.get('compensation_type')
+                    or default_compensation_type
+                    or ''
+                ).strip().lower()
+                is_salary = month_compensation_type == 'salary'
+                monthly_salary = (
+                    dec(statement_payslip.get('monthly_salary'))
+                    if statement_payslip.get('monthly_salary') not in (None, '')
+                    else default_monthly_salary
+                )
+                statement_hourly_rate = (
+                    dec(statement_payslip.get('hourly_rate'))
+                    if statement_payslip.get('hourly_rate') not in (None, '')
+                    else None
+                )
+                if (
+                    not is_salary
+                    and statement_hourly_rate is not None
+                    and statement_hourly_rate > 0
+                ):
+                    month_rate = statement_hourly_rate
+
                 ist = hours_by_key.get((str(worker.id), month), Decimal('0')).quantize(TWO)
                 difference = (ist - month_limit).quantize(TWO)
                 legacy_paid_extra = existing.paid_hours if existing else Decimal('0')
+                statement_paid_hours = (
+                    dec(statement_payslip.get('quantity'))
+                    if statement_payslip.get('quantity') not in (None, '')
+                    else None
+                )
                 if is_salary:
                     paid_total = (
                         existing.paid_total_hours
@@ -371,9 +417,13 @@ def sync_working_time(
                     balance_reference = month_limit
                 else:
                     paid_total = (
-                        existing.paid_total_hours
-                        if existing and existing.paid_total_hours is not None
-                        else (month_limit + legacy_paid_extra)
+                        statement_paid_hours
+                        if statement_paid_hours is not None
+                        else (
+                            existing.paid_total_hours
+                            if existing and existing.paid_total_hours is not None
+                            else (month_limit + legacy_paid_extra)
+                        )
                     ).quantize(TWO)
                     balance_reference = paid_total
                 manual = existing.manual_adjustment if existing else Decimal('0')
