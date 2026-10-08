@@ -78,7 +78,7 @@ type PayrollRow = {
   carryover_previous: string;
   paid_hours: string;
   paid_total_hours?: string;
-  balance_basis?: 'paid_hours' | 'soll_salary' | string;
+  balance_basis?: 'paid_hours' | 'soll_salary' | 'open_month' | string;
   balance_reference_hours?: string;
   monthly_balance_hours?: string;
   manual_adjustment: string;
@@ -95,6 +95,7 @@ type PayrollRow = {
   minijob_warning?: boolean;
   contract_issues?: string[];
   reconciliation_status?: string;
+  is_open_month?: boolean;
   reconciliation_issues?: string[];
   surcharge_reconciliation?: SurchargeReconciliation;
   payroll_statement?: PayrollStatement | null;
@@ -665,7 +666,9 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
             ? 'match'
             : reconciliationStatus === 'ABWEICHUNG'
               ? 'abweichung'
-              : 'pruefen';
+              : reconciliationStatus === 'LAUFEND'
+                ? 'laufend'
+                : 'pruefen';
           return <article className={`payroll-record-card ${expanded ? 'is-expanded' : ''}`} key={row.id}>
             <header>
               <div className="payroll-record-month"><span>{monthLabel(row.year_month)}</span><small>{employmentLabel(row.employment_type)}</small></div>
@@ -693,7 +696,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
               <div className="payroll-reconciliation-overall">
                 <span>LEXWARE ABGLEICH</span>
                 <b>{reconciliationStatus}</b>
-                <small>{row.reconciliation_issues?.length ? `${row.reconciliation_issues.length} Prüfhinweis(e)` : 'Nachweise stimmen überein'}</small>
+                <small>{reconciliationStatus === 'LAUFEND' ? 'Laufender Monat wird noch nicht in den Saldo eingerechnet' : row.reconciliation_issues?.length ? `${row.reconciliation_issues.length} Prüfhinweis(e)` : 'Nachweise stimmen überein'}</small>
               </div>
               {(['night', 'saturday', 'sunday'] as const).map(key => {
                 const item = row.surcharge_reconciliation?.[key];
@@ -715,7 +718,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
 
             <div className="payroll-metrics">
               <div><span>IST</span><b>{decimal(row.ist_hours)} Std.</b></div>
-              <div><span>{row.balance_basis === 'soll_salary' ? 'Sollbasis' : 'Bezahlt'}</span><b>{decimal(row.balance_reference_hours ?? row.paid_total_hours ?? row.soll_hours)} Std.</b></div>
+              <div><span>{row.balance_basis === 'open_month' ? 'Saldo Basis' : row.balance_basis === 'soll_salary' ? 'Sollbasis' : 'Bezahlt'}</span><b>{row.balance_basis === 'open_month' ? 'offen' : `${decimal(row.balance_reference_hours ?? row.paid_total_hours ?? row.soll_hours)} Std.`}</b></div>
               <div><span>Monatssaldo</span><b className={number(row.monthly_balance_hours) < 0 ? 'negative' : 'positive'}>{decimal(row.monthly_balance_hours)} Std.</b></div>
               <div><span>Saldo gesamt</span><b className={number(row.saldo_cumulative) < 0 ? 'negative' : 'positive'}>{decimal(row.saldo_cumulative)} Std.</b></div>
               <div>
