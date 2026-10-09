@@ -506,7 +506,8 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         ? month.slice(0, 4)
         : (lexwareReadiness?.year ? String(lexwareReadiness.year) : currentMonth().slice(0, 4));
       const params = new URLSearchParams({ year: reportYear });
-      if (selectedWorkerId) params.set('worker', selectedWorkerId);
+      // The Gesamt payroll export always contains all employees.
+      // Use worker-specific Word/PDF buttons for an individual account.
       if (month && month !== 'all') params.set('month', month);
       const result = await apiBlob(`working-time/export/${format}/?${params.toString()}`);
       triggerBlobDownload(result.blob, result.filename || `arbeitszeit-lohnkonto.${format}`);
@@ -545,8 +546,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     setBusyId('export:lexware-word');
     setMessage('');
     try {
-      const workerQuery = selectedWorkerId ? `&worker=${encodeURIComponent(selectedWorkerId)}` : '';
-      const result = await apiBlob(`working-time/lexware-docx/?month=${encodeURIComponent(month)}${workerQuery}`);
+      const result = await apiBlob(`working-time/lexware-docx/?month=${encodeURIComponent(month)}`);
       triggerBlobDownload(result.blob, result.filename || `03_Lexware_Abgleich_${month}.docx`);
     } catch (error: any) {
       setMessage(error?.message || 'Lexware Abgleich konnte nicht erstellt werden.');
@@ -582,8 +582,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     setBusyId('export:audit-word');
     setMessage('');
     try {
-      const workerQuery = selectedWorkerId ? `&worker=${encodeURIComponent(selectedWorkerId)}` : '';
-      const result = await apiBlob(`working-time/audit-docx/?year=${encodeURIComponent(reportYear)}${workerQuery}`);
+      const result = await apiBlob(`working-time/audit-docx/?year=${encodeURIComponent(reportYear)}`);
       triggerBlobDownload(result.blob, result.filename || `05_Pruefbericht_Arbeitszeit_Lexware_${reportYear}.docx`);
     } catch (error: any) {
       setMessage(error?.message || 'Prüfbericht konnte nicht erstellt werden.');
@@ -705,9 +704,9 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         <div className="payroll-hero-actions">
           <button type="button" className="payroll-secondary" onClick={() => void downloadArbeitszeitWord()} disabled={!selectedWorkerId || busyId === 'export:arbeitszeit-word'}>01 Word Arbeitszeit</button>
           <button type="button" className="payroll-secondary" onClick={() => void downloadExport('xlsx')} disabled={busyId === 'export:xlsx'}>02 Excel Gesamt</button>
-          <button type="button" className="payroll-secondary" onClick={() => void downloadLexwareWord()} disabled={month === 'all' || busyId === 'export:lexware-word'}>03 Word Lexware</button>
+          <button type="button" className="payroll-secondary" onClick={() => void downloadLexwareWord()} disabled={month === 'all' || busyId === 'export:lexware-word'}>03 Word Lexware (alle)</button>
           <button type="button" className="payroll-secondary" onClick={() => void downloadSelectedWorkerPdf()} disabled={!selectedWorkerId || busyId === 'export:worker-pdf'}>04 PDF Prüfnachweis</button>
-          <button type="button" className="payroll-secondary" onClick={() => void downloadAuditWord()} disabled={busyId === 'export:audit-word'}>05 Word Prüfbericht</button>
+          <button type="button" className="payroll-secondary" onClick={() => void downloadAuditWord()} disabled={busyId === 'export:audit-word'}>05 Word Prüfbericht (alle)</button>
           <button type="button" onClick={() => setSettingsOpen(value => !value)}>{settingsOpen ? 'Stammdaten schließen' : 'Stammdaten'}</button>
         </div>
       </header>}

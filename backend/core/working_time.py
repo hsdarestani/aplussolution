@@ -780,7 +780,16 @@ def record_dict(
         'minijob_limit': str(minijob_limit) if minijob_limit is not None else None,
         # Informational only. Use base gross here because treatment of supplements
         # in the Minijob earnings test depends on the payroll/tax classification.
-        'minijob_warning': bool(minijob_limit is not None and row.gross_amount > minijob_limit),
+        # The imported Lexware gross is stronger evidence than an A+ estimate
+        # (which may be zero for a worker without approved A+ time entries).
+        'minijob_warning': bool(
+            minijob_limit is not None
+            and (
+                dec((payroll_statement or {}).get('gross_amount'))
+                if (payroll_statement or {}).get('gross_amount') not in (None, '')
+                else dec(row.gross_amount)
+            ) > minijob_limit
+        ),
         'absence_days': int((absence_summary or {}).get('absence_days') or 0),
         'vacation_days': int((absence_summary or {}).get('vacation_days') or 0),
         'sick_days': int((absence_summary or {}).get('sick_days') or 0),
@@ -830,9 +839,20 @@ def record_dict(
         contract_issues.append(
             f'Lexware Stammdaten weisen Minijob aus, A+ ist als {employment_type} gespeichert.'
         )
-    if result['minijob_warning']:
+    if suspicious_109:
         contract_issues.append(
-            f"Minijob prüfen: Grundbrutto {row.gross_amount} € liegt über {minijob_limit} €."
+            'Lexware Personengruppe 109 bei Gehalt oberhalb der Minijobgrenze: '
+            'Beschäftigungsart anhand der Personalunterlagen prüfen.'
+        )
+    if result['minijob_warning']:
+        reference_gross = (
+            dec((payroll_statement or {}).get('gross_amount'))
+            if (payroll_statement or {}).get('gross_amount') not in (None, '')
+            else dec(row.gross_amount)
+        )
+        contract_issues.append(
+            f'Minijob prüfen: nachgewiesenes Brutto {reference_gross} € '
+            f'liegt über {minijob_limit} €. Einzelfall und Zeitraum prüfen.'
         )
 
     result['contract_issues'] = contract_issues
@@ -964,6 +984,37 @@ def export_csv(queryset) -> HttpResponse:
     return response
 
 
+
+def _entry_time_review(entry: dict) -> str:
+    """Potential attendance inconsistencies, never automatic payroll edits.
+
+    German break thresholds are screening criteria, not a legal verdict:
+    collective agreements, special rules and documentary corrections may apply.
+    """
+    gross_value = entry.get('gross_minutes')
+    if gross_value not in (None, ''):
+        gross = max(0, int(gross_value))
+    else:
+        start = parse_dt(entry.get('local_clock_in') or entry.get('clock_in'))
+        end = parse_dt(entry.get('local_clock_out') or entry.get('clock_out'))
+        gross = max(0, int((end - start).total_seconds() // 60)) if start and end else 0
+    if gross <= 0:
+        return ''
+    pause = max(0, int(entry.get('break_minutes') or 0))
+    reported = entry.get('worked_minutes')
+    required = 45 if gross > 540 else 30 if gross > 360 else 0
+    warnings = []
+    if required and pause < required:
+        warnings.append(f'Pause {pause} Min. bei {gross} Min. Anwesenheit (Richtwert {required} Min.)')
+    if max(0, gross - pause) > 600:
+        warnings.append('Nettoarbeitszeit über 10 Stunden')
+    if reported not in (None, '') and abs(int(reported) - max(0, gross - pause)) > 2:
+        warnings.append(
+            f'Nettoangabe {int(reported)} Min. statt rechnerisch {max(0, gross - pause)} Min.'
+        )
+    return '; '.join(warnings)
+
+
 def export_xlsx(queryset) -> HttpResponse:
     rows = list(queryset.select_related('worker__user'))
     statements = _statement_map(rows)
@@ -1042,6 +1093,7 @@ def export_xlsx(queryset) -> HttpResponse:
         'Mitarbeiter', 'Monat', 'Datum', 'Kunde', 'Ort', 'Service',
         'Plan Beginn', 'Plan Ende', 'Ist Beginn', 'Ist Ende', 'Pause Min.',
         'Netto Std.', 'Nacht Std.', 'Samstag Std.', 'Sonntag Std.', 'Notiz',
+        'Zeitprüfung',
     ]
     detail_ws.append(detail_headers)
     shift_notes = _shift_note_map(report_rows)
@@ -1068,6 +1120,7 @@ def export_xlsx(queryset) -> HttpResponse:
                 float((Decimal(int(entry.get('saturday_minutes') or 0)) / Decimal('60')).quantize(TWO)),
                 float((Decimal(int(entry.get('sunday_minutes') or 0)) / Decimal('60')).quantize(TWO)),
                 shift_notes.get(str(entry.get('shift_id') or ''), ''),
+                _entry_time_review(entry),
             ])
     detail_ws.freeze_panes = 'A2'
     detail_ws.auto_filter.ref = detail_ws.dimensions
@@ -1075,6 +1128,34 @@ def export_xlsx(queryset) -> HttpResponse:
         detail_ws.column_dimensions[column[0].column_letter].width = min(
             max(len(str(cell.value or '')) for cell in column) + 2,
             40,
+        )
+
+    # Separate filterable queue for manual time-entry checks. Never silently
+    # subtract statutory breaks or alter the approved source entry.
+    review_ws = wb.create_sheet('Zeitprüfungen')
+    review_ws.append([
+        'Mitarbeiter', 'Monat', 'Datum', 'Kunde', 'Ort',
+        'Ist Beginn', 'Ist Ende', 'Brutto Min.', 'Pause Min.', 'Prüfhinweis',
+    ])
+    for row in report_rows:
+        for entry in row.raw_entries or []:
+            warning = _entry_time_review(entry)
+            if not warning:
+                continue
+            review_ws.append([
+                str(row.worker.user), row.year_month.strftime('%Y-%m'),
+                _pdf_date(entry.get('local_clock_in') or entry.get('clock_in')),
+                entry.get('client_name') or '', entry.get('location_name') or '',
+                _pdf_clock(entry.get('local_clock_in') or entry.get('clock_in')),
+                _pdf_clock(entry.get('local_clock_out') or entry.get('clock_out')),
+                entry.get('gross_minutes') or '', int(entry.get('break_minutes') or 0),
+                warning,
+            ])
+    review_ws.freeze_panes = 'A2'
+    review_ws.auto_filter.ref = review_ws.dimensions
+    for column in review_ws.columns:
+        review_ws.column_dimensions[column[0].column_letter].width = min(
+            max(len(str(cell.value or '')) for cell in column) + 2, 48,
         )
 
     buffer = io.BytesIO()
@@ -1330,7 +1411,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
     _docx_title(
         document,
         'Arbeitszeitnachweis und Lohnkonto',
-        f'{worker.user} · {master.get("employment_type_lexware") or worker.get_employment_type_display()}',
+        f'{worker.user} · aktuelle Stammdaten: {master.get("employment_type_lexware") or worker.get_employment_type_display()}',
     )
 
     info_rows = [
@@ -1354,6 +1435,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
         )
         monthly_rows.append([
             row.year_month.strftime('%m/%Y'),
+            _employment_label(item.get('employment_type') or ''),
             item['ist_hours'],
             item['soll_hours'],
             item['balance_reference_hours'],
@@ -1373,7 +1455,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
         ])
     _docx_table(
         document,
-        ['Monat', 'Ist', 'Soll', 'Basis', 'Saldo Monat', 'Saldo gesamt', 'Satz', 'Nacht', 'Sa', 'So', 'Zuschläge', 'Abw.', 'Urlaub', 'Krank', 'Lexware Brutto', 'Lexware Netto', 'Auszahlung'],
+        ['Monat', 'Beschäftigung', 'Ist', 'Soll A+', 'Basis', 'Saldo Monat', 'Saldo gesamt', 'Satz', 'Nacht', 'Sa', 'So', 'Zuschläge', 'Abw.', 'Urlaub', 'Krank', 'Lexware Brutto', 'Lexware Netto', 'Auszahlung'],
         monthly_rows,
     )
 
@@ -1421,11 +1503,22 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
             ['Datum', 'Kunde', 'Ort', 'Plan', 'Ist', 'Pause', 'Netto', 'Nacht', 'Sa', 'So', 'Notiz'],
             daily,
         )
+        flagged = [
+            (_pdf_date(entry.get('local_clock_in') or entry.get('clock_in')), _entry_time_review(entry))
+            for entry in entries
+            if _entry_time_review(entry)
+        ]
+        if flagged:
+            document.add_paragraph('Zeitbuchungen zur manuellen Prüfung', style='Heading3')
+            for day, warning in flagged:
+                document.add_paragraph(f'{day}: {warning}', style='List Bullet')
 
     document.add_paragraph()
     note = document.add_paragraph(
         'Hinweis: Ist Zeiten stammen aus der tatsächlichen Zeiterfassung. '
-        'Dienstplanzeiten dienen nur dem Vergleich. Lexware Werte werden als eigener Nachweis geführt.'
+        'Dienstplanzeiten dienen nur dem Vergleich. Lexware Werte werden als eigener Nachweis geführt. '
+        'Die Sollstunden aus A+ können bei historischen Vertragswechseln von den damaligen Vertragsdaten abweichen; '
+        'die Saldo Basis steht deshalb separat. Zeitprüfungen ändern keine erfassten Stunden automatisch.'
     )
     note.runs[0].italic = True
     return _docx_bytes(document)
@@ -1509,6 +1602,21 @@ def _reconciliation_status(item: dict) -> tuple[str, list[str]]:
         issues.append(f'Auszahlung {payout} € ≠ Zahlungsliste {payment_list} €')
     elif payout is None or payment_list is None:
         issues.append('Auszahlung oder Zahlungsliste fehlt')
+
+    # Netto and Auszahlung are distinct accounting amounts. A difference may
+    # be explained by expenses, advances or a corrected payslip. Surface it
+    # for review rather than silently labeling all three documents MATCH.
+    # Corrected slips deliberately retain an earlier nonzero payout while the
+    # corrected Netto changes; their adjustment evidence must be checked in
+    # Lexware rather than treated as a new bank payment.
+    net = dec(payroll.get('net_amount')) if payroll.get('net_amount') not in (None, '') else None
+    if (net is not None and payout is not None
+            and abs(net - payout) > Decimal('0.01')
+            and not payroll.get('lexware_is_correction')):
+        issues.append(
+            f'Netto {net} € und Auszahlungsbetrag {payout} € weichen ab; '
+            'Zuschüsse, Vorschüsse oder Korrekturen prüfen.'
+        )
 
     if payroll.get('lexware_compensation_type') == 'hourly':
         lex_hours = dec(payroll.get('lexware_paid_hours')) if payroll.get('lexware_paid_hours') not in (None, '') else None
@@ -1711,8 +1819,19 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
     review_count = sum(1 for item in closed_items if item.get('reconciliation_status') == 'PRÜFEN')
     mismatch_count = sum(1 for item in closed_items if item.get('reconciliation_status') == 'ABWEICHUNG')
 
+    time_reviews = [
+        (item, entry, _entry_time_review(entry))
+        for item in closed_items
+        for entry in (next((
+            row.raw_entries or [] for row in rows
+            if str(row.worker_id) == str(item.get('worker_id'))
+            and row.year_month.strftime('%Y-%m') == item.get('year_month')
+        ), []))
+        if _entry_time_review(entry)
+    ]
     summary_rows = [
         ['Geprüfte Monatskonten', len(closed_items)],
+        ['Zeitbuchungen mit Prüffragen', len(time_reviews)],
         ['MATCH', match_count],
         ['PRÜFEN', review_count],
         ['ABWEICHUNG', mismatch_count],
@@ -1790,6 +1909,26 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
             ])
         _docx_table(document, ['Mitarbeiter', 'Monat', 'Status', 'Prüfhinweise'], exception_rows)
 
+    document.add_paragraph()
+    heading = document.add_paragraph()
+    run = heading.add_run('Zeitbuchungen zur manuellen Prüfung')
+    run.bold = True
+    run.font.size = Pt(13)
+    if time_reviews:
+        review_rows = [
+            [
+                item.get('employee_name') or '', item.get('year_month') or '',
+                _pdf_date(entry.get('local_clock_in') or entry.get('clock_in')),
+                str(entry.get('client_name') or ''), warning,
+            ]
+            for item, entry, warning in time_reviews
+        ]
+        _docx_table(
+            document, ['Mitarbeiter', 'Monat', 'Datum', 'Kunde', 'Prüfhinweis'], review_rows,
+        )
+    else:
+        document.add_paragraph('Keine auffälligen Zeitbuchungen im Prüfzeitraum.')
+
     if readiness:
         document.add_paragraph()
         heading = document.add_paragraph()
@@ -1819,7 +1958,8 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
         'Hinweis: Ist Zeiten stammen aus der tatsächlichen Zeiterfassung. Dienstplan bleibt Vergleichsdaten. '
         'Bei Stundenlohn wird mit den in Lexware ausgewiesenen bezahlten Stunden abgeglichen. '
         'Bei Gehalt ist die vertragliche Sollzeit die Saldo Basis. Abwesenheiten werden separat ausgewiesen '
-        'und verändern den Saldo nicht automatisch.'
+        'und verändern den Saldo nicht automatisch. Prüfpunkte sind Hinweise zur manuellen Klärung, '
+        'keine automatische Korrektur von Lohn, Beschäftigung oder erfassten Pausen.'
     )
     note.runs[0].italic = True
     return _docx_bytes(document)
