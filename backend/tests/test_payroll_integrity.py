@@ -2218,3 +2218,48 @@ def test_payroll_excel_contains_filterable_daily_evidence_and_notes(
     note_column = headers.index('Notiz') + 1
     assert sheet.cell(row=2, column=note_column).value == 'Event 4711 Eingang West'
     assert sheet.auto_filter.ref
+
+
+@pytest.mark.django_db
+def test_person_group_997_displays_as_managing_director(worker_user):
+    from core.working_time import record_dict
+
+    worker = worker_user.worker_profile
+    worker.employment_type = 'minijob'
+    worker.save(update_fields=['employment_type', 'updated_at'])
+    record = WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=date(2026, 9, 1),
+        ist_hours=Decimal('0.00'),
+        soll_hours=Decimal('0.00'),
+        paid_total_hours=Decimal('0.00'),
+        employment_type_snapshot='minijob',
+        saldo_cumulative=Decimal('0.00'),
+        hourly_rate=Decimal('0.00'),
+        gross_amount=Decimal('0.00'),
+    )
+    statement = PayrollStatement.objects.create(
+        worker=worker,
+        period=date(2026, 9, 1),
+        gross_amount=Decimal('2800.00'),
+        net_amount=Decimal('2523.67'),
+        transferred_amount=Decimal('2523.67'),
+        source='lexware_pdf_bundle',
+        raw_data=[{
+            'kind': 'payslip',
+            'period': '2026-09',
+            'person_group': '997',
+            'compensation_type': 'salary',
+            'monthly_salary': '2500.00',
+            'gross_amount': '2800.00',
+            'net_amount': '2523.67',
+            'payout_amount': '2523.67',
+            'supplements': [],
+        }],
+    )
+
+    data = record_dict(record, statement)
+
+    assert data['employment_type'] == 'geschaeftsfuehrer'
+    assert data['minijob_limit'] is None
+    assert data['payroll_statement']['gross_amount'] == '2800.00'
