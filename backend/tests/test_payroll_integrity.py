@@ -1903,6 +1903,7 @@ def test_lexware_payslip_parser_reads_person_group():
         'Personal-Nr. Geburtsdatum Steuerklasse Konfession',
         '14 01.01.1990 - ohne',
         'Pers.-Grp. Beitragsgruppe Eintritt Austritt',
+        '60327 Frankfurt am Main',
         '109 6500 01.10.2024 -',
         'Entgelt',
         'Bezeichnung Kennz Menge Faktor Prozentsatz Betrag',
@@ -2364,3 +2365,34 @@ def test_readiness_requests_reparse_for_impossible_minijob_salary(worker_user):
 
     assert readiness['suspicious_payslip_person_group'] == 1
     assert readiness['enrichment_needed'] is True
+
+
+def test_lexware_payslip_parser_reads_person_group_997_with_interleaved_address():
+    import io
+
+    from reportlab.pdfgen import canvas
+    from core.lexware_pdf import parse_payslips
+
+    buffer = io.BytesIO()
+    doc = canvas.Canvas(buffer)
+    for index, line in enumerate([
+        'Abrechnung für September 2026 - Ashkan Asadian Ghahferokhi',
+        'Personal-Nr. Geburtsdatum Steuerklasse Konfession',
+        '10 09.10.1994 4 ohne',
+        'Pers.-Grp. Beitragsgruppe Eintritt Austritt',
+        '60327 Frankfurt am Main',
+        '997 0000 01.01.2025 -',
+        'Entgelt',
+        'Bezeichnung Kennz Menge Faktor Prozentsatz Betrag',
+        'Gehalt LSG 1,00 2.500,00 € 2.500,00 €',
+        'Gesamtbrutto 2.800,00 €',
+        'Netto 2.523,67 €',
+        'Auszahlungsbetrag 2.523,67 €',
+    ]):
+        doc.drawString(40, 800 - index * 18, line)
+    doc.save()
+
+    rows = parse_payslips(buffer.getvalue())
+
+    assert len(rows) == 1
+    assert rows[0]['person_group'] == '997'
