@@ -1,9 +1,15 @@
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
 
-function safeFilename(filename: string) {
-  return filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+/** Preserve the document's original display name, including umlauts/spaces. */
+export function safePdfFilename(filename: string) {
+  const name = String(filename || 'Dienstplan.pdf')
+    .replace(/[\\/:*?"<>|\x00-\x1f]/g, '_')
+    .replace(/^\.+/, '')
+    .trim()
+    .slice(0, 160);
+  const safe = name || 'Dienstplan.pdf';
+  return /\.pdf$/i.test(safe) ? safe : safe + '.pdf';
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -17,45 +23,31 @@ function downloadBlob(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
-export async function saveSchedulePdf(blob: Blob, filename: string, title = 'Dienstplan') {
-  const normalizedFilename = safeFilename(filename || 'Dienstplan.pdf');
+/**
+ * Download PDF without Preview or Share.
+ * On iOS the app's Documents/Downloads folder is exposed in the Files app:
+ * "Auf meinem iPhone" > "A+ Solution" > "Downloads".
+ * Directory.Cache would not survive cleanup or be visible in Files.
+ */
+export async function saveSchedulePdf(blob: Blob, filename: string, _title = 'Dienstplan'): Promise<void> {
+  if (!blob.size) throw new Error('Die PDF Datei ist leer.');
+  const name = safePdfFilename(filename);
 
   if (Capacitor.isNativePlatform()) {
     const data = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onerror = () => reject(new Error('PDF konnte nicht gelesen werden.'));
-      reader.onload = () => resolve(String(reader.result).split(',')[1]);
+      reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
       reader.readAsDataURL(blob);
     });
-    const file = await Filesystem.writeFile({
-      path: 'dienstplan/' + normalizedFilename,
-      directory: Directory.Cache,
+    await Filesystem.writeFile({
+      path: 'Downloads/' + name,
+      directory: Directory.Documents,
       data,
       recursive: true,
     });
-    await Share.share({ title, files: [file.uri], dialogTitle: `${title} teilen` });
     return;
   }
 
-  // Mobile browsers that support Web Share Level 2 should behave like the app:
-  // opening the system share sheet immediately after PDF creation instead of
-  // silently downloading the file. Keep download as a compatibility fallback.
-  const shareFile = new File([blob], normalizedFilename, { type: blob.type || 'application/pdf' });
-  const shareData: ShareData = { title, files: [shareFile] };
-  const canShareFiles = typeof navigator.share === 'function'
-    && (typeof navigator.canShare !== 'function' || navigator.canShare(shareData));
-
-  if (canShareFiles) {
-    try {
-      await navigator.share(shareData);
-      return;
-    } catch (error: any) {
-      // Cancelling the native share sheet is a completed user action; do not
-      // surprise the user with an automatic download afterwards.
-      if (error?.name === 'AbortError') return;
-      console.warn('PDF share sheet unavailable, falling back to download', error);
-    }
-  }
-
-  downloadBlob(blob, normalizedFilename);
+  downloadBlob(blob, name);
 }
