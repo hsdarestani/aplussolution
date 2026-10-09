@@ -159,7 +159,7 @@ const monthLabel = (value: string) => {
   if (!year || !month) return value;
   return new Intl.DateTimeFormat('de-DE', { timeZone: BUSINESS_TIME_ZONE, month: 'long', year: 'numeric' }).format(new Date(Date.UTC(year, month - 1, 1, 12)));
 };
-const employmentLabel = (value?: string) => value === 'minijob' ? 'Minijob' : value === 'teilzeit' ? 'Teilzeit' : value === 'vollzeit' ? 'Vollzeit' : value === 'student' ? 'Studentische Aushilfe' : 'Beschäftigung';
+const employmentLabel = (value?: string) => value === 'minijob' ? 'Minijob' : value === 'teilzeit' ? 'Teilzeit' : value === 'vollzeit' ? 'Vollzeit' : value === 'student' ? 'Studentische Aushilfe' : value === 'geschaeftsfuehrer' ? 'Geschäftsführer' : 'Beschäftigung';
 const dateLabel = (value?: string | null) => value ? new Date(value).toLocaleDateString('de-DE', { timeZone: BUSINESS_TIME_ZONE }) : 'Keine Angabe';
 const timeLabel = (value?: string | null) => value ? new Date(value).toLocaleTimeString('de-DE', { timeZone: BUSINESS_TIME_ZONE, hour: '2-digit', minute: '2-digit' }) : 'Keine Angabe';
 const hoursFromMinutes = (value?: number) => decimal(number(value) / 60);
@@ -357,21 +357,12 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   const selectedEmployee = employeeOptions.find(item => item.worker_id === selectedWorkerId);
   const selectedSetting = settingsRows.find(item => item.worker_id === selectedWorkerId);
   const closedSummaryRows = summaryRows.filter(row => !row.is_open_month);
-  const latestSaldoByWorker = useMemo(() => {
-    const latest = new Map<string, PayrollRow>();
-    for (const row of reviewRows) {
-      const current = latest.get(row.worker_id);
-      if (!current || row.year_month > current.year_month) latest.set(row.worker_id, row);
-    }
-    return latest;
-  }, [reviewRows]);
   const summary = {
     ist: summaryRows.reduce((sum, row) => sum + number(row.ist_hours), 0),
     paid: summaryRows.reduce((sum, row) => sum + number(row.balance_reference_hours ?? row.paid_total_hours ?? row.soll_hours), 0),
-    saldo: month === 'all'
-      ? Array.from(latestSaldoByWorker.values()).reduce((sum, row) => sum + number(row.saldo_cumulative), 0)
-      : summaryRows.reduce((sum, row) => sum + number(row.monthly_balance_hours ?? row.saldo_cumulative), 0),
+    saldo: summaryRows.reduce((sum, row) => sum + number(row.monthly_balance_hours ?? 0), 0),
     gross: closedSummaryRows.reduce((sum, row) => sum + number(row.gross_with_surcharges ?? row.gross_amount), 0),
+    lexwareGross: closedSummaryRows.reduce((sum, row) => sum + number(row.payroll_statement?.gross_amount), 0),
     transferred: closedSummaryRows.reduce((sum, row) => sum + number(row.payroll_statement?.transferred_amount), 0),
   };
 
@@ -733,7 +724,8 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         <div><span>Gearbeitet</span><strong>{decimal(summary.ist)} Std.</strong><small>Ist Zeit</small></div>
         <div><span>Bezahlt oder Soll</span><strong>{decimal(summary.paid)} Std.</strong><small>bei Gehalt gilt die vertragliche Sollzeit</small></div>
         <div><span>Saldo</span><strong className={summary.saldo < 0 ? 'negative' : 'positive'}>{decimal(summary.saldo)} Std.</strong><small>offenes Zeitkonto</small></div>
-        <div><span>Brutto vorbereitet</span><strong>{money(summary.gross)}</strong><small>inklusive Zuschläge</small></div>
+        <div><span>A+ Brutto vorbereitet</span><strong>{money(summary.gross)}</strong><small>inklusive Zuschläge</small></div>
+        <div><span>Lexware Brutto</span><strong>{money(summary.lexwareGross)}</strong><small>Lohnabrechnungen</small></div>
         <div><span>Lexware Auszahlung</span><strong>{money(summary.transferred)}</strong><small>Zahlungsliste oder Bankexport</small></div>
       </section>
 
@@ -883,7 +875,8 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
                   ? money(statement?.lexware_monthly_salary ?? row.gross_amount)
                   : money(row.hourly_rate)}</b>
               </div>
-              <div><span>Brutto</span><b>{money(row.gross_with_surcharges ?? row.gross_amount)}</b></div>
+              <div><span>A+ Brutto</span><b>{money(row.gross_with_surcharges ?? row.gross_amount)}</b></div>
+              {statement?.gross_amount != null && <div><span>Lexware Brutto</span><b>{money(statement.gross_amount)}</b></div>}
               <div><span>Nacht</span><b>{decimal(row.night_hours)} Std.</b></div>
               <div><span>Samstag</span><b>{decimal(row.saturday_hours)} Std.</b></div>
               <div><span>Sonntag</span><b>{decimal(row.sunday_hours)} Std.</b></div>
