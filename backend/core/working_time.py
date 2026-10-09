@@ -650,6 +650,10 @@ def record_dict(
     ).strip()
     if lexware_person_group == '109':
         employment_type = WorkerProfile.EmploymentType.MINI
+    elif lexware_person_group == '997':
+        # Lexware uses person group 997 for a non-SV managing director setup.
+        # Do not display a stale A+ Minijob snapshot for that payroll month.
+        employment_type = 'geschaeftsfuehrer'
     is_minijob_month = (
         lexware_person_group == '109'
         or (
