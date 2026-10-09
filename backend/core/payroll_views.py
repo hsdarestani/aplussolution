@@ -136,6 +136,7 @@ def lexware_readiness_payload(year: int) -> dict:
         .values('period', 'raw_data')
     )
     missing_person_group = 0
+    suspicious_person_group = 0
     has_absence_evidence = False
     statement_stats = defaultdict(lambda: {
         'statements': 0,
@@ -149,6 +150,15 @@ def lexware_readiness_payload(year: int) -> dict:
         missing_person_group += sum(
             1 for item in items
             if item.get('kind') == 'payslip' and not str(item.get('person_group') or '').strip()
+        )
+        suspicious_person_group += sum(
+            1 for item in items
+            if item.get('kind') == 'payslip'
+            and str(item.get('person_group') or '').strip() == '109'
+            and (
+                dec(item.get('gross_amount')) > Decimal('603.00')
+                or dec(item.get('monthly_salary')) > Decimal('603.00')
+            )
         )
         if any(item.get('kind') == 'absence_evidence' for item in items):
             has_absence_evidence = True
@@ -219,9 +229,11 @@ def lexware_readiness_payload(year: int) -> dict:
         'optional_documents': dict(optional_counts),
         'enrichment_needed': bool(
             missing_person_group
+            or suspicious_person_group
             or (optional_counts.get('u1', 0) > 0 and not has_absence_evidence)
         ),
         'missing_payslip_person_group': missing_person_group,
+        'suspicious_payslip_person_group': suspicious_person_group,
         'months': months,
         'missing': missing,
         'no_additional_import_required': no_additional_import_required,
