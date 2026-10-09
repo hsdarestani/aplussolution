@@ -2544,3 +2544,106 @@ def test_review_year_export_uses_scoped_saldo(worker_user):
     assert sheet['I2'].value == 2
     assert sheet['F3'].value == 2
     assert sheet['I3'].value == 4
+
+
+@pytest.mark.django_db
+def test_uncertain_salary_minijob_is_not_presented_as_verified_minijob(worker_user):
+    from core.working_time import record_dict
+
+    worker = worker_user.worker_profile
+    worker.employment_type = 'minijob'
+    worker.save(update_fields=['employment_type', 'updated_at'])
+    record = WorkingTimeAccountRecord.objects.create(
+        worker=worker, year_month=date(2026, 9, 1),
+        ist_hours=Decimal('0.00'), soll_hours=Decimal('0.00'),
+        paid_total_hours=Decimal('0.00'), employment_type_snapshot='minijob',
+        saldo_cumulative=Decimal('0.00'), gross_amount=Decimal('0.00'),
+    )
+    statement = PayrollStatement.objects.create(
+        worker=worker, period=record.year_month,
+        gross_amount=Decimal('2800.00'),
+        net_amount=Decimal('2523.67'),
+        transferred_amount=Decimal('2523.67'),
+        raw_data=[{'kind': 'payslip', 'compensation_type': 'salary',
+                   'monthly_salary': '2500.00', 'gross_amount': '2800.00',
+                   'net_amount': '2523.67', 'payout_amount': '2523.67'}],
+    )
+
+    output = record_dict(record, statement)
+    assert output['employment_type'] == 'ungeklaert'
+    assert output['employment_classification_unverified'] is True
+    assert output['reconciliation_status'] == 'PRÜFEN'
+    assert any('Personengruppe' in issue for issue in output['reconciliation_issues'])
+
+
+@pytest.mark.django_db
+def test_historical_salary_contract_soll_is_not_misreported_as_old_minijob_soll(worker_user):
+    import io
+    from docx import Document
+    from openpyxl import load_workbook
+    from core.working_time import record_dict, worker_docx, export_xlsx
+
+    worker = worker_user.worker_profile
+    worker.employment_type = 'vollzeit'
+    worker.monthly_hours = Decimal('166.83')
+    worker.save(update_fields=['employment_type', 'monthly_hours', 'updated_at'])
+    EmployeeMasterData.objects.create(
+        worker=worker,
+        data={'compensation_type': 'salary', 'monthly_salary': '2975.00',
+              'lexware_latest_payroll_period': '2026-09'},
+    )
+    period = date(2026, 3, 1)
+    record = WorkingTimeAccountRecord.objects.create(
+        worker=worker, year_month=period,
+        ist_hours=Decimal('12.25'), soll_hours=Decimal('166.83'),
+        paid_total_hours=Decimal('12.00'),
+        employment_type_snapshot='minijob',
+        gross_amount=Decimal('186.00'), hourly_rate=Decimal('15.50'),
+        saldo_cumulative=Decimal('0.25'),
+    )
+    statement = PayrollStatement.objects.create(
+        worker=worker, period=period,
+        gross_amount=Decimal('186.00'), net_amount=Decimal('186.00'),
+        transferred_amount=Decimal('186.00'),
+        raw_data=[{'kind': 'payslip', 'compensation_type': 'hourly',
+                   'quantity': '12.00', 'hourly_rate': '15.50',
+                   'gross_amount': '186.00', 'net_amount': '186.00',
+                   'payout_amount': '186.00'}],
+    )
+    data = record_dict(record, statement)
+    assert data['historical_soll_unverified'] is True
+    assert data['reconciliation_status'] == 'PRÜFEN'
+    assert any('nicht' in issue for issue in data['reconciliation_issues'])
+
+    queryset = WorkingTimeAccountRecord.objects.filter(pk=record.pk)
+    doc = Document(io.BytesIO(worker_docx(worker, queryset)))
+    assert 'nicht belegt' in '\\n'.join(p.text for table in doc.tables for row in table.rows for cell in row.cells for p in cell.paragraphs)
+    assert max(len(table.columns) for table in doc.tables) <= 8
+    book = load_workbook(io.BytesIO(export_xlsx(queryset).content))
+    sheet = book['Arbeitszeitkonto']
+    assert sheet['D2'].value is None
+    assert sheet['E2'].value is None
+    assert sheet.cell(2, sheet.max_column).value == 'Historischer Sollwert nicht belegt'
+
+
+@pytest.mark.django_db
+def test_lexware_and_audit_docx_use_readable_column_counts(worker_user):
+    import io
+    from docx import Document
+    from core.working_time import lexware_reconciliation_docx, payroll_audit_docx
+
+    worker = worker_user.worker_profile
+    WorkingTimeAccountRecord.objects.create(
+        worker=worker, year_month=date(2026, 9, 1),
+        ist_hours=Decimal('12.00'), soll_hours=Decimal('12.00'),
+        paid_total_hours=Decimal('12.00'),
+        gross_amount=Decimal('186.00'), saldo_cumulative=Decimal('0.00'),
+    )
+    queryset = WorkingTimeAccountRecord.objects.filter(worker=worker)
+    for content in (
+        lexware_reconciliation_docx(queryset, date(2026, 9, 1)),
+        payroll_audit_docx(queryset, 2026),
+    ):
+        doc = Document(io.BytesIO(content))
+        assert max(len(table.columns) for table in doc.tables) <= 9
+        assert len(doc.tables) >= 2
