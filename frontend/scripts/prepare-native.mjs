@@ -224,7 +224,6 @@ class APlusCalendarSubscriptionPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 }
 
-@objc(APlusBridgeViewController)
 open class APlusBridgeViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         super.capacitorDidLoad()
