@@ -217,18 +217,39 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     return () => observer.disconnect();
   }, [standalone]);
 
-  async function fetchWorkspaceData() {
+  function payrollYearScope() {
     const readinessYear = currentMonth().slice(0, 4) || String(new Date().getFullYear());
     const throughMonth = currentMonth().slice(0, 7);
-    const [response, settingsResponse, readinessResponse]: any[] = await Promise.all([
-      api(`working-time/records/?from=${encodeURIComponent(`${readinessYear}-01`)}&to=${encodeURIComponent(throughMonth)}`),
+    return { readinessYear, throughMonth };
+  }
+
+  async function fetchRecordsData() {
+    const { readinessYear, throughMonth } = payrollYearScope();
+    return api(`working-time/records/?from=${encodeURIComponent(`${readinessYear}-01`)}&to=${encodeURIComponent(throughMonth)}`);
+  }
+
+  async function fetchWorkspaceMetadata() {
+    const { readinessYear } = payrollYearScope();
+    const [settingsResponse, readinessResponse]: any[] = await Promise.all([
       api('working-time/settings/'),
       api(`working-time/lexware-readiness/?year=${encodeURIComponent(readinessYear)}`),
     ]);
-    return { response, settingsResponse, readinessResponse };
+    return { settingsResponse, readinessResponse };
   }
 
-  function applyWorkspaceData(response: any, settingsResponse: any, readinessResponse?: LexwareReadiness | null) {
+  async function fetchWorkspaceData() {
+    const [response, metadata]: any[] = await Promise.all([
+      fetchRecordsData(),
+      fetchWorkspaceMetadata(),
+    ]);
+    return {
+      response,
+      settingsResponse: metadata.settingsResponse,
+      readinessResponse: metadata.readinessResponse,
+    };
+  }
+
+  function applyWorkspaceData(response: any, settingsResponse?: any, readinessResponse?: LexwareReadiness | null) {
     const nextRows = (response?.results || response || []) as PayrollRow[];
     const configuredSettings = Array.isArray(settingsResponse?.employees)
       ? settingsResponse.employees.map((item: any) => ({
@@ -244,7 +265,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
           excluded: item.excluded,
           notes: item.notes,
         })).filter((item: SettingRow) => item.worker_id && item.employee_name)
-      : [];
+      : settingsRows;
     const rowEmployees = nextRows.map(item => ({ worker_id: item.worker_id, employee_name: item.employee_name }));
     const uniqueEmployees = Array.from(
       new Map([...configuredSettings, ...rowEmployees].map(item => [item.worker_id, { worker_id: item.worker_id, employee_name: item.employee_name }])).values(),
@@ -252,8 +273,8 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
 
     setRows(nextRows);
     setEmployeeOptions(uniqueEmployees);
-    setSettingsRows(configuredSettings);
-    setLexwareReadiness(readinessResponse || null);
+    if (settingsResponse) setSettingsRows(configuredSettings);
+    if (readinessResponse !== undefined) setLexwareReadiness(readinessResponse || null);
     setDrafts(Object.fromEntries(nextRows.map(row => [row.id, {
       paid_total_hours: row.paid_total_hours ?? row.soll_hours,
       manual_adjustment: row.manual_adjustment,
@@ -265,7 +286,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     setMessage('');
     setEmptyReason('');
     try {
-      let { response, settingsResponse, readinessResponse } = await fetchWorkspaceData();
+      let response: any = await fetchRecordsData();
       let nextRows = (response?.results || response || []) as PayrollRow[];
 
       if (standalone && autoBuild && !nextRows.length && !autoBuildAttempted.current) {
@@ -276,11 +297,25 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         if (!rebuilt?.records_count) {
           setEmptyReason(rebuilt?.detail || 'Es wurden keine abgeschlossenen oder freigegebenen Ist Zeiten gefunden.');
         }
-        ({ response, settingsResponse, readinessResponse } = await fetchWorkspaceData());
+        response = await fetchRecordsData();
         nextRows = (response?.results || response || []) as PayrollRow[];
       }
 
-      applyWorkspaceData(response, settingsResponse, readinessResponse);
+      // Paint payroll numbers as soon as the scoped records API returns.
+      applyWorkspaceData(response);
+      setLoading(false);
+
+      // Settings/readiness are secondary metadata and must not delay the numbers.
+      let settingsResponse: any;
+      let readinessResponse: LexwareReadiness | null = null;
+      try {
+        const metadata = await fetchWorkspaceMetadata();
+        settingsResponse = metadata.settingsResponse;
+        readinessResponse = metadata.readinessResponse;
+        applyWorkspaceData(response, settingsResponse, readinessResponse);
+      } catch {
+        // Keep already rendered payroll data usable if metadata is slow/unavailable.
+      }
 
       // Historical archive enrichment can be expensive because it reparses PDFs.
       // Run it after the page has rendered instead of blocking payroll numbers.
