@@ -84,6 +84,8 @@ type PayrollRow = {
   employee_name: string;
   employee_number?: string;
   employment_type?: string;
+  historical_soll_unverified?: boolean;
+  employment_classification_unverified?: boolean;
   year_month: string;
   ist_hours: string;
   soll_hours: string;
@@ -161,7 +163,7 @@ const monthLabel = (value: string) => {
   if (!year || !month) return value;
   return new Intl.DateTimeFormat('de-DE', { timeZone: BUSINESS_TIME_ZONE, month: 'long', year: 'numeric' }).format(new Date(Date.UTC(year, month - 1, 1, 12)));
 };
-const employmentLabel = (value?: string) => value === 'minijob' ? 'Minijob' : value === 'teilzeit' ? 'Teilzeit' : value === 'vollzeit' ? 'Vollzeit' : value === 'student' ? 'Studentische Aushilfe' : value === 'geschaeftsfuehrer' ? 'Geschäftsführer' : 'Beschäftigung';
+const employmentLabel = (value?: string) => value === 'ungeklaert' ? 'Ungeklärt' : value === 'minijob' ? 'Minijob' : value === 'teilzeit' ? 'Teilzeit' : value === 'vollzeit' ? 'Vollzeit' : value === 'student' ? 'Studentische Aushilfe' : value === 'geschaeftsfuehrer' ? 'Geschäftsführer' : 'Beschäftigung';
 const dateLabel = (value?: string | null) => value ? new Date(value).toLocaleDateString('de-DE', { timeZone: BUSINESS_TIME_ZONE }) : 'Keine Angabe';
 const timeLabel = (value?: string | null) => value ? new Date(value).toLocaleTimeString('de-DE', { timeZone: BUSINESS_TIME_ZONE, hour: '2-digit', minute: '2-digit' }) : 'Keine Angabe';
 const hoursFromMinutes = (value?: number) => decimal(number(value) / 60);
@@ -927,7 +929,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
               <div><span>Urlaub</span><b>{row.vacation_days || 0} Tg.</b></div>
               <div><span>Krank</span><b>{row.sick_days || 0} Tg.</b></div>
               {number(statement?.lexware_sick_hours) > 0 && <div><span>Lexware Krank</span><b>{decimal(statement?.lexware_sick_hours)} Std.</b></div>}
-              <div><span>Soll</span><b>{decimal(row.soll_hours)} Std.</b></div>
+              <div><span>Soll</span><b>{row.historical_soll_unverified ? 'Historisch nicht belegt' : `${decimal(row.soll_hours)} Std.`}</b></div>
               <div><span>Einträge</span><b>{row.entry_count || 0}</b></div>
             </div>
 
