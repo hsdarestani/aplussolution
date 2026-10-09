@@ -2333,3 +2333,34 @@ def test_archived_payslip_backfill_enriches_missing_person_group(auth_admin, wor
     statement = PayrollStatement.objects.get(worker=worker, period=period)
     payslip = next(item for item in statement.raw_data if item.get('kind') == 'payslip')
     assert payslip['person_group'] == '997'
+
+
+@pytest.mark.django_db
+def test_readiness_requests_reparse_for_impossible_minijob_salary(worker_user):
+    from core.payroll_views import lexware_readiness_payload
+
+    worker = worker_user.worker_profile
+    PayrollStatement.objects.create(
+        worker=worker,
+        period=date(2026, 9, 1),
+        gross_amount=Decimal('2800.00'),
+        net_amount=Decimal('2523.67'),
+        transferred_amount=Decimal('2523.67'),
+        source='lexware_pdf_bundle',
+        raw_data=[{
+            'kind': 'payslip',
+            'period': '2026-09',
+            'person_group': '109',
+            'compensation_type': 'salary',
+            'monthly_salary': '2500.00',
+            'gross_amount': '2800.00',
+            'net_amount': '2523.67',
+            'payout_amount': '2523.67',
+            'supplements': [],
+        }],
+    )
+
+    readiness = lexware_readiness_payload(2026)
+
+    assert readiness['suspicious_payslip_person_group'] == 1
+    assert readiness['enrichment_needed'] is True
