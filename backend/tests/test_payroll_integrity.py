@@ -2263,3 +2263,73 @@ def test_person_group_997_displays_as_managing_director(worker_user):
     assert data['employment_type'] == 'geschaeftsfuehrer'
     assert data['minijob_limit'] is None
     assert data['payroll_statement']['gross_amount'] == '2800.00'
+
+
+@pytest.mark.django_db
+def test_archived_payslip_backfill_enriches_missing_person_group(auth_admin, worker_user):
+    import io
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from reportlab.pdfgen import canvas
+
+    worker = worker_user.worker_profile
+    period = date(2026, 9, 1)
+    PayrollStatement.objects.create(
+        worker=worker,
+        period=period,
+        gross_amount=Decimal('2800.00'),
+        net_amount=Decimal('2523.67'),
+        transferred_amount=Decimal('2523.67'),
+        source='lexware_pdf_bundle',
+        raw_data=[{
+            'kind': 'payslip',
+            'period': '2026-09',
+            'personal_number': '14',
+            'compensation_type': 'salary',
+            'monthly_salary': '2500.00',
+            'gross_amount': '2800.00',
+            'net_amount': '2523.67',
+            'payout_amount': '2523.67',
+            'supplements': [],
+        }],
+    )
+
+    buffer = io.BytesIO()
+    doc = canvas.Canvas(buffer)
+    for index, line in enumerate([
+        'Abrechnung für September 2026 - Anna Becker',
+        'Personal-Nr. Geburtsdatum Steuerklasse Konfession',
+        '14 01.01.1990 1 ohne',
+        'Pers.-Grp. Beitragsgruppe Eintritt Austritt',
+        '997 0000 01.01.2025 -',
+        'Entgelt',
+        'Bezeichnung Kennz Menge Faktor Prozentsatz Betrag',
+        'Gehalt LSG 1,00 2.500,00 € 2.500,00 €',
+        'Gesamtbrutto 2.800,00 €',
+        'Netto 2.523,67 €',
+        'Auszahlungsbetrag 2.523,67 €',
+    ]):
+        doc.drawString(40, 800 - index * 18, line)
+    doc.save()
+    Document.objects.create(
+        title='Lexware 2026-09 · Lohnabrechnungen_2026-09.pdf',
+        file=SimpleUploadedFile(
+            'Lohnabrechnungen_2026-09.pdf',
+            buffer.getvalue(),
+            content_type='application/pdf',
+        ),
+        folder=Document.Folder.PAYROLL,
+        visibility=Document.Visibility.ADMIN,
+    )
+
+    response = auth_admin.post(
+        '/api/working-time/lexware-backfill/',
+        {'year': 2026},
+        format='json',
+    )
+
+    assert response.status_code == 200
+    assert response.data['enriched'] == 1
+    statement = PayrollStatement.objects.get(worker=worker, period=period)
+    payslip = next(item for item in statement.raw_data if item.get('kind') == 'payslip')
+    assert payslip['person_group'] == '997'
