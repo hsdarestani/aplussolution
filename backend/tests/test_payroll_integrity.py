@@ -2396,3 +2396,151 @@ def test_lexware_payslip_parser_reads_person_group_997_with_interleaved_address(
 
     assert len(rows) == 1
     assert rows[0]['person_group'] == '997'
+
+
+@pytest.mark.django_db
+def test_report_deduplicates_repeated_payment_evidence(worker_user):
+    from core.working_time import statement_dict
+
+    worker = worker_user.worker_profile
+    statement = PayrollStatement.objects.create(
+        worker=worker,
+        period=date(2026, 9, 1),
+        gross_amount=Decimal('268.00'),
+        net_amount=Decimal('259.08'),
+        transferred_amount=Decimal('518.16'),
+        source='lexware_pdf_bundle',
+        raw_data=[
+            {
+                'kind': 'payment',
+                'amount': '259.08',
+                'recipient': 'Marzia Islam',
+                'purpose': '',
+                'iban': '',
+                'payment_method': 'cash',
+                'source_type': 'lexware_zahlungsliste_pdf',
+                'source_file': 'Zahlungsliste.pdf',
+                'key': 'old-key-a',
+            },
+            {
+                'kind': 'payment',
+                'amount': '259.08',
+                'recipient': 'Marzia Islam',
+                'purpose': '',
+                'iban': '',
+                'payment_method': 'cash',
+                'source_type': 'lexware_zahlungsliste_pdf',
+                'source_file': 'Zahlungsliste (1).pdf',
+                'key': 'old-key-b',
+            },
+            {
+                'kind': 'payslip',
+                'period': '2026-09',
+                'compensation_type': 'hourly',
+                'quantity': '16.75',
+                'hourly_rate': '16.00',
+                'gross_amount': '268.00',
+                'net_amount': '259.08',
+                'payout_amount': '259.08',
+                'supplements': [],
+            },
+        ],
+    )
+
+    data = statement_dict(statement)
+
+    assert data['transferred_amount'] == '259.08'
+
+
+@pytest.mark.django_db
+def test_contradictory_salary_minijob_uses_lexware_master_type(worker_user):
+    from core.working_time import record_dict
+
+    worker = worker_user.worker_profile
+    worker.employment_type = 'minijob'
+    worker.save(update_fields=['employment_type', 'updated_at'])
+    EmployeeMasterData.objects.create(
+        worker=worker,
+        data={
+            'employment_type_lexware': 'Mehrheitsgesellschafter',
+            'lexware_latest_payroll_period': '2026-09',
+        },
+    )
+    record = WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=date(2026, 9, 1),
+        ist_hours=Decimal('0.00'),
+        soll_hours=Decimal('0.00'),
+        paid_total_hours=Decimal('0.00'),
+        employment_type_snapshot='minijob',
+        saldo_cumulative=Decimal('0.00'),
+        hourly_rate=Decimal('0.00'),
+        gross_amount=Decimal('0.00'),
+    )
+    statement = PayrollStatement.objects.create(
+        worker=worker,
+        period=date(2026, 9, 1),
+        gross_amount=Decimal('2800.00'),
+        net_amount=Decimal('2523.67'),
+        transferred_amount=Decimal('2523.67'),
+        source='lexware_pdf_bundle',
+        raw_data=[{
+            'kind': 'payslip',
+            'period': '2026-09',
+            'person_group': '109',
+            'compensation_type': 'salary',
+            'monthly_salary': '2500.00',
+            'gross_amount': '2800.00',
+            'net_amount': '2523.67',
+            'payout_amount': '2523.67',
+            'supplements': [],
+        }],
+    )
+
+    data = record_dict(record, statement)
+
+    assert data['employment_type'] == 'geschaeftsfuehrer'
+    assert data['minijob_limit'] is None
+
+
+@pytest.mark.django_db
+def test_review_year_export_uses_scoped_saldo(worker_user):
+    import io
+
+    from openpyxl import load_workbook
+    from core.working_time import export_xlsx
+
+    worker = worker_user.worker_profile
+    first = WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=date(2026, 1, 1),
+        ist_hours=Decimal('10.00'),
+        soll_hours=Decimal('0.00'),
+        paid_total_hours=Decimal('8.00'),
+        carryover_previous=Decimal('-1900.00'),
+        saldo_cumulative=Decimal('-1898.00'),
+        hourly_rate=Decimal('15.50'),
+        gross_amount=Decimal('155.00'),
+    )
+    second = WorkingTimeAccountRecord.objects.create(
+        worker=worker,
+        year_month=date(2026, 2, 1),
+        ist_hours=Decimal('12.00'),
+        soll_hours=Decimal('0.00'),
+        paid_total_hours=Decimal('10.00'),
+        carryover_previous=Decimal('-1898.00'),
+        saldo_cumulative=Decimal('-1896.00'),
+        hourly_rate=Decimal('15.50'),
+        gross_amount=Decimal('186.00'),
+    )
+
+    response = export_xlsx(
+        WorkingTimeAccountRecord.objects.filter(pk__in=[first.pk, second.pk]).order_by('year_month')
+    )
+    workbook = load_workbook(io.BytesIO(response.content), data_only=True)
+    sheet = workbook['Arbeitszeitkonto']
+
+    assert sheet['F2'].value == 0
+    assert sheet['I2'].value == 2
+    assert sheet['F3'].value == 2
+    assert sheet['I3'].value == 4
