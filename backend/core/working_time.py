@@ -698,22 +698,43 @@ def record_dict(
         displayed_saldo = dec(row.saldo_cumulative)
     surcharge_amount = totals['surcharge_amount']
     gross_with_surcharges = (row.gross_amount + surcharge_amount).quantize(TWO)
+    master_data = _worker_master_data(row.worker)
     employment_type = row.employment_type_snapshot or row.worker.employment_type
-    # Lexware person group 109 is an authoritative Minijob marker for that
+    # Lexware person group 109 is normally a Minijob marker. If the same
+    # payslip is a salary month clearly above the Minijob ceiling, treat 109
+    # as stale extraction/import data and fall back to the Lexware master type.
     # payroll month. A non-109 group is equally authoritative that the month
     # must not be checked against the Minijob earnings ceiling, even if the
     # current/snapshotted A+ employment label is stale.
     lexware_person_group = str(
         (payroll_statement or {}).get('lexware_person_group') or ''
     ).strip()
-    if lexware_person_group == '109':
+    lexware_salary_month = (
+        str((payroll_statement or {}).get('lexware_compensation_type') or '').strip().lower() == 'salary'
+    )
+    suspicious_109 = (
+        lexware_person_group == '109'
+        and lexware_salary_month
+        and dec((payroll_statement or {}).get('gross_amount')) > _minijob_limit(row.year_month)
+    )
+    if lexware_person_group == '109' and not suspicious_109:
         employment_type = WorkerProfile.EmploymentType.MINI
+    elif suspicious_109:
+        lexware_master_type = str(master_data.get('employment_type_lexware') or '').strip().lower()
+        if (
+            'mehrheits' in lexware_master_type
+            or 'geschäftsführer' in lexware_master_type
+            or 'geschaeftsfuehrer' in lexware_master_type
+        ):
+            employment_type = 'geschaeftsfuehrer'
+        elif employment_type == WorkerProfile.EmploymentType.MINI:
+            employment_type = 'angestellt'
     elif lexware_person_group == '997':
         # Lexware uses person group 997 for a non-SV managing director setup.
         # Do not display a stale A+ Minijob snapshot for that payroll month.
         employment_type = 'geschaeftsfuehrer'
     is_minijob_month = (
-        lexware_person_group == '109'
+        (lexware_person_group == '109' and not suspicious_109)
         or (
             not lexware_person_group
             and employment_type == WorkerProfile.EmploymentType.MINI
@@ -768,7 +789,6 @@ def record_dict(
     }
 
     contract_issues = []
-    master_data = _worker_master_data(row.worker)
     latest_master_period = str(master_data.get('lexware_latest_payroll_period') or '').strip()
     is_current_master_period = (
         not latest_master_period
@@ -1493,6 +1513,19 @@ def _reconciliation_status(item: dict) -> tuple[str, list[str]]:
     return 'MATCH', []
 
 
+def _employment_label(value: Any) -> str:
+    key = str(value or '').strip().lower()
+    labels = {
+        'minijob': 'Minijob',
+        'teilzeit': 'Teilzeit',
+        'vollzeit': 'Vollzeit',
+        'student': 'Werkstudent',
+        'angestellt': 'Angestellter',
+        'geschaeftsfuehrer': 'Geschäftsführer',
+    }
+    return labels.get(key, str(value or ''))
+
+
 def _report_item_relevant(item: dict) -> bool:
     name = str(item.get('employee_name') or '').strip().lower()
     if '@sync.invalid' in name:
@@ -1564,7 +1597,7 @@ def lexware_reconciliation_docx(queryset, period: date) -> bytes:
         )
         table_rows.append([
             item['employee_name'],
-            item.get('employment_type') or master.get('employment_type_lexware') or '',
+            _employment_label(item.get('employment_type') or master.get('employment_type_lexware') or ''),
             item['ist_hours'],
             item['soll_hours'],
             item['paid_total_hours'],
@@ -1671,7 +1704,7 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
         overview_rows.append([
             item.get('employee_name') or '',
             item.get('year_month') or '',
-            item.get('employment_type') or '',
+            _employment_label(item.get('employment_type') or ''),
             item.get('ist_hours') or '0',
             item.get('balance_reference_hours') or '0',
             item.get('monthly_balance_hours') or '0',
