@@ -211,18 +211,32 @@ def fetch_attendance(client: WhenIWorkClient, start: date, end: date) -> tuple[l
 
 
 def ensure_settings() -> int:
-    created = 0
-    workers = WorkerProfile.objects.select_related('user').filter(active=True)
-    for worker in workers:
-        _, was_created = WorkingTimeSetting.objects.get_or_create(
+    # Payroll page loads this on every visit. Avoid one get_or_create query per
+    # employee; discover missing settings once and create them in a single batch.
+    workers = list(
+        WorkerProfile.objects
+        .only('id', 'monthly_hours', 'tariff_hourly_rate')
+        .filter(active=True)
+    )
+    if not workers:
+        return 0
+    existing_ids = set(
+        WorkingTimeSetting.objects
+        .filter(worker_id__in=[worker.id for worker in workers])
+        .values_list('worker_id', flat=True)
+    )
+    missing = [
+        WorkingTimeSetting(
             worker=worker,
-            defaults={
-                'monthly_limit': worker.monthly_hours or settings.WORKING_TIME_DEFAULT_MONTHLY_LIMIT,
-                'hourly_rate': worker.tariff_hourly_rate or settings.WORKING_TIME_DEFAULT_HOURLY_RATE,
-            },
+            monthly_limit=worker.monthly_hours or settings.WORKING_TIME_DEFAULT_MONTHLY_LIMIT,
+            hourly_rate=worker.tariff_hourly_rate or settings.WORKING_TIME_DEFAULT_HOURLY_RATE,
         )
-        created += int(was_created)
-    return created
+        for worker in workers
+        if worker.id not in existing_ids
+    ]
+    if missing:
+        WorkingTimeSetting.objects.bulk_create(missing, ignore_conflicts=True)
+    return len(missing)
 
 
 def _worker_for_entry(entry: dict, workers_by_id: dict[str, WorkerProfile]) -> WorkerProfile | None:
