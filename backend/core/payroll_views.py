@@ -135,6 +135,8 @@ def lexware_readiness_payload(year: int) -> dict:
         .filter(period__year=year)
         .values('period', 'raw_data')
     )
+    missing_person_group = 0
+    has_absence_evidence = False
     statement_stats = defaultdict(lambda: {
         'statements': 0,
         'with_payslip': 0,
@@ -144,6 +146,12 @@ def lexware_readiness_payload(year: int) -> dict:
     for row in statement_rows:
         period = row['period'].strftime('%Y-%m')
         items = list(row.get('raw_data') or [])
+        missing_person_group += sum(
+            1 for item in items
+            if item.get('kind') == 'payslip' and not str(item.get('person_group') or '').strip()
+        )
+        if any(item.get('kind') == 'absence_evidence' for item in items):
+            has_absence_evidence = True
         stats = statement_stats[period]
         stats['statements'] += 1
         if any(item.get('kind') == 'payslip' for item in items):
@@ -209,6 +217,11 @@ def lexware_readiness_payload(year: int) -> dict:
         'annual_documents': annual,
         'annual_complete': annual_complete,
         'optional_documents': dict(optional_counts),
+        'enrichment_needed': bool(
+            missing_person_group
+            or (optional_counts.get('u1', 0) > 0 and not has_absence_evidence)
+        ),
+        'missing_payslip_person_group': missing_person_group,
         'months': months,
         'missing': missing,
         'no_additional_import_required': no_additional_import_required,
@@ -240,12 +253,17 @@ def lexware_backfill_archived(request):
         return Response({'detail': 'Jahr muss im Format JJJJ angegeben werden.'}, status=400)
 
     matchers = _employee_matchers()
-    documents = Document.objects.filter(
-        folder=Document.Folder.PAYROLL,
-        title__icontains='u1',
-    ).order_by('created_at')
+    documents = [
+        document
+        for document in Document.objects.filter(
+            folder=Document.Folder.PAYROLL,
+            title__icontains='Lexware',
+        ).order_by('created_at')
+        if _lexware_document_kind(document.title) in {'u1', 'lohnabrechnungen'}
+    ]
     parsed = 0
     attached = 0
+    enriched = 0
     unmatched = []
 
     for document in documents:
@@ -266,7 +284,7 @@ def lexware_backfill_archived(request):
         except Exception as exc:
             unmatched.append({'file': document.title, 'text': f'PDF konnte nicht gelesen werden: {exc}'[:180]})
             continue
-        if document_type != 'u1':
+        if document_type not in {'u1', 'lohnabrechnungen'}:
             continue
 
         parsed += len(rows)
@@ -286,29 +304,73 @@ def lexware_backfill_archived(request):
             statement, created = PayrollStatement.objects.get_or_create(
                 worker=worker,
                 period=period,
-                defaults={'source': 'lexware_u1_pdf'},
+                defaults={'source': 'lexware_u1_pdf' if document_type == 'u1' else 'lexware_payslip_pdf'},
             )
-            item = dict(row)
-            item['source_file'] = document.title
-            item['source_type'] = 'lexware_u1_pdf'
-            key_source = '|'.join([
-                document.title,
-                period_text,
-                str(row.get('employee_name') or ''),
-                str(row.get('date_from') or ''),
-                str(row.get('date_to') or ''),
-                str(row.get('absence_hours') or ''),
-                str(row.get('reimbursement_amount') or ''),
-            ])
-            item['key'] = hashlib.sha256(key_source.encode('utf-8')).hexdigest()
-
             existing = list(statement.raw_data or [])
-            if any(str(existing_item.get('key') or '') == item['key'] for existing_item in existing):
-                continue
-            existing.append(item)
+
+            if document_type == 'u1':
+                item = dict(row)
+                item['source_file'] = document.title
+                item['source_type'] = 'lexware_u1_pdf'
+                key_source = '|'.join([
+                    document.title,
+                    period_text,
+                    str(row.get('employee_name') or ''),
+                    str(row.get('date_from') or ''),
+                    str(row.get('date_to') or ''),
+                    str(row.get('absence_hours') or ''),
+                    str(row.get('reimbursement_amount') or ''),
+                ])
+                item['key'] = hashlib.sha256(key_source.encode('utf-8')).hexdigest()
+                if any(str(existing_item.get('key') or '') == item['key'] for existing_item in existing):
+                    continue
+                existing.append(item)
+                attached += 1
+            else:
+                parsed_item = dict(row)
+                matched_index = None
+                for index, existing_item in enumerate(existing):
+                    if existing_item.get('kind') != 'payslip':
+                        continue
+                    if bool(existing_item.get('is_correction')) != bool(parsed_item.get('is_correction')):
+                        continue
+                    existing_personal = str(existing_item.get('personal_number') or '').strip()
+                    parsed_personal = str(parsed_item.get('personal_number') or '').strip()
+                    if existing_personal and parsed_personal and existing_personal != parsed_personal:
+                        continue
+                    matched_index = index
+                    break
+
+                if matched_index is not None:
+                    current = dict(existing[matched_index])
+                    changed = False
+                    for key, value in parsed_item.items():
+                        if value in (None, '', []):
+                            continue
+                        if current.get(key) != value:
+                            current[key] = value
+                            changed = True
+                    if changed:
+                        current.setdefault('source_file', document.title)
+                        current.setdefault('source_type', 'lexware_payslip_pdf')
+                        existing[matched_index] = current
+                        enriched += 1
+                else:
+                    parsed_item['source_file'] = document.title
+                    parsed_item['source_type'] = 'lexware_payslip_pdf'
+                    key_source = '|'.join([
+                        document.title,
+                        period_text,
+                        str(parsed_item.get('personal_number') or ''),
+                        str(parsed_item.get('is_correction') or ''),
+                        str(parsed_item.get('gross_amount') or ''),
+                        str(parsed_item.get('payout_amount') or ''),
+                    ])
+                    parsed_item['key'] = hashlib.sha256(key_source.encode('utf-8')).hexdigest()
+                    existing.append(parsed_item)
+                    attached += 1
+
             statement.raw_data = existing
-            if created or statement.source in {'', 'manual', 'lexware_import'}:
-                statement.source = 'lexware_u1_pdf'
             refs = [
                 value.strip()
                 for value in str(statement.source_reference or '').split(',')
@@ -317,13 +379,13 @@ def lexware_backfill_archived(request):
             if document.title not in refs:
                 refs.append(document.title)
             statement.source_reference = ', '.join(refs)[:255]
-            statement.save(update_fields=['raw_data', 'source', 'source_reference', 'updated_at'])
-            attached += 1
+            statement.save(update_fields=['raw_data', 'source_reference', 'updated_at'])
 
     audit(request, 'payroll.lexware_archive_backfilled', request.user, {
         'year': year,
         'parsed': parsed,
         'attached': attached,
+        'enriched': enriched,
         'unmatched': len(unmatched),
     })
     return Response({
@@ -331,6 +393,7 @@ def lexware_backfill_archived(request):
         'year': year,
         'parsed': parsed,
         'attached': attached,
+        'enriched': enriched,
         'unmatched_count': len(unmatched),
         'unmatched_preview': unmatched[:20],
     })
