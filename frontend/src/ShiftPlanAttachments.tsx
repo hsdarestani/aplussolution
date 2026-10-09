@@ -1,8 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { api, apiBlob } from './api';
 import { saveSchedulePdf } from './saveSchedulePdf';
-import { openPdfDocument } from './openPdfDocument';
 import './shift-plan-attachments.css';
 
 type Plan = {
@@ -93,11 +91,6 @@ function shiftLabel(candidate: BulkCandidate) {
   return [date, time, customer, place, position].filter(Boolean).join(' · ');
 }
 
-async function shareOrSavePlan(plan: Plan) {
-  const result = await apiBlob(planPath(plan.download_url));
-  await saveSchedulePdf(result.blob, result.filename || plan.name || 'Einsatzplan.pdf', 'Einsatzplan');
-}
-
 export function ShiftPlanAttachments({
   shift,
   canUpload = false,
@@ -115,29 +108,11 @@ export function ShiftPlanAttachments({
   const [pendingFile, setPendingFile] = useState<File>();
   const [visibility, setVisibility] = useState<'all' | 'worker'>('all');
   const [targetWorker, setTargetWorker] = useState('');
-  const [preview, setPreview] = useState<{ plan: Plan; url: string }>();
-  const [previewZoom, setPreviewZoom] = useState(1);
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setPlans(Array.isArray(shift?.plans) ? shift.plans : []);
   }, [shift?.id, shift?.plans]);
-
-  useEffect(() => {
-    if (!preview) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.classList.add('shift-plan-preview-open');
-    document.body.style.overflow = 'hidden';
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closePreview();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.body.classList.remove('shift-plan-preview-open');
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, [preview?.url]);
 
   async function upload(file?: File) {
     if (!file || !shift?.id || busy) return;
@@ -167,38 +142,19 @@ export function ShiftPlanAttachments({
     }
   }
 
-  async function openPreview(plan: Plan) {
+  async function downloadPlan(plan: Plan) {
     if (busy) return;
     setBusy(true);
     setMessage('');
     try {
-      const result = await apiBlob(planPath(plan.view_url || plan.download_url));
-      // Present PDF using iOS native document viewer, outside the app shell.
-      // Keep the browser-only iframe fallback for desktop web users.
-      if (await openPdfDocument(result.blob, result.filename || plan.name)) return;
-      const url = URL.createObjectURL(result.blob);
-      setPreviewZoom(1);
-      setPreview((current) => {
-        if (current?.url) URL.revokeObjectURL(current.url);
-        return { plan, url };
-      });
+      const result = await apiBlob(planPath(plan.download_url));
+      await saveSchedulePdf(result.blob, result.filename || plan.name || 'Einsatzplan.pdf', 'Einsatzplan');
+      setMessage('PDF gespeichert. Auf dem iPhone unter Dateien > Auf meinem iPhone > A+ Solution > Downloads.');
     } catch (error: any) {
-      setMessage(error?.message || 'Einsatzplan konnte nicht geöffnet werden.');
+      setMessage(error?.message || 'PDF konnte nicht heruntergeladen werden.');
     } finally {
       setBusy(false);
     }
-  }
-
-  function closePreview() {
-    setPreviewZoom(1);
-    setPreview((current) => {
-      if (current?.url) URL.revokeObjectURL(current.url);
-      return undefined;
-    });
-  }
-
-  function changePreviewZoom(delta: number) {
-    setPreviewZoom((current) => Math.max(0.75, Math.min(3, Math.round((current + delta) * 100) / 100)));
   }
 
   async function removePlan(plan: Plan) {
@@ -209,7 +165,6 @@ export function ShiftPlanAttachments({
     try {
       await api(planPath(plan.delete_url), { method: 'DELETE' });
       setPlans((current) => current.filter((item) => item.id !== plan.id));
-      if (preview?.plan.id === plan.id) closePreview();
       setMessage('Einsatzplan gelöscht.');
       await onChanged?.();
     } catch (error: any) {
@@ -262,7 +217,7 @@ export function ShiftPlanAttachments({
     </div> : null}
     {plans.length ? <div className="shift-plan-list">
       {plans.map((plan) => <div className="shift-plan-file" key={plan.id} title={plan.name}>
-        <button type="button" className="shift-plan-file-main" onClick={() => void openPreview(plan)}>
+        <button type="button" className="shift-plan-file-main" disabled={busy} onClick={() => void downloadPlan(plan)}>
           <span className="shift-plan-file-icon">PDF</span>
           <span>
             <b>{plan.name}</b>
@@ -271,7 +226,7 @@ export function ShiftPlanAttachments({
                 ? `Nur für ${plan.target_worker_name}`
                 : plan.event_numbers?.length
                   ? `Event ${plan.event_numbers.join(', ')}`
-                  : 'In der App ansehen'}
+                  : 'Zum Herunterladen antippen'}
             </small>
           </span>
           <em>›</em>
@@ -279,50 +234,7 @@ export function ShiftPlanAttachments({
         {canUpload && !compact && plan.delete_url ? <button type="button" className="shift-plan-delete" disabled={busy} onClick={() => void removePlan(plan)} aria-label="Einsatzplan löschen">Löschen</button> : null}
       </div>)}
     </div> : null}
-    {preview ? createPortal(<div
-      className="shift-plan-preview"
-      role="dialog"
-      aria-modal="true"
-      aria-label={preview.plan.name}
-      onClick={(event) => event.stopPropagation()}
-    >
-      <div className="shift-plan-preview-card">
-        <div className="shift-plan-preview-head">
-          <b>{preview.plan.name}</b>
-          <div className="shift-plan-preview-head-actions">
-            <div className="shift-plan-preview-zoom" aria-label="PDF Zoom">
-              <button type="button" onClick={() => changePreviewZoom(-0.25)} disabled={previewZoom <= 0.75} aria-label="Verkleinern">−</button>
-              <button type="button" className="shift-plan-preview-zoom-value" onClick={() => setPreviewZoom(1)} aria-label="Zoom zurücksetzen">
-                {Math.round(previewZoom * 100)}%
-              </button>
-              <button type="button" onClick={() => changePreviewZoom(0.25)} disabled={previewZoom >= 3} aria-label="Vergrößern">+</button>
-            </div>
-            <button
-              type="button"
-              className="shift-plan-preview-close"
-              onPointerDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                closePreview();
-              }}
-              aria-label="Schließen"
-            >×</button>
-          </div>
-        </div>
-        <div className="shift-plan-preview-stage">
-          <iframe
-            src={preview.url}
-            title={preview.plan.name}
-            style={{ width: `${previewZoom * 100}%`, height: `${previewZoom * 100}%` }}
-          />
-        </div>
-        <div className="shift-plan-preview-actions">
-          <button type="button" onPointerDown={(event) => { event.preventDefault(); closePreview(); }}>Schließen</button>
-          <button type="button" className="primary" onClick={() => void shareOrSavePlan(preview.plan)}>Speichern / Teilen</button>
-        </div>
-      </div>
-    </div>, document.body) : null}
-    {message && !compact ? <small className="shift-plan-message">{message}</small> : null}
+    {message ? <small className="shift-plan-message" role="status">{message}</small> : null}
   </div>;
 }
 
