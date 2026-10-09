@@ -181,6 +181,80 @@ with open(p, 'wb') as output:
   }
 }
 
+
+function patchIosCalendarSubscription() {
+  const appDir = path.join(cwd, 'ios', 'App', 'App');
+  const delegatePath = path.join(appDir, 'AppDelegate.swift');
+  const storyboardPath = path.join(appDir, 'Base.lproj', 'Main.storyboard');
+  if (!fs.existsSync(delegatePath) || !fs.existsSync(storyboardPath)) {
+    throw new Error('iOS native calendar bridge needs generated AppDelegate.swift and Main.storyboard.');
+  }
+
+  // AppDelegate.swift already belongs to the generated Xcode App target.
+  // Embedding the plugin here avoids an unreferenced Swift file in pbxproj.
+  const swift = String.raw`
+
+// Native Apple Calendar subscription launcher. WKWebView does not reliably
+// dispatch webcal:// URLs, so UIApplication must invoke the OS URL handler.
+@objc(APlusCalendarSubscriptionPlugin)
+class APlusCalendarSubscriptionPlugin: CAPPlugin, CAPBridgedPlugin {
+    let identifier = "APlusCalendarSubscriptionPlugin"
+    let jsName = "APlusCalendarSubscription"
+    let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "open", returnType: CAPPluginReturnPromise)
+    ]
+
+    @objc func open(_ call: CAPPluginCall) {
+        guard let value = call.getString("url"),
+              let url = URL(string: value),
+              url.scheme?.lowercased() == "webcal",
+              let host = url.host, !host.isEmpty else {
+            call.reject("Ungültiger Kalenderlink.")
+            return
+        }
+        DispatchQueue.main.async {
+            UIApplication.shared.open(url, options: [:]) { opened in
+                if opened {
+                    call.resolve()
+                } else {
+                    call.reject("Apple Kalender konnte das Kalenderabo nicht öffnen.")
+                }
+            }
+        }
+    }
+}
+
+open class APlusBridgeViewController: CAPBridgeViewController {
+    override open func capacitorDidLoad() {
+        super.capacitorDidLoad()
+        bridge?.registerPluginInstance(APlusCalendarSubscriptionPlugin())
+    }
+}
+`;
+  let delegate = fs.readFileSync(delegatePath, 'utf8');
+  if (!delegate.includes('class APlusCalendarSubscriptionPlugin')) {
+    if (!delegate.includes('import Capacitor')) {
+      delegate = 'import Capacitor\n' + delegate;
+    }
+    fs.writeFileSync(delegatePath, delegate + swift);
+  }
+
+  let storyboard = fs.readFileSync(storyboardPath, 'utf8');
+  const nativeController = /<viewController\b[^>]*customClass="CAPBridgeViewController"[^>]*>/;
+  if (!nativeController.test(storyboard) && !storyboard.includes('customClass="APlusBridgeViewController"')) {
+    throw new Error('Generated iOS storyboard has no Capacitor bridge view controller.');
+  }
+  storyboard = storyboard.replace(nativeController, (tag) => {
+    const custom = tag.replace('customClass="CAPBridgeViewController"', 'customClass="APlusBridgeViewController"');
+    if (/customModule="[^"]*"/.test(custom)) {
+      return custom.replace(/customModule="[^"]*"/, 'customModule="App"');
+    }
+    return custom.replace(/>$/, ' customModule="App" customModuleProvider="target">');
+  });
+  fs.writeFileSync(storyboardPath, storyboard);
+  console.log('Registered native iOS webcal subscription handler.');
+}
+
 function patchIos() {
   const plistPath = path.join(cwd, 'ios', 'App', 'App', 'Info.plist');
   if (!fs.existsSync(plistPath)) {
@@ -196,8 +270,11 @@ function patchIos() {
   // understand that no background tracking is performed.
   plist = ensurePlistKey(plist, 'NSLocationAlwaysAndWhenInUseUsageDescription', 'Diese Standortberechtigung wird technisch für die Standortfunktion benötigt. A+ Solution verwendet den Standort ausschließlich beim Ein- und Ausstempeln im Vordergrund, um den vorgesehenen Einsatzort zu prüfen. Eine Hintergrundortung findet nicht statt.');
   plist = ensurePlistBooleanKey(plist, 'ITSAppUsesNonExemptEncryption', false);
+  plist = ensurePlistBooleanKey(plist, 'UIFileSharingEnabled', true);
+  plist = ensurePlistBooleanKey(plist, 'LSSupportsOpeningDocumentsInPlace', true);
   fs.writeFileSync(plistPath, plist);
   patchIosPush();
+  patchIosCalendarSubscription();
   patchIosFilePrivacy();
   console.log('Prepared iOS foreground-location purpose strings, export compliance and native push.');
 }

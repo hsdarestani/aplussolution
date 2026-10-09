@@ -67,6 +67,7 @@ import ClientPortalAccounts from './ClientPortalAccounts';
 import Settings from './Settings';
 import MobileMoreMenu from './MobileMoreMenu';
 import { akteHref, openAkte } from './entityNavigation';
+import { openAppleCalendarSubscription } from './appleCalendarSubscription';
 
 type View =
   | 'dashboard'
@@ -3038,15 +3039,13 @@ function Profile({ user }: { user: User }) {
     return () => { cancelled = true; };
   }, [user.role]);
 
-  function openAppleCalendar() {
+  async function openAppleCalendar() {
     const url = String(calendarSync?.webcal_url || '');
-    if (!/^webcal:\/\/[a-z0-9.-]+\//i.test(url)) {
-      setToast('Kalenderabo konnte nicht geöffnet werden.');
-      return;
+    try {
+      await openAppleCalendarSubscription(url);
+    } catch (error: any) {
+      setToast(error?.message || 'Apple Kalender konnte nicht geöffnet werden.');
     }
-    // A direct navigation from the tap invokes iOS's native calendar
-    // subscription flow without showing an intermediate link page.
-    window.location.href = url;
   }
 
   async function copyCalendarLink() {
@@ -3118,7 +3117,7 @@ function Profile({ user }: { user: User }) {
           <h3>Dienstplan mit Kalender synchronisieren</h3>
           <p>Einmal abonnieren. Danach werden deine zugewiesenen Schichten sowie spätere Änderungen und Löschungen automatisch über das Kalenderabo aktualisiert.</p>
           {calendarLoading ? <p>Kalenderlink wird geladen …</p> : calendarSync ? <>
-            <IonButton type="button" onClick={openAppleCalendar} expand="block">iPhone / Apple Kalender</IonButton>
+            <IonButton type="button" onClick={() => void openAppleCalendar()} expand="block">iPhone / Apple Kalender</IonButton>
             <IonButton href={calendarSync.google_url} target="_blank" fill="outline" expand="block">Google Kalender</IonButton>
             <IonButton href={calendarSync.outlook_url} target="_blank" fill="outline" expand="block">Outlook Kalender</IonButton>
             <IonButton type="button" fill="clear" expand="block" onClick={() => void copyCalendarLink()}>Kalenderlink kopieren</IonButton>
