@@ -106,11 +106,21 @@ def _personal_number(text: str) -> str:
 
 
 def _person_group(text: str) -> str:
+    # Lexware PDFs use two visual columns. PDF text extraction may insert the
+    # employee address between the "Pers.-Grp." header and its value, so a
+    # next-line regex can read nothing (or the address) instead of 997/109.
+    # Anchor the value to the adjacent four-digit Beitragsgruppe and entry date.
     match = re.search(
-        r'Pers\.-Grp\.[^\n]*\n\s*(\d{3})\b',
+        r'Pers\.-Grp\.[\s\S]{0,320}?\b(\d{3})\s+(\d{4})\s+\d{2}\.\d{2}\.\d{4}\b',
         text,
         flags=re.IGNORECASE,
     )
+    if not match:
+        match = re.search(
+            r'Pers\.-Grp\.[\s\S]{0,320}?\b(\d{3})\s+(\d{4})\b',
+            text,
+            flags=re.IGNORECASE,
+        )
     return match.group(1).strip() if match else ''
 
 
