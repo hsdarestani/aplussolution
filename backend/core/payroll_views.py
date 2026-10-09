@@ -856,7 +856,14 @@ def lexware_bank_import(request):
                     continue
                 payment_date = _parse_bank_date(row.get('payment_date'), file_period)
                 amount = abs(amount).quantize(Decimal('0.01'))
-                key_source = f"{name}|{file_period_text}|sepa|{row.get('employee_name')}|{row.get('iban')}|{amount}|{payment_date}"
+                key_source = '|'.join([
+                    file_period_text,
+                    'sepa',
+                    _norm(str(row.get('employee_name') or '')),
+                    re.sub(r'\s+', '', str(row.get('iban') or '')).upper(),
+                    str(amount),
+                    _norm(str(row.get('purpose') or '')),
+                ])
                 grouped[(worker.id, file_period_text)].append({
                     'kind': 'payment',
                     'key': hashlib.sha256(key_source.encode('utf-8')).hexdigest(),
@@ -929,17 +936,27 @@ def lexware_bank_import(request):
                         'period': target_period_text,
                     })
                     continue
-                key_source = '|'.join([
-                    name,
-                    target_period_text,
-                    str(row.get('kind') or ''),
-                    str(row.get('employee_name') or ''),
-                    str(row.get('personal_number') or ''),
-                    str(row.get('amount') or ''),
-                    str(row.get('gross_amount') or ''),
-                    str(row.get('payout_amount') or ''),
-                    str(row.get('is_correction') or ''),
-                ])
+                if row.get('kind') == 'payment':
+                    key_source = '|'.join([
+                        target_period_text,
+                        'payment',
+                        _norm(str(row.get('employee_name') or '')),
+                        str(row.get('amount') or ''),
+                        re.sub(r'\s+', '', str(row.get('iban') or '')).upper(),
+                        str(row.get('payment_method') or ''),
+                    ])
+                else:
+                    key_source = '|'.join([
+                        name,
+                        target_period_text,
+                        str(row.get('kind') or ''),
+                        str(row.get('employee_name') or ''),
+                        str(row.get('personal_number') or ''),
+                        str(row.get('amount') or ''),
+                        str(row.get('gross_amount') or ''),
+                        str(row.get('payout_amount') or ''),
+                        str(row.get('is_correction') or ''),
+                    ])
                 item['key'] = hashlib.sha256(key_source.encode('utf-8')).hexdigest()
                 grouped[(worker.id, target_period_text)].append(item)
                 source_files[(worker.id, target_period_text)].add(name)
@@ -988,7 +1005,14 @@ def lexware_bank_import(request):
                 'Auftraggeber/Empfänger', 'Zahlungspflichtiger/Zahlungsempfänger',
             )) or '')
             amount = abs(amount).quantize(Decimal('0.01'))
-            key_source = f'{row.get("_source_file",name)}|{payment_date}|{amount}|{recipient}|{purpose}'
+            key_source = '|'.join([
+                file_period_text,
+                'bank',
+                payment_date.isoformat() if payment_date else '',
+                str(amount),
+                _norm(recipient),
+                _norm(purpose),
+            ])
             grouped[(worker.id, file_period_text)].append({
                 'kind': 'payment',
                 'key': hashlib.sha256(key_source.encode('utf-8')).hexdigest(),
@@ -1053,6 +1077,24 @@ def lexware_bank_import(request):
                 break
 
         if preferred_payment_items:
+            deduped_payment_items = []
+            seen_payment_signatures = set()
+            for item in preferred_payment_items:
+                source_type = str(item.get('source_type') or 'legacy')
+                signature = (
+                    source_type,
+                    str(dec(item.get('amount')).quantize(Decimal('0.01'))),
+                    str(item.get('payment_date') or '') if source_type == 'lexware_bank_export' else '',
+                    _norm(str(item.get('recipient') or '')),
+                    _norm(str(item.get('purpose') or '')),
+                    re.sub(r'\s+', '', str(item.get('iban') or '')).upper(),
+                    str(item.get('payment_method') or ''),
+                )
+                if signature in seen_payment_signatures:
+                    continue
+                seen_payment_signatures.add(signature)
+                deduped_payment_items.append(item)
+            preferred_payment_items = deduped_payment_items
             total = sum(
                 (dec(item.get('amount')) for item in preferred_payment_items),
                 Decimal('0.00'),
