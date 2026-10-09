@@ -132,6 +132,8 @@ type LexwareReadiness = {
   no_additional_import_required: boolean;
   missing?: Array<{ period: string; kind: string }>;
   optional_documents?: Record<string, number>;
+  enrichment_needed?: boolean;
+  missing_payslip_person_group?: number;
 };
 
 type Draft = { paid_total_hours: string; manual_adjustment: string };
@@ -267,7 +269,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
 
       if (
         !archiveBackfillAttempted.current
-        && Number(readinessResponse?.optional_documents?.u1 || 0) > 0
+        && Boolean(readinessResponse?.enrichment_needed)
       ) {
         archiveBackfillAttempted.current = true;
         try {
@@ -276,7 +278,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
             method: 'POST',
             body: JSON.stringify({ year: backfillYear }),
           });
-          if (Number(backfill?.attached || 0) > 0) {
+          if (Number(backfill?.attached || 0) > 0 || Number(backfill?.enriched || 0) > 0) {
             ({ response, settingsResponse, readinessResponse } = await fetchWorkspaceData());
             nextRows = (response?.results || response || []) as PayrollRow[];
           }
