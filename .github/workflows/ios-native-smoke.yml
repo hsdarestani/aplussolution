@@ -1,0 +1,47 @@
+name: iOS native calendar and PDF smoke build
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'frontend/src/**'
+      - 'frontend/scripts/prepare-native.mjs'
+      - 'frontend/capacitor.config.ts'
+      - '.github/workflows/ios-native-smoke.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/src/appleCalendarSubscription.ts'
+      - 'frontend/src/saveSchedulePdf.ts'
+      - 'frontend/src/ShiftPlanAttachments.tsx'
+      - 'frontend/src/App.tsx'
+      - 'frontend/scripts/prepare-native.mjs'
+      - '.github/workflows/ios-native-smoke.yml'
+
+jobs:
+  ios-native:
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Build and test frontend
+        working-directory: frontend
+        env:
+          VITE_API_URL: https://app.aplus-solution.de/api
+        run: |
+          npm install --no-audit --no-fund
+          npm test
+          npm run build
+          npx cap add ios
+          npx cap sync ios
+          node scripts/prepare-native.mjs ios
+      - name: Compile generated native iOS app without signing
+        working-directory: frontend/ios
+        run: |
+          xcodebuild -workspace App/App.xcworkspace \
+            -scheme App -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO build
