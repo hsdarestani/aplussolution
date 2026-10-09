@@ -192,7 +192,7 @@ function patchIosCalendarSubscription() {
 
   // AppDelegate.swift already belongs to the generated Xcode App target.
   // Embedding the plugin here avoids an unreferenced Swift file in pbxproj.
-  const swift = String.raw\`
+  const swift = String.raw`
 
 // Native Apple Calendar subscription launcher. WKWebView does not reliably
 // dispatch webcal:// URLs, so UIApplication must invoke the OS URL handler.
@@ -231,17 +231,17 @@ open class APlusBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(APlusCalendarSubscriptionPlugin())
     }
 }
-\`;
+`;
   let delegate = fs.readFileSync(delegatePath, 'utf8');
   if (!delegate.includes('class APlusCalendarSubscriptionPlugin')) {
     if (!delegate.includes('import Capacitor')) {
-      delegate = 'import Capacitor\\n' + delegate;
+      delegate = 'import Capacitor\n' + delegate;
     }
     fs.writeFileSync(delegatePath, delegate + swift);
   }
 
   let storyboard = fs.readFileSync(storyboardPath, 'utf8');
-  const nativeController = /<viewController\\b[^>]*customClass="CAPBridgeViewController"[^>]*>/;
+  const nativeController = /<viewController\b[^>]*customClass="CAPBridgeViewController"[^>]*>/;
   if (!nativeController.test(storyboard) && !storyboard.includes('customClass="APlusBridgeViewController"')) {
     throw new Error('Generated iOS storyboard has no Capacitor bridge view controller.');
   }
