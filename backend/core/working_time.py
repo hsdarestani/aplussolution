@@ -1792,7 +1792,7 @@ def lexware_reconciliation_docx(queryset, period: date) -> bytes:
     section.page_width, section.page_height = section.page_height, section.page_width
     _docx_title(document, 'Lexware Abgleich', period.strftime('%m/%Y'))
 
-    table_rows = []
+    hours_rows, payments_rows = [], []
     detail_blocks = []
     for row in rows:
         item = record_dict(
@@ -1806,34 +1806,42 @@ def lexware_reconciliation_docx(queryset, period: date) -> bytes:
         status, issues = _reconciliation_status(item)
         master = _worker_master_data(row.worker)
         compensation = (
-            f"Gehalt {master.get('monthly_salary') or payroll.get('lexware_monthly_salary') or ''} €"
-            if (master.get('compensation_type') == 'salary' or payroll.get('lexware_compensation_type') == 'salary')
-            else f"{master.get('hourly_rate') or payroll.get('lexware_hourly_rate') or item.get('hourly_rate') or ''} €/Std."
+            f"Gehalt {payroll.get('lexware_monthly_salary') or master.get('monthly_salary') or ''} €"
+            if payroll.get('lexware_compensation_type') == 'salary'
+            else f"{payroll.get('lexware_hourly_rate') or item.get('hourly_rate') or ''} €/Std."
         )
-        table_rows.append([
+        hours_rows.append([
             item['employee_name'],
-            _employment_label(item.get('employment_type') or master.get('employment_type_lexware') or ''),
+            _employment_label(item.get('employment_type') or ''),
             item['ist_hours'],
-            item['soll_hours'],
-            item['paid_total_hours'],
-            item['monthly_balance_hours'],
-            compensation,
-            f"{payroll.get('gross_amount') or ''} €" if payroll.get('gross_amount') else '',
-            f"{payroll.get('net_amount') or ''} €" if payroll.get('net_amount') else '',
-            f"{payroll.get('lexware_payout_amount') or payroll.get('transferred_amount') or ''} €" if (payroll.get('lexware_payout_amount') or payroll.get('transferred_amount')) else '',
+            'nicht belegt' if item.get('historical_soll_unverified') else item['soll_hours'],
+            item['paid_total_hours'], item['monthly_balance_hours'], status,
+        ])
+        payments_rows.append([
+            item['employee_name'], compensation,
+            payroll.get('gross_amount') or '',
+            payroll.get('net_amount') or '',
+            payroll.get('lexware_payout_amount') or payroll.get('transferred_amount') or '',
             item.get('vacation_days') or 0,
             item.get('sick_days') or 0,
             payroll.get('lexware_sick_hours') or '',
             payroll.get('lexware_u1_reimbursement') or '',
-            status,
         ])
         if issues:
             detail_blocks.append((item['employee_name'], status, issues))
 
+    document.add_heading('Arbeitszeit und Abgleich', level=2)
     _docx_table(
         document,
-        ['Mitarbeiter', 'Beschäftigung', 'Ist', 'Soll', 'Bezahlt', 'Saldo', 'Vergütung', 'Brutto', 'Netto', 'Auszahlung', 'Urlaub', 'Krank', 'Lexware Krank Std.', 'U1 Erstattung', 'Status'],
-        table_rows,
+        ['Mitarbeiter', 'Beschäftigung', 'Ist', 'Soll A+', 'Bezahlt', 'Saldo', 'Status'],
+        hours_rows,
+    )
+    document.add_heading('Lexware Lohnabrechnung', level=2)
+    _docx_table(
+        document,
+        ['Mitarbeiter', 'Vergütung', 'Brutto €', 'Netto €',
+         'Auszahlung €', 'Urlaub', 'Krank', 'Lexware Krank Std.', 'U1 €'],
+        payments_rows,
     )
 
     if detail_blocks:
@@ -1899,6 +1907,7 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
     ]
     summary_rows = [
         ['Geprüfte Monatskonten', len(closed_items)],
+        ['Offene Prüfpunkte sind keine Freigabe', 'Manuelle Klärung erforderlich'],
         ['Zeitbuchungen mit Prüffragen', len(time_reviews)],
         ['MATCH', match_count],
         ['PRÜFEN', review_count],
@@ -1920,14 +1929,14 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
     run.bold = True
     run.font.size = Pt(13)
 
-    overview_rows = []
+    attendance_rows, finance_rows = [], []
     for item in closed_items:
         payroll = item.get('payroll_statement') or {}
         scoped_saldo = scoped_saldos.get(
             (str(item.get('worker_id') or ''), str(item.get('year_month') or '')),
             Decimal('0.00'),
         )
-        overview_rows.append([
+        attendance_rows.append([
             item.get('employee_name') or '',
             item.get('year_month') or '',
             _employment_label(item.get('employment_type') or ''),
@@ -1935,19 +1944,30 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
             item.get('balance_reference_hours') or '0',
             item.get('monthly_balance_hours') or '0',
             str(scoped_saldo),
-            item.get('vacation_days') or 0,
-            item.get('sick_days') or 0,
+            item.get('reconciliation_status') or '',
+        ])
+        finance_rows.append([
+            item.get('employee_name') or '',
+            item.get('year_month') or '',
             payroll.get('gross_amount') or '',
             payroll.get('net_amount') or '',
             payroll.get('lexware_payout_amount') or payroll.get('transferred_amount') or '',
+            item.get('vacation_days') or 0,
+            item.get('sick_days') or 0,
             payroll.get('lexware_sick_hours') or '',
             payroll.get('lexware_u1_reimbursement') or '',
-            item.get('reconciliation_status') or '',
         ])
     _docx_table(
         document,
-        ['Mitarbeiter', 'Monat', 'Beschäftigung', 'Ist', 'Basis', 'Saldo Monat', 'Saldo gesamt', 'Urlaub', 'Krank', 'Lexware Brutto', 'Lexware Netto', 'Auszahlung', 'Lexware Krank Std.', 'U1 Erstattung', 'Status'],
-        overview_rows,
+        ['Mitarbeiter', 'Monat', 'Beschäftigung', 'Ist', 'Basis', 'Saldo Monat', 'Saldo gesamt', 'Status'],
+        attendance_rows,
+    )
+    document.add_heading('Lexware Lohn und Abwesenheiten', level=2)
+    _docx_table(
+        document,
+        ['Mitarbeiter', 'Monat', 'Brutto €', 'Netto €', 'Auszahlung €',
+         'Urlaub', 'Krank', 'Krank Std.', 'U1 €'],
+        finance_rows,
     )
 
     exceptions = [
