@@ -17,7 +17,9 @@ from openpyxl import Workbook
 from docx import Document
 from docx.enum.section import WD_ORIENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Cm, Pt
+from docx.shared import Cm, Pt, RGBColor
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4, landscape
@@ -733,12 +735,21 @@ def record_dict(
         # Lexware uses person group 997 for a non-SV managing director setup.
         # Do not display a stale A+ Minijob snapshot for that payroll month.
         employment_type = 'geschaeftsfuehrer'
+    # Conflicting payroll evidence must not be reported as a confirmed Minijob.
+    classification_unverified = bool(
+        employment_type == WorkerProfile.EmploymentType.MINI
+        and lexware_salary_month
+        and dec((payroll_statement or {}).get('gross_amount')) > _minijob_limit(row.year_month)
+        and not lexware_person_group
+    )
+    if classification_unverified:
+        employment_type = 'ungeklaert'
     is_minijob_month = (
         (lexware_person_group == '109' and not suspicious_109)
-        or (
-            not lexware_person_group
-            and employment_type == WorkerProfile.EmploymentType.MINI
-        )
+        or (not lexware_person_group and (
+            employment_type == WorkerProfile.EmploymentType.MINI
+            or classification_unverified
+        ))
     )
     minijob_limit = _minijob_limit(row.year_month) if is_minijob_month else None
     result = {
@@ -747,6 +758,7 @@ def record_dict(
         'employee_name': str(row.worker.user),
         'employee_number': row.worker.employee_number,
         'employment_type': employment_type,
+        'employment_classification_unverified': classification_unverified,
         'wiw_user_id': row.worker.wiw_user_id,
         'year_month': row.year_month.strftime('%Y-%m'),
         'ist_hours': str(row.ist_hours),
@@ -804,6 +816,18 @@ def record_dict(
         or row.year_month.strftime('%Y-%m') == latest_master_period
     )
 
+    # Old hourly months may still contain today's salary contract Soll,
+    # inherited from a rebuild. Without the dated contract it is unverified.
+    historical_soll_unverified = bool(
+        latest_master_period
+        and row.year_month.strftime('%Y-%m') < latest_master_period
+        and str(master_data.get('compensation_type') or '').lower() == 'salary'
+        and str((payroll_statement or {}).get('lexware_compensation_type') or '') == 'hourly'
+        and dec(row.soll_hours) >= Decimal('100.00')
+        and dec(paid_total) <= Decimal('80.00')
+    )
+    result['historical_soll_unverified'] = historical_soll_unverified
+
     # Current master data must not be compared against old payroll months.
     # Employees can legitimately move from hourly/minijob to salary/full-time,
     # as happened in the imported 2026 history. Historical Lexware payslips are
@@ -838,6 +862,17 @@ def record_dict(
     ):
         contract_issues.append(
             f'Lexware Stammdaten weisen Minijob aus, A+ ist als {employment_type} gespeichert.'
+        )
+    if classification_unverified:
+        contract_issues.append(
+            'Beschäftigungsart ungeklärt: A+ meldet Minijob, '
+            'Lexware meldet Gehalt oberhalb der Minijobgrenze. '
+            'Personengruppe und Vertragsnachweis prüfen.'
+        )
+    if historical_soll_unverified:
+        contract_issues.append(
+            f'Historische Sollstunden {row.soll_hours} aus A+ nicht '
+            'durch den damaligen Vertrag belegt.'
         )
     if suspicious_109:
         contract_issues.append(
@@ -1045,6 +1080,7 @@ def export_xlsx(queryset) -> HttpResponse:
         'Abwesenheit Tage', 'Urlaub Tage', 'Krank Tage', 'Sonstige Abwesenheit Tage',
         'Lexware Krank Stunden', 'Lexware U1 Erstattung',
     ]
+    headers.append('Sollnachweis')
     ws.append(headers)
     for row, data in prepared:
         payroll = data.get('payroll_statement') or {}
@@ -1055,7 +1091,8 @@ def export_xlsx(queryset) -> HttpResponse:
         scoped_previous = (scoped_saldo - dec(data.get('monthly_balance_hours'))).quantize(TWO)
         ws.append([
             data['employee_name'], data['year_month'], float(data['ist_hours']),
-            float(data['soll_hours']), float(data['difference_hours']),
+            None if data.get('historical_soll_unverified') else float(data['soll_hours']),
+            None if data.get('historical_soll_unverified') else float(data['difference_hours']),
             float(scoped_previous), float(data['paid_hours']),
             float(data['manual_adjustment']), float(scoped_saldo),
             float(data['hourly_rate']), float(data['gross_amount']),
@@ -1079,6 +1116,7 @@ def export_xlsx(queryset) -> HttpResponse:
             int(data.get('other_absence_days') or 0),
             float(payroll.get('lexware_sick_hours')) if payroll.get('lexware_sick_hours') else None,
             float(payroll.get('lexware_u1_reimbursement')) if payroll.get('lexware_u1_reimbursement') else None,
+            'Historischer Sollwert nicht belegt' if data.get('historical_soll_unverified') else 'A+ Vertragswert',
         ])
     for column in ws.columns:
         ws.column_dimensions[column[0].column_letter].width = min(max(len(str(cell.value or '')) for cell in column) + 2, 32)
@@ -1358,22 +1396,40 @@ def _docx_title(document: Document, title: str, subtitle: str = ''):
 
 
 def _docx_table(document: Document, headers: list[str], rows: list[list[Any]]):
+    """Readable, alternating rows and repeating column headings in Word."""
     table = document.add_table(rows=1, cols=len(headers))
     table.style = 'Table Grid'
     table.autofit = True
-    for index, header in enumerate(headers):
-        cell = table.rows[0].cells[index]
-        cell.text = str(header)
-        for run in cell.paragraphs[0].runs:
-            run.bold = True
-            run.font.size = Pt(8)
-    for row in rows:
+    repeat = OxmlElement('w:tblHeader')
+    repeat.set(qn('w:val'), 'true')
+    table.rows[0]._tr.get_or_add_trPr().append(repeat)
+
+    def color_cell(cell, fill):
+        shade = OxmlElement('w:shd')
+        shade.set(qn('w:fill'), fill)
+        cell._tc.get_or_add_tcPr().append(shade)
+
+    for col, title in enumerate(headers):
+        cell = table.rows[0].cells[col]
+        cell.text = str(title)
+        color_cell(cell, '183B61')
+        for paragraph in cell.paragraphs:
+            paragraph.paragraph_format.space_after = Pt(0)
+            for run in paragraph.runs:
+                run.bold = True
+                run.font.size = Pt(8.5)
+                run.font.color.rgb = RGBColor(255, 255, 255)
+    for index, values in enumerate(rows):
         cells = table.add_row().cells
-        for index, value in enumerate(row):
-            cells[index].text = '' if value is None else str(value)
-            for paragraph in cells[index].paragraphs:
+        for col, value in enumerate(values):
+            cells[col].text = '' if value is None else str(value)
+            if index % 2:
+                color_cell(cells[col], 'F3F7FC')
+            for paragraph in cells[col].paragraphs:
+                paragraph.paragraph_format.space_after = Pt(0)
                 for run in paragraph.runs:
-                    run.font.size = Pt(8)
+                    run.font.size = Pt(8.5)
+    document.add_paragraph().paragraph_format.space_after = Pt(0)
     return table
 
 
@@ -1421,42 +1477,48 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
         ['Stundenlohn', f"{master.get('hourly_rate') or worker.tariff_hourly_rate or ''} €" if master.get('compensation_type') != 'salary' else ''],
         ['Monatsgehalt', f"{master.get('monthly_salary') or ''} €" if master.get('compensation_type') == 'salary' else ''],
         ['Wochenstunden', master.get('weekly_hours') or ''],
-        ['Sollstunden monatlich', str(worker.monthly_hours or '')],
+        ['Sollstunden monatlich (aktuell)', str(worker.monthly_hours or '')],
     ]
     _docx_table(document, ['Stammdatum', 'Wert'], info_rows)
     document.add_paragraph()
 
-    monthly_rows = []
+    working_rows, pay_rows = [], []
     for row, item in prepared:
         payroll = item.get('payroll_statement') or {}
-        scoped_saldo = scoped_saldos.get(
+        saldo = scoped_saldos.get(
             (str(item.get('worker_id') or ''), str(item.get('year_month') or '')),
             Decimal('0.00'),
         )
-        monthly_rows.append([
-            row.year_month.strftime('%m/%Y'),
-            _employment_label(item.get('employment_type') or ''),
+        period = row.year_month.strftime('%m/%Y')
+        working_rows.append([
+            period, _employment_label(item.get('employment_type') or ''),
             item['ist_hours'],
-            item['soll_hours'],
-            item['balance_reference_hours'],
-            item['monthly_balance_hours'],
-            str(scoped_saldo),
-            f"{item['hourly_rate']} €",
-            item['night_hours'],
-            item['saturday_hours'],
-            item['sunday_hours'],
-            f"{item['surcharge_amount']} €",
-            item['absence_days'],
-            item['vacation_days'],
-            item['sick_days'],
-            f"{payroll.get('gross_amount') or ''} €" if payroll.get('gross_amount') else '',
-            f"{payroll.get('net_amount') or ''} €" if payroll.get('net_amount') else '',
-            f"{payroll.get('lexware_payout_amount') or payroll.get('transferred_amount') or ''} €" if (payroll.get('lexware_payout_amount') or payroll.get('transferred_amount')) else '',
+            'nicht belegt' if item.get('historical_soll_unverified') else item['soll_hours'],
+            item['balance_reference_hours'], item['monthly_balance_hours'], str(saldo),
         ])
+        pay_rows.append([
+            period, f"{item['hourly_rate']} €", item['night_hours'],
+            item['saturday_hours'], item['sunday_hours'],
+            payroll.get('gross_amount') or '',
+            payroll.get('net_amount') or '',
+            payroll.get('lexware_payout_amount') or payroll.get('transferred_amount') or '',
+        ])
+    document.add_heading('Monatliche Arbeitszeit', level=2)
     _docx_table(
         document,
-        ['Monat', 'Beschäftigung', 'Ist', 'Soll A+', 'Basis', 'Saldo Monat', 'Saldo gesamt', 'Satz', 'Nacht', 'Sa', 'So', 'Zuschläge', 'Abw.', 'Urlaub', 'Krank', 'Lexware Brutto', 'Lexware Netto', 'Auszahlung'],
-        monthly_rows,
+        ['Monat', 'Beschäftigung', 'Ist', 'Soll A+', 'Saldo Basis', 'Saldo Monat', 'Saldo gesamt'],
+        working_rows,
+    )
+    document.add_paragraph(
+        'Nicht belegt bedeutet: Der historische Vertragswert fehlt; '
+        'der heutige Sollwert wurde nicht rückwirkend übernommen. '
+        'Die separate Saldo Basis ist kein Nachweis des alten Vertrags.'
+    )
+    document.add_heading('Lexware und Zuschlagsstunden', level=2)
+    _docx_table(
+        document,
+        ['Monat', 'Satz', 'Nacht', 'Sa.', 'So.', 'Brutto €', 'Netto €', 'Auszahlung €'],
+        pay_rows,
     )
 
     for row, item in prepared:
@@ -1476,12 +1538,12 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
         run.bold = True
         run.font.size = Pt(14)
         document.add_paragraph(
-            f"Ist {item['ist_hours']} Std. | Soll {item['soll_hours']} Std. | "
+            f"Ist {item['ist_hours']} Std. | Soll {'nicht belegt' if item.get('historical_soll_unverified') else item['soll_hours']} Std. | "
             f"Basis {item['balance_reference_hours']} Std. | Monatssaldo {item['monthly_balance_hours']} Std. | "
             f"Saldo Prüfjahr {scoped_saldo} Std. | "
             f"Abwesenheit {item['absence_days']} Tage | Urlaub {item['vacation_days']} | Krank {item['sick_days']}"
         )
-        daily = []
+        daily, extras = [], []
         for entry in entries:
             client = str(entry.get('client_name') or 'Ohne Zuordnung')
             location = str(entry.get('location_name') or entry.get('position_name') or '')
@@ -1493,6 +1555,9 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
                 f"{_pdf_clock(entry.get('local_clock_in') or entry.get('clock_in'))} bis {_pdf_clock(entry.get('local_clock_out') or entry.get('clock_out'))}",
                 f"{int(entry.get('break_minutes') or 0)} Min.",
                 _pdf_hours(entry.get('worked_minutes')),
+            ])
+            extras.append([
+                _pdf_date(entry.get('local_clock_in') or entry.get('clock_in')),
                 _pdf_hours(entry.get('night_minutes')),
                 _pdf_hours(entry.get('saturday_minutes')),
                 _pdf_hours(entry.get('sunday_minutes')),
@@ -1500,9 +1565,11 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
             ])
         _docx_table(
             document,
-            ['Datum', 'Kunde', 'Ort', 'Plan', 'Ist', 'Pause', 'Netto', 'Nacht', 'Sa', 'So', 'Notiz'],
+            ['Datum', 'Kunde', 'Ort', 'Plan', 'Ist', 'Pause', 'Netto'],
             daily,
         )
+        document.add_paragraph('Zuschlagsstunden und Notizen', style='Heading3')
+        _docx_table(document, ['Datum', 'Nacht', 'Sa.', 'So.', 'Notiz'], extras)
         flagged = [
             (_pdf_date(entry.get('local_clock_in') or entry.get('clock_in')), _entry_time_review(entry))
             for entry in entries
@@ -1669,6 +1736,7 @@ def _employment_label(value: Any) -> str:
         'student': 'Werkstudent',
         'angestellt': 'Angestellter',
         'geschaeftsfuehrer': 'Geschäftsführer',
+        'ungeklaert': 'Ungeklärt',
     }
     return labels.get(key, str(value or ''))
 
