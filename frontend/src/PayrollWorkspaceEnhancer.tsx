@@ -219,8 +219,9 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
 
   async function fetchWorkspaceData() {
     const readinessYear = currentMonth().slice(0, 4) || String(new Date().getFullYear());
+    const throughMonth = currentMonth().slice(0, 7);
     const [response, settingsResponse, readinessResponse]: any[] = await Promise.all([
-      api('working-time/records/'),
+      api(`working-time/records/?from=${encodeURIComponent(`${readinessYear}-01`)}&to=${encodeURIComponent(throughMonth)}`),
       api('working-time/settings/'),
       api(`working-time/lexware-readiness/?year=${encodeURIComponent(readinessYear)}`),
     ]);
@@ -267,26 +268,6 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
       let { response, settingsResponse, readinessResponse } = await fetchWorkspaceData();
       let nextRows = (response?.results || response || []) as PayrollRow[];
 
-      if (
-        !archiveBackfillAttempted.current
-        && Boolean(readinessResponse?.enrichment_needed)
-      ) {
-        archiveBackfillAttempted.current = true;
-        try {
-          const backfillYear = String(readinessResponse?.year || currentMonth().slice(0, 4));
-          const backfill: any = await api('working-time/lexware-backfill/', {
-            method: 'POST',
-            body: JSON.stringify({ year: backfillYear }),
-          });
-          if (Number(backfill?.attached || 0) > 0 || Number(backfill?.enriched || 0) > 0) {
-            ({ response, settingsResponse, readinessResponse } = await fetchWorkspaceData());
-            nextRows = (response?.results || response || []) as PayrollRow[];
-          }
-        } catch {
-          // Archive enrichment is best effort and must never block the payroll workspace.
-        }
-      }
-
       if (standalone && autoBuild && !nextRows.length && !autoBuildAttempted.current) {
         autoBuildAttempted.current = true;
         setMessage('Arbeitszeitdaten werden aus den vorhandenen Ist Zeiten aufgebaut.');
@@ -300,6 +281,31 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
       }
 
       applyWorkspaceData(response, settingsResponse, readinessResponse);
+
+      // Historical archive enrichment can be expensive because it reparses PDFs.
+      // Run it after the page has rendered instead of blocking payroll numbers.
+      if (
+        !archiveBackfillAttempted.current
+        && Boolean(readinessResponse?.enrichment_needed)
+      ) {
+        archiveBackfillAttempted.current = true;
+        const backfillYear = String(readinessResponse?.year || currentMonth().slice(0, 4));
+        void api('working-time/lexware-backfill/', {
+          method: 'POST',
+          body: JSON.stringify({ year: backfillYear }),
+        }).then(async (backfill: any) => {
+          if (Number(backfill?.attached || 0) > 0 || Number(backfill?.enriched || 0) > 0) {
+            const refreshed = await fetchWorkspaceData();
+            applyWorkspaceData(
+              refreshed.response,
+              refreshed.settingsResponse,
+              refreshed.readinessResponse,
+            );
+          }
+        }).catch(() => {
+          // Best effort only. The visible payroll workspace stays usable.
+        });
+      }
       if (nextRows.length) setMessage('');
     } catch (error: any) {
       setMessage(error?.message || 'Arbeitszeitkonto konnte nicht geladen werden.');
