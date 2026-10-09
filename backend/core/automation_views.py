@@ -455,7 +455,10 @@ def _payroll_statement_map(rows):
 @api_view(['GET'])
 @permission_classes([IsAdminOrManager])
 def worktime_records(request):
-    queryset = WorkingTimeAccountRecord.objects.select_related('worker__user').order_by('-year_month', 'worker__user__last_name')
+    queryset = WorkingTimeAccountRecord.objects.select_related(
+        'worker__user',
+        'worker__master_data',
+    ).order_by('-year_month', 'worker__user__last_name')
     worker = request.query_params.get('worker')
     if worker:
         queryset = queryset.filter(worker_id=worker)
@@ -485,7 +488,7 @@ def worktime_records(request):
 @permission_classes([IsAdminOrManager])
 def worktime_record_detail(request, pk):
     record = get_object_or_404(
-        WorkingTimeAccountRecord.objects.select_related('worker__user'),
+        WorkingTimeAccountRecord.objects.select_related('worker__user', 'worker__master_data'),
         pk=pk,
     )
     statement = PayrollStatement.objects.filter(
@@ -505,7 +508,7 @@ def worktime_record_detail(request, pk):
 @permission_classes([IsAdminOrManager])
 def worktime_record_update(request, pk):
     record = get_object_or_404(
-        WorkingTimeAccountRecord.objects.select_related('worker__user'),
+        WorkingTimeAccountRecord.objects.select_related('worker__user', 'worker__master_data'),
         pk=pk,
     )
     record = update_record(
