@@ -1449,6 +1449,46 @@ def _reconciliation_status(item: dict) -> tuple[str, list[str]]:
     return 'MATCH', []
 
 
+def _report_item_relevant(item: dict) -> bool:
+    name = str(item.get('employee_name') or '').strip().lower()
+    if '@sync.invalid' in name:
+        return False
+    payroll = item.get('payroll_statement') or {}
+    has_payroll = bool(payroll.get('id')) or any(
+        payroll.get(key) not in (None, '')
+        for key in (
+            'gross_amount', 'net_amount', 'transferred_amount',
+            'lexware_payout_amount', 'lexware_compensation_type',
+        )
+    )
+    return bool(
+        has_payroll
+        or dec(item.get('ist_hours')) != Decimal('0.00')
+        or dec(item.get('balance_reference_hours')) != Decimal('0.00')
+        or dec(item.get('manual_adjustment')) != Decimal('0.00')
+        or int(item.get('absence_days') or 0) > 0
+        or int(item.get('entry_count') or 0) > 0
+    )
+
+
+def _scoped_saldo_map(items: list[dict]) -> dict[tuple[str, str], Decimal]:
+    running: dict[str, Decimal] = defaultdict(lambda: Decimal('0.00'))
+    result: dict[tuple[str, str], Decimal] = {}
+    for item in sorted(
+        items,
+        key=lambda value: (
+            str(value.get('worker_id') or ''),
+            str(value.get('year_month') or ''),
+        ),
+    ):
+        worker_id = str(item.get('worker_id') or '')
+        running[worker_id] = (
+            running[worker_id] + dec(item.get('monthly_balance_hours'))
+        ).quantize(TWO)
+        result[(worker_id, str(item.get('year_month') or ''))] = running[worker_id]
+    return result
+
+
 def lexware_reconciliation_docx(queryset, period: date) -> bytes:
     rows = list(queryset.select_related('worker__user'))
     statements = _statement_map(rows)
@@ -1468,6 +1508,8 @@ def lexware_reconciliation_docx(queryset, period: date) -> bytes:
             statements.get((str(row.worker_id), row.year_month)),
             absence_summary=absences.get((str(row.worker_id), row.year_month)),
         )
+        if not _report_item_relevant(item):
+            continue
         payroll = item.get('payroll_statement') or {}
         status, issues = _reconciliation_status(item)
         master = _worker_master_data(row.worker)
@@ -1478,7 +1520,7 @@ def lexware_reconciliation_docx(queryset, period: date) -> bytes:
         )
         table_rows.append([
             item['employee_name'],
-            master.get('employment_type_lexware') or item.get('employment_type') or '',
+            item.get('employment_type') or master.get('employment_type_lexware') or '',
             item['ist_hours'],
             item['soll_hours'],
             item['paid_total_hours'],
@@ -1536,20 +1578,25 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
 
     items = []
     for row in rows:
-        items.append(record_dict(
+        item = record_dict(
             row,
             statements.get((str(row.worker_id), row.year_month)),
             absence_summary=absences.get((str(row.worker_id), row.year_month)),
-        ))
+        )
+        if _report_item_relevant(item):
+            items.append(item)
 
-    closed_items = [item for item in items if item.get('reconciliation_status') != 'LAUFEND']
+    closed_items = [
+        item for item in items
+        if item.get('reconciliation_status') != 'LAUFEND'
+    ]
+    scoped_saldos = _scoped_saldo_map(closed_items)
     match_count = sum(1 for item in closed_items if item.get('reconciliation_status') == 'MATCH')
     review_count = sum(1 for item in closed_items if item.get('reconciliation_status') == 'PRÜFEN')
     mismatch_count = sum(1 for item in closed_items if item.get('reconciliation_status') == 'ABWEICHUNG')
 
     summary_rows = [
-        ['Monatskonten', len(items)],
-        ['Abgeschlossene Konten', len(closed_items)],
+        ['Geprüfte Monatskonten', len(closed_items)],
         ['MATCH', match_count],
         ['PRÜFEN', review_count],
         ['ABWEICHUNG', mismatch_count],
@@ -1571,8 +1618,12 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
     run.font.size = Pt(13)
 
     overview_rows = []
-    for item in items:
+    for item in closed_items:
         payroll = item.get('payroll_statement') or {}
+        scoped_saldo = scoped_saldos.get(
+            (str(item.get('worker_id') or ''), str(item.get('year_month') or '')),
+            Decimal('0.00'),
+        )
         overview_rows.append([
             item.get('employee_name') or '',
             item.get('year_month') or '',
@@ -1580,7 +1631,7 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
             item.get('ist_hours') or '0',
             item.get('balance_reference_hours') or '0',
             item.get('monthly_balance_hours') or '0',
-            item.get('saldo_cumulative') or '0',
+            str(scoped_saldo),
             item.get('vacation_days') or 0,
             item.get('sick_days') or 0,
             payroll.get('gross_amount') or '',
