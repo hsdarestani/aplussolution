@@ -480,6 +480,50 @@ def _minijob_limit(year_month: date) -> Decimal | None:
     return limits.get(year_month.year)
 
 
+def _report_transfer_total(statement: PayrollStatement) -> Decimal | None:
+    items = [
+        item for item in list(statement.raw_data or [])
+        if item.get('kind') == 'payment'
+        or (not item.get('kind') and item.get('amount') is not None)
+    ]
+    if not items:
+        return statement.transferred_amount
+
+    by_source = defaultdict(list)
+    for item in items:
+        by_source[str(item.get('source_type') or 'legacy')].append(item)
+
+    selected = []
+    for source_type in (
+        'lexware_bank_export',
+        'lexware_sepa_xml',
+        'lexware_zahlungsliste_pdf',
+        'legacy',
+    ):
+        if by_source.get(source_type):
+            selected = by_source[source_type]
+            break
+
+    seen = set()
+    total = Decimal('0.00')
+    for item in selected:
+        source_type = str(item.get('source_type') or 'legacy')
+        signature = (
+            source_type,
+            str(dec(item.get('amount'))),
+            str(item.get('payment_date') or '') if source_type == 'lexware_bank_export' else '',
+            ' '.join(str(item.get('recipient') or '').lower().split()),
+            ' '.join(str(item.get('purpose') or '').lower().split()),
+            ''.join(str(item.get('iban') or '').split()).upper(),
+            str(item.get('payment_method') or ''),
+        )
+        if signature in seen:
+            continue
+        seen.add(signature)
+        total += dec(item.get('amount'))
+    return total.quantize(TWO)
+
+
 def statement_dict(statement: PayrollStatement | None) -> dict | None:
     if not statement:
         return None
@@ -521,7 +565,7 @@ def statement_dict(statement: PayrollStatement | None) -> dict | None:
         'id': str(statement.id),
         'gross_amount': str(statement.gross_amount) if statement.gross_amount is not None else None,
         'net_amount': str(statement.net_amount) if statement.net_amount is not None else None,
-        'transferred_amount': str(statement.transferred_amount) if statement.transferred_amount is not None else None,
+        'transferred_amount': str(_report_transfer_total(statement)) if _report_transfer_total(statement) is not None else None,
         'payment_date': statement.payment_date.isoformat() if statement.payment_date else None,
         'source': statement.source,
         'source_reference': statement.source_reference,
