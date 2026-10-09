@@ -596,7 +596,11 @@ def worktime_export(request, file_format):
     month = str(request.query_params.get('month') or '').strip()
     if year:
         try:
-            queryset = queryset.filter(year_month__year=int(year))
+            report_year = int(year)
+            queryset = queryset.filter(year_month__year=report_year)
+            today = timezone.localdate()
+            if report_year == today.year and not month:
+                queryset = queryset.filter(year_month__lt=today.replace(day=1))
         except ValueError:
             return Response({'detail': 'Jahr muss im Format JJJJ angegeben werden.'}, status=400)
     if month:
@@ -620,7 +624,11 @@ def worktime_pdf(request, worker_id):
     year = str(request.query_params.get('year') or '').strip()
     if year:
         try:
-            queryset = queryset.filter(year_month__year=int(year))
+            report_year = int(year)
+            queryset = queryset.filter(year_month__year=report_year)
+            today = timezone.localdate()
+            if report_year == today.year:
+                queryset = queryset.filter(year_month__lt=today.replace(day=1))
         except ValueError:
             return Response({'detail': 'Jahr muss im Format JJJJ angegeben werden.'}, status=400)
     response = HttpResponse(worker_pdf(worker, queryset), content_type='application/pdf')
@@ -636,7 +644,11 @@ def worktime_docx(request, worker_id):
     year = str(request.query_params.get('year') or '').strip()
     if year:
         try:
-            queryset = queryset.filter(year_month__year=int(year))
+            report_year = int(year)
+            queryset = queryset.filter(year_month__year=report_year)
+            today = timezone.localdate()
+            if report_year == today.year:
+                queryset = queryset.filter(year_month__lt=today.replace(day=1))
         except ValueError:
             return Response({'detail': 'Jahr muss im Format JJJJ angegeben werden.'}, status=400)
     response = HttpResponse(
@@ -682,7 +694,15 @@ def worktime_audit_docx(request):
 
     queryset = WorkingTimeAccountRecord.objects.filter(
         year_month__year=year,
-    ).order_by('worker__user__last_name', 'worker__user__first_name', 'year_month')
+    )
+    today = timezone.localdate()
+    if year == today.year:
+        queryset = queryset.filter(year_month__lt=today.replace(day=1))
+    queryset = queryset.order_by(
+        'worker__user__last_name',
+        'worker__user__first_name',
+        'year_month',
+    )
     worker_id = request.query_params.get('worker')
     if worker_id:
         queryset = queryset.filter(worker_id=worker_id)
