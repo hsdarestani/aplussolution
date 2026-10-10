@@ -16,6 +16,7 @@ from .models import (
     WorkingTimeSetting,
     WorkingTimeSyncLog,
 )
+from .hessen_holidays import hessen_holiday, holiday_tax_exempt_ceiling_percent
 from .working_time import dec, ensure_settings, iter_months
 
 TWO = Decimal('0.01')
@@ -107,6 +108,8 @@ def _entry_metrics(entry: TimeEntry, current_tz) -> dict:
     night_gross = 0
     saturday_gross = 0
     sunday_gross = 0
+    holiday_gross = 0
+    holiday_details = []
     cursor = local_start.date() - timedelta(days=1)
     final_day = local_end.date()
     while cursor <= final_day:
@@ -120,6 +123,17 @@ def _entry_metrics(entry: TimeEntry, current_tz) -> dict:
             saturday_gross += _overlap_minutes(local_start, local_end, day_start, day_end)
         if cursor.weekday() == 6:
             sunday_gross += _overlap_minutes(local_start, local_end, day_start, day_end)
+        holiday_name = hessen_holiday(cursor)
+        if holiday_name:
+            holiday_day_minutes = _overlap_minutes(local_start, local_end, day_start, day_end)
+            if holiday_day_minutes:
+                holiday_gross += holiday_day_minutes
+                holiday_details.append({
+                    'date': cursor.isoformat(),
+                    'name': holiday_name,
+                    'minutes': int((Decimal(holiday_day_minutes) * factor).quantize(Decimal('1'))),
+                    'tax_exempt_ceiling_percent': holiday_tax_exempt_ceiling_percent(cursor),
+                })
         cursor += timedelta(days=1)
 
     return {
@@ -129,6 +143,8 @@ def _entry_metrics(entry: TimeEntry, current_tz) -> dict:
         'night_minutes': int((Decimal(night_gross) * factor).quantize(Decimal('1'))),
         'saturday_minutes': int((Decimal(saturday_gross) * factor).quantize(Decimal('1'))),
         'sunday_minutes': int((Decimal(sunday_gross) * factor).quantize(Decimal('1'))),
+        'holiday_minutes': int((Decimal(holiday_gross) * factor).quantize(Decimal('1'))),
+        'holiday_details': holiday_details,
         'clock_out_rollover_corrected': corrected_rollover,
         'effective_local_clock_out': local_end.isoformat(),
     }
@@ -302,6 +318,7 @@ def sync_working_time(
             night_percent = dec(row_setting.night_surcharge_percent if row_setting else 0)
             saturday_percent = dec(row_setting.saturday_surcharge_percent if row_setting else 0)
             sunday_percent = dec(row_setting.sunday_surcharge_percent if row_setting else 0)
+            holiday_percent = dec(row_setting.holiday_surcharge_percent if row_setting else 0)
 
             worker_months = sorted(
                 month
@@ -467,16 +484,20 @@ def sync_working_time(
                         row_night_percent = night_percent
                         row_saturday_percent = saturday_percent
                         row_sunday_percent = sunday_percent
+                        row_holiday_percent = holiday_percent
                     else:
                         row_night_percent = dec(previous.get('night_surcharge_percent', night_percent))
                         row_saturday_percent = dec(previous.get('saturday_surcharge_percent', saturday_percent))
                         row_sunday_percent = dec(previous.get('sunday_surcharge_percent', sunday_percent))
+                        row_holiday_percent = dec(previous.get('holiday_surcharge_percent', holiday_percent))
                     raw['night_surcharge_percent'] = str(row_night_percent)
                     raw['saturday_surcharge_percent'] = str(row_saturday_percent)
                     raw['sunday_surcharge_percent'] = str(row_sunday_percent)
+                    raw['holiday_surcharge_percent'] = str(row_holiday_percent)
                     raw['night_surcharge_amount'] = str(_surcharge_amount(raw['night_minutes'], month_rate, row_night_percent))
                     raw['saturday_surcharge_amount'] = str(_surcharge_amount(raw['saturday_minutes'], month_rate, row_saturday_percent))
                     raw['sunday_surcharge_amount'] = str(_surcharge_amount(raw['sunday_minutes'], month_rate, row_sunday_percent))
+                    raw['holiday_surcharge_amount'] = str(_surcharge_amount(raw['holiday_minutes'], month_rate, row_holiday_percent))
 
                 WorkingTimeAccountRecord.objects.update_or_create(
                     worker=worker,

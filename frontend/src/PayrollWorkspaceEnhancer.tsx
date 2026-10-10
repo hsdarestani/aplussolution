@@ -56,6 +56,7 @@ type SurchargeReconciliation = {
   night?: ReconciliationItem;
   saturday?: ReconciliationItem;
   sunday?: ReconciliationItem;
+  holiday?: ReconciliationItem;
 };
 
 type PayrollEntry = {
@@ -73,6 +74,8 @@ type PayrollEntry = {
   night_minutes?: number;
   saturday_minutes?: number;
   sunday_minutes?: number;
+  holiday_minutes?: number;
+  holiday_details?: Array<{ date: string; name: string; minutes: number }>;
   notes?: string;
   clock_out_rollover_corrected?: boolean;
   source?: string;
@@ -104,6 +107,8 @@ type PayrollRow = {
   night_hours?: string;
   saturday_hours?: string;
   sunday_hours?: string;
+  holiday_hours?: string;
+  holiday_surcharge_amount?: string;
   surcharge_amount?: string;
   entry_count?: number;
   absence_days?: number;
@@ -147,6 +152,7 @@ type SettingRow = EmployeeOption & {
   night_surcharge_percent: string;
   saturday_surcharge_percent: string;
   sunday_surcharge_percent: string;
+  holiday_surcharge_percent: string;
   active?: boolean;
   excluded?: boolean;
   notes?: string;
@@ -768,7 +774,6 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         <div><span>Gearbeitet</span><strong>{decimal(summary.ist)} Std.</strong><small>Ist Zeit</small></div>
         <div><span>Bezahlt oder Soll</span><strong>{decimal(summary.paid)} Std.</strong><small>bei Gehalt gilt die vertragliche Sollzeit</small></div>
         <div><span>Saldo</span><strong className={summary.saldo < 0 ? 'negative' : 'positive'}>{decimal(summary.saldo)} Std.</strong><small>offenes Zeitkonto</small></div>
-        <div><span>A+ Brutto vorbereitet</span><strong>{money(summary.gross)}</strong><small>inklusive Zuschläge</small></div>
         <div><span>Lexware Brutto</span><strong>{money(summary.lexwareGross)}</strong><small>Lohnabrechnungen</small></div>
         <div><span>Lexware Auszahlung</span><strong>{money(summary.transferred)}</strong><small>Zahlungsliste oder Bankexport</small></div>
       </section>
@@ -784,6 +789,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
           <label>Nacht Zuschlag %<input type="number" step="0.01" value={selectedSetting.night_surcharge_percent} onChange={event => updateSelectedSetting('night_surcharge_percent', event.target.value)} /></label>
           <label>Samstag Zuschlag %<input type="number" step="0.01" value={selectedSetting.saturday_surcharge_percent} onChange={event => updateSelectedSetting('saturday_surcharge_percent', event.target.value)} /></label>
           <label>Sonntag Zuschlag %<input type="number" step="0.01" value={selectedSetting.sunday_surcharge_percent} onChange={event => updateSelectedSetting('sunday_surcharge_percent', event.target.value)} /></label>
+          <label>Feiertag Hessen Zuschlag % (laut Vertrag)<input type="number" step="0.01" min="0" value={selectedSetting.holiday_surcharge_percent ?? '0'} onChange={event => updateSelectedSetting('holiday_surcharge_percent', event.target.value)} /></label>
           <button type="button" onClick={() => void saveSelectedSettings()} disabled={settingsBusy}>{settingsBusy ? 'Speichert' : 'Stammdaten speichern'}</button>
         </div>}
       </section>}
@@ -890,7 +896,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
                 <b>{reconciliationStatus}</b>
                 <small>{reconciliationStatus === 'LAUFEND' ? 'Laufender Monat wird noch nicht in den Saldo eingerechnet' : row.reconciliation_issues?.length ? `${row.reconciliation_issues.length} Prüfhinweis(e)` : 'Nachweise stimmen überein'}</small>
               </div>
-              {(['night', 'saturday', 'sunday'] as const).map(key => {
+              {(['night', 'saturday', 'sunday', 'holiday'] as const).map(key => {
                 const item = row.surcharge_reconciliation?.[key];
                 if (!item) return null;
                 const itemClass = item.status === 'MATCH' ? 'match' : item.status === 'ABWEICHUNG' ? 'abweichung' : 'pruefen';
@@ -924,6 +930,8 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
               <div><span>Nacht</span><b>{decimal(row.night_hours)} Std.</b></div>
               <div><span>Samstag</span><b>{decimal(row.saturday_hours)} Std.</b></div>
               <div><span>Sonntag</span><b>{decimal(row.sunday_hours)} Std.</b></div>
+              <div><span>Feiertag Hessen</span><b>{decimal(row.holiday_hours)} Std.</b></div>
+              <div><span>Feiertag Zuschlag</span><b>{money(row.holiday_surcharge_amount)}</b></div>
               <div><span>Zuschläge</span><b>{money(row.surcharge_amount)}</b></div>
               <div><span>Abwesenheit</span><b>{row.absence_days || 0} Tg.</b></div>
               <div><span>Urlaub</span><b>{row.vacation_days || 0} Tg.</b></div>
@@ -986,7 +994,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
                 {!detail && <div className="payroll-detail-loading">Tagesdetails werden geladen.</div>}
                 {!!detail?.entries?.length && <div className="payroll-daily-table" role="table" aria-label={`Tagesnachweis ${row.employee_name} ${row.year_month}`}>
                   <div className="payroll-daily-row payroll-daily-header" role="row">
-                    <span>Datum</span><span>Kunde</span><span>Plan</span><span>Ist</span><span>Pause</span><span>Netto</span><span>Nacht</span><span>Sa</span><span>So</span><span>Notiz</span>
+                    <span>Datum</span><span>Kunde</span><span>Plan</span><span>Ist</span><span>Pause</span><span>Netto</span><span>Nacht</span><span>Sa</span><span>So</span><span>Feiertag</span><span>Notiz</span>
                   </div>
                   {detail.entries.map(entry => <div className="payroll-daily-row" role="row" key={entry.id}>
                     <span>{dateLabel(entry.local_clock_in)}</span>
@@ -998,6 +1006,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
                     <span>{hoursFromMinutes(entry.night_minutes)}</span>
                     <span>{hoursFromMinutes(entry.saturday_minutes)}</span>
                     <span>{hoursFromMinutes(entry.sunday_minutes)}</span>
+                    <span title={(entry.holiday_details || []).map(item => `${item.date}: ${item.name}`).join(', ')}>{hoursFromMinutes(entry.holiday_minutes)}</span>
                     <span>{entry.notes || '–'}</span>
                   </div>)}
                 </div>}
