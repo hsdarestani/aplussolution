@@ -1086,6 +1086,7 @@ def export_xlsx(queryset) -> HttpResponse:
         'Lexware Auszahlung', 'Lexware Zahlungsdatum', 'Vergütungsart',
         'Abgleich Status', 'Prüfhinweise', 'Nacht Abgleich',
         'Samstag Abgleich', 'Sonntag Abgleich',
+        'Feiertag Hessen Std.', 'Feiertag Zuschlag EUR', 'Feiertag Abgleich',
         'Abwesenheit Tage', 'Urlaub Tage', 'Krank Tage', 'Sonstige Abwesenheit Tage',
         'Lexware Krank Stunden', 'Lexware U1 Erstattung',
     ]
