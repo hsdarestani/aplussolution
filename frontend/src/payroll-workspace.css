@@ -220,7 +220,7 @@
 
 .payroll-summary{
   display:grid;
-  grid-template-columns:repeat(6,minmax(0,1fr));
+  grid-template-columns:repeat(5,minmax(0,1fr));
   gap:10px;
   margin-bottom:14px;
 }
@@ -537,7 +537,7 @@
 }
 .payroll-daily-row{
   display:grid;
-  grid-template-columns:92px minmax(170px,1.5fr) 125px 125px 70px 74px 60px 52px 52px minmax(160px,1.2fr);
+  grid-template-columns:92px minmax(170px,1.5fr) 125px 125px 70px 74px 60px 52px 52px 70px minmax(160px,1.2fr);
   min-width:1050px;
   border-top:1px solid #eef1f2;
 }
