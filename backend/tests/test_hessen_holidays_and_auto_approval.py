@@ -38,6 +38,21 @@ def test_hessen_calendar_2026_matches_official_ten_days():
     assert holiday_tax_exempt_ceiling_percent(date(2026, 5, 1)) == 150
 
 
+def test_attendance_pdf_uses_same_holiday_split():
+    from core.schedule_reports import _attendance_metrics
+
+    start = local_datetime(2026, 4, 2, 23)
+    end = local_datetime(2026, 4, 3, 4)
+    entry = TimeEntry(
+        clock_in=start,
+        clock_out=end,
+        break_minutes=60,
+    )
+    metrics = _attendance_metrics(entry, start, end)
+    assert metrics['holiday'] == 192
+    assert metrics['net'] == 240
+
+
 def test_cross_midnight_holiday_minutes_are_prorated_for_break():
     entry = TimeEntry(
         clock_in=local_datetime(2026, 4, 2, 23),
