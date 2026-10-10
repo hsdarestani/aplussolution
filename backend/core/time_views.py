@@ -15,7 +15,23 @@ from .views import TimeEntryViewSet as LegacyTimeEntryViewSet, geofence_error
 
 OUTSIDE_GEOFENCE_PREFIX = 'OUTSIDE_GEOFENCE:'
 SELF_REPORTED_REASON = 'SELF_REPORTED_AFTER_SHIFT'
+OUTSIDE_SHIFT_PLAN_PREFIX = 'OUTSIDE_SHIFT_PLAN:'
 MAX_SELF_REPORTED_HOURS = 24
+EARLY_SHIFT_REPORT_MINUTES = 60
+
+
+def outside_planned_shift(shift, clock_in, clock_out):
+    """Only time outside the *planned interval* needs manual approval.
+
+    A shorter shift within the schedule stays automatically approved. The
+    comparison uses timezone-aware datetimes, including overnight shifts.
+    """
+    return bool(
+        shift and (
+            clock_in < shift.starts_at or clock_out > shift.ends_at
+        )
+    )
+
 
 
 def _parse_admin_datetime(value):
@@ -108,9 +124,15 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
         entry.clock_out = timezone.now()
         entry.clock_out_lat = request.data.get('lat')
         entry.clock_out_lng = request.data.get('lng')
-        entry.approved = not bool(geofence_issue)
+        outside_plan = outside_planned_shift(entry.shift, entry.clock_in, entry.clock_out)
+        review_required = bool(geofence_issue or outside_plan)
+        entry.approved = not review_required
         entry.approved_by = None
-        entry.edit_reason = f'{OUTSIDE_GEOFENCE_PREFIX} {geofence_issue}' if geofence_issue else ''
+        entry.edit_reason = (
+            f'{OUTSIDE_GEOFENCE_PREFIX} {geofence_issue}' if geofence_issue
+            else f'{OUTSIDE_SHIFT_PLAN_PREFIX} Zeit außerhalb der geplanten Schicht' if outside_plan
+            else ''
+        )
         entry.save(update_fields=[
             'clock_out', 'clock_out_lat', 'clock_out_lng', 'approved', 'approved_by',
             'edit_reason', 'updated_at',
@@ -118,32 +140,33 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
 
         notify_managers_attendance(entry, 'check_out')
 
-        if geofence_issue:
+        if review_required:
             worker_name = entry.worker.user.get_full_name() or entry.worker.user.email
             for recipient in User.objects.filter(role__in=[User.Role.ADMIN, User.Role.MANAGER], is_active=True):
                 Notification.objects.create(
                     user=recipient,
-                    kind=f'offsite-checkout-{entry.id}',
-                    title='Check-out außerhalb des Einsatzortes',
+                    kind=f'time-checkout-review-{entry.id}',
+                    title='Check-out außerhalb des Einsatzortes' if geofence_issue else 'Arbeitszeit außerhalb des Dienstplans',
                     body=f'{worker_name}: Zeit prüfen und freigeben.',
                     action_url='/time',
                 )
 
         audit(request, 'time.clock_out', entry, {
-            'review_required': bool(geofence_issue),
+            'review_required': review_required,
             'geofence_issue': geofence_issue or '',
+            'outside_plan': outside_plan,
         })
         payload = self.get_serializer(entry).data
-        payload['review_required'] = bool(geofence_issue)
-        payload['review_reason'] = geofence_issue or ''
+        payload['review_required'] = review_required
+        payload['review_reason'] = geofence_issue or ('Arbeitszeit außerhalb des Dienstplans' if outside_plan else '')
         return Response(payload)
 
     @action(detail=False, methods=['post'])
     def report_shift(self, request):
-        """Let a worker report actual hours after a completed scheduled shift.
+        """Let a worker report actual hours from 60 minutes before shift end.
 
-        This flow intentionally does not request or store GPS coordinates. The
-        submitted row is approved on save; later corrections remain auditable.
+        The employee may report completed time only (never a future clock-out).
+        Any extension beyond the planned shift is held for admin review.
         """
         if request.user.role != User.Role.WORKER:
             return Response({'detail': 'Arbeitszeiten können hier nur Mitarbeiter melden.'}, status=403)
@@ -166,8 +189,8 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
             return Response({'detail': 'Für diese Schicht kann keine Arbeitszeit gemeldet werden.'}, status=400)
 
         now = timezone.now()
-        if shift.ends_at > now:
-            return Response({'detail': 'Die Schicht ist noch nicht beendet.'}, status=400)
+        if now < shift.starts_at or now < shift.ends_at - timedelta(minutes=EARLY_SHIFT_REPORT_MINUTES):
+            return Response({'detail': 'Arbeitszeit kann frühestens eine Stunde vor Schichtende erfasst werden.'}, status=400)
         if TimeEntry.objects.filter(worker=worker, shift=shift).exists():
             return Response({'detail': 'Für diese Schicht wurde bereits Arbeitszeit erfasst.'}, status=400)
 
@@ -184,14 +207,18 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
         if clock_in < shift.starts_at - timedelta(hours=12) or clock_out > shift.ends_at + timedelta(hours=12):
             return Response({'detail': 'Die gemeldete Zeit liegt zu weit außerhalb der geplanten Schicht.'}, status=400)
 
+        outside_plan = outside_planned_shift(shift, clock_in, clock_out)
         entry = TimeEntry.objects.create(
             worker=worker,
             shift=shift,
             clock_in=clock_in,
             clock_out=clock_out,
-            approved=True,
+            approved=not outside_plan,
             break_minutes=shift.break_minutes,
-            edit_reason=f'{SELF_REPORTED_REASON}\nLEGAL_ACKNOWLEDGED',
+            edit_reason=(
+                f'{SELF_REPORTED_REASON}\nLEGAL_ACKNOWLEDGED'
+                + (f'\n{OUTSIDE_SHIFT_PLAN_PREFIX} Arbeitszeit außerhalb des Dienstplans' if outside_plan else '')
+            ),
         )
         worker_name = request.user.get_full_name() or request.user.email
         for recipient in User.objects.filter(role__in=[User.Role.ADMIN, User.Role.MANAGER], is_active=True):
@@ -199,7 +226,7 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
                 user=recipient,
                 kind=f'shift-time-report-review-{entry.id}',
                 defaults={
-                    'title': 'Arbeitszeit automatisch freigegeben',
+                    'title': 'Arbeitszeit außerhalb des Dienstplans: Bitte prüfen' if outside_plan else 'Arbeitszeit automatisch freigegeben',
                     'body': f'{worker_name}: {timezone.localtime(clock_in):%d.%m.%Y %H:%M}–{timezone.localtime(clock_out):%H:%M}',
                     'action_url': '/time',
                 },
@@ -209,9 +236,14 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
             kind=f'shift-time-report-{shift.id}-{worker.id}',
             read_at__isnull=True,
         ).update(read_at=timezone.now())
-        audit(request, 'time.shift_reported', entry, {'shift': str(shift.id)})
+        audit(request, 'time.shift_reported', entry, {
+            'shift': str(shift.id),
+            'review_required': outside_plan,
+            'outside_plan': outside_plan,
+        })
         payload = self.get_serializer(entry).data
-        payload['review_required'] = False
+        payload['review_required'] = outside_plan
+        payload['review_reason'] = 'Arbeitszeit außerhalb des Dienstplans' if outside_plan else ''
         return Response(payload, status=201)
 
     @action(detail=False, methods=['post'], url_path='set-for-shift', permission_classes=[IsAdminOrManager])
@@ -363,7 +395,7 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
 
         reason = str(request.data.get('reason') or '').strip()
         previous_reason = entry.edit_reason or ''
-        if changed or previous_reason.startswith(OUTSIDE_GEOFENCE_PREFIX):
+        if changed or previous_reason.startswith((OUTSIDE_GEOFENCE_PREFIX, OUTSIDE_SHIFT_PLAN_PREFIX)) or OUTSIDE_SHIFT_PLAN_PREFIX in previous_reason:
             review_note = reason or 'Durch Administration geprüft und freigegeben.'
             entry.edit_reason = f'{previous_reason}\nADMIN_REVIEW: {review_note}'.strip()
 

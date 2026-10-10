@@ -366,11 +366,14 @@ export default function WiwEmployeeScheduleMobile() {
 
   function openTimeReport(shift: any) {
     setMessage('');
+    // During the final hour, default to the current real clock time instead
+    // of suggesting a future clock-out that has not happened yet.
+    const early = new Date(shift.ends_at).getTime() > Date.now();
     setTimeReport({
       shift,
       date: dateKey(shift.starts_at),
       clock_in: time(shift.starts_at),
-      clock_out: time(shift.ends_at),
+      clock_out: early ? time(new Date().toISOString()) : time(shift.ends_at),
     });
   }
 
@@ -408,7 +411,9 @@ export default function WiwEmployeeScheduleMobile() {
       setSelected((current: any) => current?.id === updatedShift.id ? updatedShift : current);
       sessionStorage.removeItem(`aplus:time-report-later:${timeReport.shift.id}`);
       setTimeReport(undefined);
-      setMessage('Arbeitszeit gespeichert und automatisch freigegeben.');
+      setMessage(entry.review_required
+        ? 'Arbeitszeit gespeichert. Die Administration muss die Zeit außerhalb des Dienstplans prüfen.'
+        : 'Arbeitszeit gespeichert und automatisch freigegeben.');
     } catch (error: any) {
       setMessage(error?.message || 'Arbeitszeit konnte nicht gesendet werden.');
     } finally {
@@ -418,7 +423,11 @@ export default function WiwEmployeeScheduleMobile() {
 
   if (!active || !mobile || !worker) return null;
   const host = document.querySelector('.app-main') || document.body;
-  const selectedEnded = Boolean(selected?.ends_at && new Date(selected.ends_at).getTime() <= Date.now());
+  const selectedReadyForTimeReport = Boolean(
+    selected?.starts_at && selected?.ends_at
+    && Date.now() >= new Date(selected.starts_at).getTime()
+    && Date.now() >= new Date(selected.ends_at).getTime() - 60 * 60 * 1000
+  );
   const selectedIsOwn = selected?._selected_worker
     ? Boolean(selected._selected_worker.is_me)
     : isOwnShift(selected);
@@ -473,7 +482,7 @@ export default function WiwEmployeeScheduleMobile() {
           <button type="button" className="primary" disabled={busy} onClick={() => void claim(selected)}>{busy ? 'Bitte warten …' : 'Schicht übernehmen'}</button>
         ) : !isOwnShift(selected) ? (
           <button type="button" disabled>Nur sichtbar · Service Zeitplan</button>
-        ) : selectedEnded ? (
+        ) : selectedReadyForTimeReport ? (
           selected.my_time_entry ? (
             <button type="button" disabled>
               {selected.my_time_entry.clock_out
@@ -590,13 +599,13 @@ export default function WiwEmployeeScheduleMobile() {
         </div>
         <div className="wiw-release-copy">
           <strong>Wie lange hast du tatsächlich gearbeitet?</strong>
-          <p>Trage die tatsächlichen Zeiten ein. Nach dem Speichern sind sie automatisch freigegeben; Korrekturen bleiben nachvollziehbar.</p>
+          <p>Ab einer Stunde vor Schichtende kannst du deine bereits geleistete Arbeitszeit erfassen. Liegt deine Zeit außerhalb der geplanten Schicht, prüft sie die Administration.</p>
         </div>
         <div className="wiw-time-report-fields">
           <GermanTimeField label="Von" value={timeReport.clock_in} disabled={busy} onChange={(value) => setTimeReport({ ...timeReport, clock_in: value })} />
           <GermanTimeField label="Bis" value={timeReport.clock_out} disabled={busy} onChange={(value) => setTimeReport({ ...timeReport, clock_out: value })} />
         </div>
-        <p className="wiw-time-report-legal-note">Mit dem Speichern bestätigst du, dass Beginn und Ende korrekt sind.</p>
+        <p className="wiw-time-report-legal-note">Trage keine zukünftige Endzeit ein. Mit dem Speichern bestätigst du, dass Beginn und Ende korrekt sind.</p>
         {message && <div className="wiw-release-error">{message}</div>}
         <div className="wiw-release-actions">
           <button type="button" disabled={busy} onClick={closeTimeReport}>Abbrechen</button>
