@@ -1512,7 +1512,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
         ])
         pay_rows.append([
             period, f"{item['hourly_rate']} €", item['night_hours'],
-            item['saturday_hours'], item['sunday_hours'], item['holiday_hours'],
+            item['saturday_hours'], item['sunday_hours'],
             payroll.get('gross_amount') or '',
             payroll.get('net_amount') or '',
             payroll.get('lexware_payout_amount') or payroll.get('transferred_amount') or '',
@@ -1531,8 +1531,14 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
     document.add_heading('Lexware und Zuschlagsstunden', level=2)
     _docx_table(
         document,
-        ['Monat', 'Satz', 'Nacht', 'Sa.', 'So.', 'Feiertag Hessen', 'Brutto €', 'Netto €', 'Auszahlung €'],
+        ['Monat', 'Satz', 'Nacht', 'Sa.', 'So.', 'Brutto €', 'Netto €', 'Auszahlung €'],
         pay_rows,
+    )
+    document.add_heading('Feiertagsstunden Hessen', level=3)
+    _docx_table(
+        document,
+        ['Monat', 'Feiertag Std.', 'Feiertag Zuschlag €'],
+        [[row.year_month.strftime('%m/%Y'), item['holiday_hours'], item['holiday_surcharge_amount']] for row, item in prepared],
     )
 
     for row, item in prepared:
@@ -1960,7 +1966,8 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
             item.get('ist_hours') or '0',
             item.get('balance_reference_hours') or '0',
             item.get('monthly_balance_hours') or '0',
-            str(scoped_saldo), item.get('holiday_hours') or '0', item.get('holiday_surcharge_amount') or '0',
+            str(scoped_saldo),
+            f"{item.get('holiday_hours') or '0'} Std. / {item.get('holiday_surcharge_amount') or '0'} €",
             item.get('reconciliation_status') or '',
         ])
         finance_rows.append([
@@ -1976,7 +1983,7 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
         ])
     _docx_table(
         document,
-        ['Mitarbeiter', 'Monat', 'Beschäftigung', 'Ist', 'Basis', 'Saldo Monat', 'Saldo gesamt', 'Feiertag Hessen Std.', 'Feiertag Zuschlag €', 'Status'],
+        ['Mitarbeiter', 'Monat', 'Beschäftigung', 'Ist', 'Basis', 'Saldo Monat', 'Saldo gesamt', 'Feiertag Hessen Std. / €', 'Status'],
         attendance_rows,
     )
     document.add_heading('Lexware Lohn und Abwesenheiten', level=2)
