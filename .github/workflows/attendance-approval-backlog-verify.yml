@@ -35,6 +35,8 @@ jobs:
           from django.db.migrations.recorder import MigrationRecorder
           exists = MigrationRecorder.Migration.objects.filter(app="core", name="0057_backfill_completed_native_time_approvals").exists()
           q = TimeEntry.objects.filter(wiw_time_id__isnull=True, clock_out__isnull=False, approved=False).exclude(worker__user__email__iendswith="@sync.invalid")
-          print("ATTENDANCE_QUEUE_VERIFIED migration_applied=%s auto_approved_legacy=%s pending_manual_review=%s geofence_review=%s correction_requests=%s" % (exists, AuditLog.objects.filter(action="time.auto_approved_legacy_completed").count(), q.count(), q.filter(edit_reason__startswith="OUTSIDE_GEOFENCE:").count(), TimeEntryCorrection.objects.filter(status="pending", entry__wiw_time_id__isnull=True).count()), flush=True)
+          shift_window_applied = MigrationRecorder.Migration.objects.filter(app="core", name="0058_review_extended_shift_times_october_2026").exists()
+          new_reviews = AuditLog.objects.filter(action="time.outside_plan_reopened").count()
+          print("ATTENDANCE_QUEUE_VERIFIED migration_applied=%s auto_approved_legacy=%s pending_manual_review=%s geofence_review=%s correction_requests=%s shift_window_applied=%s outside_plan_reopened=%s outside_plan_pending=%s" % (exists, AuditLog.objects.filter(action="time.auto_approved_legacy_completed").count(), q.count(), q.filter(edit_reason__startswith="OUTSIDE_GEOFENCE:").count(), TimeEntryCorrection.objects.filter(status="pending", entry__wiw_time_id__isnull=True).count(), shift_window_applied, new_reviews, q.filter(edit_reason__contains="OUTSIDE_SHIFT_PLAN:").count()), flush=True)
           '
           REMOTE
