@@ -602,6 +602,7 @@ class WorkingTimeSetting(TimestampedModel):
     night_surcharge_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
     saturday_surcharge_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
     sunday_surcharge_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    holiday_surcharge_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
     active = models.BooleanField(default=True)
     excluded = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
