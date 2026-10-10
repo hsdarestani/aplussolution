@@ -13,7 +13,6 @@ import {
 import { api } from './api';
 import { ShiftPlanAttachments } from './ShiftPlanAttachments';
 import GermanTimeField from './GermanTimeField';
-import TimeReportLegalConfirmation from './TimeReportLegalConfirmation';
 import { schedulePalette } from './scheduleClientPalette';
 import './wiw-schedule-mobile.css';
 import './wiw-employee-schedule-mobile.css';
@@ -148,7 +147,6 @@ export default function WiwEmployeeScheduleMobile() {
   const [changeHistory, setChangeHistory] = useState<any[]>([]);
   const [releaseTarget, setReleaseTarget] = useState<any>();
   const [timeReport, setTimeReport] = useState<any>();
-  const [timeReportLegalOpen, setTimeReportLegalOpen] = useState(false);
   const [releaseCandidates, setReleaseCandidates] = useState<any[]>([]);
   const [requestedWorkerId, setRequestedWorkerId] = useState('');
   const [releaseLoading, setReleaseLoading] = useState(false);
@@ -378,7 +376,6 @@ export default function WiwEmployeeScheduleMobile() {
 
   function closeTimeReport() {
     if (busy) return;
-    setTimeReportLegalOpen(false);
     setTimeReport(undefined);
   }
 
@@ -388,7 +385,7 @@ export default function WiwEmployeeScheduleMobile() {
       return;
     }
     setMessage('');
-    setTimeReportLegalOpen(true);
+    void submitTimeReport();
   }
 
   async function submitTimeReport() {
@@ -410,9 +407,8 @@ export default function WiwEmployeeScheduleMobile() {
       setMine((current) => current.map((shift) => shift.id === updatedShift.id ? updatedShift : shift));
       setSelected((current: any) => current?.id === updatedShift.id ? updatedShift : current);
       sessionStorage.removeItem(`aplus:time-report-later:${timeReport.shift.id}`);
-      setTimeReportLegalOpen(false);
       setTimeReport(undefined);
-      setMessage('Arbeitszeit wurde zur Freigabe an die Administration gesendet.');
+      setMessage('Arbeitszeit gespeichert und automatisch freigegeben.');
     } catch (error: any) {
       setMessage(error?.message || 'Arbeitszeit konnte nicht gesendet werden.');
     } finally {
@@ -594,20 +590,20 @@ export default function WiwEmployeeScheduleMobile() {
         </div>
         <div className="wiw-release-copy">
           <strong>Wie lange hast du tatsächlich gearbeitet?</strong>
-          <p>Trage Beginn und Ende ein. Die Administration prüft und bestätigt die Zeit anschließend.</p>
+          <p>Trage die tatsächlichen Zeiten ein. Nach dem Speichern sind sie automatisch freigegeben; Korrekturen bleiben nachvollziehbar.</p>
         </div>
         <div className="wiw-time-report-fields">
           <GermanTimeField label="Von" value={timeReport.clock_in} disabled={busy} onChange={(value) => setTimeReport({ ...timeReport, clock_in: value })} />
           <GermanTimeField label="Bis" value={timeReport.clock_out} disabled={busy} onChange={(value) => setTimeReport({ ...timeReport, clock_out: value })} />
         </div>
+        <p className="wiw-time-report-legal-note">Mit dem Speichern bestätigst du, dass Beginn und Ende korrekt sind.</p>
         {message && <div className="wiw-release-error">{message}</div>}
         <div className="wiw-release-actions">
           <button type="button" disabled={busy} onClick={closeTimeReport}>Abbrechen</button>
-          <button type="button" className="primary" disabled={busy} onClick={requestTimeReportSubmit}>{busy ? 'Wird gesendet …' : 'Zur Freigabe senden'}</button>
+          <button type="button" className="primary" disabled={busy} onClick={requestTimeReportSubmit}>{busy ? 'Wird gesendet …' : 'Arbeitszeit speichern'}</button>
         </div>
       </section>
     </div>, document.body) : null}
-    <TimeReportLegalConfirmation open={timeReportLegalOpen} busy={busy} onCancel={() => setTimeReportLegalOpen(false)} onConfirm={() => void submitTimeReport()} />
     {releaseTarget ? createPortal(<div className="wiw-release-backdrop" role="presentation" onClick={closeReleaseChooser}>
       <section className="wiw-release-sheet" role="dialog" aria-modal="true" aria-labelledby="wiw-release-title" onClick={(event) => event.stopPropagation()}>
         <div className="wiw-release-handle" />
