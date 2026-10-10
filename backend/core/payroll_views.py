@@ -24,6 +24,7 @@ from .permissions import IsAdminOrManager
 from .serializers import PayrollStatementSerializer
 from .services import audit
 from .working_time import dec, settings_rows, update_record
+from .payroll_engine import _surcharge_amount
 from .lexware_pdf import parse_lexware_pdf
 from .lexware_aliases import aliases_for_target, canonical_target
 from .wiw_sync import calculate_completeness
@@ -440,6 +441,27 @@ def worktime_settings(request):
         setting.excluded = bool(row.get('excluded', False))
         setting.notes = str(row.get('notes') or '')
         setting.save()
+
+        # Apply newly saved contractual holiday rates to the open payroll
+        # period immediately. Closed months stay frozen for audit integrity.
+        open_period = timezone.localdate().replace(day=1)
+        for account in WorkingTimeAccountRecord.objects.filter(
+            worker=worker, year_month__gte=open_period
+        ).iterator():
+            entries = list(account.raw_entries or [])
+            changed = False
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                entry['holiday_surcharge_percent'] = str(setting.holiday_surcharge_percent)
+                entry['holiday_surcharge_amount'] = str(_surcharge_amount(
+                    int(entry.get('holiday_minutes') or 0),
+                    dec(account.hourly_rate), setting.holiday_surcharge_percent,
+                ))
+                changed = True
+            if changed:
+                account.raw_entries = entries
+                account.save(update_fields=['raw_entries'])
 
         worker.monthly_hours = monthly_limit
         worker.tariff_hourly_rate = hourly_rate
