@@ -143,7 +143,7 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
         """Let a worker report actual hours after a completed scheduled shift.
 
         This flow intentionally does not request or store GPS coordinates. The
-        submitted row always enters the existing admin review queue.
+        submitted row is approved on save; later corrections remain auditable.
         """
         if request.user.role != User.Role.WORKER:
             return Response({'detail': 'Arbeitszeiten können hier nur Mitarbeiter melden.'}, status=403)
@@ -189,7 +189,7 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
             shift=shift,
             clock_in=clock_in,
             clock_out=clock_out,
-            approved=False,
+            approved=True,
             break_minutes=shift.break_minutes,
             edit_reason=f'{SELF_REPORTED_REASON}\nLEGAL_ACKNOWLEDGED',
         )
@@ -199,7 +199,7 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
                 user=recipient,
                 kind=f'shift-time-report-review-{entry.id}',
                 defaults={
-                    'title': 'Arbeitszeit wartet auf Freigabe',
+                    'title': 'Arbeitszeit automatisch freigegeben',
                     'body': f'{worker_name}: {timezone.localtime(clock_in):%d.%m.%Y %H:%M}–{timezone.localtime(clock_out):%H:%M}',
                     'action_url': '/time',
                 },
@@ -211,7 +211,7 @@ class TimeEntryViewSet(LegacyTimeEntryViewSet):
         ).update(read_at=timezone.now())
         audit(request, 'time.shift_reported', entry, {'shift': str(shift.id)})
         payload = self.get_serializer(entry).data
-        payload['review_required'] = True
+        payload['review_required'] = False
         return Response(payload, status=201)
 
     @action(detail=False, methods=['post'], url_path='set-for-shift', permission_classes=[IsAdminOrManager])
