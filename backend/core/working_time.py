@@ -454,19 +454,22 @@ def _entry_totals(raw_entries: list[dict]) -> dict:
         'night_minutes': 0,
         'saturday_minutes': 0,
         'sunday_minutes': 0,
+        'holiday_minutes': 0,
         'night_surcharge_amount': Decimal('0.00'),
         'saturday_surcharge_amount': Decimal('0.00'),
         'sunday_surcharge_amount': Decimal('0.00'),
+        'holiday_surcharge_amount': Decimal('0.00'),
     }
     for entry in raw_entries or []:
-        for key in ('worked_minutes', 'break_minutes', 'night_minutes', 'saturday_minutes', 'sunday_minutes'):
+        for key in ('worked_minutes', 'break_minutes', 'night_minutes', 'saturday_minutes', 'sunday_minutes', 'holiday_minutes'):
             totals[key] += int(entry.get(key) or 0)
-        for key in ('night_surcharge_amount', 'saturday_surcharge_amount', 'sunday_surcharge_amount'):
+        for key in ('night_surcharge_amount', 'saturday_surcharge_amount', 'sunday_surcharge_amount', 'holiday_surcharge_amount'):
             totals[key] += dec(entry.get(key) or 0)
     totals['surcharge_amount'] = (
         totals['night_surcharge_amount']
         + totals['saturday_surcharge_amount']
         + totals['sunday_surcharge_amount']
+        + totals['holiday_surcharge_amount']
     ).quantize(TWO)
     return totals
 
@@ -781,9 +784,11 @@ def record_dict(
         'night_hours': str((Decimal(totals['night_minutes']) / Decimal('60')).quantize(TWO)),
         'saturday_hours': str((Decimal(totals['saturday_minutes']) / Decimal('60')).quantize(TWO)),
         'sunday_hours': str((Decimal(totals['sunday_minutes']) / Decimal('60')).quantize(TWO)),
+        'holiday_hours': str((Decimal(totals['holiday_minutes']) / Decimal('60')).quantize(TWO)),
         'night_surcharge_amount': str(totals['night_surcharge_amount'].quantize(TWO)),
         'saturday_surcharge_amount': str(totals['saturday_surcharge_amount'].quantize(TWO)),
         'sunday_surcharge_amount': str(totals['sunday_surcharge_amount'].quantize(TWO)),
+        'holiday_surcharge_amount': str(totals['holiday_surcharge_amount'].quantize(TWO)),
         'surcharge_amount': str(surcharge_amount),
         'entry_count': len(row.raw_entries or []),
         'source': row.source,
@@ -923,6 +928,7 @@ def settings_rows() -> list[dict]:
         'night_surcharge_percent': str(item.night_surcharge_percent),
         'saturday_surcharge_percent': str(item.saturday_surcharge_percent),
         'sunday_surcharge_percent': str(item.sunday_surcharge_percent),
+        'holiday_surcharge_percent': str(item.holiday_surcharge_percent),
         'active': item.active,
         'excluded': item.excluded,
         'notes': item.notes,
@@ -980,6 +986,7 @@ def export_csv(queryset) -> HttpResponse:
         'Lexware Auszahlung', 'Lexware Zahlungsdatum', 'Vergütungsart',
         'Abgleich Status', 'Prüfhinweise', 'Nacht Abgleich',
         'Samstag Abgleich', 'Sonntag Abgleich',
+        'Feiertag Hessen Std.', 'Feiertag Zuschlag EUR', 'Feiertag Abgleich',
         'Abwesenheit Tage', 'Urlaub Tage', 'Krank Tage', 'Sonstige Abwesenheit Tage',
         'Lexware Krank Stunden', 'Lexware U1 Erstattung',
     ])
@@ -1007,6 +1014,8 @@ def export_csv(queryset) -> HttpResponse:
             (data.get('surcharge_reconciliation') or {}).get('night', {}).get('status') or '',
             (data.get('surcharge_reconciliation') or {}).get('saturday', {}).get('status') or '',
             (data.get('surcharge_reconciliation') or {}).get('sunday', {}).get('status') or '',
+            data['holiday_hours'], data['holiday_surcharge_amount'],
+            (data.get('surcharge_reconciliation') or {}).get('holiday', {}).get('status') or '',
             data.get('absence_days') or 0,
             data.get('vacation_days') or 0,
             data.get('sick_days') or 0,
@@ -1110,6 +1119,8 @@ def export_xlsx(queryset) -> HttpResponse:
             (data.get('surcharge_reconciliation') or {}).get('night', {}).get('status') or '',
             (data.get('surcharge_reconciliation') or {}).get('saturday', {}).get('status') or '',
             (data.get('surcharge_reconciliation') or {}).get('sunday', {}).get('status') or '',
+            float(data['holiday_hours']), float(data['holiday_surcharge_amount']),
+            (data.get('surcharge_reconciliation') or {}).get('holiday', {}).get('status') or '',
             int(data.get('absence_days') or 0),
             int(data.get('vacation_days') or 0),
             int(data.get('sick_days') or 0),
@@ -1130,7 +1141,7 @@ def export_xlsx(queryset) -> HttpResponse:
     detail_headers = [
         'Mitarbeiter', 'Monat', 'Datum', 'Kunde', 'Ort', 'Service',
         'Plan Beginn', 'Plan Ende', 'Ist Beginn', 'Ist Ende', 'Pause Min.',
-        'Netto Std.', 'Nacht Std.', 'Samstag Std.', 'Sonntag Std.', 'Notiz',
+        'Netto Std.', 'Nacht Std.', 'Samstag Std.', 'Sonntag Std.', 'Feiertag Hessen Std.', 'Notiz',
         'Zeitprüfung',
     ]
     detail_ws.append(detail_headers)
@@ -1157,6 +1168,7 @@ def export_xlsx(queryset) -> HttpResponse:
                 float((Decimal(int(entry.get('night_minutes') or 0)) / Decimal('60')).quantize(TWO)),
                 float((Decimal(int(entry.get('saturday_minutes') or 0)) / Decimal('60')).quantize(TWO)),
                 float((Decimal(int(entry.get('sunday_minutes') or 0)) / Decimal('60')).quantize(TWO)),
+                float((Decimal(int(entry.get('holiday_minutes') or 0)) / Decimal('60')).quantize(TWO)),
                 shift_notes.get(str(entry.get('shift_id') or ''), ''),
                 _entry_time_review(entry),
             ])
@@ -1619,6 +1631,7 @@ def _surcharge_reconciliation(item: dict) -> dict:
         ('night_hours', 'night_surcharge_amount', 'night', 'Nacht', 'nacht'),
         ('saturday_hours', 'saturday_surcharge_amount', 'saturday', 'Samstag', 'samstag'),
         ('sunday_hours', 'sunday_surcharge_amount', 'sunday', 'Sonntag', 'sonntag'),
+        ('holiday_hours', 'holiday_surcharge_amount', 'holiday', 'Feiertag Hessen', 'feiertag'),
     )
     for hours_key, amount_key, output_key, label, keyword in mapping:
         app_hours = dec(item.get(hours_key))
@@ -1698,6 +1711,7 @@ def _reconciliation_status(item: dict) -> tuple[str, list[str]]:
         ('night_hours', 'night_surcharge_amount', 'Nacht', 'nacht'),
         ('saturday_hours', 'saturday_surcharge_amount', 'Samstag', 'samstag'),
         ('sunday_hours', 'sunday_surcharge_amount', 'Sonntag', 'sonntag'),
+        ('holiday_hours', 'holiday_surcharge_amount', 'Feiertag Hessen', 'feiertag'),
     ):
         app_hours = dec(item.get(hours_key))
         app_amount = dec(item.get(amount_key))
