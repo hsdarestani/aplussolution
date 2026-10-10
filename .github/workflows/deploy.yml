@@ -205,6 +205,8 @@ jobs:
 
           docker compose exec -T backend python manage.py check
           docker compose exec -T backend python manage.py migrate --check
+          # Read-only post-deploy confirmation of migration result (counts only).
+          docker compose exec -T backend python manage.py shell -c "from core.models import TimeEntry, AuditLog; q=TimeEntry.objects.filter(wiw_time_id__isnull=True, clock_out__isnull=False, approved=False).exclude(worker__user__email__iendswith='@sync.invalid'); print('ATTENDANCE_APPROVAL_STATUS auto_approved_legacy=%s pending_manual_review=%s' % (AuditLog.objects.filter(action='time.auto_approved_legacy_completed').count(), q.count()))"
           docker compose exec -T backend python manage.py shell -c "from core.push_notifications import push_provider_status; s=push_provider_status(); assert s.get('android') and s.get('ios'), s; print('PRIMARY_PUSH_PROVIDERS_OK')"
           curl -fsS --max-time 15 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/
 
