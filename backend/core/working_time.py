@@ -1271,7 +1271,7 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
 
     data = [[
         'Monat', 'Ist', 'Soll', 'Basis', 'Monatssaldo', 'Übertrag', 'Saldo',
-        'Nacht', 'Sa.', 'So.', 'Abw.', 'Urlaub', 'Krank', 'Zuschläge', 'Brutto', 'Überwiesen',
+        'Nacht', 'Sa.', 'So.', 'Feiertag', 'Abw.', 'Urlaub', 'Krank', 'Zuschläge', 'Brutto', 'Überwiesen',
     ]]
     for row, item in prepared:
         payroll = item.get('payroll_statement') or {}
@@ -1283,12 +1283,12 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
         data.append([
             row.year_month.strftime('%m/%Y'), item['ist_hours'], item['soll_hours'],
             item['balance_reference_hours'], item['monthly_balance_hours'], str(scoped_previous),
-            str(scoped_saldo), item['night_hours'], item['saturday_hours'], item['sunday_hours'],
+            str(scoped_saldo), item['night_hours'], item['saturday_hours'], item['sunday_hours'], item['holiday_hours'],
             item['absence_days'], item['vacation_days'], item['sick_days'],
             f"{item['surcharge_amount']} €", f"{item['gross_with_surcharges']} €",
             f"{payroll.get('transferred_amount')} €" if payroll.get('transferred_amount') else '–',
         ])
-    table = Table(data, repeatRows=1, colWidths=[18 * mm] + [16 * mm] * 15)
+    table = Table(data, repeatRows=1, colWidths=[18 * mm] + [16 * mm] * 16)
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#163B65')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -1304,7 +1304,7 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
     story.append(Paragraph(
         'IST basiert auf tatsächlichen freigegebenen A+ Zeiten und historischem WIW Altbestand. '
         'Dienstplanzeiten dienen nur als Vergleich. Bezahlt sind die tatsächlich für den Monat '
-        'hinterlegten bezahlten Stunden. Zuschläge verwenden die je Mitarbeiter hinterlegten Prozentsätze.',
+        'hinterlegten bezahlten Stunden. Feiertage gelten für Hessen; Zuschläge sind vertraglich einzustellen und nicht gesetzlich als Auszahlung vorgeschrieben.',
         styles['BodyText'],
     ))
 
@@ -1332,13 +1332,13 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
         story.append(Paragraph(
             f"Gearbeitet: {item['ist_hours']} Std. · {basis_label}: {item['balance_reference_hours']} Std. · "
             f"Saldo Monat: {item['monthly_balance_hours']} Std. · Saldo Prüfjahr: {scoped_saldo} Std. · "
-            f"{compensation_text} · Brutto mit Zuschlägen: {item['gross_with_surcharges']} € · "
+            f"{compensation_text} · Feiertag Hessen: {item['holiday_hours']} Std. ({item['holiday_surcharge_amount']} €) · Brutto mit Zuschlägen: {item['gross_with_surcharges']} € · "
             f"Lexware überwiesen: {payroll.get('transferred_amount') or '–'} € · "
             f"Abwesenheit: {item['absence_days']} Tage (Urlaub {item['vacation_days']}, Krank {item['sick_days']})",
             styles['BodyText'],
         ))
         story.append(Spacer(1, 6))
-        detail = [['Datum', 'Kunde / Ort', 'Plan', 'Ist', 'Pause', 'Netto', 'Nacht', 'Sa.', 'So.', 'Notiz']]
+        detail = [['Datum', 'Kunde / Ort', 'Plan', 'Ist', 'Pause', 'Netto', 'Nacht', 'Sa.', 'So.', 'Feiertag', 'Notiz']]
         for entry in entries:
             client = str(entry.get('client_name') or 'Ohne Zuordnung')
             location = str(entry.get('location_name') or entry.get('position_name') or '')
@@ -1354,12 +1354,13 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
                 _pdf_hours(entry.get('night_minutes')),
                 _pdf_hours(entry.get('saturday_minutes')),
                 _pdf_hours(entry.get('sunday_minutes')),
+                _pdf_hours(entry.get('holiday_minutes')),
                 shift_notes.get(str(entry.get('shift_id') or ''), ''),
             ])
         detail_table = Table(
             detail,
             repeatRows=1,
-            colWidths=[20 * mm, 43 * mm, 28 * mm, 28 * mm, 17 * mm, 17 * mm, 16 * mm, 14 * mm, 14 * mm, 45 * mm],
+            colWidths=[20 * mm, 43 * mm, 28 * mm, 28 * mm, 17 * mm, 17 * mm, 16 * mm, 14 * mm, 14 * mm, 14 * mm, 31 * mm],
         )
         detail_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#163B65')),
@@ -1510,7 +1511,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
         ])
         pay_rows.append([
             period, f"{item['hourly_rate']} €", item['night_hours'],
-            item['saturday_hours'], item['sunday_hours'],
+            item['saturday_hours'], item['sunday_hours'], item['holiday_hours'],
             payroll.get('gross_amount') or '',
             payroll.get('net_amount') or '',
             payroll.get('lexware_payout_amount') or payroll.get('transferred_amount') or '',
@@ -1529,7 +1530,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
     document.add_heading('Lexware und Zuschlagsstunden', level=2)
     _docx_table(
         document,
-        ['Monat', 'Satz', 'Nacht', 'Sa.', 'So.', 'Brutto €', 'Netto €', 'Auszahlung €'],
+        ['Monat', 'Satz', 'Nacht', 'Sa.', 'So.', 'Feiertag Hessen', 'Brutto €', 'Netto €', 'Auszahlung €'],
         pay_rows,
     )
 
@@ -1573,6 +1574,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
                 _pdf_hours(entry.get('night_minutes')),
                 _pdf_hours(entry.get('saturday_minutes')),
                 _pdf_hours(entry.get('sunday_minutes')),
+                _pdf_hours(entry.get('holiday_minutes')),
                 shift_notes.get(str(entry.get('shift_id') or ''), ''),
             ])
         _docx_table(
@@ -1581,7 +1583,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
             daily,
         )
         document.add_paragraph('Zuschlagsstunden und Notizen', style='Heading3')
-        _docx_table(document, ['Datum', 'Nacht', 'Sa.', 'So.', 'Notiz'], extras)
+        _docx_table(document, ['Datum', 'Nacht', 'Sa.', 'So.', 'Feiertag Hessen', 'Notiz'], extras)
         flagged = [
             (_pdf_date(entry.get('local_clock_in') or entry.get('clock_in')), _entry_time_review(entry))
             for entry in entries
@@ -1829,7 +1831,7 @@ def lexware_reconciliation_docx(queryset, period: date) -> bytes:
             _employment_label(item.get('employment_type') or ''),
             item['ist_hours'],
             'nicht belegt' if item.get('historical_soll_unverified') else item['soll_hours'],
-            item['paid_total_hours'], item['monthly_balance_hours'], status,
+            item['paid_total_hours'], item['monthly_balance_hours'], item['holiday_hours'], item['holiday_surcharge_amount'], status,
         ])
         payments_rows.append([
             item['employee_name'], compensation,
@@ -1847,7 +1849,7 @@ def lexware_reconciliation_docx(queryset, period: date) -> bytes:
     document.add_heading('Arbeitszeit und Abgleich', level=2)
     _docx_table(
         document,
-        ['Mitarbeiter', 'Beschäftigung', 'Ist', 'Soll A+', 'Bezahlt', 'Saldo', 'Status'],
+        ['Mitarbeiter', 'Beschäftigung', 'Ist', 'Soll A+', 'Bezahlt', 'Saldo', 'Feiertag Std.', 'Feiertag Zuschlag €', 'Status'],
         hours_rows,
     )
     document.add_heading('Lexware Lohnabrechnung', level=2)
@@ -1957,7 +1959,7 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
             item.get('ist_hours') or '0',
             item.get('balance_reference_hours') or '0',
             item.get('monthly_balance_hours') or '0',
-            str(scoped_saldo),
+            str(scoped_saldo), item.get('holiday_hours') or '0', item.get('holiday_surcharge_amount') or '0',
             item.get('reconciliation_status') or '',
         ])
         finance_rows.append([
@@ -1973,7 +1975,7 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
         ])
     _docx_table(
         document,
-        ['Mitarbeiter', 'Monat', 'Beschäftigung', 'Ist', 'Basis', 'Saldo Monat', 'Saldo gesamt', 'Status'],
+        ['Mitarbeiter', 'Monat', 'Beschäftigung', 'Ist', 'Basis', 'Saldo Monat', 'Saldo gesamt', 'Feiertag Hessen Std.', 'Feiertag Zuschlag €', 'Status'],
         attendance_rows,
     )
     document.add_heading('Lexware Lohn und Abwesenheiten', level=2)
@@ -2061,7 +2063,7 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
         'Bei Stundenlohn wird mit den in Lexware ausgewiesenen bezahlten Stunden abgeglichen. '
         'Bei Gehalt ist die vertragliche Sollzeit die Saldo Basis. Abwesenheiten werden separat ausgewiesen '
         'und verändern den Saldo nicht automatisch. Prüfpunkte sind Hinweise zur manuellen Klärung, '
-        'keine automatische Korrektur von Lohn, Beschäftigung oder erfassten Pausen.'
+        'keine automatische Korrektur von Lohn, Beschäftigung oder erfassten Pausen. Feiertagsstunden beziehen sich auf die gesetzlichen Feiertage in Hessen; ein Zuschlag entsteht nur nach der hinterlegten Vereinbarung.'
     )
     note.runs[0].italic = True
     return _docx_bytes(document)
