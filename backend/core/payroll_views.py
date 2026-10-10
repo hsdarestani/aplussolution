@@ -435,6 +435,7 @@ def worktime_settings(request):
         setting.night_surcharge_percent = max(Decimal('0'), dec(row.get('night_surcharge_percent')))
         setting.saturday_surcharge_percent = max(Decimal('0'), dec(row.get('saturday_surcharge_percent')))
         setting.sunday_surcharge_percent = max(Decimal('0'), dec(row.get('sunday_surcharge_percent')))
+        setting.holiday_surcharge_percent = max(Decimal('0'), dec(row.get('holiday_surcharge_percent', setting.holiday_surcharge_percent)))
         setting.active = bool(row.get('active', True))
         setting.excluded = bool(row.get('excluded', False))
         setting.notes = str(row.get('notes') or '')
