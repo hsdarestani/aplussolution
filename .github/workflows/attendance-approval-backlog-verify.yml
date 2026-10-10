@@ -1,0 +1,40 @@
+name: Verify A+ attendance approval backlog
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/attendance-approval-backlog-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      PRIMARY_HOST: ${{ secrets.STRATO_HOST }}
+      PRIMARY_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Read-only verification on STRATO primary
+        run: |
+          set -euo pipefail
+          test -n "$PRIMARY_HOST"
+          test -n "$PRIMARY_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$PRIMARY_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 -o ServerAliveInterval=10 -o ServerAliveCountMax=6 root@"$PRIMARY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell -c '
+          from core.models import TimeEntry, AuditLog
+          from core.attendance_models import TimeEntryCorrection
+          from django.db.migrations.recorder import MigrationRecorder
+          exists = MigrationRecorder.Migration.objects.filter(app="core", name="0057_backfill_completed_native_time_approvals").exists()
+          q = TimeEntry.objects.filter(wiw_time_id__isnull=True, clock_out__isnull=False, approved=False).exclude(worker__user__email__iendswith="@sync.invalid")
+          print("ATTENDANCE_QUEUE_VERIFIED migration_applied=%s auto_approved_legacy=%s pending_manual_review=%s geofence_review=%s correction_requests=%s" % (exists, AuditLog.objects.filter(action="time.auto_approved_legacy_completed").count(), q.count(), q.filter(edit_reason__startswith="OUTSIDE_GEOFENCE:").count(), TimeEntryCorrection.objects.filter(status="pending", entry__wiw_time_id__isnull=True).count()), flush=True)
+          '
+          REMOTE
