@@ -18,6 +18,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from rest_framework.decorators import api_view
 
+from .hessen_holidays import hessen_holiday
 from .models import ClientCompany, Location, Shift, TimeEntry, User, WorkerProfile
 from .shift_rules import normalized_groups
 from .shift_slots import ShiftSlot
@@ -427,6 +428,7 @@ def _attendance_metrics(entry, range_start, range_end):
     local_end = timezone.localtime(end)
     night_gross = 0
     sunday_gross = 0
+    holiday_gross = 0
     cursor = local_start.date() - timedelta(days=1)
     last_day = local_end.date()
     while cursor <= last_day:
@@ -438,6 +440,10 @@ def _attendance_metrics(entry, range_start, range_end):
             sunday_start = _local_boundary(cursor, 0)
             sunday_end = _local_boundary(cursor + timedelta(days=1), 0)
             sunday_gross += _overlap_minutes(start, end, sunday_start, sunday_end)
+        if hessen_holiday(cursor):
+            holiday_gross += _overlap_minutes(
+                start, end, _local_boundary(cursor, 0), _local_boundary(cursor + timedelta(days=1), 0)
+            )
         cursor += timedelta(days=1)
 
     return {
@@ -446,6 +452,7 @@ def _attendance_metrics(entry, range_start, range_end):
         'net': net,
         'night': round(night_gross * factor),
         'sunday': round(sunday_gross * factor),
+        'holiday': round(holiday_gross * factor),
     }
 
 
@@ -502,10 +509,11 @@ def export_attendance_pdf(request):
             'net': 0,
             'night': 0,
             'sunday': 0,
+            'holiday': 0,
             'pause': 0,
             'entries': 0,
         })
-        for field in ('net', 'night', 'sunday', 'pause'):
+        for field in ('net', 'night', 'sunday', 'holiday', 'pause'):
             row[field] += metrics[field]
         row['entries'] += 1
 
@@ -580,6 +588,7 @@ def export_attendance_pdf(request):
             Paragraph('Arbeitszeit netto', head_style),
             Paragraph('Nacht 23–06', head_style),
             Paragraph('Sonntag', head_style),
+            Paragraph('Feiertag Hessen', head_style),
             Paragraph('Pause', head_style),
             Paragraph('Einträge', head_style),
         ]]
@@ -589,22 +598,24 @@ def export_attendance_pdf(request):
                 Paragraph(_minutes_hhmm(row['net']) + ' Std.', cell_style),
                 Paragraph(_minutes_hhmm(row['night']) + ' Std.', cell_style),
                 Paragraph(_minutes_hhmm(row['sunday']) + ' Std.', cell_style),
+                Paragraph(_minutes_hhmm(row['holiday']) + ' Std.', cell_style),
                 Paragraph(_minutes_hhmm(row['pause']) + ' Std.', cell_style),
                 Paragraph(str(row['entries']), cell_style),
             ])
         total = {
             field: sum(row[field] for row in group_rows)
-            for field in ('net', 'night', 'sunday', 'pause', 'entries')
+            for field in ('net', 'night', 'sunday', 'holiday', 'pause', 'entries')
         }
         table_data.append([
             Paragraph('Gesamt', cell_bold),
             Paragraph(_minutes_hhmm(total['net']) + ' Std.', cell_bold),
             Paragraph(_minutes_hhmm(total['night']) + ' Std.', cell_bold),
             Paragraph(_minutes_hhmm(total['sunday']) + ' Std.', cell_bold),
+            Paragraph(_minutes_hhmm(total['holiday']) + ' Std.', cell_bold),
             Paragraph(_minutes_hhmm(total['pause']) + ' Std.', cell_bold),
             Paragraph(str(total['entries']), cell_bold),
         ])
-        table = Table(table_data, repeatRows=1, colWidths=[70 * mm, 38 * mm, 34 * mm, 34 * mm, 30 * mm, 24 * mm], hAlign='LEFT')
+        table = Table(table_data, repeatRows=1, colWidths=[66 * mm, 34 * mm, 32 * mm, 32 * mm, 32 * mm, 27 * mm, 24 * mm], hAlign='LEFT')
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#10253F')),
             ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#D0D5DD')),
@@ -623,11 +634,11 @@ def export_attendance_pdf(request):
     story.append(Spacer(1, 2 * mm))
     story.append(Paragraph(
         'Pausen werden von der Nettoarbeitszeit abgezogen. Da keine genaue Pausenlage gespeichert wird, '
-        'werden Pausen bei Nacht- und Sonntagszuschlagszeiten anteilig auf die Anwesenheitszeit verteilt.',
+        'werden Pausen bei Nacht-, Sonntags- und hessischen Feiertagsstunden anteilig auf die Anwesenheitszeit verteilt.',
         note_style,
     ))
     story.append(Paragraph(
-        'Berücksichtigt werden ausschließlich abgeschlossene und durch die Administration freigegebene Zeiteinträge.',
+        'Berücksichtigt werden abgeschlossene, automatisch freigegebene A+ Arbeitszeiten sowie historische WIW Zeiteinträge.',
         note_style,
     ))
 
@@ -704,6 +715,7 @@ def export_attendance_details_pdf(request):
             'clock_out': local_out.strftime('%H:%M'),
             'pause': int(metrics['pause']),
             'net': int(metrics['net']),
+            'holiday': int(metrics['holiday']),
             'note': str(shift.notes or '').strip() if shift else '',
             'approved': effective_approved,
             'status': 'Freigegeben' if effective_approved else 'Offen',
@@ -781,6 +793,7 @@ def export_attendance_details_pdf(request):
             Paragraph('Ende', head_style),
             Paragraph('Pause', head_style),
             Paragraph('Netto', head_style),
+            Paragraph('Feiertag Hessen', head_style),
             Paragraph('Notiz', head_style),
             Paragraph('Status', head_style),
         ]]
@@ -795,13 +808,14 @@ def export_attendance_details_pdf(request):
                 Paragraph(row['clock_out'], cell_style),
                 Paragraph(_minutes_hhmm(row['pause']), cell_style),
                 Paragraph(_minutes_hhmm(row['net']), cell_style),
+                Paragraph(_minutes_hhmm(row['holiday']), cell_style),
                 Paragraph(escape(row['note']).replace('\r\n', '\n').replace('\r', '\n').replace('\n', '<br/>'), cell_style),
                 Paragraph(row['status'], cell_bold),
             ])
         table = Table(
             table_data,
             repeatRows=1,
-            colWidths=[18 * mm, 31 * mm, 28 * mm, 31 * mm, 21 * mm, 16 * mm, 16 * mm, 16 * mm, 18 * mm, 45 * mm, 22 * mm],
+            colWidths=[18 * mm, 29 * mm, 26 * mm, 27 * mm, 20 * mm, 16 * mm, 16 * mm, 16 * mm, 18 * mm, 26 * mm, 40 * mm, 20 * mm],
             hAlign='LEFT',
         )
         style = TableStyle([
@@ -809,8 +823,8 @@ def export_attendance_details_pdf(request):
             ('GRID', (0, 0), (-1, -1), 0.35, colors.HexColor('#D0D5DD')),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8FAFC')]),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('ALIGN', (5, 1), (8, -1), 'CENTER'),
-            ('ALIGN', (10, 1), (10, -1), 'CENTER'),
+            ('ALIGN', (5, 1), (9, -1), 'CENTER'),
+            ('ALIGN', (11, 1), (11, -1), 'CENTER'),
             ('LEFTPADDING', (0, 0), (-1, -1), 4),
             ('RIGHTPADDING', (0, 0), (-1, -1), 4),
             ('TOPPADDING', (0, 0), (-1, -1), 5),
@@ -818,7 +832,7 @@ def export_attendance_details_pdf(request):
         ])
         for row_index, row in enumerate(rows, start=1):
             status_color = colors.HexColor('#E9F4E4') if row['approved'] else colors.HexColor('#FFF4CC')
-            style.add('BACKGROUND', (10, row_index), (10, row_index), status_color)
+            style.add('BACKGROUND', (11, row_index), (11, row_index), status_color)
         table.setStyle(style)
         story.append(table)
 
