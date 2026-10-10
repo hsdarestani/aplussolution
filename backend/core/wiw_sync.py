@@ -415,7 +415,8 @@ class WhenIWorkSynchronizer:
                 obj.shift = shift
                 obj.clock_in = clock_in
                 obj.clock_out = as_datetime(first(item, 'end_time', 'clock_out', 'end'))
-                obj.approved = bool(first(item, 'approved', 'is_approved', default=False))
+                # Completed WIW evidence is trusted on import; an open timer is never approved.
+                obj.approved = bool(obj.clock_out)
                 obj.edit_reason = str(first(item, 'notes', 'reason', default=''))
                 obj.wiw_time_id = wiw_id
                 obj.wiw_payload = item
