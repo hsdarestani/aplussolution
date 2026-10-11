@@ -28,6 +28,7 @@ jobs:
           docker compose exec -T backend python manage.py shell -c '
           from core.models import Document, PayrollStatement
           from django.db.models import Q
+          from core.payroll_views import _lexware_document_kind
           items = Document.objects.filter(folder="payroll", title__startswith="Lexware 2025")
           print("LEXWARE_ARCHIVES_2025: total=%s large_annual=%s uv_annual=%s tax_annual=%s monthly=%s" % (
             items.count(),
@@ -37,11 +38,16 @@ jobs:
             items.filter(title__contains="2025-12").count()
           ), flush=True)
           print("LEXWARE_IMPORTED_PAYROLL_2025_12=%s" % PayrollStatement.objects.filter(period__year=2025,period__month=12).count(),flush=True)
+          print("LEXWARE_ARCHIVE_CATEGORIES:", sorted(set((_lexware_document_kind(d.title), d.title[:15]) for d in items)),flush=True)
+          print("LEXWARE_ARCHIVE_SIZES_MB:", sorted(round(d.file.size / 1048576, 2) for d in items if "lohnkonto" in d.title.lower())[:20],flush=True)
           '
-          docker compose logs --since 90m --no-color backend 2>&1 | python3 -c '
+          printf 'DISK_AVAILABLE: '; df -h /opt/aplussolution | tail -n 1 | awk '{print $4}'
+          printf 'CONTAINER_MEM: '; docker stats --no-stream --format '{{.Name}}={{.MemUsage}}' | grep 'aplussolution-backend' | head -n 1 || true
+          docker compose logs --since 12h --no-color backend 2>&1 | python3 -c '
           import sys,re,collections
           data=sys.stdin.read()
-          keys=re.findall(r"\\b(?:[A-Za-z_][A-Za-z_0-9.]*(?:Error|Exception|Timeout)|SIGKILL|WORKER TIMEOUT|Out of memory|OOMKilled)\\b",data,re.I)
-          print("RECENT_BACKEND_EXCEPTION_TYPES:",dict(collections.Counter(keys).most_common(20)),flush=True)
+          keys=re.findall(r"\\b(?:[A-Za-z_][A-Za-z_0-9.]*(?:Error|Exception|Timeout)|SIGKILL|WORKER TIMEOUT|Out of memory|OOMKilled|No space left|Permission denied)\\b",data,re.I)
+          print("BACKEND_EXCEPTION_TYPES:",dict(collections.Counter(keys).most_common(25)),flush=True)
+          print("BACKEND_GUNICORN_TIMEOUTS:",len(re.findall(r"WORKER TIMEOUT|worker was sent SIGKILL",data,re.I)),flush=True)
           '
           REMOTE
