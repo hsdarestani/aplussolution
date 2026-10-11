@@ -50,6 +50,12 @@ def dec(value: Any, default='0') -> Decimal:
         return Decimal(default).quantize(TWO)
 
 
+def signed_saldo(value: Any) -> str:
+    """Display a visible +/- without changing stored hours or payroll values."""
+    amount = dec(value)
+    return f"{'+' if amount >= 0 else '-'}{abs(amount):.2f}".replace('.', ',')
+
+
 def month_start(value: str | date) -> date:
     if isinstance(value, date):
         return value.replace(day=1)
@@ -999,10 +1005,10 @@ def export_csv(queryset) -> HttpResponse:
         scoped_previous = (scoped_saldo - dec(data.get('monthly_balance_hours'))).quantize(TWO)
         writer.writerow([
             data['employee_name'], data['year_month'], data['ist_hours'],
-            data['soll_hours'], data['difference_hours'], str(scoped_previous),
-            data['paid_hours'], data['manual_adjustment'], str(scoped_saldo),
+            data['soll_hours'], data['difference_hours'], signed_saldo(scoped_previous),
+            data['paid_hours'], data['manual_adjustment'], signed_saldo(scoped_saldo),
             data['hourly_rate'], data['gross_amount'],
-            data['employment_type'], data['paid_total_hours'], data['monthly_balance_hours'],
+            data['employment_type'], data['paid_total_hours'], signed_saldo(data['monthly_balance_hours']),
             data['night_hours'], data['saturday_hours'], data['sunday_hours'],
             data['surcharge_amount'], data['gross_with_surcharges'],
             payroll.get('gross_amount') or '', payroll.get('net_amount') or '',
@@ -1141,7 +1147,7 @@ def export_xlsx(queryset) -> HttpResponse:
     detail_ws = wb.create_sheet('Tagesnachweise')
     detail_headers = [
         'Mitarbeiter', 'Monat', 'Datum', 'Kunde', 'Ort', 'Service',
-        'Plan Beginn', 'Plan Ende', 'Ist Beginn', 'Ist Ende', 'Pause Min.',
+        'Soll Beginn', 'Soll Ende', 'Ist Beginn', 'Ist Ende', 'Pause Min.',
         'Netto Std.', 'Nacht Std.', 'Samstag Std.', 'Sonntag Std.', 'Feiertag Hessen Std.', 'Notiz',
         'Zeitprüfung',
     ]
@@ -1272,7 +1278,7 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
 
     data = [[
         'Monat', 'Ist', 'Soll', 'Basis', 'Monatssaldo', 'Übertrag', 'Saldo',
-        'Nacht', 'Sa.', 'So.', 'Feiertag', 'Abw.', 'Urlaub', 'Krank', 'Zuschläge', 'Brutto', 'Überwiesen',
+        'Nacht', 'Sa.', 'So.', 'Feiertag', 'Abw.', 'Urlaub', 'Krank', 'Zuschläge', 'Brutto', 'Auszahlungsbetrag',
     ]]
     for row, item in prepared:
         payroll = item.get('payroll_statement') or {}
@@ -1283,8 +1289,8 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
         scoped_previous = (scoped_saldo - dec(item.get('monthly_balance_hours'))).quantize(TWO)
         data.append([
             row.year_month.strftime('%m/%Y'), item['ist_hours'], item['soll_hours'],
-            item['balance_reference_hours'], item['monthly_balance_hours'], str(scoped_previous),
-            str(scoped_saldo), item['night_hours'], item['saturday_hours'], item['sunday_hours'], item['holiday_hours'],
+            item['balance_reference_hours'], signed_saldo(item['monthly_balance_hours']), signed_saldo(scoped_previous),
+            signed_saldo(scoped_saldo), item['night_hours'], item['saturday_hours'], item['sunday_hours'], item['holiday_hours'],
             item['absence_days'], item['vacation_days'], item['sick_days'],
             f"{item['surcharge_amount']} €", f"{item['gross_with_surcharges']} €",
             f"{payroll.get('transferred_amount')} €" if payroll.get('transferred_amount') else '–',
@@ -1332,14 +1338,14 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
         )
         story.append(Paragraph(
             f"Gearbeitet: {item['ist_hours']} Std. · {basis_label}: {item['balance_reference_hours']} Std. · "
-            f"Saldo Monat: {item['monthly_balance_hours']} Std. · Saldo Prüfjahr: {scoped_saldo} Std. · "
+            f"Saldo Monat: {signed_saldo(item['monthly_balance_hours'])} Std. · Saldo Prüfjahr: {signed_saldo(scoped_saldo)} Std. · "
             f"{compensation_text} · Feiertag Hessen: {item['holiday_hours']} Std. ({item['holiday_surcharge_amount']} €) · Brutto mit Zuschlägen: {item['gross_with_surcharges']} € · "
-            f"Lexware überwiesen: {payroll.get('transferred_amount') or '–'} € · "
+            f"Lexware Auszahlungsbetrag: {payroll.get('transferred_amount') or '–'} € · "
             f"Abwesenheit: {item['absence_days']} Tage (Urlaub {item['vacation_days']}, Krank {item['sick_days']})",
             styles['BodyText'],
         ))
         story.append(Spacer(1, 6))
-        detail = [['Datum', 'Kunde / Ort', 'Plan', 'Ist', 'Pause', 'Netto', 'Nacht', 'Sa.', 'So.', 'Feiertag', 'Notiz']]
+        detail = [['Datum', 'Kunde / Ort', 'Soll', 'Ist', 'Pause', 'Netto', 'Nacht', 'Sa.', 'So.', 'Feiertag', 'Notiz']]
         for entry in entries:
             client = str(entry.get('client_name') or 'Ohne Zuordnung')
             location = str(entry.get('location_name') or entry.get('position_name') or '')
@@ -1508,7 +1514,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
             period, _employment_label(item.get('employment_type') or ''),
             item['ist_hours'],
             'nicht belegt' if item.get('historical_soll_unverified') else item['soll_hours'],
-            item['balance_reference_hours'], item['monthly_balance_hours'], str(saldo),
+            item['balance_reference_hours'], signed_saldo(item['monthly_balance_hours']), signed_saldo(saldo),
         ])
         pay_rows.append([
             period, f"{item['hourly_rate']} €", item['night_hours'],
@@ -1531,7 +1537,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
     document.add_heading('Lexware und Zuschlagsstunden', level=2)
     _docx_table(
         document,
-        ['Monat', 'Satz', 'Nacht', 'Sa.', 'So.', 'Brutto €', 'Netto €', 'Auszahlung €'],
+        ['Monat', 'Satz', 'Nacht', 'Sa.', 'So.', 'Brutto €', 'Netto €', 'Auszahlungsbetrag €'],
         pay_rows,
     )
     document.add_heading('Feiertagsstunden Hessen', level=3)
@@ -1559,8 +1565,8 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
         run.font.size = Pt(14)
         document.add_paragraph(
             f"Ist {item['ist_hours']} Std. | Soll {'nicht belegt' if item.get('historical_soll_unverified') else item['soll_hours']} Std. | "
-            f"Basis {item['balance_reference_hours']} Std. | Monatssaldo {item['monthly_balance_hours']} Std. | "
-            f"Saldo Prüfjahr {scoped_saldo} Std. | "
+            f"Basis {item['balance_reference_hours']} Std. | Monatssaldo {signed_saldo(item['monthly_balance_hours'])} Std. | "
+            f"Saldo Prüfjahr {signed_saldo(scoped_saldo)} Std. | "
             f"Abwesenheit {item['absence_days']} Tage | Urlaub {item['vacation_days']} | Krank {item['sick_days']}"
         )
         daily, extras = [], []
@@ -1586,7 +1592,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
             ])
         _docx_table(
             document,
-            ['Datum', 'Kunde', 'Ort', 'Plan', 'Ist', 'Pause', 'Netto'],
+            ['Datum', 'Kunde', 'Ort', 'Soll', 'Ist', 'Pause', 'Netto'],
             daily,
         )
         document.add_paragraph('Zuschlagsstunden und Notizen', style='Heading3')
@@ -1838,7 +1844,7 @@ def lexware_reconciliation_docx(queryset, period: date) -> bytes:
             _employment_label(item.get('employment_type') or ''),
             item['ist_hours'],
             'nicht belegt' if item.get('historical_soll_unverified') else item['soll_hours'],
-            item['paid_total_hours'], item['monthly_balance_hours'], item['holiday_hours'], item['holiday_surcharge_amount'], status,
+            item['paid_total_hours'], signed_saldo(item['monthly_balance_hours']), item['holiday_hours'], item['holiday_surcharge_amount'], status,
         ])
         payments_rows.append([
             item['employee_name'], compensation,
@@ -1863,7 +1869,7 @@ def lexware_reconciliation_docx(queryset, period: date) -> bytes:
     _docx_table(
         document,
         ['Mitarbeiter', 'Vergütung', 'Brutto €', 'Netto €',
-         'Auszahlung €', 'Urlaub', 'Krank', 'Lexware Krank Std.', 'U1 €'],
+         'Auszahlungsbetrag €', 'Urlaub', 'Krank', 'Lexware Krank Std.', 'U1 €'],
         payments_rows,
     )
 
@@ -1965,8 +1971,8 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
             _employment_label(item.get('employment_type') or ''),
             item.get('ist_hours') or '0',
             item.get('balance_reference_hours') or '0',
-            item.get('monthly_balance_hours') or '0',
-            str(scoped_saldo),
+            signed_saldo(item.get('monthly_balance_hours')),
+            signed_saldo(scoped_saldo),
             f"{item.get('holiday_hours') or '0'} Std. / {item.get('holiday_surcharge_amount') or '0'} €",
             item.get('reconciliation_status') or '',
         ])
@@ -1989,7 +1995,7 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
     document.add_heading('Lexware Lohn und Abwesenheiten', level=2)
     _docx_table(
         document,
-        ['Mitarbeiter', 'Monat', 'Brutto €', 'Netto €', 'Auszahlung €',
+        ['Mitarbeiter', 'Monat', 'Brutto €', 'Netto €', 'Auszahlungsbetrag €',
          'Urlaub', 'Krank', 'Krank Std.', 'U1 €'],
         finance_rows,
     )
