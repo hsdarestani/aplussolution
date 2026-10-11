@@ -1,0 +1,68 @@
+name: Recover archived 2025 July to November payroll identities
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/lexware-2025-jul-nov-reconcile.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  safe_reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PRIMARY_HOST: ${{ secrets.STRATO_HOST }}
+      PRIMARY_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Verify evidence, back up PostgreSQL, and append unmatched historical Lexware records
+        run: |
+          set -euo pipefail
+          test -n "$PRIMARY_HOST"
+          test -n "$PRIMARY_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$PRIMARY_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 -o ServerAliveInterval=10 -o ServerAliveCountMax=10 root@"$PRIMARY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          echo "=== Preflight: read-only month evidence, no payroll modification ==="
+          for M in 07 08 09 10 11; do
+            REPORT="$(docker compose exec -T backend python manage.py reconcile_lexware_archive --year 2025 --month "$M" < /dev/null)"
+            echo "PREVIEW_MONTH=$M $REPORT"
+            printf '%s\n' "$REPORT" | python3 -c '
+          import sys,json
+          s=sys.stdin.read().strip().splitlines()[-1]
+          if not s.startswith("LEXWARE_HISTORICAL_RECONCILE "): sys.exit("Dry run summary missing")
+          d=json.loads(s.split(" ",1)[1])
+          if d["source_files"] < 2 or d["archive_parse_errors"] or d["applied"]:
+            sys.exit("Unsafe or incomplete archived evidence")
+          '
+          done
+          echo "=== Confirm compressed PostgreSQL safety backup ==="
+          install -d -m 700 /var/backups/aplussolution
+          umask 077
+          BACKUP="/var/backups/aplussolution/lexware-jul-nov-pre-reconcile-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+          docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" --no-owner --no-acl' < /dev/null | gzip -1 > "$BACKUP"
+          test -s "$BACKUP"
+          gzip -t "$BACKUP"
+          echo "BACKUP_VERIFIED bytes=$(wc -c < "$BACKUP")"
+          echo "=== Recover unmatched identities from payroll evidence, earliest month first ==="
+          for M in 07 08 09 10 11; do
+            echo "APPLY_MONTH=$M"
+            docker compose exec -T backend python manage.py reconcile_lexware_archive --year 2025 --month "$M" --apply < /dev/null
+          done
+          echo "=== Verify historical profiles cannot log in or fabricate hours ==="
+          docker compose exec -T backend python manage.py shell -c '
+          from core.models import WorkerProfile,PayrollStatement,WorkingTimeAccountRecord
+          profiles=WorkerProfile.objects.filter(employment_type="historisch")
+          active_logins=profiles.filter(user__is_active=True).count()
+          active_workers=profiles.filter(active=True).count()
+          fake_hours=WorkingTimeAccountRecord.objects.filter(worker__employment_type="historisch").count()
+          print("HISTORY_VERIFIED profiles=%s active_logins=%s active_workers=%s fake_worktime_records=%s" % (profiles.count(),active_logins,active_workers,fake_hours),flush=True)
+          for month in range(7,13):
+              q=PayrollStatement.objects.filter(period__year=2025,period__month=month)
+              print("PAYROLL_VERIFIED month=%02d rows=%d historical=%d" % (month,q.count(),q.filter(worker__employment_type="historisch").count()),flush=True)
+          if active_logins or active_workers or fake_hours:
+              raise Exception("Unsafe historical records")
+          ' < /dev/null
+          REMOTE
