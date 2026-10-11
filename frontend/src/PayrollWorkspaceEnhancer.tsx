@@ -632,6 +632,30 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     }
   }
 
+  async function archiveLargeLexwarePdf(file: File, period: string) {
+    // Browser sends 2 MiB chunks. Annual 27 MB+ Lohnkonto uploads no longer
+    // require one long-running multipart request on the production server.
+    const session: any = await api('working-time/lexware-archive/begin/', {
+      method: 'POST',
+      body: JSON.stringify({ filename: file.name, size: file.size, period }),
+    });
+    const size = Number(session.chunk_size);
+    const count = Number(session.chunks);
+    if (!size || !count) throw new Error('Ungültige Antwort vom Lexware Upload Server.');
+    for (let index = 0; index < count; index += 1) {
+      const body = new FormData();
+      body.append('upload_token', session.upload_token);
+      body.append('index', String(index));
+      body.append('chunk', file.slice(index * size, Math.min(file.size, (index + 1) * size)), file.name);
+      await api('working-time/lexware-archive/chunk/', { method: 'POST', body });
+      setMessage(`Jahresnachweis ${file.name}: Teil ${index + 1} von ${count} übertragen.`);
+    }
+    return api('working-time/lexware-archive/finish/', {
+      method: 'POST',
+      body: JSON.stringify({ upload_token: session.upload_token }),
+    });
+  }
+
   async function importLexware() {
     if (!lexwareFiles.length) {
       setMessage('Bitte mindestens eine Lexware Datei auswählen.');
@@ -661,13 +685,29 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
           .map(match => String(match?.[1] || '')),
       ].filter(Boolean)));
       if (autoMode && years.length === 1) form.append('year', years[0]);
-      lexwareFiles.forEach(file => form.append('files', file));
-
-      const result: any = await api('working-time/lexware-import/', { method: 'POST', body: form });
+      const largeAnnual = lexwareFiles.filter(file =>
+        file.size > 8 * 1024 * 1024
+        && file.name.toLowerCase().endsWith('.pdf')
+        && /lohnkonto|lohnjournal|lohnsteuerbescheinigung|meldebescheinigung/i.test(file.name)
+      );
+      const regularFiles = lexwareFiles.filter(file => !largeAnnual.includes(file));
+      if (largeAnnual.length && autoMode) {
+        throw new Error('Große Jahresnachweise bitte mit einem konkreten Monat separat hochladen.');
+      }
+      const annualResults = [];
+      for (const file of largeAnnual) {
+        annualResults.push(await archiveLargeLexwarePdf(file, lexwarePeriod));
+      }
+      regularFiles.forEach(file => form.append('files', file));
+      const result: any = regularFiles.length
+        ? await api('working-time/lexware-import/', { method: 'POST', body: form })
+        : { files: largeAnnual.length, employees: [], archived_documents: [], unmatched_count: 0 };
       await loadRows();
       setUnmatchedReport(null);
       const archiveErrors = Array.isArray(result?.archive_errors) ? result.archive_errors : [];
-      const archived = Array.isArray(result?.archived_documents) ? result.archived_documents.length : 0;
+      const archived = (Array.isArray(result?.archived_documents) ? result.archived_documents.length : 0)
+        + annualResults.filter(row => row.status === 'archived').length;
+      const alreadyArchived = annualResults.filter(row => row.status === 'already_archived').length;
       const periods = Array.isArray(result?.detected_periods) && result.detected_periods.length
         ? result.detected_periods.map((item: string) => monthLabel(item)).join(', ')
         : (lexwarePeriod ? monthLabel(lexwarePeriod) : '');
@@ -678,6 +718,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         `${result?.files || lexwareFiles.length} Datei(en), ` +
         `${result?.employees?.length || 0} Mitarbeiter Monatszuordnungen, ` +
         `${archived} Nachweise archiviert. ` +
+        (alreadyArchived ? `${alreadyArchived} bereits zuvor archiviert. ` : '') +
         (unmatchedRows
           ? `${unmatchedUnique} eindeutige nicht zugeordnete Fälle (${unmatchedRows} Nachweiszeilen).`
           : 'Alle Nachweise zugeordnet.') +
