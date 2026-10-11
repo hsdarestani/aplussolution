@@ -647,7 +647,10 @@ def worktime_monthly_attendance_pdf(request, worker_id):
     month_text = str(request.query_params.get('month') or '').strip()
     if not re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', month_text):
         return Response({'detail': 'Monat muss im Format JJJJ-MM angegeben werden.'}, status=400)
-    period = datetime.strptime(month_text, '%Y-%m').date()
+    try:
+        period = datetime.strptime(month_text, '%Y-%m').date()
+    except ValueError:
+        return Response({'detail': 'Ungültiger Monat oder Jahr.'}, status=400)
     worker = get_object_or_404(WorkerProfile.objects.select_related('user'), pk=worker_id)
     record = get_object_or_404(
         WorkingTimeAccountRecord.objects.select_related('worker__user'),
