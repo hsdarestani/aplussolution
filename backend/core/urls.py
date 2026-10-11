@@ -1,6 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
+from . import lexware_chunk_archive
 from . import client_portal_user_admin, admin_center_views, advanced_views, akten_views, announcement_api, attendance_actions, attendance_views, automation_ai_views, automation_views, availability_admin, avatar_views, calendar_sync, client_admin_views, client_order_planning, client_portal_auth, client_portal_views, contract_views, document_catalog_views, document_center_views, employee_schedule, global_search_views, integration_views, live_admin_center, live_operations, mobile_schedule, native_operations, oauth_views, one_time_ops, payroll_views, portal_views, push_views, schedule_reports, searchable_views, semantic_ai_views, shift_card_admin, shift_plan_views, shift_slot_actions, shift_views, store_review_views, time_views, views, wiw_dashboard, worker_portal_views
 
 router = DefaultRouter()
@@ -139,6 +140,9 @@ urlpatterns = [
     path('working-time/records/<uuid:pk>/details/', automation_views.worktime_record_detail),
     path('working-time/rebuild-all/', automation_views.worktime_rebuild_all),
     path('working-time/lexware-import/', payroll_views.lexware_bank_import),
+    path('working-time/lexware-archive/begin/', lexware_chunk_archive.lexware_archive_begin),
+    path('working-time/lexware-archive/chunk/', lexware_chunk_archive.lexware_archive_chunk),
+    path('working-time/lexware-archive/finish/', lexware_chunk_archive.lexware_archive_finish),
     path('working-time/lexware-unmatched/', payroll_views.lexware_unmatched_review),
     path('working-time/lexware-readiness/', payroll_views.lexware_readiness),
     path('working-time/lexware-backfill/', payroll_views.lexware_backfill_archived),
