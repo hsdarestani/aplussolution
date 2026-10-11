@@ -1242,6 +1242,125 @@ def _pdf_hours(minutes) -> str:
     return f'{total // 60}:{total % 60:02d}'
 
 
+GERMAN_MONTH_NAMES = (
+    '', 'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+    'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+)
+
+
+def german_month_name(period: date) -> str:
+    return f'{GERMAN_MONTH_NAMES[period.month]} {period.year}'
+
+
+def worker_monthly_attendance_pdf(worker: WorkerProfile, record: WorkingTimeAccountRecord) -> bytes:
+    """One focused work-time PDF for a single employee and calendar month.
+
+    Soll and Ist are local start/end clock times, Pause is minutes, and Netto,
+    Sa., So. and Feiertag are net HH:MM hours. Use the same persisted evidence
+    as the payroll report; do not fabricate hours for unapproved times.
+    """
+    from xml.sax.saxutils import escape as escape_xml
+
+    if str(record.worker_id) != str(worker.id):
+        raise ValueError('Monatskonto gehört nicht zum ausgewählten Mitarbeiter.')
+    entries = sorted(
+        (row for row in (record.raw_entries or []) if isinstance(row, dict)),
+        key=lambda row: str(row.get('local_clock_in') or row.get('clock_in') or ''),
+    )
+    name = (worker.user.get_full_name() or str(worker.user)).strip()
+    month_name = german_month_name(record.year_month)
+    buffer = io.BytesIO()
+    document = SimpleDocTemplate(
+        buffer, pagesize=landscape(A4),
+        leftMargin=12 * mm, rightMargin=12 * mm,
+        topMargin=14 * mm, bottomMargin=14 * mm,
+        title=f'Arbeitszeitnachweis - {name} - {month_name}',
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'MonthlyTimeTitle', parent=styles['Heading1'], alignment=TA_CENTER,
+        textColor=colors.HexColor('#163B65'), spaceAfter=6,
+    )
+    meta_style = ParagraphStyle(
+        'MonthlyTimeMeta', parent=styles['BodyText'], alignment=TA_CENTER,
+        spaceAfter=14, fontSize=10, leading=14,
+    )
+    story = [
+        Paragraph('Arbeitszeitnachweis', title_style),
+        Paragraph(f'{escape_xml(name)} · {escape_xml(month_name)}', meta_style),
+    ]
+    headers = ['Datum', 'Soll', 'Ist', 'Pause', 'Netto', 'Sa.', 'So.', 'Feiertag']
+    table_rows = [headers]
+    totals = {key: 0 for key in (
+        'break_minutes', 'worked_minutes', 'saturday_minutes',
+        'sunday_minutes', 'holiday_minutes',
+    )}
+    for entry in entries:
+        for key in totals:
+            totals[key] += int(entry.get(key) or 0)
+        table_rows.append([
+            _pdf_date(entry.get('local_clock_in') or entry.get('clock_in')),
+            f"{_pdf_clock(entry.get('planned_start'))} - {_pdf_clock(entry.get('planned_end'))}",
+            f"{_pdf_clock(entry.get('local_clock_in') or entry.get('clock_in'))} - "
+            f"{_pdf_clock(entry.get('local_clock_out') or entry.get('clock_out'))}",
+            f"{int(entry.get('break_minutes') or 0)} Min.",
+            _pdf_hours(entry.get('worked_minutes')),
+            _pdf_hours(entry.get('saturday_minutes')),
+            _pdf_hours(entry.get('sunday_minutes')),
+            _pdf_hours(entry.get('holiday_minutes')),
+        ])
+    if entries:
+        table_rows.append([
+            'Gesamt', '', '', f"{totals['break_minutes']} Min.",
+            _pdf_hours(totals['worked_minutes']),
+            _pdf_hours(totals['saturday_minutes']),
+            _pdf_hours(totals['sunday_minutes']),
+            _pdf_hours(totals['holiday_minutes']),
+        ])
+    else:
+        table_rows.append(['Keine freigegebenen Zeiten', '', '', '', '', '', '', ''])
+
+    table = Table(
+        table_rows, repeatRows=1,
+        colWidths=[30 * mm, 42 * mm, 42 * mm, 24 * mm,
+                   28 * mm, 27 * mm, 27 * mm, 33 * mm],
+        hAlign='CENTER',
+    )
+    table_styles = [
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#163B65')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('GRID', (0, 0), (-1, -1), .4, colors.HexColor('#CED7E3')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F5F8FC')]),
+        ('LEFTPADDING', (0, 0), (-1, -1), 8),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (3, 1), (-1, -1), 'RIGHT'),
+    ]
+    if entries:
+        table_styles += [
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#E6EEF7')),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ]
+    else:
+        table_styles.append(('SPAN', (0, 1), (-1, 1)))
+    table.setStyle(TableStyle(table_styles))
+    story.append(table)
+    story.append(Spacer(1, 12))
+    story.append(Paragraph(
+        'Soll = geplante Arbeitszeit. Ist = erfasste Arbeitszeit. '
+        'Netto, Sa., So. und Feiertag = tatsächlich geleistete Stunden '
+        'nach anteiligem Pausenabzug. Feiertag gilt nach dem hessischen Kalender. '
+        'Nur freigegebene Ist Zeiten sind enthalten; offene Prüffälle bleiben bis zur Freigabe ausgenommen.',
+        styles['BodyText'],
+    ))
+    document.build(story)
+    return buffer.getvalue()
+
+
 def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
     rows = list(queryset.select_related('worker__user'))
     statements = _statement_map(rows)
