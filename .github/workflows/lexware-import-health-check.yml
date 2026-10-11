@@ -1,0 +1,47 @@
+name: Diagnose Lexware annual import failures
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/lexware-import-health-check.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      PRIMARY_HOST: ${{ secrets.STRATO_HOST }}
+      PRIMARY_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Inspect STRATO errors and Lexware archival status without personal data
+        run: |
+          set -euo pipefail
+          test -n "$PRIMARY_HOST"
+          test -n "$PRIMARY_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$PRIMARY_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 root@"$PRIMARY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell -c '
+          from core.models import Document, PayrollStatement
+          from django.db.models import Q
+          items = Document.objects.filter(folder="payroll", title__startswith="Lexware 2025")
+          print("LEXWARE_ARCHIVES_2025: total=%s large_annual=%s uv_annual=%s tax_annual=%s monthly=%s" % (
+            items.count(),
+            items.filter(title__icontains="Lohnkonto(1)").count() + items.filter(title__icontains="Lohnkonto_2025").count(),
+            items.filter(title__icontains="Lohnkonto-UV").count(),
+            items.filter(title__icontains="Lohnsteuerbescheinigungen").count(),
+            items.filter(title__contains="2025-12").count()
+          ), flush=True)
+          print("LEXWARE_IMPORTED_PAYROLL_2025_12=%s" % PayrollStatement.objects.filter(period__year=2025,period__month=12).count(),flush=True)
+          '
+          docker compose logs --since 90m --no-color backend 2>&1 | python3 -c '
+          import sys,re,collections
+          data=sys.stdin.read()
+          keys=re.findall(r"\\b(?:[A-Za-z_][A-Za-z_0-9.]*(?:Error|Exception|Timeout)|SIGKILL|WORKER TIMEOUT|Out of memory|OOMKilled)\\b",data,re.I)
+          print("RECENT_BACKEND_EXCEPTION_TYPES:",dict(collections.Counter(keys).most_common(20)),flush=True)
+          '
+          REMOTE
