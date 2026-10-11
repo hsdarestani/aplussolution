@@ -20,9 +20,13 @@ def _money(value: str | None) -> Decimal | None:
         return None
 
 
-def _pages(payload: bytes) -> list[str]:
+def _pages(payload: bytes, *, limit: int | None = None) -> list[str]:
     reader = PdfReader(io.BytesIO(payload))
-    return [(page.extract_text() or '') for page in reader.pages]
+    return [
+        page.extract_text() or ''
+        for index, page in enumerate(reader.pages)
+        if limit is None or index < limit
+    ]
 
 
 def _employee_name_from_payslip(text: str) -> str:
@@ -320,7 +324,11 @@ def parse_u1(payload: bytes) -> list[dict]:
 
 
 def parse_lexware_pdf(payload: bytes) -> tuple[str, list[dict]]:
-    pages = _pages(payload)
+    # First identify the document from its opening pages. A Lohnkonto can
+    # contain hundreds of pages (e.g. 301 pages / 27 MB). Scanning all of
+    # them just to decide that it is archival evidence overloads web workers.
+    # Confirmed payslip/payment/U1 PDFs are still processed in full below.
+    pages = _pages(payload, limit=3)
     text = '\n'.join(pages)
     normalized = text.lower()
     if 'erstattungsantrag u1' in normalized:
