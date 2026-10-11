@@ -471,15 +471,20 @@ def sync_working_time(
                     ).quantize(TWO)
                     balance_reference = month_limit
                 else:
-                    paid_total = (
-                        statement_paid_hours
-                        if statement_paid_hours is not None
-                        else (
-                            existing.paid_total_hours
-                            if existing and existing.paid_total_hours is not None
-                            else (month_limit + legacy_paid_extra)
-                        )
-                    ).quantize(TWO)
+                    # An attendance-only refresh must not overwrite a settled
+                    # payment amount when historical payslip metadata changes.
+                    if attendance_change and existing and existing.paid_total_hours is not None:
+                        paid_total = dec(existing.paid_total_hours)
+                    else:
+                        paid_total = (
+                            statement_paid_hours
+                            if statement_paid_hours is not None
+                            else (
+                                existing.paid_total_hours
+                                if existing and existing.paid_total_hours is not None
+                                else (month_limit + legacy_paid_extra)
+                            )
+                        ).quantize(TWO)
                     balance_reference = paid_total
                 manual = existing.manual_adjustment if existing else Decimal('0')
                 is_open_month = (
