@@ -1335,3 +1335,69 @@ def lexware_bank_import(request):
         'skipped_historical_corrections': skipped_historical_corrections,
     })
 
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminOrManager])
+def lexware_unmatched_review(request):
+    """Inspect already archived payroll evidence without reimporting payroll.
+
+    This is read-only: it does not rewrite employee profiles, Saldo,
+    monthly records, payment instructions or parsed Lexware observations.
+    """
+    period = str(request.query_params.get('period') or '').strip()
+    if not re.fullmatch(r'20[0-9]{2}-(0[1-9]|1[0-2])', period):
+        return Response({'detail': 'Bitte Monat im Format JJJJ-MM wählen.'}, status=400)
+
+    documents = Document.objects.filter(
+        folder=Document.Folder.PAYROLL,
+        title__startswith=f'Lexware {period} ·',
+    ).order_by('created_at')
+    matchers = _employee_matchers()
+    evidence_files = 0
+    scanned_rows = 0
+    matched_rows = 0
+    problems = {}
+    errors = []
+    for document in documents:
+        kind = _lexware_document_kind(document.title)
+        if kind not in {'lohnabrechnungen', 'zahlungsliste'}:
+            continue
+        evidence_files += 1
+        try:
+            with document.file.open('rb') as stream:
+                document_type, rows = parse_lexware_pdf(stream.read())
+            if document_type not in {'lohnabrechnungen', 'zahlungsliste'}:
+                errors.append({'file': document.title.split(' · ', 1)[-1], 'reason': 'Unbekanntes PDF-Format'})
+                continue
+            for row in rows:
+                scanned_rows += 1
+                if _find_worker({'employee_name': row.get('employee_name') or ''}, matchers):
+                    matched_rows += 1
+                    continue
+                name = ' '.join(str(row.get('employee_name') or 'Unbekannt').split())
+                key = _norm(name) or 'unbekannt'
+                item = problems.setdefault(key, {
+                    'employee_name': name,
+                    'rows': 0,
+                    'sources': [],
+                })
+                item['rows'] += 1
+                source = document.title.split(' · ', 1)[-1]
+                if source not in item['sources']:
+                    item['sources'].append(source)
+        except Exception:
+            errors.append({
+                'file': document.title.split(' · ', 1)[-1],
+                'reason': 'Archiviertes Dokument konnte nicht gelesen werden.',
+            })
+    return Response({
+        'period': period,
+        'evidence_files': evidence_files,
+        'scanned_rows': scanned_rows,
+        'matched_rows': matched_rows,
+        'unmatched_rows': scanned_rows - matched_rows,
+        'unmatched_unique_count': len(problems),
+        'unmatched': sorted(problems.values(), key=lambda item: _norm(item['employee_name'])),
+        'errors': errors,
+    })
