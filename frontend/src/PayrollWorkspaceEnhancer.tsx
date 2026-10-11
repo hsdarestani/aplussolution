@@ -208,6 +208,8 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   const [lexwarePeriod, setLexwarePeriod] = useState(currentMonth());
   const [lexwareFiles, setLexwareFiles] = useState<File[]>([]);
   const [lexwareBusy, setLexwareBusy] = useState(false);
+  const [unmatchedBusy, setUnmatchedBusy] = useState(false);
+  const [unmatchedReport, setUnmatchedReport] = useState<{ period: string; unmatched_unique_count: number; unmatched_rows: number; evidence_files: number; unmatched: Array<{ employee_name: string; rows: number; sources: string[] }>; errors: Array<{ file: string; reason: string }> } | null>(null);
   const [masterDataFile, setMasterDataFile] = useState<File | null>(null);
   const [masterDataBusy, setMasterDataBusy] = useState(false);
   const [historyBusy, setHistoryBusy] = useState(false);
@@ -663,6 +665,8 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
 
       const result: any = await api('working-time/lexware-import/', { method: 'POST', body: form });
       await loadRows();
+      setUnmatchedReport(null);
+      const archiveErrors = Array.isArray(result?.archive_errors) ? result.archive_errors : [];
       const archived = Array.isArray(result?.archived_documents) ? result.archived_documents.length : 0;
       const periods = Array.isArray(result?.detected_periods) && result.detected_periods.length
         ? result.detected_periods.map((item: string) => monthLabel(item)).join(', ')
@@ -676,13 +680,32 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         `${archived} Nachweise archiviert. ` +
         (unmatchedRows
           ? `${unmatchedUnique} eindeutige nicht zugeordnete Fälle (${unmatchedRows} Nachweiszeilen).`
-          : 'Alle Nachweise zugeordnet.')
+          : 'Alle Nachweise zugeordnet.') +
+        (archiveErrors.length ? ` ACHTUNG: ${archiveErrors.length} Datei(en) nicht archiviert: ${archiveErrors.map((row: any) => row.file).join(', ')}. Bitte nur fehlgeschlagene Dateien erneut versuchen.` : '')
       );
       setLexwareFiles([]);
     } catch (error: any) {
       setMessage(error?.message || 'Lexware Import konnte nicht verarbeitet werden.');
     } finally {
       setLexwareBusy(false);
+    }
+  }
+
+  async function inspectUnmatchedLexware() {
+    if (!/^20\\d{2}-(0[1-9]|1[0-2])$/.test(lexwarePeriod)) {
+      setMessage('Bitte zuerst den Lexware Abrechnungsmonat auswählen.');
+      return;
+    }
+    setUnmatchedBusy(true);
+    setUnmatchedReport(null);
+    try {
+      const report: any = await api(`working-time/lexware-unmatched/?period=${encodeURIComponent(lexwarePeriod)}`);
+      setUnmatchedReport(report);
+      setMessage(`Lexware ${monthLabel(lexwarePeriod)} geprüft: ${report.unmatched_unique_count} nicht zugeordnete Namen (${report.unmatched_rows} Nachweiszeilen). Keine Lohndaten geändert.`);
+    } catch (error: any) {
+      setMessage(error?.message || 'Nicht zugeordnete Lexware Fälle konnten nicht gelesen werden.');
+    } finally {
+      setUnmatchedBusy(false);
     }
   }
 
@@ -855,7 +878,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
             <span className="payroll-tool-index">L</span>
             <div><b>Lexware übernehmen</b><small>Einzelmonat oder komplettes Jahrespaket als ZIP. PDF, SEPA XML und Bankdateien werden automatisch dem richtigen Monat zugeordnet.</small></div>
             <div className="payroll-lexware-fields">
-              <input aria-label="Lexware Abrechnungsmonat" type="month" value={lexwarePeriod} onChange={event => setLexwarePeriod(event.target.value)} />
+              <input aria-label="Lexware Abrechnungsmonat" type="month" value={lexwarePeriod} onChange={event => { setLexwarePeriod(event.target.value); setUnmatchedReport(null); }} />
               <input
                 aria-label="Lexware Dateien"
                 type="file"
@@ -879,12 +902,20 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
                 }}
               />
               <button type="button" onClick={() => void importLexware()} disabled={lexwareBusy || !lexwareFiles.length}>{lexwareBusy ? 'Importiert' : `Übernehmen${lexwareFiles.length ? ` (${lexwareFiles.length})` : ''}`}</button>
+              <button type="button" className="payroll-secondary" onClick={() => void inspectUnmatchedLexware()} disabled={unmatchedBusy}>{unmatchedBusy ? 'Prüfung läuft' : 'Nicht zugeordnete prüfen'}</button>
             </div>
           </div>
         </div>}
       </section>
 
       {message && <div className="payroll-message" role="status">{message}</div>}
+      {unmatchedReport && <div className="payroll-unmatched-report" role="region" aria-label="Nicht zugeordnete Lexware Mitarbeiter">
+        <b>{monthLabel(unmatchedReport.period)}: {unmatchedReport.unmatched_unique_count} nicht zugeordnete Namen, {unmatchedReport.unmatched_rows} Nachweiszeilen</b>
+        <small>Nur archivierte Dokumente geprüft. Es wurden keine Stunden, Gehälter oder Salden verändert.</small>
+        {unmatchedReport.evidence_files === 0 && <p>Keine archivierten Lohnabrechnungen oder Zahlungslisten für diesen Monat gefunden.</p>}
+        {unmatchedReport.unmatched.length > 0 && <ul>{unmatchedReport.unmatched.map(item => <li key={item.employee_name}><strong>{item.employee_name}</strong> · {item.rows} Nachweiszeile(n) · {item.sources.join(', ')}</li>)}</ul>}
+        {unmatchedReport.errors?.length > 0 && <p>{unmatchedReport.errors.length} Archivdateien konnten nicht gelesen werden.</p>}
+      </div>}
 
       <div className="payroll-record-list" data-testid="payroll-record-list">
         {visibleRows.map(row => {
