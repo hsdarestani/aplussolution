@@ -86,3 +86,11 @@ def test_same_personnel_number_aliases_unify_verified_payslips(monkeypatch):
     assert WorkerProfile.objects.count() == 1
     assert PayrollStatement.objects.count() == 1
     assert len(WorkerProfile.objects.get().master_data.data['lexware_source_names']) == 2
+
+    # The short source name is not the created historical user's full name.
+    # Despite that difference, the archived row has already been linked.
+    # Subsequent read-only reviews must not report it as unresolved again.
+    preview = reconcile_archive(2025, 12)
+    assert preview['unmatched_source_rows'] == 0
+    assert preview['unresolved_rows'] == 0
+    assert preview['profiles_eligible'] == 0
