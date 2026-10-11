@@ -39,39 +39,6 @@ jobs:
           docker compose exec -T backend python manage.py shell -c "import inspect, core.schedule_reports as s; print('HAS_DETAILS', hasattr(s,'export_attendance_details_pdf')); print(inspect.getsource(s.export_attendance_details_pdf)[:1200] if hasattr(s,'export_attendance_details_pdf') else '')" </dev/null
           echo "=== reproduce ==="
           docker compose exec -T backend python manage.py shell -c "from rest_framework.test import APIClient; from core.models import User; u=User.objects.filter(role=User.Role.ADMIN,is_active=True).first(); print('ADMIN', bool(u)); client=APIClient(); client.force_authenticate(user=u); resp=client.get('/api/reports/attendance-details.pdf', {'date_from':'2026-09-01','date_to':'2026-09-28','approval':'all'}, HTTP_HOST='app.aplus-solution.de', secure=True); print('APP_STATUS', resp.status_code, resp.get('Content-Type','')); resp2=client.get('/api/reports/attendance-details.pdf', {'date_from':'2026-09-01','date_to':'2026-09-28','approval':'all'}, HTTP_HOST='solution.smarbiz.sbs', secure=True); print('SMARBIZ_STATUS', resp2.status_code, resp2.get('Content-Type','')); print('SMARBIZ_BODY', (resp2.content[:300] if hasattr(resp2,'content') else getattr(resp2,'data',None)))" </dev/null
-          echo "=== September 2026 employee attendance coverage (read-only) ==="
-          docker compose exec -T backend python manage.py shell <<'DJANGO'
-          from datetime import datetime, date, time, timedelta
-          from django.db.models import Q
-          from django.utils import timezone
-          from core.models import WorkerProfile, Shift, TimeEntry, WorkingTimeAccountRecord
-          workers = list(WorkerProfile.objects.filter(
-              user__first_name__iexact='Claire', user__last_name__iexact='Odinius'
-          ))
-          print('MATCHED_WORKERS', len(workers))
-          for worker in workers:
-              rec = WorkingTimeAccountRecord.objects.filter(
-                  worker=worker, year_month=date(2026, 9, 1)
-              ).first()
-              raw = [r for r in (rec.raw_entries if rec else []) if isinstance(r, dict)]
-              print('MONTHLY_SNAPSHOT', 'exists', bool(rec), 'approved_rows', len(raw),
-                    'approved_minutes', sum(int(r.get('worked_minutes') or 0) for r in raw),
-                    'source', rec.source if rec else 'missing')
-              for day in (1, 3, 9, 16, 23):
-                  begin = timezone.make_aware(datetime(2026, 9, day), timezone.get_current_timezone())
-                  end = begin + timedelta(days=1)
-                  times = TimeEntry.objects.filter(worker=worker, clock_in__gte=begin, clock_in__lt=end)
-                  shifts = Shift.objects.filter(
-                      Q(worker=worker) | Q(slots__worker=worker, slots__status='claimed'),
-                      starts_at__gte=begin, starts_at__lt=end
-                  ).distinct()
-                  print('DAY', day, 'shifts', shifts.count(), 'time_rows', times.count(),
-                        'completed', times.filter(clock_out__isnull=False).count(),
-                        'approved', times.filter(approved=True, clock_out__isnull=False).count(),
-                        'wiw', times.filter(wiw_time_id__isnull=False).count(),
-                        'pending', times.filter(approved=False, wiw_time_id__isnull=True, clock_out__isnull=False).count(),
-                        'snapshot_rows', sum(1 for r in raw if str(r.get('local_clock_in') or r.get('clock_in') or '').startswith(f'2026-09-{day:02d}')))
-          DJANGO
           echo "=== host and CORS settings ==="
           docker compose exec -T backend python manage.py shell -c "from django.conf import settings; print('SMARBIZ_ALLOWED_HOST', 'solution.smarbiz.sbs' in settings.ALLOWED_HOSTS); print('SMARBIZ_CORS', 'https://solution.smarbiz.sbs' in settings.CORS_ALLOWED_ORIGINS); print('SMARBIZ_CSRF', 'https://solution.smarbiz.sbs' in settings.CSRF_TRUSTED_ORIGINS)" </dev/null
           echo "=== frontend build API target ==="
