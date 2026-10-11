@@ -125,6 +125,33 @@ def _row_key(title, row, period):
     ]).encode('utf-8')).hexdigest()
 
 
+def _archived_evidence_keys(year, month):
+    """Exact source evidence keys already attached to a 2025 payroll statement.
+
+    Historical name variants can be shorter than the created worker's display
+    name. A linked source row must not repeatedly appear as an unmatched
+    employee merely because the display name is different. This is read-only
+    and never attempts to match a new identity.
+    """
+    prefix = f'Lexware {year:04d}-{month:02d} ·'
+    keys = set()
+    for raw_data in PayrollStatement.objects.filter(
+        period__year=year
+    ).values_list('raw_data', flat=True):
+        if not isinstance(raw_data, list):
+            continue
+        for entry in raw_data:
+            if not isinstance(entry, dict):
+                continue
+            if (
+                entry.get('source_type') in {'lexware_payslip_pdf', 'lexware_zahlungsliste_pdf'}
+                and str(entry.get('source_file') or '').startswith(prefix)
+                and isinstance(entry.get('key'), str)
+            ):
+                keys.add(entry['key'])
+    return keys
+
+
 def reconcile_archive(year=2025, month=12, *, apply=False):
     """Safely resolve historical employees and missing payslip/payment entries.
 
@@ -134,9 +161,14 @@ def reconcile_archive(year=2025, month=12, *, apply=False):
     period = f'{year:04d}-{month:02d}'
     evidence, errors = _evidence(year, month)
     original = _employee_matchers()
+    already_attached = _archived_evidence_keys(year, month)
     outstanding = [
         (title, row) for title, row in evidence
         if _find_worker({'employee_name': row['employee_name']}, original) is None
+        and _row_key(
+            title, row,
+            str(row.get('period') or '') if row.get('kind') == 'payslip' else period,
+        ) not in already_attached
     ]
     # Payslip personal numbers are reliable; payment lists alone have no ID.
     by_personnel = defaultdict(list)
