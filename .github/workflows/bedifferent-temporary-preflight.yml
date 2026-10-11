@@ -1,0 +1,67 @@
+name: Be Different temporary hosting preflight (read only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify A+ Solution externally before inspection
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 https://app.aplus-solution.de/health/ > /dev/null
+          echo "APLUS_PUBLIC_HEALTH=OK"
+
+      - name: Inspect STRATO without changing production
+        shell: bash
+        env:
+          STRATO_HOST: ${{ secrets.STRATO_HOST }}
+          STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_preflight_key"
+          chmod 600 "$HOME/.ssh/strato_preflight_key"
+          trap 'rm -f "$HOME/.ssh/strato_preflight_key"' EXIT
+          ssh -i "$HOME/.ssh/strato_preflight_key" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 \
+            root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo "=== SERVER ==="
+          printf 'CPU_CORES='; nproc
+          printf 'UPTIME='; uptime -p
+          printf 'LOAD_AVG='; cat /proc/loadavg
+          echo "=== MEMORY_MB ==="
+          free -m
+          echo "=== DISK ==="
+          df -h / /var/lib/docker 2>/dev/null || df -h /
+          echo "=== DOCKER_SPACE ==="
+          docker system df || true
+          echo "=== CURRENT_CONTAINERS ==="
+          docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+          echo "=== CURRENT_CONTAINER_RESOURCE_USAGE ==="
+          docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}' || true
+          echo "=== LISTENING_PORTS_80_443_3100 ==="
+          ss -ltn | grep -E '(:80|:443|:3100)[[:space:]]' || true
+          echo "=== APLUS_LOCAL_HEALTH ==="
+          curl -ksSf --max-time 15 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/ >/dev/null && echo APLUS_LOCAL_HEALTH=OK
+          echo "PREFLIGHT_READ_ONLY_COMPLETE"
+          REMOTE
+
+      - name: Confirm A+ Solution externally after inspection
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 https://app.aplus-solution.de/health/ > /dev/null
+          echo "APLUS_POSTCHECK=OK"
