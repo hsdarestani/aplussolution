@@ -1,0 +1,65 @@
+name: Read only duplicate employee profile audit
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/employee-profile-duplicate-audit.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Set up SSH
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/audit"
+          chmod 600 "$HOME/.ssh/audit"
+      - name: Inspect duplicates without modifying records
+        run: |
+          set -euo pipefail
+          timeout 240 ssh -i "$HOME/.ssh/audit" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from collections import defaultdict
+          from django.db.models import Count
+          from core.models import WorkerProfile, WorkingTimeAccountRecord, PayrollStatement, TimeEntry, Shift
+          from django.contrib.auth import get_user_model
+          from django.utils import timezone
+          def name_key(value):
+              return ' '.join((value or '').casefold().split())
+          groups = defaultdict(list)
+          for w in WorkerProfile.objects.select_related('user').all():
+              name = (w.user.get_full_name() or '').strip()
+              if name:
+                  groups[name_key(name)].append(w)
+          repeated = {k:v for k,v in groups.items() if len(v)>1}
+          print('DUPLICATE_GROUPS',len(repeated),'DUPLICATE_PROFILES',sum(map(len,repeated.values())))
+          for normalized, workers in sorted(repeated.items()):
+              print('DUPLICATE_NAME',workers[0].user.get_full_name(), 'profiles',len(workers))
+              for w in workers:
+                  print(' PROFILE', 'worker_id',str(w.pk),'employee_number',w.employee_number,
+                      'synthetic',w.user.email.lower().endswith('@sync.invalid'),
+                      'wiw',bool(w.wiw_user_id),'active',w.active,'user_active',w.user.is_active,
+                      'months',WorkingTimeAccountRecord.objects.filter(worker=w).count(),
+                      'payroll',PayrollStatement.objects.filter(worker=w).count(),
+                      'time_entries',TimeEntry.objects.filter(worker=w).count(),
+                      'shifts',Shift.objects.filter(worker=w).count())
+          synthetic = WorkerProfile.objects.filter(user__email__iendswith='@sync.invalid')
+          print('SYNTHETIC_COUNT',synthetic.count(),
+                'WITH_PAYROLL',PayrollStatement.objects.filter(worker__in=synthetic).values('worker_id').distinct().count(),
+                'WITH_TIME',TimeEntry.objects.filter(worker__in=synthetic).values('worker_id').distinct().count(),
+                'WITH_MONTHLY',WorkingTimeAccountRecord.objects.filter(worker__in=synthetic).values('worker_id').distinct().count())
+          PY
+          REMOTE
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/audit"
