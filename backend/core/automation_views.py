@@ -645,7 +645,7 @@ def worktime_pdf(request, worker_id):
 def worktime_monthly_attendance_pdf(request, worker_id):
     """Standalone proof for exactly one employee and requested month."""
     month_text = str(request.query_params.get('month') or '').strip()
-    if not re.fullmatch(r'\\d{4}-(0[1-9]|1[0-2])', month_text):
+    if not re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', month_text):
         return Response({'detail': 'Monat muss im Format JJJJ-MM angegeben werden.'}, status=400)
     period = datetime.strptime(month_text, '%Y-%m').date()
     worker = get_object_or_404(WorkerProfile.objects.select_related('user'), pk=worker_id)
@@ -655,7 +655,7 @@ def worktime_monthly_attendance_pdf(request, worker_id):
     )
     employee_name = worker.user.get_full_name().strip() or str(worker.user)
     # Avoid control chars/path separators when a name becomes a download filename.
-    employee_name = re.sub(r'[\\\\/\\r\\n";]', ' ', employee_name)
+    employee_name = re.sub(r'[\\/\r\n";]', ' ', employee_name)
     employee_name = ' '.join(employee_name.split())
     filename = f'Arbeitszeitnachweis - {employee_name} - {german_month_name(period)}.pdf'
     response = HttpResponse(
