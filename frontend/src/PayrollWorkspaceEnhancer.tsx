@@ -163,6 +163,7 @@ const number = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 const decimal = (value: unknown) => number(value).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const signedDecimal = (value: unknown) => number(value).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2, signDisplay: 'always' });
 const money = (value: unknown) => number(value).toLocaleString('de-DE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const monthLabel = (value: string) => {
   const [year, month] = value.split('-').map(Number);
@@ -612,6 +613,24 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     }
   }
 
+  async function downloadMonthlyAttendancePdf(row: PayrollRow) {
+    setBusyId(`attendance-pdf:${row.id}`);
+    setMessage('');
+    try {
+      const result = await apiBlob(
+        `working-time/attendance-pdf/${row.worker_id}/?month=${encodeURIComponent(row.year_month)}`,
+      );
+      triggerBlobDownload(
+        result.blob,
+        result.filename || `Arbeitszeitnachweis - ${row.employee_name} - ${monthLabel(row.year_month)}.pdf`,
+      );
+    } catch (error: any) {
+      setMessage(error?.message || 'Monatlicher Arbeitszeitnachweis konnte nicht erstellt werden.');
+    } finally {
+      setBusyId('');
+    }
+  }
+
   async function importLexware() {
     if (!lexwareFiles.length) {
       setMessage('Bitte mindestens eine Lexware Datei auswählen.');
@@ -773,7 +792,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
       <section className="payroll-summary" aria-label="Lohnübersicht">
         <div><span>Gearbeitet</span><strong>{decimal(summary.ist)} Std.</strong><small>Ist Zeit</small></div>
         <div><span>Bezahlt oder Soll</span><strong>{decimal(summary.paid)} Std.</strong><small>bei Gehalt gilt die vertragliche Sollzeit</small></div>
-        <div><span>Saldo</span><strong className={summary.saldo < 0 ? 'negative' : 'positive'}>{decimal(summary.saldo)} Std.</strong><small>offenes Zeitkonto</small></div>
+        <div><span>Saldo</span><strong className={summary.saldo < 0 ? 'negative' : 'positive'}>{signedDecimal(summary.saldo)} Std.</strong><small>offenes Zeitkonto</small></div>
         <div><span>Lexware Brutto</span><strong>{money(summary.lexwareGross)}</strong><small>Lohnabrechnungen</small></div>
         <div><span>Lexware Auszahlung</span><strong>{money(summary.transferred)}</strong><small>Zahlungsliste oder Bankexport</small></div>
       </section>
@@ -917,8 +936,8 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
             <div className="payroll-metrics">
               <div><span>IST</span><b>{decimal(row.ist_hours)} Std.</b></div>
               <div><span>{row.balance_basis === 'open_month' ? 'Saldo Basis' : row.balance_basis === 'soll_salary' ? 'Sollbasis' : 'Bezahlt'}</span><b>{row.balance_basis === 'open_month' ? 'offen' : `${decimal(row.balance_reference_hours ?? row.paid_total_hours ?? row.soll_hours)} Std.`}</b></div>
-              <div><span>Monatssaldo</span><b className={number(row.monthly_balance_hours) < 0 ? 'negative' : 'positive'}>{decimal(row.monthly_balance_hours)} Std.</b></div>
-              <div><span>Saldo gesamt</span><b className={number(row.saldo_cumulative) < 0 ? 'negative' : 'positive'}>{decimal(row.saldo_cumulative)} Std.</b></div>
+              <div><span>Monatssaldo</span><b className={number(row.monthly_balance_hours) < 0 ? 'negative' : 'positive'}>{signedDecimal(row.monthly_balance_hours)} Std.</b></div>
+              <div><span>Saldo gesamt</span><b className={number(row.saldo_cumulative) < 0 ? 'negative' : 'positive'}>{signedDecimal(row.saldo_cumulative)} Std.</b></div>
               <div>
                 <span>{row.balance_basis === 'soll_salary' ? 'Gehalt' : 'Stundensatz'}</span>
                 <b>{row.balance_basis === 'soll_salary'
@@ -944,6 +963,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
             <div className="payroll-record-actions">
               <button type="button" onClick={() => void toggleRow(row)}>{expanded ? 'Details schließen' : 'Tagesnachweis öffnen'}</button>
               <button type="button" className="payroll-secondary" onClick={() => void downloadPayrollPdf(row)} disabled={busyId === `pdf:${row.worker_id}`}>{busyId === `pdf:${row.worker_id}` ? 'PDF wird erstellt' : 'PDF'}</button>
+              <button type="button" className="payroll-secondary" onClick={() => void downloadMonthlyAttendancePdf(row)} disabled={busyId === `attendance-pdf:${row.id}`}>{busyId === `attendance-pdf:${row.id}` ? 'Arbeitszeitnachweis wird erstellt' : 'Arbeitszeitnachweis PDF'}</button>
             </div>
 
             {expanded && <div className="payroll-card-details">
@@ -990,11 +1010,11 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
               </div>}
 
               <div className="payroll-daily">
-                <div className="payroll-daily-head"><div><span>TAGESNACHWEIS</span><b>Plan und Ist nebeneinander</b></div><small>{detail?.entries?.length ?? row.entry_count ?? 0} Einträge</small></div>
+                <div className="payroll-daily-head"><div><span>TAGESNACHWEIS</span><b>Soll und Ist nebeneinander</b></div><small>{detail?.entries?.length ?? row.entry_count ?? 0} Einträge</small></div>
                 {!detail && <div className="payroll-detail-loading">Tagesdetails werden geladen.</div>}
                 {!!detail?.entries?.length && <div className="payroll-daily-table" role="table" aria-label={`Tagesnachweis ${row.employee_name} ${row.year_month}`}>
                   <div className="payroll-daily-row payroll-daily-header" role="row">
-                    <span>Datum</span><span>Kunde</span><span>Plan</span><span>Ist</span><span>Pause</span><span>Netto</span><span>Nacht</span><span>Sa</span><span>So</span><span>Feiertag</span><span>Notiz</span>
+                    <span>Datum</span><span>Kunde</span><span>Soll</span><span>Ist</span><span>Pause</span><span>Netto</span><span>Nacht</span><span>Sa</span><span>So</span><span>Feiertag</span><span>Notiz</span>
                   </div>
                   {detail.entries.map(entry => <div className="payroll-daily-row" role="row" key={entry.id}>
                     <span>{dateLabel(entry.local_clock_in)}</span>

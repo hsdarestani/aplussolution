@@ -50,6 +50,12 @@ def dec(value: Any, default='0') -> Decimal:
         return Decimal(default).quantize(TWO)
 
 
+def signed_saldo(value: Any) -> str:
+    """Display a visible +/- without changing stored hours or payroll values."""
+    amount = dec(value)
+    return f"{'+' if amount >= 0 else '-'}{abs(amount):.2f}".replace('.', ',')
+
+
 def month_start(value: str | date) -> date:
     if isinstance(value, date):
         return value.replace(day=1)
@@ -999,10 +1005,10 @@ def export_csv(queryset) -> HttpResponse:
         scoped_previous = (scoped_saldo - dec(data.get('monthly_balance_hours'))).quantize(TWO)
         writer.writerow([
             data['employee_name'], data['year_month'], data['ist_hours'],
-            data['soll_hours'], data['difference_hours'], str(scoped_previous),
-            data['paid_hours'], data['manual_adjustment'], str(scoped_saldo),
+            data['soll_hours'], data['difference_hours'], signed_saldo(scoped_previous),
+            data['paid_hours'], data['manual_adjustment'], signed_saldo(scoped_saldo),
             data['hourly_rate'], data['gross_amount'],
-            data['employment_type'], data['paid_total_hours'], data['monthly_balance_hours'],
+            data['employment_type'], data['paid_total_hours'], signed_saldo(data['monthly_balance_hours']),
             data['night_hours'], data['saturday_hours'], data['sunday_hours'],
             data['surcharge_amount'], data['gross_with_surcharges'],
             payroll.get('gross_amount') or '', payroll.get('net_amount') or '',
@@ -1132,6 +1138,11 @@ def export_xlsx(queryset) -> HttpResponse:
         ])
     for column in ws.columns:
         ws.column_dimensions[column[0].column_letter].width = min(max(len(str(cell.value or '')) for cell in column) + 2, 32)
+    # Signed display without coercing numeric cells to text or losing formulas.
+    saldo_number_format = '+0.00;-0.00;+0.00'
+    for row_index in range(2, ws.max_row + 1):
+        for column_index in (6, 9, 14):  # Übertrag, Saldo, Monatssaldo
+            ws.cell(row_index, column_index).number_format = saldo_number_format
     ws.freeze_panes = 'A2'
     ws.auto_filter.ref = ws.dimensions
 
@@ -1141,7 +1152,7 @@ def export_xlsx(queryset) -> HttpResponse:
     detail_ws = wb.create_sheet('Tagesnachweise')
     detail_headers = [
         'Mitarbeiter', 'Monat', 'Datum', 'Kunde', 'Ort', 'Service',
-        'Plan Beginn', 'Plan Ende', 'Ist Beginn', 'Ist Ende', 'Pause Min.',
+        'Soll Beginn', 'Soll Ende', 'Ist Beginn', 'Ist Ende', 'Pause Min.',
         'Netto Std.', 'Nacht Std.', 'Samstag Std.', 'Sonntag Std.', 'Feiertag Hessen Std.', 'Notiz',
         'Zeitprüfung',
     ]
@@ -1236,6 +1247,125 @@ def _pdf_hours(minutes) -> str:
     return f'{total // 60}:{total % 60:02d}'
 
 
+GERMAN_MONTH_NAMES = (
+    '', 'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+    'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+)
+
+
+def german_month_name(period: date) -> str:
+    return f'{GERMAN_MONTH_NAMES[period.month]} {period.year}'
+
+
+def worker_monthly_attendance_pdf(worker: WorkerProfile, record: WorkingTimeAccountRecord) -> bytes:
+    """One focused work-time PDF for a single employee and calendar month.
+
+    Soll and Ist are local start/end clock times, Pause is minutes, and Netto,
+    Sa., So. and Feiertag are net HH:MM hours. Use the same persisted evidence
+    as the payroll report; do not fabricate hours for unapproved times.
+    """
+    from xml.sax.saxutils import escape as escape_xml
+
+    if str(record.worker_id) != str(worker.id):
+        raise ValueError('Monatskonto gehört nicht zum ausgewählten Mitarbeiter.')
+    entries = sorted(
+        (row for row in (record.raw_entries or []) if isinstance(row, dict)),
+        key=lambda row: str(row.get('local_clock_in') or row.get('clock_in') or ''),
+    )
+    name = (worker.user.get_full_name() or str(worker.user)).strip()
+    month_name = german_month_name(record.year_month)
+    buffer = io.BytesIO()
+    document = SimpleDocTemplate(
+        buffer, pagesize=landscape(A4),
+        leftMargin=12 * mm, rightMargin=12 * mm,
+        topMargin=14 * mm, bottomMargin=14 * mm,
+        title=f'Arbeitszeitnachweis - {name} - {month_name}',
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'MonthlyTimeTitle', parent=styles['Heading1'], alignment=TA_CENTER,
+        textColor=colors.HexColor('#163B65'), spaceAfter=6,
+    )
+    meta_style = ParagraphStyle(
+        'MonthlyTimeMeta', parent=styles['BodyText'], alignment=TA_CENTER,
+        spaceAfter=14, fontSize=10, leading=14,
+    )
+    story = [
+        Paragraph('Arbeitszeitnachweis', title_style),
+        Paragraph(f'{escape_xml(name)} · {escape_xml(month_name)}', meta_style),
+    ]
+    headers = ['Datum', 'Soll', 'Ist', 'Pause', 'Netto', 'Sa.', 'So.', 'Feiertag']
+    table_rows = [headers]
+    totals = {key: 0 for key in (
+        'break_minutes', 'worked_minutes', 'saturday_minutes',
+        'sunday_minutes', 'holiday_minutes',
+    )}
+    for entry in entries:
+        for key in totals:
+            totals[key] += int(entry.get(key) or 0)
+        table_rows.append([
+            _pdf_date(entry.get('local_clock_in') or entry.get('clock_in')),
+            f"{_pdf_clock(entry.get('planned_start'))} - {_pdf_clock(entry.get('planned_end'))}",
+            f"{_pdf_clock(entry.get('local_clock_in') or entry.get('clock_in'))} - "
+            f"{_pdf_clock(entry.get('local_clock_out') or entry.get('clock_out'))}",
+            f"{int(entry.get('break_minutes') or 0)} Min.",
+            _pdf_hours(entry.get('worked_minutes')),
+            _pdf_hours(entry.get('saturday_minutes')),
+            _pdf_hours(entry.get('sunday_minutes')),
+            _pdf_hours(entry.get('holiday_minutes')),
+        ])
+    if entries:
+        table_rows.append([
+            'Gesamt', '', '', f"{totals['break_minutes']} Min.",
+            _pdf_hours(totals['worked_minutes']),
+            _pdf_hours(totals['saturday_minutes']),
+            _pdf_hours(totals['sunday_minutes']),
+            _pdf_hours(totals['holiday_minutes']),
+        ])
+    else:
+        table_rows.append(['Keine freigegebenen Zeiten', '', '', '', '', '', '', ''])
+
+    table = Table(
+        table_rows, repeatRows=1,
+        colWidths=[30 * mm, 42 * mm, 42 * mm, 24 * mm,
+                   28 * mm, 27 * mm, 27 * mm, 33 * mm],
+        hAlign='CENTER',
+    )
+    table_styles = [
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#163B65')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('GRID', (0, 0), (-1, -1), .4, colors.HexColor('#CED7E3')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F5F8FC')]),
+        ('LEFTPADDING', (0, 0), (-1, -1), 8),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (3, 1), (-1, -1), 'RIGHT'),
+    ]
+    if entries:
+        table_styles += [
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#E6EEF7')),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ]
+    else:
+        table_styles.append(('SPAN', (0, 1), (-1, 1)))
+    table.setStyle(TableStyle(table_styles))
+    story.append(table)
+    story.append(Spacer(1, 12))
+    story.append(Paragraph(
+        'Soll = geplante Arbeitszeit. Ist = erfasste Arbeitszeit. '
+        'Netto, Sa., So. und Feiertag = tatsächlich geleistete Stunden '
+        'nach anteiligem Pausenabzug. Feiertag gilt nach dem hessischen Kalender. '
+        'Nur freigegebene Ist Zeiten sind enthalten; offene Prüffälle bleiben bis zur Freigabe ausgenommen.',
+        styles['BodyText'],
+    ))
+    document.build(story)
+    return buffer.getvalue()
+
+
 def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
     rows = list(queryset.select_related('worker__user'))
     statements = _statement_map(rows)
@@ -1272,7 +1402,7 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
 
     data = [[
         'Monat', 'Ist', 'Soll', 'Basis', 'Monatssaldo', 'Übertrag', 'Saldo',
-        'Nacht', 'Sa.', 'So.', 'Feiertag', 'Abw.', 'Urlaub', 'Krank', 'Zuschläge', 'Brutto', 'Überwiesen',
+        'Nacht', 'Sa.', 'So.', 'Feiertag', 'Abw.', 'Urlaub', 'Krank', 'Zuschläge', 'Brutto', 'Auszahlungs\nbetrag',
     ]]
     for row, item in prepared:
         payroll = item.get('payroll_statement') or {}
@@ -1283,13 +1413,14 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
         scoped_previous = (scoped_saldo - dec(item.get('monthly_balance_hours'))).quantize(TWO)
         data.append([
             row.year_month.strftime('%m/%Y'), item['ist_hours'], item['soll_hours'],
-            item['balance_reference_hours'], item['monthly_balance_hours'], str(scoped_previous),
-            str(scoped_saldo), item['night_hours'], item['saturday_hours'], item['sunday_hours'], item['holiday_hours'],
+            item['balance_reference_hours'], signed_saldo(item['monthly_balance_hours']), signed_saldo(scoped_previous),
+            signed_saldo(scoped_saldo), item['night_hours'], item['saturday_hours'], item['sunday_hours'], item['holiday_hours'],
             item['absence_days'], item['vacation_days'], item['sick_days'],
             f"{item['surcharge_amount']} €", f"{item['gross_with_surcharges']} €",
             f"{payroll.get('transferred_amount')} €" if payroll.get('transferred_amount') else '–',
         ])
-    table = Table(data, repeatRows=1, colWidths=[18 * mm] + [16 * mm] * 16)
+    # Leave room for the full Auszahlungsbetrag heading on landscape A4.
+    table = Table(data, repeatRows=1, colWidths=[17 * mm] + [15.4 * mm] * 15 + [25 * mm])
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#163B65')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -1332,14 +1463,14 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
         )
         story.append(Paragraph(
             f"Gearbeitet: {item['ist_hours']} Std. · {basis_label}: {item['balance_reference_hours']} Std. · "
-            f"Saldo Monat: {item['monthly_balance_hours']} Std. · Saldo Prüfjahr: {scoped_saldo} Std. · "
+            f"Saldo Monat: {signed_saldo(item['monthly_balance_hours'])} Std. · Saldo Prüfjahr: {signed_saldo(scoped_saldo)} Std. · "
             f"{compensation_text} · Feiertag Hessen: {item['holiday_hours']} Std. ({item['holiday_surcharge_amount']} €) · Brutto mit Zuschlägen: {item['gross_with_surcharges']} € · "
-            f"Lexware überwiesen: {payroll.get('transferred_amount') or '–'} € · "
+            f"Lexware Auszahlungsbetrag: {payroll.get('transferred_amount') or '–'} € · "
             f"Abwesenheit: {item['absence_days']} Tage (Urlaub {item['vacation_days']}, Krank {item['sick_days']})",
             styles['BodyText'],
         ))
         story.append(Spacer(1, 6))
-        detail = [['Datum', 'Kunde / Ort', 'Plan', 'Ist', 'Pause', 'Netto', 'Nacht', 'Sa.', 'So.', 'Feiertag', 'Notiz']]
+        detail = [['Datum', 'Kunde / Ort', 'Soll', 'Ist', 'Pause', 'Netto', 'Nacht', 'Sa.', 'So.', 'Feiertag', 'Notiz']]
         for entry in entries:
             client = str(entry.get('client_name') or 'Ohne Zuordnung')
             location = str(entry.get('location_name') or entry.get('position_name') or '')
@@ -1508,7 +1639,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
             period, _employment_label(item.get('employment_type') or ''),
             item['ist_hours'],
             'nicht belegt' if item.get('historical_soll_unverified') else item['soll_hours'],
-            item['balance_reference_hours'], item['monthly_balance_hours'], str(saldo),
+            item['balance_reference_hours'], signed_saldo(item['monthly_balance_hours']), signed_saldo(saldo),
         ])
         pay_rows.append([
             period, f"{item['hourly_rate']} €", item['night_hours'],
@@ -1531,7 +1662,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
     document.add_heading('Lexware und Zuschlagsstunden', level=2)
     _docx_table(
         document,
-        ['Monat', 'Satz', 'Nacht', 'Sa.', 'So.', 'Brutto €', 'Netto €', 'Auszahlung €'],
+        ['Monat', 'Satz', 'Nacht', 'Sa.', 'So.', 'Brutto €', 'Netto €', 'Auszahlungsbetrag €'],
         pay_rows,
     )
     document.add_heading('Feiertagsstunden Hessen', level=3)
@@ -1559,8 +1690,8 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
         run.font.size = Pt(14)
         document.add_paragraph(
             f"Ist {item['ist_hours']} Std. | Soll {'nicht belegt' if item.get('historical_soll_unverified') else item['soll_hours']} Std. | "
-            f"Basis {item['balance_reference_hours']} Std. | Monatssaldo {item['monthly_balance_hours']} Std. | "
-            f"Saldo Prüfjahr {scoped_saldo} Std. | "
+            f"Basis {item['balance_reference_hours']} Std. | Monatssaldo {signed_saldo(item['monthly_balance_hours'])} Std. | "
+            f"Saldo Prüfjahr {signed_saldo(scoped_saldo)} Std. | "
             f"Abwesenheit {item['absence_days']} Tage | Urlaub {item['vacation_days']} | Krank {item['sick_days']}"
         )
         daily, extras = [], []
@@ -1586,7 +1717,7 @@ def worker_docx(worker: WorkerProfile, queryset) -> bytes:
             ])
         _docx_table(
             document,
-            ['Datum', 'Kunde', 'Ort', 'Plan', 'Ist', 'Pause', 'Netto'],
+            ['Datum', 'Kunde', 'Ort', 'Soll', 'Ist', 'Pause', 'Netto'],
             daily,
         )
         document.add_paragraph('Zuschlagsstunden und Notizen', style='Heading3')
@@ -1838,7 +1969,7 @@ def lexware_reconciliation_docx(queryset, period: date) -> bytes:
             _employment_label(item.get('employment_type') or ''),
             item['ist_hours'],
             'nicht belegt' if item.get('historical_soll_unverified') else item['soll_hours'],
-            item['paid_total_hours'], item['monthly_balance_hours'], item['holiday_hours'], item['holiday_surcharge_amount'], status,
+            item['paid_total_hours'], signed_saldo(item['monthly_balance_hours']), item['holiday_hours'], item['holiday_surcharge_amount'], status,
         ])
         payments_rows.append([
             item['employee_name'], compensation,
@@ -1863,7 +1994,7 @@ def lexware_reconciliation_docx(queryset, period: date) -> bytes:
     _docx_table(
         document,
         ['Mitarbeiter', 'Vergütung', 'Brutto €', 'Netto €',
-         'Auszahlung €', 'Urlaub', 'Krank', 'Lexware Krank Std.', 'U1 €'],
+         'Auszahlungsbetrag €', 'Urlaub', 'Krank', 'Lexware Krank Std.', 'U1 €'],
         payments_rows,
     )
 
@@ -1965,8 +2096,8 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
             _employment_label(item.get('employment_type') or ''),
             item.get('ist_hours') or '0',
             item.get('balance_reference_hours') or '0',
-            item.get('monthly_balance_hours') or '0',
-            str(scoped_saldo),
+            signed_saldo(item.get('monthly_balance_hours')),
+            signed_saldo(scoped_saldo),
             f"{item.get('holiday_hours') or '0'} Std. / {item.get('holiday_surcharge_amount') or '0'} €",
             item.get('reconciliation_status') or '',
         ])
@@ -1989,7 +2120,7 @@ def payroll_audit_docx(queryset, year: int, readiness: dict | None = None) -> by
     document.add_heading('Lexware Lohn und Abwesenheiten', level=2)
     _docx_table(
         document,
-        ['Mitarbeiter', 'Monat', 'Brutto €', 'Netto €', 'Auszahlung €',
+        ['Mitarbeiter', 'Monat', 'Brutto €', 'Netto €', 'Auszahlungsbetrag €',
          'Urlaub', 'Krank', 'Krank Std.', 'U1 €'],
         finance_rows,
     )

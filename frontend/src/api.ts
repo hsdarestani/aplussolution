@@ -247,6 +247,18 @@ function fallbackBlobFilename(path: string) {
   return 'Download.pdf';
 }
 
+function filenameFromDisposition(disposition: string, fallback: string) {
+  const encoded = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded.trim().replace(/^"|"$/g, ''));
+    } catch {
+      // An invalid filename* may still have an ASCII filename fallback.
+    }
+  }
+  return /filename="?([^";]+)"?/i.exec(disposition)?.[1] || fallback;
+}
+
 export async function apiBlob(path: string, options: RequestInit = {}, retry = true): Promise<{ blob: Blob; filename: string }> {
   const normalizedPath = path.replace(/^\//, '');
   const fallbackFilename = fallbackBlobFilename(normalizedPath);
@@ -257,7 +269,7 @@ export async function apiBlob(path: string, options: RequestInit = {}, retry = t
       const retried = await request(`${API}/${normalizedPath}`, { ...options, headers: headers(options, token) });
       if (!retried.ok) throw new Error(await parseError(retried));
       const disposition = retried.headers.get('content-disposition') || '';
-      const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] || fallbackFilename;
+      const filename = filenameFromDisposition(disposition, fallbackFilename);
       return { blob: await retried.blob(), filename };
     }
     localStorage.removeItem('access');
@@ -266,7 +278,7 @@ export async function apiBlob(path: string, options: RequestInit = {}, retry = t
   }
   if (!response.ok) throw new Error(await parseError(response));
   const disposition = response.headers.get('content-disposition') || '';
-  const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] || fallbackFilename;
+  const filename = filenameFromDisposition(disposition, fallbackFilename);
   return { blob: await response.blob(), filename };
 }
 
