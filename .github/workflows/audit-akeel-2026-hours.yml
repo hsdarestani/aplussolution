@@ -1,0 +1,59 @@
+name: Audit Akeel Zafar 2026 monthly hours
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/audit-akeel-2026-hours.yml'
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_key"
+          chmod 600 "$HOME/.ssh/strato_key"
+      - name: Read only employee account by month
+        run: |
+          set -euo pipefail
+          timeout 120 ssh -i "$HOME/.ssh/strato_key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from decimal import Decimal
+          from django.db.models import Q
+          from core.models import WorkerProfile, WorkingTimeAccountRecord, TimeEntry, PayrollStatement
+          from core.payroll_views import lexware_readiness_payload
+          from core.working_time import record_dict
+          people=list(WorkerProfile.objects.filter(user__first_name__iexact='Akeel',user__last_name__iexact='Zafar').select_related('user'))
+          print('AKEEL_PROFILE_COUNT',len(people))
+          info=lexware_readiness_payload(2026)
+          print('LEXWARE_REVIEW_THROUGH',info.get('expected_through'))
+          for worker in people:
+              print('PROFILE',worker.employee_number,'active',worker.active,'wiw',bool(worker.wiw_user_id))
+              accounts=list(WorkingTimeAccountRecord.objects.filter(worker=worker,year_month__year=2026).order_by('year_month'))
+              all_total=Decimal('0')
+              review_total=Decimal('0')
+              for a in accounts:
+                  p=PayrollStatement.objects.filter(worker=worker,period=a.year_month).first()
+                  d=record_dict(a,p)
+                  month=d['year_month']
+                  qty=Decimal(d['ist_hours'])
+                  all_total+=qty
+                  included=not d['is_open_month'] and month <= (info.get('expected_through') or '9999-12')
+                  if included:review_total+=qty
+                  actual_rows=TimeEntry.objects.filter(worker=worker,clock_in__year=2026,clock_in__month=a.year_month.month,clock_out__isnull=False).filter(Q(approved=True)|Q(wiw_time_id__isnull=False)).count()
+                  print('MONTH',month,'hours',qty,'included_in_review',included,'is_open_month',d['is_open_month'],'source',a.source,'entries',d['entry_count'],'approved_rows',actual_rows,'statement',bool(p))
+              print('TOTAL',worker.employee_number,'all_months',all_total,'review_through_lexware',review_total)
+          PY
+          REMOTE
+      - name: Remove key
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_key"
