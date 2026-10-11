@@ -155,8 +155,8 @@ class WhenIWorkSynchronizer:
             self.sync_positions(self.client.collection('positions', params=params, optional=True).items)
             self.sync_locations(self.client.collection('locations', params=params, optional=True).items)
             self.sync_sites(self.client.collection('sites', params=params, optional=True).items)
-            self.sync_shifts(self.client.collection('shifts', params=params).items)
             with batch_attendance_changes():
+                self.sync_shifts(self.client.collection('shifts', params=params).items)
                 self.sync_times(self.client.collection('times', params=params, optional=True).items)
             self.sync_availabilities(self.client.collection('availabilities', params=params, optional=True).items)
             self.sync_requests(self.client.collection('requests', params=params, optional=True).items)
