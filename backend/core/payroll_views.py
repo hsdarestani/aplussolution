@@ -843,7 +843,21 @@ def lexware_bank_import(request):
     parsed_rows = 0
     archived_documents = []
     archived_only = []
+    archive_errors = []
     skipped_historical_corrections = []
+
+    def archive_document(upload, archive_period_label):
+        try:
+            return _archive_lexware_upload(upload, archive_period_label, request.user)
+        except Exception:
+            # Failed storage must not return an opaque 500 or pretend that
+            # the annual evidence was successfully archived. Payroll records
+            # already parsed in this request remain intact.
+            archive_errors.append({
+                'file': str(getattr(upload, 'name', '') or 'Unbekannte Datei'),
+                'reason': 'Datei konnte nicht im Archiv gespeichert werden.',
+            })
+            return None
 
     for upload in uploads:
         name = str(getattr(upload, 'name', '') or 'lexware')
@@ -862,7 +876,7 @@ def lexware_bank_import(request):
             parsed_rows += len(sepa_rows)
             if not file_period_text or file_period is None:
                 unmatched.append({'file': name, 'text': 'Abrechnungsmonat für SEPA Datei nicht erkennbar'})
-                archived_title = _archive_lexware_upload(upload, archive_period_label, request.user)
+                archived_title = archive_document(upload, archive_period_label)
                 if archived_title:
                     archived_documents.append(archived_title)
                 continue
@@ -899,12 +913,29 @@ def lexware_bank_import(request):
                     'source_type': 'lexware_sepa_xml',
                 })
                 source_files[(worker.id, file_period_text)].add(name)
-            archived_title = _archive_lexware_upload(upload, archive_period_label, request.user)
+            archived_title = archive_document(upload, archive_period_label)
             if archived_title:
                 archived_documents.append(archived_title)
             continue
 
         if lower_name.endswith('.pdf') or str(getattr(upload, 'content_type', '')).lower() == 'application/pdf':
+            document_kind = _lexware_document_kind(name)
+            # Lohnkonto, UV, Lohnjournal, certificates and DEÜV evidence are
+            # annual/monthly archive documents, not payslip import sources.
+            # The 2025 Lohnkonto alone is 301 pages. Never parse the full PDF
+            # simply to determine its type or calculate payroll amounts.
+            if document_kind in {
+                'lohnkonto', 'lohnkonto_uv', 'lohnjournal',
+                'lohnsteuerbescheinigungen', 'meldebescheinigungen',
+                'beitragsabrechnung', 'beitragserlaeuterung', 'beitragsnachweise',
+                'buchungsuebersicht', 'mitgliedsbestaetigung',
+                'lohnsteueranmeldung', 'restbeitragsschuld',
+            }:
+                archived_title = archive_document(upload, archive_period_label)
+                if archived_title:
+                    archived_documents.append(archived_title)
+                    archived_only.append(name)
+                continue
             payload = upload.read()
             try:
                 document_type, pdf_rows = parse_lexware_pdf(payload)
@@ -913,7 +944,7 @@ def lexware_bank_import(request):
                 continue
 
             if document_type == 'unknown':
-                archived_title = _archive_lexware_upload(upload, archive_period_label, request.user)
+                archived_title = archive_document(upload, archive_period_label)
                 if archived_title:
                     archived_documents.append(archived_title)
                 archived_only.append(name)
@@ -983,14 +1014,14 @@ def lexware_bank_import(request):
                 item['key'] = hashlib.sha256(key_source.encode('utf-8')).hexdigest()
                 grouped[(worker.id, target_period_text)].append(item)
                 source_files[(worker.id, target_period_text)].add(name)
-            archived_title = _archive_lexware_upload(upload, archive_period_label, request.user)
+            archived_title = archive_document(upload, archive_period_label)
             if archived_title:
                 archived_documents.append(archived_title)
             continue
 
         if not file_period_text or file_period is None:
             unmatched.append({'file': name, 'text': 'Abrechnungsmonat für Bankdatei nicht erkennbar'})
-            archived_title = _archive_lexware_upload(upload, archive_period_label, request.user)
+            archived_title = archive_document(upload, archive_period_label)
             if archived_title:
                 archived_documents.append(archived_title)
             continue
@@ -1048,7 +1079,7 @@ def lexware_bank_import(request):
             })
             source_files[(worker.id, file_period_text)].add(name)
 
-        archived_title = _archive_lexware_upload(upload, archive_period_label, request.user)
+        archived_title = archive_document(upload, archive_period_label)
         if archived_title:
             archived_documents.append(archived_title)
 
@@ -1288,7 +1319,8 @@ def lexware_bank_import(request):
         'unmatched_unique': len(unmatched_unique),
     })
     return Response({
-        'status': 'ok',
+        'status': 'partial' if archive_errors else 'ok',
+        'archive_errors': archive_errors,
         'period': period_text,
         'year': requested_year or None,
         'detected_periods': sorted(detected_periods),
