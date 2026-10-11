@@ -1,4 +1,6 @@
 from datetime import date, datetime, timedelta
+from urllib.parse import quote
+import re
 from decimal import Decimal
 
 from django.db.models import Q
@@ -40,6 +42,8 @@ from .working_time import (
     settings_rows,
     update_record,
     worker_pdf,
+    worker_monthly_attendance_pdf,
+    german_month_name,
     worker_docx,
     lexware_reconciliation_docx,
     payroll_audit_docx,
@@ -633,6 +637,36 @@ def worktime_pdf(request, worker_id):
             return Response({'detail': 'Jahr muss im Format JJJJ angegeben werden.'}, status=400)
     response = HttpResponse(worker_pdf(worker, queryset), content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="arbeitszeit-lohnkonto-{worker.employee_number}.pdf"'
+    return response
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminOrManager])
+def worktime_monthly_attendance_pdf(request, worker_id):
+    """Standalone proof for exactly one employee and requested month."""
+    month_text = str(request.query_params.get('month') or '').strip()
+    if not re.fullmatch(r'\\d{4}-(0[1-9]|1[0-2])', month_text):
+        return Response({'detail': 'Monat muss im Format JJJJ-MM angegeben werden.'}, status=400)
+    period = datetime.strptime(month_text, '%Y-%m').date()
+    worker = get_object_or_404(WorkerProfile.objects.select_related('user'), pk=worker_id)
+    record = get_object_or_404(
+        WorkingTimeAccountRecord.objects.select_related('worker__user'),
+        worker=worker, year_month=period,
+    )
+    employee_name = worker.user.get_full_name().strip() or str(worker.user)
+    # Avoid control chars/path separators when a name becomes a download filename.
+    employee_name = re.sub(r'[\\\\/\\r\\n";]', ' ', employee_name)
+    employee_name = ' '.join(employee_name.split())
+    filename = f'Arbeitszeitnachweis - {employee_name} - {german_month_name(period)}.pdf'
+    response = HttpResponse(
+        worker_monthly_attendance_pdf(worker, record),
+        content_type='application/pdf',
+    )
+    # RFC 5987: non-ASCII German names are preserved without breaking browsers.
+    response['Content-Disposition'] = (
+        f'attachment; filename="Arbeitszeitnachweis - {period:%Y-%m}.pdf"; '
+        f"filename*=UTF-8''{quote(filename)}"
+    )
     return response
 
 
