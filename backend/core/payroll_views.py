@@ -1349,6 +1349,12 @@ def lexware_unmatched_review(request):
     if not re.fullmatch(r'20[0-9]{2}-(0[1-9]|1[0-2])', period):
         return Response({'detail': 'Bitte Monat im Format JJJJ-MM wählen.'}, status=400)
 
+    # Import lazily: historical reconciliation already uses _find_worker
+    # from this module. The key lookup is strictly read-only.
+    from .lexware_historical import _archived_evidence_keys, _row_key
+
+    year, month = (int(value) for value in period.split('-'))
+    already_attached = _archived_evidence_keys(year, month)
     documents = Document.objects.filter(
         folder=Document.Folder.PAYROLL,
         title__startswith=f'Lexware {period} ·',
@@ -1372,7 +1378,14 @@ def lexware_unmatched_review(request):
                 continue
             for row in rows:
                 scanned_rows += 1
-                if _find_worker({'employee_name': row.get('employee_name') or ''}, matchers):
+                source_period = (
+                    str(row.get('period') or '')
+                    if row.get('kind') == 'payslip' else period
+                )
+                if (
+                    _find_worker({'employee_name': row.get('employee_name') or ''}, matchers)
+                    or _row_key(document.title, row, source_period) in already_attached
+                ):
                     matched_rows += 1
                     continue
                 name = ' '.join(str(row.get('employee_name') or 'Unbekannt').split())

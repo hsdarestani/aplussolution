@@ -103,3 +103,53 @@ def test_can_review_old_unmatched_worker_without_reimport(
     assert response.data['unmatched_unique_count'] == 1
     assert response.data['unmatched'][0]['employee_name'] == 'Missing Employee'
     assert auth_admin.get('/api/working-time/lexware-unmatched/?period=2025-13').status_code == 400
+
+
+
+@pytest.mark.django_db
+def test_review_counts_archived_short_name_as_assigned_without_guessing_new_names(
+    auth_admin, admin_user, monkeypatch,
+):
+    from core.lexware_historical import reconcile_archive
+
+    title = 'Lexware 2025-10 · Lohnabrechnungen_2025-10.pdf'
+    long_name = {
+        'kind': 'payslip', 'employee_name': 'Example Historical Complete',
+        'personal_number': '8012', 'period': '2025-10',
+        'gross_amount': '900.00', 'net_amount': '715.00', 'page': 1,
+    }
+    short_name = {
+        'kind': 'payslip', 'employee_name': 'Example Historical',
+        'personal_number': '8012', 'period': '2025-10',
+        'gross_amount': '900.00', 'net_amount': '715.00', 'page': 2,
+    }
+    unrelated = {
+        'kind': 'payslip', 'employee_name': 'Still Unverified Other',
+        'personal_number': '8888', 'period': '2025-10',
+        'gross_amount': '600.00', 'net_amount': '500.00', 'page': 3,
+    }
+    Document.objects.create(
+        title=title,
+        file=SimpleUploadedFile('Lohnabrechnungen_2025-10.pdf', tiny_pdf('test')),
+        folder=Document.Folder.PAYROLL,
+        visibility=Document.Visibility.ADMIN,
+        uploaded_by=admin_user,
+    )
+    monkeypatch.setattr(
+        'core.lexware_historical._evidence',
+        lambda year, month: ([(title, long_name), (title, short_name)], 0),
+    )
+    restored = reconcile_archive(2025, 10, apply=True)
+    assert restored['added_payroll_rows'] == 2
+    monkeypatch.setattr(
+        'core.payroll_views.parse_lexware_pdf',
+        lambda data: ('lohnabrechnungen', [long_name, short_name, unrelated]),
+    )
+
+    response = auth_admin.get('/api/working-time/lexware-unmatched/?period=2025-10')
+    assert response.status_code == 200, response.data
+    assert response.data['scanned_rows'] == 3
+    assert response.data['matched_rows'] == 2
+    assert response.data['unmatched_rows'] == 1
+    assert response.data['unmatched_unique_count'] == 1
+    assert response.data['unmatched'][0]['employee_name'] == 'Still Unverified Other'
