@@ -674,7 +674,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
       const unmatchedRows = Number(result?.unmatched_count || 0);
       const unmatchedUnique = Number(result?.unmatched_unique_count ?? unmatchedRows);
       setMessage(
-        `Lexware Import abgeschlossen${periods ? ` (${periods})` : ''}. ` +
+        `Lexware Import ${archiveErrors.length ? 'teilweise abgeschlossen' : 'abgeschlossen'}${periods ? ` (${periods})` : ''}. ` +
         `${result?.files || lexwareFiles.length} Datei(en), ` +
         `${result?.employees?.length || 0} Mitarbeiter Monatszuordnungen, ` +
         `${archived} Nachweise archiviert. ` +
