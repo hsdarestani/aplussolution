@@ -1,16 +1,17 @@
 """Single-month work-time PDF and explicit signed saldo presentation."""
 import csv
 import io
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from urllib.parse import unquote
 
 import pytest
+from django.utils import timezone
 from docx import Document
 from openpyxl import load_workbook
 from pypdf import PdfReader
 
-from core.models import WorkingTimeAccountRecord
+from core.models import TimeEntry, WorkingTimeAccountRecord
 from core.working_time import (
     export_csv, export_xlsx, signed_saldo, worker_pdf, worker_docx,
 )
@@ -74,6 +75,58 @@ def test_single_month_employee_pdf_columns_and_filename(auth_admin, worker_user)
     assert '8:00' in text
     assert '2:00' in text
     assert '0:00' in text
+
+
+@pytest.mark.django_db
+def test_monthly_pdf_includes_later_approved_native_entries_even_if_snapshot_is_stale(
+    auth_admin, worker_user
+):
+    record = sample_record(worker_user)
+    record.source = 'aplus_time_entries'
+    worker = worker_user.worker_profile
+    tz = timezone.get_current_timezone()
+
+    def timestamp(day, hour, minute):
+        return timezone.make_aware(datetime(2026, 9, day, hour, minute), tz)
+
+    historical = TimeEntry.objects.create(
+        worker=worker,
+        clock_in=timestamp(5, 8, 15),
+        clock_out=timestamp(5, 16, 45),
+        break_minutes=30,
+        approved=True,
+        wiw_time_id='wiw-verified-september-5',
+    )
+    record.raw_entries[0]['id'] = str(historical.id)
+    record.save(update_fields=['raw_entries', 'source'])
+
+    for day, start_h, start_m, end_h, end_m, break_minutes, approved in (
+        (16, 15, 30, 21, 0, 0, True),
+        (23, 11, 30, 20, 0, 45, True),
+        (24, 9, 0, 16, 0, 30, False),
+    ):
+        TimeEntry.objects.create(
+            worker=worker,
+            clock_in=timestamp(day, start_h, start_m),
+            clock_out=timestamp(day, end_h, end_m),
+            break_minutes=break_minutes,
+            approved=approved,
+        )
+
+    result = auth_admin.get(
+        f'/api/working-time/attendance-pdf/{worker.pk}/?month=2026-09'
+    )
+    assert result.status_code == 200
+    content = pdf_text(result.content)
+    assert '05.09.2026' in content
+    assert '16.09.2026' in content
+    assert '23.09.2026' in content
+    assert '24.09.2026' not in content
+    assert '21:15' in content  # 8:00 + 5:30 + 7:45 from live approved evidence
+    assert 'gespeicherte Monatskonto' in content
+    record.refresh_from_db()
+    assert len(record.raw_entries) == 1  # PDF GET cannot alter financial ledger
+    assert record.ist_hours == Decimal('8.00')
 
 
 @pytest.mark.django_db
