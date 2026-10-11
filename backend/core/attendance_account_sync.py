@@ -7,14 +7,14 @@ Never auto-modify imported legacy ledgers or imported Lexware payroll evidence.
 import logging
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import timedelta
 
 from django.db import transaction
-from django.db.models.signals import post_delete, post_save, pre_save
+from django.db.models import Q
+from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
 
-from .models import TimeEntry, WorkerProfile
+from .models import Shift, TimeEntry, WorkerProfile
 
 logger = logging.getLogger(__name__)
 _batched_changes = ContextVar('attendance_account_batched_changes', default=None)
@@ -142,3 +142,47 @@ def attendance_entry_saved(sender, instance, **kwargs):
 @receiver(post_delete, sender=TimeEntry, dispatch_uid='attendance_account_post_delete')
 def attendance_entry_deleted(sender, instance, **kwargs):
     _queue(_affected(_snapshot(instance), None))
+
+
+def _shift_snapshot(shift):
+    return (
+        shift.starts_at, shift.ends_at, shift.break_minutes,
+        shift.client_id, shift.location_id, shift.position_id,
+    )
+
+
+def _affected_shift_attendance(shift_id):
+    return {
+        (_snapshot(entry)[0], _snapshot(entry)[1])
+        for entry in TimeEntry.objects.filter(
+            shift_id=shift_id, clock_out__isnull=False
+        ).filter(Q(approved=True) | Q(wiw_time_id__isnull=False))
+        .only('worker_id', 'clock_in', 'clock_out', 'approved', 'wiw_time_id')
+        if _snapshot(entry) is not None
+    }
+
+
+@receiver(pre_save, sender=Shift, dispatch_uid='attendance_account_shift_pre_save')
+def capture_previous_shift(sender, instance, **kwargs):
+    prior = Shift.objects.filter(pk=instance.pk).only(
+        'starts_at', 'ends_at', 'break_minutes',
+        'client_id', 'location_id', 'position_id',
+    ).first() if instance.pk else None
+    instance._attendance_previous_shift = _shift_snapshot(prior) if prior else None
+
+
+@receiver(post_save, sender=Shift, dispatch_uid='attendance_account_shift_post_save')
+def attendance_shift_saved(sender, instance, **kwargs):
+    prior = getattr(instance, '_attendance_previous_shift', None)
+    if prior is not None and prior != _shift_snapshot(instance):
+        _queue(_affected_shift_attendance(instance.pk))
+
+
+@receiver(pre_delete, sender=Shift, dispatch_uid='attendance_account_shift_pre_delete')
+def capture_deleted_shift_hours(sender, instance, **kwargs):
+    instance._attendance_affected_shift = _affected_shift_attendance(instance.pk)
+
+
+@receiver(post_delete, sender=Shift, dispatch_uid='attendance_account_shift_post_delete')
+def attendance_shift_deleted(sender, instance, **kwargs):
+    _queue(getattr(instance, '_attendance_affected_shift', set()))
