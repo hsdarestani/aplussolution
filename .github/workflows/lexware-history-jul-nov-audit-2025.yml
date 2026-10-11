@@ -1,4 +1,5 @@
 name: Read-only 2025 Lexware July to November audit
+# Final check after backed-up historical month completion
 on:
   push:
     branches: [main]
