@@ -197,6 +197,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   const [details, setDetails] = useState<Record<string, PayrollRow>>({});
   const [settingsRows, setSettingsRows] = useState<SettingRow[]>([]);
   const [month, setMonth] = useState('all');
+  const [selectedYear, setSelectedYear] = useState(() => Number(currentMonth().slice(0, 4)) || new Date().getFullYear());
   const [selectedWorkerId, setSelectedWorkerId] = useState('');
   const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
   const [expandedId, setExpandedId] = useState('');
@@ -227,8 +228,9 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   }, [standalone]);
 
   function payrollYearScope() {
-    const readinessYear = currentMonth().slice(0, 4) || String(new Date().getFullYear());
-    const throughMonth = currentMonth().slice(0, 7);
+    const readinessYear = String(selectedYear);
+    const currentYear = Number(currentMonth().slice(0, 4)) || new Date().getFullYear();
+    const throughMonth = selectedYear < currentYear ? `${readinessYear}-12` : currentMonth().slice(0, 7);
     return { readinessYear, throughMonth };
   }
 
@@ -298,10 +300,10 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
       let response: any = await fetchRecordsData();
       let nextRows = (response?.results || response || []) as PayrollRow[];
 
-      if (standalone && autoBuild && !nextRows.length && !autoBuildAttempted.current) {
+      if (standalone && autoBuild && selectedYear === Number(currentMonth().slice(0, 4)) && !nextRows.length && !autoBuildAttempted.current) {
         autoBuildAttempted.current = true;
         setMessage('Arbeitszeitdaten werden aus den vorhandenen Ist Zeiten aufgebaut.');
-        const rebuildYear = String(new Date().getFullYear());
+        const rebuildYear = String(selectedYear);
         const rebuilt: any = await api('working-time/rebuild-all/', { method: 'POST', body: JSON.stringify({ refresh_contract_terms: true, year: rebuildYear }) });
         if (!rebuilt?.records_count) {
           setEmptyReason(rebuilt?.detail || 'Es wurden keine abgeschlossenen oder freigegebenen Ist Zeiten gefunden.');
@@ -330,6 +332,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
       // Run it after the page has rendered instead of blocking payroll numbers.
       if (
         !archiveBackfillAttempted.current
+        && selectedYear === Number(currentMonth().slice(0, 4))
         && Boolean(readinessResponse?.enrichment_needed)
       ) {
         archiveBackfillAttempted.current = true;
@@ -360,18 +363,14 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
 
   useEffect(() => {
     if (standalone || target) void loadRows(standalone);
-  }, [standalone, target]);
+  }, [standalone, target, selectedYear]);
 
   const workerRows = useMemo(
     () => selectedWorkerId ? rows.filter(row => row.worker_id === selectedWorkerId) : rows,
     [rows, selectedWorkerId],
   );
-  const reviewYear = String(
-    lexwareReadiness?.year
-    || currentMonth().slice(0, 4)
-    || new Date().getFullYear()
-  );
-  const reviewThrough = lexwareReadiness?.expected_through || '';
+  const reviewYear = String(selectedYear);
+  const reviewThrough = lexwareReadiness?.year === selectedYear ? (lexwareReadiness.expected_through || '') : '';
   const months = useMemo(
     () => Array.from(new Set(workerRows.map(row => row.year_month))).sort().reverse(),
     [workerRows],
@@ -464,7 +463,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     try {
       const rebuildYear = month && month !== 'all'
         ? month.slice(0, 4)
-        : (months[0]?.slice(0, 4) || String(new Date().getFullYear()));
+        : String(selectedYear);
       const result: any = await api('working-time/rebuild-all/', {
         method: 'POST',
         body: JSON.stringify({ year: rebuildYear }),
@@ -513,7 +512,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     try {
       const reportYear = month && month !== 'all'
         ? month.slice(0, 4)
-        : (lexwareReadiness?.year ? String(lexwareReadiness.year) : currentMonth().slice(0, 4));
+        : String(selectedYear);
       const params = new URLSearchParams({ year: reportYear });
       // The Gesamt payroll export always contains all employees.
       // Use worker-specific Word/PDF buttons for an individual account.
@@ -537,7 +536,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     try {
       const reportYear = month && month !== 'all'
         ? month.slice(0, 4)
-        : (lexwareReadiness?.year ? String(lexwareReadiness.year) : currentMonth().slice(0, 4));
+        : String(selectedYear);
       const result = await apiBlob(`working-time/docx/${selectedWorkerId}/?year=${encodeURIComponent(reportYear)}`);
       triggerBlobDownload(result.blob, result.filename || '01_Arbeitszeitnachweis.docx');
     } catch (error: any) {
@@ -574,7 +573,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     try {
       const reportYear = month && month !== 'all'
         ? month.slice(0, 4)
-        : (lexwareReadiness?.year ? String(lexwareReadiness.year) : currentMonth().slice(0, 4));
+        : String(selectedYear);
       const result = await apiBlob(`working-time/pdf/${selectedWorkerId}/?year=${encodeURIComponent(reportYear)}`);
       triggerBlobDownload(result.blob, result.filename || '04_Pruefnachweis_Mitarbeiter.pdf');
     } catch (error: any) {
@@ -587,7 +586,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   async function downloadAuditWord() {
     const reportYear = month && month !== 'all'
       ? month.slice(0, 4)
-      : (lexwareReadiness?.year ? String(lexwareReadiness.year) : currentMonth().slice(0, 4));
+      : String(selectedYear);
     setBusyId('export:audit-word');
     setMessage('');
     try {
@@ -740,6 +739,21 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
 
       <section className="payroll-filter-deck">
         <div className="payroll-filter-main">
+          <label>Jahr
+            <select aria-label="Arbeitszeitkonto Jahr" value={selectedYear} onChange={event => {
+              const nextYear = Number(event.target.value);
+              setSelectedYear(nextYear);
+              setMonth('all');
+              setExpandedId('');
+              setDetails({});
+              setLexwareReadiness(null);
+              setLexwarePeriod(`${nextYear}-01`);
+            }}>
+              {Array.from({ length: Math.max(1, (Number(currentMonth().slice(0, 4)) || new Date().getFullYear()) - 1999) }, (_, index) =>
+                (Number(currentMonth().slice(0, 4)) || new Date().getFullYear()) - index
+              ).map(year => <option key={year} value={year}>{year}</option>)}
+            </select>
+          </label>
           <label>Mitarbeiter
             <select aria-label="Mitarbeiter auswählen" value={selectedWorkerId} onChange={event => { setSelectedWorkerId(event.target.value); setExpandedId(''); }}>
               <option value="">Alle Mitarbeiter</option>
