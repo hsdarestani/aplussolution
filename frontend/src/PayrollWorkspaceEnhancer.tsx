@@ -692,7 +692,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   }
 
   async function inspectUnmatchedLexware() {
-    if (!/^20\\d{2}-(0[1-9]|1[0-2])$/.test(lexwarePeriod)) {
+    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(lexwarePeriod)) {
       setMessage('Bitte zuerst den Lexware Abrechnungsmonat auswählen.');
       return;
     }
