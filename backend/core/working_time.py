@@ -1419,7 +1419,8 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
             f"{item['surcharge_amount']} €", f"{item['gross_with_surcharges']} €",
             f"{payroll.get('transferred_amount')} €" if payroll.get('transferred_amount') else '–',
         ])
-    table = Table(data, repeatRows=1, colWidths=[18 * mm] + [16 * mm] * 16)
+    # Leave room for the full Auszahlungsbetrag heading on landscape A4.
+    table = Table(data, repeatRows=1, colWidths=[17 * mm] + [15.4 * mm] * 15 + [25 * mm])
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#163B65')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
