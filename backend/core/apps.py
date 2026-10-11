@@ -8,6 +8,7 @@ class CoreConfig(AppConfig):
     def ready(self):
         from . import (  # noqa: F401
             attendance_models,
+            attendance_account_sync,
             client_order_notifications,
             document_source_recovery,
             location_client_consistency,
