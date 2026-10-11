@@ -1,5 +1,8 @@
 name: Safely reconcile archived Lexware 2025 former staff
 on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/lexware-historical-reconcile-2025.yml']
   workflow_dispatch:
 
 permissions:
