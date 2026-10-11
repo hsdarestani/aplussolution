@@ -1,5 +1,8 @@
 name: Safely complete missing August September 2025 Lexware payroll
 on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/lexware-2025-fill-missing-historical-months.yml']
   workflow_dispatch:
 permissions:
   contents: read
