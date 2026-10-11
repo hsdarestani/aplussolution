@@ -50,6 +50,7 @@ def _historical_worker(name, personnel, aliases):
     user.save()
     worker = WorkerProfile.objects.create(
         user=user, employee_number=code, active=False,
+        employment_type=WorkerProfile.EmploymentType.HISTORICAL,
     )
     EmployeeMasterData.objects.create(
         worker=worker,
@@ -191,9 +192,22 @@ def reconcile_archive(year=2025, month=12, *, apply=False):
         return summary
 
     with transaction.atomic():
+        # Reuse a real existing worker if its Lexware Personalnummer is
+        # already explicitly recorded; never create a duplicate payroll identity.
+        personnel_matches = defaultdict(list)
+        for candidate in WorkerProfile.objects.select_related('user').all():
+            number = str(candidate.employee_number or '').strip().upper()
+            if number:
+                personnel_matches[number].append(candidate)
+        for master in EmployeeMasterData.objects.select_related('worker').all():
+            number = str((master.data or {}).get('lexware_personal_number') or '').strip().upper()
+            if number and all(existing.pk != master.worker_id for existing in personnel_matches[number]):
+                personnel_matches[number].append(master.worker)
+
         # A matching existing user account should never be silently repurposed.
         roster = list(User.objects.all().only('id', 'first_name', 'last_name'))
         worker_by_key = {}
+        ambiguous_worker_keys = set()
         for name, personnel, aliases in safe_groups:
             key = _norm(name)
             existing_person = any(
@@ -203,10 +217,21 @@ def reconcile_archive(year=2025, month=12, *, apply=False):
             )
             if existing_person:
                 continue
-            worker, created = _historical_worker(name, personnel, aliases)
+            previously_known = personnel_matches.get(personnel, []) if personnel else []
+            if len(previously_known) > 1:
+                continue
+            if len(previously_known) == 1:
+                worker, created = previously_known[0], False
+            else:
+                worker, created = _historical_worker(name, personnel, aliases)
             summary['created_inactive_profiles' if created else 'reused_historical_profiles'] += 1
             for alias in aliases:
-                worker_by_key[_norm(alias)] = worker
+                alias_key = _norm(alias)
+                prior = worker_by_key.get(alias_key)
+                if prior is not None and prior.pk != worker.pk:
+                    ambiguous_worker_keys.add(alias_key)
+                elif alias_key not in ambiguous_worker_keys:
+                    worker_by_key[alias_key] = worker
             if personnel:
                 worker_by_key[f'PERSONNEL:{personnel}'] = worker
 
@@ -214,7 +239,7 @@ def reconcile_archive(year=2025, month=12, *, apply=False):
         for title, row in outstanding:
             pn = _personnel_number(row)
             worker = worker_by_key.get(f'PERSONNEL:{pn}') if pn else None
-            if worker is None:
+            if worker is None and _norm(row['employee_name']) not in ambiguous_worker_keys:
                 worker = worker_by_key.get(_norm(row['employee_name']))
             if worker is None:
                 continue
