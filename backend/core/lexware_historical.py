@@ -166,9 +166,9 @@ def reconcile_archive(year=2025, month=12, *, apply=False):
     group_names = [_norm(name) for name, _pn, _names in groups]
     safe_groups = [
         item for item in groups
-        if not _ambiguous_name(_norm(item[0]), [
+        if (item[1] or not _ambiguous_name(_norm(item[0]), [
             name for name, pn, _ in groups if pn != item[1] or not pn
-        ])
+        ]))
         and len(_norm(item[0]).split()) >= 2
     ]
     held_groups = len(groups) - len(safe_groups)
