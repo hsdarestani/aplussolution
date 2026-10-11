@@ -278,7 +278,7 @@ export async function apiBlob(path: string, options: RequestInit = {}, retry = t
   }
   if (!response.ok) throw new Error(await parseError(response));
   const disposition = response.headers.get('content-disposition') || '';
-  const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] || fallbackFilename;
+  const filename = filenameFromDisposition(disposition, fallbackFilename);
   return { blob: await response.blob(), filename };
 }
 
