@@ -1,5 +1,5 @@
 name: Diagnose Lexware annual import failures
-# Verify historical archive after chunked Lohnkonto upload
+# Verify actual archived 2025 Lohnkonto after user confirmed successful chunk upload
 on:
   push:
     branches: [main]
