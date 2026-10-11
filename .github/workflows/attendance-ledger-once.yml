@@ -34,6 +34,17 @@ jobs:
           timeout 150 docker compose exec -T backend python manage.py reconcile_attendance_accounts --year 2026 </dev/null
           echo "=== read-only ledger audit 2025 ==="
           timeout 60 docker compose exec -T backend python manage.py reconcile_attendance_accounts --year 2025 </dev/null
+          echo "=== backup primary database before 2026 reconciliation ==="
+          umask 077
+          mkdir -p /var/backups/aplussolution/attendance-ledger
+          backup="/var/backups/aplussolution/attendance-ledger/pre-reconcile-2026-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+          docker compose exec -T db sh -c 'exec pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' </dev/null | gzip > "$backup"
+          test -s "$backup"
+          echo "ATTENDANCE_BACKUP_CREATED"
+          echo "=== apply targeted 2026 attendance account reconciliation ==="
+          timeout 180 docker compose exec -T backend python manage.py reconcile_attendance_accounts --year 2026 --apply </dev/null
+          echo "=== verify 2026 reconciliation is fully clean ==="
+          timeout 90 docker compose exec -T backend python manage.py reconcile_attendance_accounts --year 2026 </dev/null
           REMOTE
       - name: Cleanup
         if: always()
