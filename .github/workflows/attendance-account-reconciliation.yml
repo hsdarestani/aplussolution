@@ -49,7 +49,7 @@ jobs:
           # the reconciler code to reach the STRATO primary.
           ready=0
           for attempt in $(seq 1 80); do
-            if docker compose exec -T backend python manage.py reconcile_attendance_accounts --help >/dev/null 2>&1; then
+            if docker compose exec -T backend python manage.py reconcile_attendance_accounts --help </dev/null >/dev/null 2>&1; then
               ready=1
               break
             fi
@@ -57,7 +57,7 @@ jobs:
           done
           test "$ready" -eq 1 || { echo "ATTENDANCE_RECONCILER_NOT_DEPLOYED"; exit 1; }
           year=$(date -u +%Y)
-          docker compose exec -T backend python manage.py reconcile_attendance_accounts --year "$year"
+          docker compose exec -T backend python manage.py reconcile_attendance_accounts --year "$year" </dev/null
           if [ "$APPLY" = "true" ]; then
             umask 077
             mkdir -p /var/backups/aplussolution/attendance-ledger
@@ -65,7 +65,7 @@ jobs:
             docker compose exec -T db sh -c 'exec pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' | gzip > "$backup"
             test -s "$backup" || { echo "ATTENDANCE_BACKUP_FAILED"; exit 1; }
             echo "ATTENDANCE_BACKUP_CREATED"
-            docker compose exec -T backend python manage.py reconcile_attendance_accounts --year "$year" --apply
+            docker compose exec -T backend python manage.py reconcile_attendance_accounts --year "$year" --apply </dev/null
             find /var/backups/aplussolution/attendance-ledger -type f -name 'pre-reconcile-*.sql.gz' -mtime +14 -delete
           fi
           REMOTE
