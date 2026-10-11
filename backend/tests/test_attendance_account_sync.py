@@ -110,3 +110,24 @@ def test_imported_legacy_month_is_never_overwritten_by_auto_refresh(worker_user)
     assert legacy.source == 'wiw_times'
     assert legacy.ist_hours == Decimal('12.00')
     assert legacy.raw_entries[0]['id'] == 'historical-evidence'
+
+
+@pytest.mark.django_db(transaction=True)
+def test_shift_break_change_refreshes_dependent_attendance_hours(worker_user, shift):
+    worker = worker_user.worker_profile
+    shift.starts_at = local_dt(16, 15)
+    shift.ends_at = local_dt(16, 21)
+    shift.break_minutes = 0
+    shift.save(update_fields=['starts_at', 'ends_at', 'break_minutes', 'updated_at'])
+    TimeEntry.objects.create(
+        worker=worker, shift=shift,
+        clock_in=local_dt(16, 15), clock_out=local_dt(16, 21),
+        approved=True, break_minutes=None,
+    )
+    record = WorkingTimeAccountRecord.objects.get(worker=worker, year_month=date(2026, 9, 1))
+    assert record.ist_hours == Decimal('6.00')
+    shift.break_minutes = 30
+    shift.save(update_fields=['break_minutes', 'updated_at'])
+    record.refresh_from_db()
+    assert record.ist_hours == Decimal('5.50')
+    assert record.raw_entries[0]['break_minutes'] == 30
