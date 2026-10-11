@@ -1,0 +1,60 @@
+name: Safely complete missing August September 2025 Lexware payroll
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PRIMARY_HOST: ${{ secrets.STRATO_HOST }}
+      PRIMARY_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Preflight, back up DB and create only missing real historical payroll months
+        run: |
+          set -euo pipefail
+          test -n "$PRIMARY_HOST"
+          test -n "$PRIMARY_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$PRIMARY_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 -o ServerAliveInterval=10 -o ServerAliveCountMax=10 root@"$PRIMARY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          echo "=== Safe preview, read-only ==="
+          PREVIEW="$(docker compose exec -T backend python manage.py complete_lexware_historical_months --year 2025 < /dev/null)"
+          echo "$PREVIEW"
+          printf '%s\n' "$PREVIEW" | python3 -c '
+          import json,sys
+          line=sys.stdin.read().strip().splitlines()[-1]
+          if not line.startswith("LEXWARE_MISSING_MONTHS "): sys.exit("Missing preflight result")
+          d=json.loads(line.split(" ",1)[1])
+          if d["parse_errors"] or d["applied"] or d["missing_payroll_months"] < 1:
+              sys.exit("No recoverable or safe historical payroll rows detected")
+          '
+          echo "=== Verified PostgreSQL backup outside deployed Git repository ==="
+          install -d -m 700 /var/backups/aplussolution
+          umask 077
+          BACKUP="/var/backups/aplussolution/lexware-missing-aug-sep-pre-apply-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+          docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" --no-owner --no-acl' < /dev/null | gzip -1 > "$BACKUP"
+          test -s "$BACKUP"
+          gzip -t "$BACKUP"
+          echo "BACKUP_VERIFIED bytes=$(wc -c < "$BACKUP")"
+          echo "=== Fill only absent historic payroll statements ==="
+          docker compose exec -T backend python manage.py complete_lexware_historical_months --year 2025 --apply < /dev/null
+          echo "=== Verify database and no fabricated worktime ==="
+          docker compose exec -T backend python manage.py shell -c '
+          from core.models import PayrollStatement,WorkerProfile,WorkingTimeAccountRecord
+          q=WorkerProfile.objects.filter(employment_type="historisch")
+          active=q.filter(active=True).count()+q.filter(user__is_active=True).count()
+          fabricated=WorkingTimeAccountRecord.objects.filter(worker__employment_type="historisch").count()
+          print("HISTORY_VERIFIED inactive_profiles=%s active_flags=%s fabricated_worktime_records=%s" % (q.count(),active,fabricated),flush=True)
+          for m in range(7,13):
+              payroll=PayrollStatement.objects.filter(period__year=2025,period__month=m)
+              print("PAYROLL_VERIFIED month=%02d total=%d historical=%d" % (m,payroll.count(),payroll.filter(worker__employment_type="historisch").count()),flush=True)
+          if active or fabricated: raise ValueError("Unexpected active historical user or fabricated hours")
+          ' < /dev/null
+          echo "=== Remaining missing months (read-only) ==="
+          docker compose exec -T backend python manage.py complete_lexware_historical_months --year 2025 < /dev/null
+          REMOTE
