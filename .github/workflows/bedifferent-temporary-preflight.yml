@@ -1,6 +1,10 @@
 name: Be Different temporary hosting preflight (read only)
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/bedifferent-temporary-preflight.yml'
   workflow_dispatch:
 
 permissions:
