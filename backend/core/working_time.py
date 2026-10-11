@@ -1138,6 +1138,11 @@ def export_xlsx(queryset) -> HttpResponse:
         ])
     for column in ws.columns:
         ws.column_dimensions[column[0].column_letter].width = min(max(len(str(cell.value or '')) for cell in column) + 2, 32)
+    # Signed display without coercing numeric cells to text or losing formulas.
+    saldo_number_format = '+0.00;-0.00;+0.00'
+    for row_index in range(2, ws.max_row + 1):
+        for column_index in (6, 9, 14):  # Übertrag, Saldo, Monatssaldo
+            ws.cell(row_index, column_index).number_format = saldo_number_format
     ws.freeze_panes = 'A2'
     ws.auto_filter.ref = ws.dimensions
 
@@ -1397,7 +1402,7 @@ def worker_pdf(worker: WorkerProfile, queryset) -> bytes:
 
     data = [[
         'Monat', 'Ist', 'Soll', 'Basis', 'Monatssaldo', 'Übertrag', 'Saldo',
-        'Nacht', 'Sa.', 'So.', 'Feiertag', 'Abw.', 'Urlaub', 'Krank', 'Zuschläge', 'Brutto', 'Auszahlungsbetrag',
+        'Nacht', 'Sa.', 'So.', 'Feiertag', 'Abw.', 'Urlaub', 'Krank', 'Zuschläge', 'Brutto', 'Auszahlungs\nbetrag',
     ]]
     for row, item in prepared:
         payroll = item.get('payroll_statement') or {}
