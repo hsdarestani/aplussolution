@@ -165,6 +165,8 @@ def sync_working_time(
     include_inactive_workers: bool = False,
     refresh_contract_terms: bool = False,
     reset_carry: bool = False,
+    worker_ids=None,
+    attendance_change: bool = False,
 ) -> WorkingTimeSyncLog:
     """Rebuild payroll records from actual A+ attendance.
 
@@ -179,12 +181,15 @@ def sync_working_time(
     start_dt = timezone.make_aware(datetime.combine(start, time.min), current_tz)
     end_dt = timezone.make_aware(datetime.combine(end + timedelta(days=1), time.min), current_tz)
 
+    closed_query = TimeEntry.objects.filter(
+        clock_in__gte=start_dt,
+        clock_in__lt=end_dt,
+        clock_out__isnull=False,
+    )
+    if worker_ids is not None:
+        closed_query = closed_query.filter(worker_id__in=worker_ids)
     closed_entries = list(
-        TimeEntry.objects.filter(
-            clock_in__gte=start_dt,
-            clock_in__lt=end_dt,
-            clock_out__isnull=False,
-        )
+        closed_query
         .select_related('worker__user', 'shift__client', 'shift__location', 'shift__position')
         .order_by('clock_in')
     )
@@ -199,6 +204,8 @@ def sync_working_time(
     ])
 
     worker_queryset = WorkerProfile.objects.select_related('user')
+    if worker_ids is not None:
+        worker_queryset = worker_queryset.filter(id__in=worker_ids)
     if not include_inactive_workers:
         worker_queryset = worker_queryset.filter(active=True)
     workers = list(worker_queryset)
@@ -228,7 +235,7 @@ def sync_working_time(
         row['worker_id']: row
         for row in (
             TimeEntry.objects
-            .filter(clock_out__isnull=False)
+            .filter(clock_out__isnull=False, worker_id__in=[w.id for w in workers])
             .values('worker_id')
             .annotate(first_clock_in=Min('clock_in'), last_clock_out=Max('clock_out'))
         )
@@ -291,13 +298,31 @@ def sync_working_time(
                 continue
 
             bounds = history_bounds.get(worker.id)
-            if not bounds or not bounds.get('first_clock_in'):
+            previous_auto_months = set()
+            if attendance_change:
+                previous_auto_months = set(
+                    WorkingTimeAccountRecord.objects.filter(
+                        worker=worker, source='aplus_time_entries',
+                        year_month__gte=start.replace(day=1),
+                        year_month__lte=end,
+                    ).values_list('year_month', flat=True)
+                )
+            if (not bounds or not bounds.get('first_clock_in')) and not previous_auto_months:
                 continue
-            first_month = timezone.localtime(bounds['first_clock_in'], current_tz).date().replace(day=1)
-            last_month = timezone.localtime(bounds['last_clock_out'], current_tz).date().replace(day=1)
-            worker_range_start = max(start.replace(day=1), first_month)
+            first_month = (
+                timezone.localtime(bounds['first_clock_in'], current_tz).date().replace(day=1)
+                if bounds and bounds.get('first_clock_in') else start.replace(day=1)
+            )
+            last_month = (
+                timezone.localtime(bounds['last_clock_out'], current_tz).date().replace(day=1)
+                if bounds and bounds.get('last_clock_out') else start.replace(day=1)
+            )
+            worker_range_start = (
+                start.replace(day=1) if attendance_change and previous_auto_months
+                else max(start.replace(day=1), first_month)
+            )
             worker_range_end = end
-            if include_inactive_workers and not worker.active:
+            if include_inactive_workers and not worker.active and not attendance_change:
                 worker_range_end = min(worker_range_end, last_month)
             if worker_range_end < worker_range_start:
                 continue
@@ -321,10 +346,11 @@ def sync_working_time(
             holiday_percent = dec(row_setting.holiday_surcharge_percent if row_setting else 0)
 
             worker_months = sorted(
-                month
-                for worker_id, month in closed_month_keys
-                if worker_id == worker.id
-                and worker_range_start <= month <= worker_range_end
+                {
+                    month for worker_id, month in closed_month_keys
+                    if worker_id == worker.id
+                    and worker_range_start <= month <= worker_range_end
+                } | (previous_auto_months if attendance_change else set())
             )
             if not worker_months:
                 continue
@@ -333,17 +359,18 @@ def sync_working_time(
             # window. Manual/payroll evidence is untouched. A closed but still
             # unapproved attendance row remains valid because its month is in
             # worker_months and will intentionally show zero IST until approval.
-            (
-                WorkingTimeAccountRecord.objects
-                .filter(
-                    worker=worker,
-                    year_month__gte=worker_range_start,
-                    year_month__lte=worker_range_end,
-                    source='aplus_time_entries',
+            if not attendance_change:
+                (
+                    WorkingTimeAccountRecord.objects
+                    .filter(
+                        worker=worker,
+                        year_month__gte=worker_range_start,
+                        year_month__lte=worker_range_end,
+                        source='aplus_time_entries',
+                    )
+                    .exclude(year_month__in=worker_months)
+                    .delete()
                 )
-                .exclude(year_month__in=worker_months)
-                .delete()
-            )
 
             first_rebuilt_month = worker_months[0]
             prior = None
@@ -362,6 +389,10 @@ def sync_working_time(
                     worker=worker,
                     year_month=month,
                 ).first()
+                # Never automatically replace an imported legacy ledger.
+                if attendance_change and existing and existing.source != 'aplus_time_entries':
+                    carry = dec(existing.saldo_cumulative)
+                    continue
                 closed_month = month < current_month
 
                 month_limit = (
@@ -546,6 +577,8 @@ def sync_working_time(
                 'refresh_contract_terms': refresh_contract_terms,
                 'include_inactive_workers': include_inactive_workers,
                 'reset_carry': reset_carry,
+                'attendance_change': attendance_change,
+                'targeted_workers': len(workers) if worker_ids is not None else None,
             },
         )
 
