@@ -1,0 +1,54 @@
+name: Safely reconcile archived Lexware 2025 former staff
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup_and_reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PRIMARY_HOST: ${{ secrets.STRATO_HOST }}
+      PRIMARY_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Backup and reconcile existing December 2025 archive (no new uploads)
+        run: |
+          set -euo pipefail
+          test -n "$PRIMARY_HOST"
+          test -n "$PRIMARY_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$PRIMARY_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 -o ServerAliveInterval=10 -o ServerAliveCountMax=9 root@"$PRIMARY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          echo "=== Read-only preview of real archived December payroll evidence ==="
+          PREVIEW="$(docker compose exec -T backend python manage.py reconcile_lexware_archive --year 2025 --month 12)"
+          echo "$PREVIEW"
+          printf '%s\n' "$PREVIEW" | python3 -c '
+          import json,sys
+          line=sys.stdin.read().strip().splitlines()[-1]
+          if not line.startswith("LEXWARE_HISTORICAL_RECONCILE "): sys.exit("Missing preview output")
+          data=json.loads(line.split(" ",1)[1])
+          if data["source_files"] < 2 or data["archive_parse_errors"] > 0:
+              sys.exit("Archived payslip and payment-list evidence is incomplete")
+          '
+          echo "=== Save compressed PostgreSQL backup OUTSIDE deployed git tree ==="
+          install -d -m 700 /var/backups/aplussolution
+          umask 077
+          BACKUP="/var/backups/aplussolution/lexware-before-reconcile-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+          docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" --no-owner --no-acl' | gzip -1 > "$BACKUP"
+          test -s "$BACKUP"
+          echo "BACKUP_CONFIRMED bytes=$(wc -c < "$BACKUP")"
+          echo "=== Add only evidence-backed inactive historical payroll identities ==="
+          docker compose exec -T backend python manage.py reconcile_lexware_archive --year 2025 --month 12 --apply
+          docker compose exec -T backend python manage.py shell -c '
+          from core.models import WorkerProfile, PayrollStatement, WorkingTimeAccountRecord
+          q=WorkerProfile.objects.filter(employment_type="historisch")
+          print("HISTORICAL_PROFILES_TOTAL=%s ACTIVE_PROFILES=%s ACTIVE_LOGINS=%s" % (q.count(),q.filter(active=True).count(),q.filter(user__is_active=True).count()), flush=True)
+          print("HISTORICAL_DEC_PAYROLL_MONTHS=%s" % PayrollStatement.objects.filter(worker__employment_type="historisch",period__year=2025,period__month=12).count(),flush=True)
+          print("HISTORICAL_FAKE_TIMESHEET_RECORDS=%s" % WorkingTimeAccountRecord.objects.filter(worker__employment_type="historisch").count(),flush=True)
+          '
+          REMOTE
