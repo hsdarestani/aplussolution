@@ -303,7 +303,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
       if (standalone && autoBuild && selectedYear === Number(currentMonth().slice(0, 4)) && !nextRows.length && !autoBuildAttempted.current) {
         autoBuildAttempted.current = true;
         setMessage('Arbeitszeitdaten werden aus den vorhandenen Ist Zeiten aufgebaut.');
-        const rebuildYear = String(new Date().getFullYear());
+        const rebuildYear = String(selectedYear);
         const rebuilt: any = await api('working-time/rebuild-all/', { method: 'POST', body: JSON.stringify({ refresh_contract_terms: true, year: rebuildYear }) });
         if (!rebuilt?.records_count) {
           setEmptyReason(rebuilt?.detail || 'Es wurden keine abgeschlossenen oder freigegebenen Ist Zeiten gefunden.');
@@ -536,7 +536,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     try {
       const reportYear = month && month !== 'all'
         ? month.slice(0, 4)
-        : (lexwareReadiness?.year ? String(lexwareReadiness.year) : currentMonth().slice(0, 4));
+        : String(selectedYear);
       const result = await apiBlob(`working-time/docx/${selectedWorkerId}/?year=${encodeURIComponent(reportYear)}`);
       triggerBlobDownload(result.blob, result.filename || '01_Arbeitszeitnachweis.docx');
     } catch (error: any) {
@@ -573,7 +573,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     try {
       const reportYear = month && month !== 'all'
         ? month.slice(0, 4)
-        : (lexwareReadiness?.year ? String(lexwareReadiness.year) : currentMonth().slice(0, 4));
+        : String(selectedYear);
       const result = await apiBlob(`working-time/pdf/${selectedWorkerId}/?year=${encodeURIComponent(reportYear)}`);
       triggerBlobDownload(result.blob, result.filename || '04_Pruefnachweis_Mitarbeiter.pdf');
     } catch (error: any) {
@@ -586,7 +586,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   async function downloadAuditWord() {
     const reportYear = month && month !== 'all'
       ? month.slice(0, 4)
-      : (lexwareReadiness?.year ? String(lexwareReadiness.year) : currentMonth().slice(0, 4));
+      : String(selectedYear);
     setBusyId('export:audit-word');
     setMessage('');
     try {
