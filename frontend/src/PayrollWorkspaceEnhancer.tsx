@@ -181,7 +181,7 @@ const isNormalEmployeeOption = (item: EmployeeOption) =>
   !isTechnicalEmployee(item)
   && (item.worker_active !== false || Boolean(item.has_period_data) || Boolean(item.has_payroll_history));
 
-const employeeNameKey = (name: string) => name.normalize('NFKC').trim().toLocaleLowerCase('de').replace(/\\s+/g, ' ');
+const employeeNameKey = (name: string) => name.normalize('NFKC').trim().toLocaleLowerCase('de').replace(/\s+/g, ' ');
 
 const mergeEmployeeOptions = (...groups: EmployeeOption[][]): EmployeeOption[] => {
   const options = new Map<string, EmployeeOption>();
