@@ -86,6 +86,9 @@ type PayrollRow = {
   worker_id: string;
   employee_name: string;
   employee_number?: string;
+  worker_active?: boolean;
+  user_active?: boolean;
+  is_synthetic?: boolean;
   employment_type?: string;
   historical_soll_unverified?: boolean;
   employment_classification_unverified?: boolean;
@@ -147,6 +150,9 @@ type HistoricLexwareRow = {
   worker_id: string;
   employee_name: string;
   employee_number: string;
+  worker_active?: boolean;
+  user_active?: boolean;
+  is_synthetic?: boolean;
   period: string;
   gross_amount: string | null;
   net_amount: string | null;
@@ -155,7 +161,46 @@ type HistoricLexwareRow = {
 };
 
 type Draft = { paid_total_hours: string; manual_adjustment: string };
-type EmployeeOption = { worker_id: string; employee_name: string };
+type EmployeeOption = {
+  worker_id: string;
+  employee_name: string;
+  employee_number?: string;
+  worker_active?: boolean;
+  user_active?: boolean;
+  is_synthetic?: boolean;
+  has_period_data?: boolean;
+  has_payroll_history?: boolean;
+};
+
+const isTechnicalEmployee = (item: EmployeeOption) =>
+  item.is_synthetic === true
+  || item.employee_name.toLowerCase().endsWith('@sync.invalid')
+  || item.employee_name.trim().toLowerCase() === 'store reviewer';
+
+const isNormalEmployeeOption = (item: EmployeeOption) =>
+  !isTechnicalEmployee(item)
+  && (item.worker_active !== false || Boolean(item.has_period_data) || Boolean(item.has_payroll_history));
+
+const employeeNameKey = (name: string) => name.normalize('NFKC').trim().toLocaleLowerCase('de').replace(/\\s+/g, ' ');
+
+const mergeEmployeeOptions = (...groups: EmployeeOption[][]): EmployeeOption[] => {
+  const options = new Map<string, EmployeeOption>();
+  for (const item of groups.flat()) {
+    if (!item.worker_id || !item.employee_name.trim()) continue;
+    const previous = options.get(item.worker_id);
+    options.set(item.worker_id, {
+      ...previous,
+      ...item,
+      has_period_data: Boolean(previous?.has_period_data || item.has_period_data),
+      has_payroll_history: Boolean(previous?.has_payroll_history || item.has_payroll_history),
+    });
+  }
+  return Array.from(options.values()).sort((a, b) =>
+    a.employee_name.localeCompare(b.employee_name, 'de')
+    || String(a.employee_number || '').localeCompare(String(b.employee_number || ''), 'de')
+    || a.worker_id.localeCompare(b.worker_id),
+  );
+};
 type SettingRow = EmployeeOption & {
   employment_type?: string;
   monthly_limit: string;
@@ -212,6 +257,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   const [selectedYear, setSelectedYear] = useState(() => Number(currentMonth().slice(0, 4)) || new Date().getFullYear());
   const [selectedWorkerId, setSelectedWorkerId] = useState('');
   const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
+  const [showHistoricalProfiles, setShowHistoricalProfiles] = useState(false);
   const [expandedId, setExpandedId] = useState('');
   const [busyId, setBusyId] = useState('');
   const [loading, setLoading] = useState(false);
@@ -280,6 +326,10 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
       ? settingsResponse.employees.map((item: any) => ({
           worker_id: String(item.worker_id || ''),
           employee_name: String(item.employee_name || ''),
+          employee_number: String(item.employee_number || ''),
+          worker_active: item.worker_active,
+          user_active: item.user_active,
+          is_synthetic: item.is_synthetic,
           employment_type: item.employment_type,
           monthly_limit: String(item.monthly_limit ?? '0'),
           hourly_rate: String(item.hourly_rate ?? '0'),
@@ -291,10 +341,16 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
           notes: item.notes,
         })).filter((item: SettingRow) => item.worker_id && item.employee_name)
       : settingsRows;
-    const rowEmployees = nextRows.map(item => ({ worker_id: item.worker_id, employee_name: item.employee_name }));
-    const uniqueEmployees = Array.from(
-      new Map([...configuredSettings, ...rowEmployees].map(item => [item.worker_id, { worker_id: item.worker_id, employee_name: item.employee_name }])).values(),
-    ).sort((a, b) => a.employee_name.localeCompare(b.employee_name, 'de'));
+    const rowEmployees: EmployeeOption[] = nextRows.map(item => ({
+      worker_id: item.worker_id,
+      employee_name: item.employee_name,
+      employee_number: item.employee_number,
+      worker_active: item.worker_active,
+      user_active: item.user_active,
+      is_synthetic: item.is_synthetic,
+      has_period_data: true,
+    }));
+    const uniqueEmployees = mergeEmployeeOptions(configuredSettings, rowEmployees);
 
     setRows(nextRows);
     setEmployeeOptions(uniqueEmployees);
@@ -351,11 +407,15 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
           .filter((item: any) => /^20\d{2}-(0[1-9]|1[0-2])$/.test(String(item.period || '')) && item.worker_id);
         setHistoricalPayrollRows(historical);
         setEmployeeOptions(previous => {
-          const byId = new Map<string, EmployeeOption>(previous.map(row => [row.worker_id, row]));
-          for (const item of historical as HistoricLexwareRow[]) {
-            byId.set(item.worker_id, { worker_id: item.worker_id, employee_name: item.employee_name });
-          }
-          return Array.from(byId.values()).sort((a, b) => a.employee_name.localeCompare(b.employee_name, 'de'));
+          return mergeEmployeeOptions(previous, (historical as HistoricLexwareRow[]).map(item => ({
+            worker_id: item.worker_id,
+            employee_name: item.employee_name,
+            employee_number: item.employee_number,
+            worker_active: item.worker_active,
+            user_active: item.user_active,
+            is_synthetic: item.is_synthetic,
+            has_payroll_history: true,
+          })));
         });
       } catch {
         // Existing IST data remains available if an archive-only listing fails.
@@ -447,6 +507,18 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     if (month && month !== 'all') setLexwarePeriod(month);
   }, [month]);
 
+  const visibleEmployeeOptions = useMemo(
+    () => employeeOptions.filter(item => showHistoricalProfiles || isNormalEmployeeOption(item)),
+    [employeeOptions, showHistoricalProfiles],
+  );
+  const duplicateNameCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const employee of visibleEmployeeOptions) {
+      const key = employeeNameKey(employee.employee_name);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return counts;
+  }, [visibleEmployeeOptions]);
   const selectedEmployee = employeeOptions.find(item => item.worker_id === selectedWorkerId);
   const selectedSetting = settingsRows.find(item => item.worker_id === selectedWorkerId);
   const closedSummaryRows = summaryRows.filter(row => !row.is_open_month);
@@ -861,8 +933,32 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
           <label>Mitarbeiter
             <select aria-label="Mitarbeiter auswählen" value={selectedWorkerId} onChange={event => { setSelectedWorkerId(event.target.value); setExpandedId(''); }}>
               <option value="">Alle Mitarbeiter</option>
-              {employeeOptions.map(item => <option key={item.worker_id} value={item.worker_id}>{item.employee_name}</option>)}
+              {visibleEmployeeOptions.map(item => (
+                <option key={item.worker_id} value={item.worker_id}>
+                  {item.employee_name}
+                  {(duplicateNameCounts.get(employeeNameKey(item.employee_name)) || 0) > 1
+                    ? ` · Personalnr. ${item.employee_number || item.worker_id.slice(0, 8)}`
+                    : ''}
+                  {showHistoricalProfiles && !isNormalEmployeeOption(item) ? ' · Historisch/Technisch' : ''}
+                </option>
+              ))}
             </select>
+            <span className="payroll-employee-filter-advanced">
+              <input
+                type="checkbox"
+                aria-label="Historische und technische Profile anzeigen"
+                checked={showHistoricalProfiles}
+                onChange={event => {
+                  const enabled = event.target.checked;
+                  setShowHistoricalProfiles(enabled);
+                  if (!enabled && selectedEmployee && !isNormalEmployeeOption(selectedEmployee)) {
+                    setSelectedWorkerId('');
+                    setExpandedId('');
+                  }
+                }}
+              />
+              Historische und technische Profile anzeigen
+            </span>
           </label>
           <label>Monat
             <select aria-label="Arbeitszeitkonto Monat" value={month} onChange={event => { setMonth(event.target.value); setExpandedId(''); }}>
