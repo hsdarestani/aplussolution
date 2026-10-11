@@ -1,5 +1,6 @@
 import io
 import re
+from itertools import islice
 from decimal import Decimal
 
 from pypdf import PdfReader
@@ -22,11 +23,7 @@ def _money(value: str | None) -> Decimal | None:
 
 def _pages(payload: bytes, *, limit: int | None = None) -> list[str]:
     reader = PdfReader(io.BytesIO(payload))
-    return [
-        page.extract_text() or ''
-        for index, page in enumerate(reader.pages)
-        if limit is None or index < limit
-    ]
+    return [page.extract_text() or '' for page in islice(reader.pages, limit)]
 
 
 def _employee_name_from_payslip(text: str) -> str:
