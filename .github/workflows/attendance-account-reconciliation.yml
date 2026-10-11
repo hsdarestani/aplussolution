@@ -59,13 +59,13 @@ jobs:
           year=$(date -u +%Y)
           docker compose exec -T backend python manage.py reconcile_attendance_accounts --year "$year"
           if [ "$APPLY" = "true" ]; then
-            mkdir -p /opt/aplussolution/backups/attendance-ledger
-            backup="/opt/aplussolution/backups/attendance-ledger/pre-reconcile-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+            mkdir -p /var/backups/aplussolution/attendance-ledger
+            backup="/var/backups/aplussolution/attendance-ledger/pre-reconcile-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
             docker compose exec -T db sh -c 'exec pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' | gzip > "$backup"
             test -s "$backup" || { echo "ATTENDANCE_BACKUP_FAILED"; exit 1; }
             echo "ATTENDANCE_BACKUP_CREATED"
             docker compose exec -T backend python manage.py reconcile_attendance_accounts --year "$year" --apply
-            find /opt/aplussolution/backups/attendance-ledger -type f -name 'pre-reconcile-*.sql.gz' -mtime +14 -delete
+            find /var/backups/aplussolution/attendance-ledger -type f -name 'pre-reconcile-*.sql.gz' -mtime +14 -delete
           fi
           REMOTE
       - name: Clear SSH private key
