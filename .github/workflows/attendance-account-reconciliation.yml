@@ -1,0 +1,73 @@
+name: Reconcile A+ attendance account drift
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        type: boolean
+        required: false
+        default: false
+        description: Apply guarded changes after database backup
+  schedule:
+    - cron: '23 2 * * *'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/attendance-account-reconciliation.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: attendance-account-reconciliation
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+      APPLY: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.apply) }}
+    steps:
+      - name: Configure production SSH
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+      - name: Audit and optionally reconcile current-year A+ attendance
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 root@"$STRATO_HOST" "APPLY='$APPLY' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          # On initial push, deployment may still be in progress. Wait for
+          # the reconciler code to reach the STRATO primary.
+          ready=0
+          for attempt in $(seq 1 80); do
+            if docker compose exec -T backend python manage.py reconcile_attendance_accounts --help >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 10
+          done
+          test "$ready" -eq 1 || { echo "ATTENDANCE_RECONCILER_NOT_DEPLOYED"; exit 1; }
+          year=$(date -u +%Y)
+          docker compose exec -T backend python manage.py reconcile_attendance_accounts --year "$year"
+          if [ "$APPLY" = "true" ]; then
+            mkdir -p /opt/aplussolution/backups/attendance-ledger
+            backup="/opt/aplussolution/backups/attendance-ledger/pre-reconcile-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+            docker compose exec -T db sh -c 'exec pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' | gzip > "$backup"
+            test -s "$backup" || { echo "ATTENDANCE_BACKUP_FAILED"; exit 1; }
+            echo "ATTENDANCE_BACKUP_CREATED"
+            docker compose exec -T backend python manage.py reconcile_attendance_accounts --year "$year" --apply
+            find /opt/aplussolution/backups/attendance-ledger -type f -name 'pre-reconcile-*.sql.gz' -mtime +14 -delete
+          fi
+          REMOTE
+      - name: Clear SSH private key
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
