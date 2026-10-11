@@ -83,6 +83,47 @@ describe('PayrollWorkspaceEnhancer', () => {
     });
   });
 
+  it('hides inactive empty duplicates and WIW technical users but keeps an explicit historical picker', async () => {
+    const employees = [
+      { worker_id: 'real-musa', employee_name: 'Musa Jamali', employee_number: '53560424', worker_active: true },
+      { worker_id: 'stub-musa', employee_name: 'Musa Jamali', employee_number: 'LOCAL-MUSA-JAMALI', worker_active: false },
+      { worker_id: 'real-antor', employee_name: 'Antor Shaha', employee_number: 'MA-0061', worker_active: true },
+      { worker_id: 'stub-antor', employee_name: 'Antor Shaha', employee_number: 'MA-0063', worker_active: false },
+      { worker_id: 'wiw-synthetic', employee_name: 'wiw-48430856@sync.invalid', employee_number: 'WIW-48430856', worker_active: true, is_synthetic: true },
+      { worker_id: 'review-user', employee_name: 'Store Reviewer', employee_number: 'TEST-REVIEW', worker_active: true },
+    ];
+    apiMock.mockImplementation((path: string) => {
+      if (path.startsWith('working-time/records/?')) {
+        return Promise.resolve({ results: [
+          { ...row, id: 'rec-real-musa', worker_id: 'real-musa', employee_name: 'Musa Jamali', employee_number: '53560424', worker_active: true },
+          { ...row, id: 'rec-synthetic', worker_id: 'wiw-synthetic', employee_name: 'wiw-48430856@sync.invalid', is_synthetic: true },
+        ] });
+      }
+      if (path === 'working-time/settings/') return Promise.resolve({ employees });
+      if (path.startsWith('working-time/lexware-history/')) return Promise.resolve({ results: [] });
+      return Promise.resolve({ results: [] });
+    });
+    render(<PayrollWorkspaceEnhancer />);
+    const workspace = await screen.findByTestId('payroll-workspace');
+    const select = within(workspace).getByLabelText('Mitarbeiter auswählen');
+    await waitFor(() => expect(within(select).getByRole('option', { name: 'Antor Shaha' })).toBeInTheDocument());
+    expect(within(select).getAllByRole('option', { name: 'Musa Jamali' })).toHaveLength(1);
+    expect(within(select).queryByText(/sync.invalid/)).not.toBeInTheDocument();
+    expect(within(select).queryByText(/Store Reviewer/)).not.toBeInTheDocument();
+
+    fireEvent.click(within(workspace).getByRole('checkbox', { name: 'Historische und technische Profile anzeigen' }));
+    await waitFor(() => {
+      expect(within(select).getAllByRole('option', { name: /Musa Jamali.*Personalnr/ })).toHaveLength(2);
+      expect(within(select).getAllByRole('option', { name: /Antor Shaha.*Personalnr/ })).toHaveLength(2);
+    });
+    expect(within(select).getByRole('option', { name: /wiw-48430856@sync.invalid/ })).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: /Store Reviewer/ })).toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: 'stub-musa' } });
+    fireEvent.click(within(workspace).getByRole('checkbox', { name: 'Historische und technische Profile anzeigen' }));
+    expect((select as HTMLSelectElement).value).toBe('');
+  });
+
   it('reviews unmatched employees from archived PDFs without another import', async () => {
     const existingHandler = apiMock.getMockImplementation();
     apiMock.mockImplementation((path: string, options?: RequestInit) => {
