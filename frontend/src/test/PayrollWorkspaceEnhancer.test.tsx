@@ -83,6 +83,35 @@ describe('PayrollWorkspaceEnhancer', () => {
     });
   });
 
+  it('reviews unmatched employees from archived PDFs without another import', async () => {
+    const existingHandler = apiMock.getMockImplementation();
+    apiMock.mockImplementation((path: string, options?: RequestInit) => {
+      if (path === 'working-time/lexware-unmatched/?period=2025-12') {
+        return Promise.resolve({
+          period: '2025-12',
+          evidence_files: 2,
+          scanned_rows: 31,
+          matched_rows: 0,
+          unmatched_rows: 31,
+          unmatched_unique_count: 1,
+          errors: [],
+          unmatched: [{ employee_name: 'Missing Employee', rows: 3, sources: ['Lohnabrechnungen_2025-12.pdf'] }],
+        });
+      }
+      return existingHandler?.(path, options);
+    });
+    render(<PayrollWorkspaceEnhancer />);
+    const workspace = await screen.findByTestId('payroll-workspace');
+    fireEvent.click(within(workspace).getByRole('button', { name: /Datenpflege & Import/ }));
+    fireEvent.change(within(workspace).getByLabelText('Lexware Abrechnungsmonat'), {
+      target: { value: '2025-12' },
+    });
+    fireEvent.click(within(workspace).getByRole('button', { name: 'Nicht zugeordnete prüfen' }));
+    expect(await within(workspace).findByText('Missing Employee')).toBeInTheDocument();
+    expect(apiMock).toHaveBeenCalledWith('working-time/lexware-unmatched/?period=2025-12');
+    expect(apiMock.mock.calls.some(([path]) => path === 'working-time/lexware-import/')).toBe(false);
+  });
+
   it('downloads a separate monthly Arbeitszeitnachweis next to existing PDF', async () => {
     Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:demo'), configurable: true });
     Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), configurable: true });

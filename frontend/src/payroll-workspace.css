@@ -341,8 +341,9 @@
 .payroll-tool-card b{font-size:.82rem;color:var(--payroll-navy);margin-bottom:3px}
 .payroll-tool-card small{font-size:.68rem;line-height:1.4;color:var(--payroll-muted)}
 .payroll-lexware-card{grid-template-columns:auto minmax(180px,.65fr) minmax(0,1.25fr)}
-.payroll-lexware-fields{display:grid;grid-template-columns:minmax(130px,.65fr) minmax(170px,1fr) auto;gap:8px;align-items:center}
-.payroll-lexware-fields input[type=file]{padding:7px;min-width:0}
+.payroll-lexware-fields{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.payroll-lexware-fields input[type=month]{width:155px;max-width:100%}
+.payroll-lexware-fields input[type=file]{padding:7px;min-width:0;flex:1 1 175px}
 
 .payroll-message{
   margin:10px 0 14px;
@@ -355,6 +356,11 @@
   font-weight:800;
 }
 
+.payroll-unmatched-report{border:1px solid var(--payroll-line);border-radius:14px;padding:14px;background:#fff;margin:10px 0 16px;font-size:.78rem}
+.payroll-unmatched-report>b,.payroll-unmatched-report>small{display:block;margin-bottom:7px}
+.payroll-unmatched-report>small{color:var(--payroll-muted)}
+.payroll-unmatched-report ul{max-height:280px;overflow:auto;padding-left:22px;margin:9px 0}
+.payroll-unmatched-report li{padding:5px 0;border-bottom:1px solid var(--payroll-line);overflow-wrap:anywhere}
 .payroll-record-list{display:grid;gap:12px;min-width:0}
 .payroll-record-card{
   min-width:0;
@@ -642,7 +648,7 @@ body[data-ap-admin-web="true"] aside ion-item.ap-nav-subitem.active{
   .payroll-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
   .payroll-settings-grid{grid-template-columns:1fr 1fr}
   .payroll-lexware-card{grid-template-columns:auto minmax(0,1fr)}
-  .payroll-lexware-fields{grid-column:1/-1;grid-template-columns:1fr}
+  .payroll-lexware-fields{grid-column:1/-1}
   .payroll-record-card>header{grid-template-columns:1fr 1fr}
   .payroll-record-gross{grid-column:2;grid-row:1/3}
   .payroll-metrics{grid-template-columns:repeat(3,minmax(0,1fr));padding:0 12px}
