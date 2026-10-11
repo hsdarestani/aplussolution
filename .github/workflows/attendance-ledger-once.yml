@@ -29,11 +29,11 @@ jobs:
           set -euo pipefail
           cd /opt/aplussolution
           echo "=== current ledger command ==="
-          timeout 35 docker compose exec -T backend python manage.py reconcile_attendance_accounts --help >/dev/null
+          timeout 35 docker compose exec -T backend python manage.py reconcile_attendance_accounts --help </dev/null >/dev/null
           echo "=== read-only ledger audit 2026 ==="
-          timeout 150 docker compose exec -T backend python manage.py reconcile_attendance_accounts --year 2026
+          timeout 150 docker compose exec -T backend python manage.py reconcile_attendance_accounts --year 2026 </dev/null
           echo "=== read-only ledger audit 2025 ==="
-          timeout 60 docker compose exec -T backend python manage.py reconcile_attendance_accounts --year 2025
+          timeout 60 docker compose exec -T backend python manage.py reconcile_attendance_accounts --year 2025 </dev/null
           REMOTE
       - name: Cleanup
         if: always()
