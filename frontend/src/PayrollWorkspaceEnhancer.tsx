@@ -350,10 +350,13 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         const historical = (Array.isArray(history?.results) ? history.results : [])
           .filter((item: any) => /^20\d{2}-(0[1-9]|1[0-2])$/.test(String(item.period || '')) && item.worker_id);
         setHistoricalPayrollRows(historical);
-        setEmployeeOptions(previous => Array.from(new Map([
-          ...previous.map(row => [row.worker_id, row] as const),
-          ...historical.map((row: HistoricLexwareRow) => [row.worker_id, { worker_id: row.worker_id, employee_name: row.employee_name }] as const),
-        ]).values()).sort((a, b) => a.employee_name.localeCompare(b.employee_name, 'de')));
+        setEmployeeOptions(previous => {
+          const byId = new Map<string, EmployeeOption>(previous.map(row => [row.worker_id, row]));
+          for (const item of historical as HistoricLexwareRow[]) {
+            byId.set(item.worker_id, { worker_id: item.worker_id, employee_name: item.employee_name });
+          }
+          return Array.from(byId.values()).sort((a, b) => a.employee_name.localeCompare(b.employee_name, 'de'));
+        });
       } catch {
         // Existing IST data remains available if an archive-only listing fails.
       }
