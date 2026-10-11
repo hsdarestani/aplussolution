@@ -361,6 +361,10 @@
 .payroll-unmatched-report>small{color:var(--payroll-muted)}
 .payroll-unmatched-report ul{max-height:280px;overflow:auto;padding-left:22px;margin:9px 0}
 .payroll-unmatched-report li{padding:5px 0;border-bottom:1px solid var(--payroll-line);overflow-wrap:anywhere}
+.payroll-archive-scroll{overflow-x:auto;max-width:100%}
+.payroll-archive-scroll table{width:100%;border-collapse:collapse;font-size:.8rem;min-width:690px}
+.payroll-archive-scroll th,.payroll-archive-scroll td{border-bottom:1px solid var(--payroll-line);text-align:left;padding:9px 10px;white-space:nowrap}
+.payroll-archive-scroll th{font-weight:700;background:#f5f8fc}
 .payroll-record-list{display:grid;gap:12px;min-width:0}
 .payroll-record-card{
   min-width:0;
