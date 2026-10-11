@@ -144,6 +144,7 @@ urlpatterns = [
     path('working-time/lexware-archive/chunk/', lexware_chunk_archive.lexware_archive_chunk),
     path('working-time/lexware-archive/finish/', lexware_chunk_archive.lexware_archive_finish),
     path('working-time/lexware-unmatched/', payroll_views.lexware_unmatched_review),
+    path('working-time/lexware-history/', payroll_views.lexware_history_without_attendance),
     path('working-time/lexware-readiness/', payroll_views.lexware_readiness),
     path('working-time/lexware-backfill/', payroll_views.lexware_backfill_archived),
     path('working-time/export/<str:file_format>/', automation_views.worktime_export),
