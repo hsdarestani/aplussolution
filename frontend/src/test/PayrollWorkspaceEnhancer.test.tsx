@@ -83,6 +83,17 @@ describe('PayrollWorkspaceEnhancer', () => {
     });
   });
 
+  it('downloads a separate monthly Arbeitszeitnachweis next to existing PDF', async () => {
+    Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:demo'), configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), configurable: true });
+    render(<PayrollWorkspaceEnhancer />);
+    const workspace = await screen.findByTestId('payroll-workspace');
+    fireEvent.click(within(workspace).getByRole('button', { name: 'Arbeitszeitnachweis PDF' }));
+    await waitFor(() => expect(apiBlobMock).toHaveBeenCalledWith(
+      'working-time/attendance-pdf/worker-1/?month=2026-08',
+    ));
+  });
+
   it('renders audited monthly payroll and saves total paid hours', async () => {
     render(<PayrollWorkspaceEnhancer />);
 
@@ -95,6 +106,8 @@ describe('PayrollWorkspaceEnhancer', () => {
     expect(within(workspace).getAllByText(/900,00/).length).toBeGreaterThanOrEqual(1);
     expect(within(workspace).getAllByText(/500,00/).length).toBeGreaterThanOrEqual(1);
     expect(within(workspace).getByText(/17,50/)).toBeInTheDocument();
+    expect(within(workspace).getAllByText('+12,00 Std.').length).toBeGreaterThanOrEqual(2);
+    expect(within(workspace).getByRole('button', { name: 'Arbeitszeitnachweis PDF' })).toBeInTheDocument();
 
     fireEvent.click(within(workspace).getByRole('button', { name: 'Tagesnachweis öffnen' }));
     expect(await within(workspace).findByText('Kunde GmbH')).toBeInTheDocument();
