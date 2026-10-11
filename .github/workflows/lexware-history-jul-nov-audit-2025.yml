@@ -43,4 +43,28 @@ jobs:
             echo "DRY_RUN_MONTH=$MONTH"
             docker compose exec -T backend python manage.py reconcile_lexware_archive --year 2025 --month "$MONTH" < /dev/null
           done
+          echo "=== Verify all historical archived staff have a per-month payroll record ==="
+          docker compose exec -T backend python manage.py shell -c '
+          from datetime import date
+          from core.lexware_historical import _evidence
+          from core.payroll_views import _employee_matchers,_find_worker
+          from core.models import PayrollStatement,WorkerProfile
+          roster=_employee_matchers()
+          for month in range(7,13):
+              source, errors=_evidence(2025,month)
+              absent=set()
+              historical_rows=0
+              missing_rows=0
+              for title,row in source:
+                  person=_find_worker({"employee_name":row.get("employee_name") or ""},roster)
+                  if not person or person.employment_type!="historisch": continue
+                  historical_rows+=1
+                  target=str(row.get("period") or "") if row.get("kind")=="payslip" else "2025-%02d"%month
+                  try: year_text,month_text=target.split("-"); period=date(int(year_text),int(month_text),1)
+                  except (ValueError,TypeError): continue
+                  if not PayrollStatement.objects.filter(worker=person,period=period).exists():
+                      absent.add((str(person.pk),target))
+                      missing_rows+=1
+              print("HISTORICAL_COVERAGE month=%02d historical_evidence_rows=%s missing_statement_months=%s missing_evidence_rows=%s parse_errors=%s" % (month,historical_rows,len(absent),missing_rows,errors),flush=True)
+          ' < /dev/null
           REMOTE
