@@ -25,7 +25,7 @@ jobs:
           set -euo pipefail
           cd /opt/aplussolution
           echo "=== Read-only preview of real archived December payroll evidence ==="
-          PREVIEW="$(docker compose exec -T backend python manage.py reconcile_lexware_archive --year 2025 --month 12)"
+          PREVIEW="$(docker compose exec -T backend python manage.py reconcile_lexware_archive --year 2025 --month 12 < /dev/null)"
           echo "$PREVIEW"
           printf '%s\n' "$PREVIEW" | python3 -c '
           import json,sys
@@ -39,11 +39,11 @@ jobs:
           install -d -m 700 /var/backups/aplussolution
           umask 077
           BACKUP="/var/backups/aplussolution/lexware-before-reconcile-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
-          docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" --no-owner --no-acl' | gzip -1 > "$BACKUP"
+          docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" --no-owner --no-acl' < /dev/null | gzip -1 > "$BACKUP"
           test -s "$BACKUP"
           echo "BACKUP_CONFIRMED bytes=$(wc -c < "$BACKUP")"
           echo "=== Add only evidence-backed inactive historical payroll identities ==="
-          docker compose exec -T backend python manage.py reconcile_lexware_archive --year 2025 --month 12 --apply
+          docker compose exec -T backend python manage.py reconcile_lexware_archive --year 2025 --month 12 --apply < /dev/null
           docker compose exec -T backend python manage.py shell -c '
           from core.models import WorkerProfile, PayrollStatement, WorkingTimeAccountRecord
           q=WorkerProfile.objects.filter(employment_type="historisch")
