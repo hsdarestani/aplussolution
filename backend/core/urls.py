@@ -143,6 +143,7 @@ urlpatterns = [
     path('working-time/lexware-backfill/', payroll_views.lexware_backfill_archived),
     path('working-time/export/<str:file_format>/', automation_views.worktime_export),
     path('working-time/pdf/<uuid:worker_id>/', automation_views.worktime_pdf),
+    path('working-time/attendance-pdf/<uuid:worker_id>/', automation_views.worktime_monthly_attendance_pdf),
     path('working-time/docx/<uuid:worker_id>/', automation_views.worktime_docx),
     path('working-time/lexware-docx/', automation_views.worktime_lexware_docx),
     path('working-time/audit-docx/', automation_views.worktime_audit_docx),
