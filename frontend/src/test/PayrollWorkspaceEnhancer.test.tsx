@@ -94,6 +94,20 @@ describe('PayrollWorkspaceEnhancer', () => {
     ));
   });
 
+  it('switches to earlier years without automatically rebuilding historical balances', async () => {
+    render(<PayrollWorkspaceEnhancer />);
+    const workspace = await screen.findByTestId('payroll-workspace');
+    const year = within(workspace).getByLabelText('Arbeitszeitkonto Jahr') as HTMLSelectElement;
+    expect(year.value).toBe('2026');
+    fireEvent.change(year, { target: { value: '2025' } });
+    await waitFor(() => {
+      expect(apiMock).toHaveBeenCalledWith('working-time/records/?from=2025-01&to=2025-12');
+      expect(apiMock).toHaveBeenCalledWith('working-time/lexware-readiness/?year=2025');
+    });
+    expect(year.value).toBe('2025');
+    expect(apiMock.mock.calls.some(([path]) => path === 'working-time/rebuild-all/')).toBe(false);
+  });
+
   it('renders audited monthly payroll and saves total paid hours', async () => {
     render(<PayrollWorkspaceEnhancer />);
 
