@@ -1,0 +1,40 @@
+name: One-time A+ attendance ledger verification
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/attendance-ledger-once.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Secure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$KEY" > "$HOME/.ssh/one_time"
+          chmod 600 "$HOME/.ssh/one_time"
+      - name: Inspect 2026 reconciliation state
+        run: |
+          set -euo pipefail
+          timeout 240 ssh -i "$HOME/.ssh/one_time" -o IdentitiesOnly=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          echo "=== current ledger command ==="
+          timeout 35 docker compose exec -T backend python manage.py reconcile_attendance_accounts --help >/dev/null
+          echo "=== read-only ledger audit 2026 ==="
+          timeout 150 docker compose exec -T backend python manage.py reconcile_attendance_accounts --year 2026
+          echo "=== read-only ledger audit 2025 ==="
+          timeout 60 docker compose exec -T backend python manage.py reconcile_attendance_accounts --year 2025
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/one_time"
