@@ -150,6 +150,29 @@
   letter-spacing:.02em;
   color:#657583;
 }
+.payroll-employee-filter-advanced{
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  gap:7px;
+  margin-top:3px;
+  color:var(--payroll-muted);
+  font-size:.67rem;
+  font-weight:500;
+  letter-spacing:normal;
+  cursor:pointer;
+}
+.payroll-workspace .payroll-employee-filter-advanced input[type="checkbox"]{
+  display:inline-block;
+  width:15px;
+  height:15px;
+  flex:0 0 15px;
+  min-height:15px;
+  margin:0;
+  padding:0;
+  border-radius:4px;
+  accent-color:var(--payroll-navy);
+}
 .payroll-filter-context{
   min-width:210px;
   padding-left:18px;
