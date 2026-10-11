@@ -105,7 +105,7 @@ def _ambiguous_name(key, candidates):
     for other in candidates:
         if other == key:
             continue
-        other_tokens = set(other.split())
+        other_tokens = set(_norm(other).split())
         if tokens < other_tokens or other_tokens < tokens:
             return True
     return False
