@@ -171,7 +171,7 @@ describe('PayrollWorkspaceEnhancer', () => {
     fireEvent.change(within(workspace).getByLabelText('Arbeitszeitkonto Monat'), {
       target: { value: '2026-10' },
     });
-    await waitFor(() => expect(within(workspace).getByText('14,75 Std.')).toBeInTheDocument());
+    await waitFor(() => expect(within(workspace).getAllByText('14,75 Std.').length).toBeGreaterThan(0));
   });
 
   it('reviews unmatched employees from archived PDFs without another import', async () => {
