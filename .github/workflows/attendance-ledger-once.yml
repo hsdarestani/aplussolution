@@ -34,17 +34,19 @@ jobs:
           timeout 150 docker compose exec -T backend python manage.py reconcile_attendance_accounts --year 2026 </dev/null
           echo "=== read-only ledger audit 2025 ==="
           timeout 60 docker compose exec -T backend python manage.py reconcile_attendance_accounts --year 2025 </dev/null
-          echo "=== backup primary database before 2026 reconciliation ==="
+          echo "=== backup primary database before 2025 reconciliation ==="
           umask 077
           mkdir -p /var/backups/aplussolution/attendance-ledger
-          backup="/var/backups/aplussolution/attendance-ledger/pre-reconcile-2026-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+          backup="/var/backups/aplussolution/attendance-ledger/pre-reconcile-2025-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
           docker compose exec -T db sh -c 'exec pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' </dev/null | gzip > "$backup"
           test -s "$backup"
           echo "ATTENDANCE_BACKUP_CREATED"
-          echo "=== apply targeted 2026 attendance account reconciliation ==="
-          timeout 180 docker compose exec -T backend python manage.py reconcile_attendance_accounts --year 2026 --apply </dev/null
-          echo "=== verify 2026 reconciliation is fully clean ==="
+          echo "=== apply targeted 2025 attendance account reconciliation ==="
+          timeout 180 docker compose exec -T backend python manage.py reconcile_attendance_accounts --year 2025 --apply </dev/null
+          echo "=== verify 2025 and 2026 reconciliation is fully clean ==="
+          timeout 90 docker compose exec -T backend python manage.py reconcile_attendance_accounts --year 2025 </dev/null
           timeout 90 docker compose exec -T backend python manage.py reconcile_attendance_accounts --year 2026 </dev/null
+          timeout 30 docker compose exec -T backend python manage.py shell -c "from core.management.commands.reconcile_attendance_accounts import find_mismatches; results=[(year, sum(map(len, find_mismatches(year)[0].values()))) for year in (2025, 2026)]; print('FINAL_LEDGER_DRIFT', results); assert all(count == 0 for _,count in results), results" </dev/null
           REMOTE
       - name: Cleanup
         if: always()
