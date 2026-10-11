@@ -1401,3 +1401,39 @@ def lexware_unmatched_review(request):
         'unmatched': sorted(problems.values(), key=lambda item: _norm(item['employee_name'])),
         'errors': errors,
     })
+
+@api_view(['GET'])
+@permission_classes([IsAdminOrManager])
+def lexware_history_without_attendance(request):
+    """Read-only annual payroll evidence that has no corresponding IST times.
+
+    Do not create zero-hour account records or fake Saldo for former workers.
+    """
+    year_text = str(request.query_params.get('year') or '').strip()
+    if not re.fullmatch(r'20[0-9]{2}', year_text):
+        return Response({'detail': 'Bitte Jahr im Format JJJJ auswählen.'}, status=400)
+    year = int(year_text)
+    statements = PayrollStatement.objects.filter(period__year=year).select_related('worker__user')
+    attendance_keys = set(
+        WorkingTimeAccountRecord.objects.filter(year_month__year=year)
+        .values_list('worker_id', 'year_month')
+    )
+    results = []
+    for record in statements.order_by('period', 'worker__user__last_name'):
+        if (record.worker_id, record.period) in attendance_keys:
+            continue
+        results.append({
+            'worker_id': str(record.worker_id),
+            'employee_name': record.worker.user.get_full_name() or str(record.worker.user),
+            'employee_number': record.worker.employee_number,
+            'period': record.period.strftime('%Y-%m'),
+            'gross_amount': str(record.gross_amount) if record.gross_amount is not None else None,
+            'net_amount': str(record.net_amount) if record.net_amount is not None else None,
+            'transferred_amount': str(record.transferred_amount) if record.transferred_amount is not None else None,
+            'source': record.source,
+            'historical_profile': (
+                record.worker.employment_type == WorkerProfile.EmploymentType.HISTORICAL
+            ),
+            'has_attendance': False,
+        })
+    return Response({'year': year, 'results': results})

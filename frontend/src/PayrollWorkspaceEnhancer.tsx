@@ -143,6 +143,17 @@ type LexwareReadiness = {
   missing_payslip_person_group?: number;
 };
 
+type HistoricLexwareRow = {
+  worker_id: string;
+  employee_name: string;
+  employee_number: string;
+  period: string;
+  gross_amount: string | null;
+  net_amount: string | null;
+  transferred_amount: string | null;
+  historical_profile: boolean;
+};
+
 type Draft = { paid_total_hours: string; manual_adjustment: string };
 type EmployeeOption = { worker_id: string; employee_name: string };
 type SettingRow = EmployeeOption & {
@@ -170,7 +181,7 @@ const monthLabel = (value: string) => {
   if (!year || !month) return value;
   return new Intl.DateTimeFormat('de-DE', { timeZone: BUSINESS_TIME_ZONE, month: 'long', year: 'numeric' }).format(new Date(Date.UTC(year, month - 1, 1, 12)));
 };
-const employmentLabel = (value?: string) => value === 'ungeklaert' ? 'Ungeklärt' : value === 'minijob' ? 'Minijob' : value === 'teilzeit' ? 'Teilzeit' : value === 'vollzeit' ? 'Vollzeit' : value === 'student' ? 'Studentische Aushilfe' : value === 'geschaeftsfuehrer' ? 'Geschäftsführer' : 'Beschäftigung';
+const employmentLabel = (value?: string) => value === 'historisch' ? 'Historisch (Lohnart unbekannt)' : value === 'ungeklaert' ? 'Ungeklärt' : value === 'minijob' ? 'Minijob' : value === 'teilzeit' ? 'Teilzeit' : value === 'vollzeit' ? 'Vollzeit' : value === 'student' ? 'Studentische Aushilfe' : value === 'geschaeftsfuehrer' ? 'Geschäftsführer' : 'Beschäftigung';
 const dateLabel = (value?: string | null) => value ? new Date(value).toLocaleDateString('de-DE', { timeZone: BUSINESS_TIME_ZONE }) : 'Keine Angabe';
 const timeLabel = (value?: string | null) => value ? new Date(value).toLocaleTimeString('de-DE', { timeZone: BUSINESS_TIME_ZONE, hour: '2-digit', minute: '2-digit' }) : 'Keine Angabe';
 const hoursFromMinutes = (value?: number) => decimal(number(value) / 60);
@@ -193,6 +204,7 @@ function triggerBlobDownload(blob: Blob, filename: string) {
 export default function PayrollWorkspaceEnhancer({ standalone = false }: { standalone?: boolean }) {
   const [target, setTarget] = useState<Element | null>(null);
   const [rows, setRows] = useState<PayrollRow[]>([]);
+  const [historicalPayrollRows, setHistoricalPayrollRows] = useState<HistoricLexwareRow[]>([]);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [details, setDetails] = useState<Record<string, PayrollRow>>({});
   const [settingsRows, setSettingsRows] = useState<SettingRow[]>([]);
@@ -296,6 +308,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
 
   async function loadRows(autoBuild = false) {
     setLoading(true);
+    setHistoricalPayrollRows([]);
     setMessage('');
     setEmptyReason('');
     try {
@@ -328,6 +341,24 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         applyWorkspaceData(response, settingsResponse, readinessResponse);
       } catch {
         // Keep already rendered payroll data usable if metadata is slow/unavailable.
+      }
+
+      // Lexware-only evidence is shown separately; we never manufacture zero IST
+      // work-time accounts or Saldo for employees without a true timesheet.
+      try {
+        const history: any = await api(`working-time/lexware-history/?year=${selectedYear}`);
+        const historical = (Array.isArray(history?.results) ? history.results : [])
+          .filter((item: any) => /^20\d{2}-(0[1-9]|1[0-2])$/.test(String(item.period || '')) && item.worker_id);
+        setHistoricalPayrollRows(historical);
+        setEmployeeOptions(previous => {
+          const byId = new Map<string, EmployeeOption>(previous.map(row => [row.worker_id, row]));
+          for (const item of historical as HistoricLexwareRow[]) {
+            byId.set(item.worker_id, { worker_id: item.worker_id, employee_name: item.employee_name });
+          }
+          return Array.from(byId.values()).sort((a, b) => a.employee_name.localeCompare(b.employee_name, 'de'));
+        });
+      } catch {
+        // Existing IST data remains available if an archive-only listing fails.
       }
 
       // Historical archive enrichment can be expensive because it reparses PDFs.
@@ -374,8 +405,17 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   const reviewYear = String(selectedYear);
   const reviewThrough = lexwareReadiness?.year === selectedYear ? (lexwareReadiness.expected_through || '') : '';
   const months = useMemo(
-    () => Array.from(new Set(workerRows.map(row => row.year_month))).sort().reverse(),
-    [workerRows],
+    () => Array.from(new Set([
+      ...workerRows.map(row => row.year_month),
+      ...historicalPayrollRows.filter(row => !selectedWorkerId || row.worker_id === selectedWorkerId).map(row => row.period),
+    ])).sort().reverse(),
+    [workerRows, historicalPayrollRows, selectedWorkerId],
+  );
+  const visibleArchiveRows = useMemo(
+    () => historicalPayrollRows.filter(row =>
+      (!selectedWorkerId || row.worker_id === selectedWorkerId)
+      && (month === 'all' || !month || row.period === month)),
+    [historicalPayrollRows, selectedWorkerId, month],
   );
   const reviewRows = useMemo(
     () => workerRows.filter(row =>
@@ -632,6 +672,30 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
     }
   }
 
+  async function archiveLargeLexwarePdf(file: File, period: string) {
+    // Browser sends 2 MiB chunks. Annual 27 MB+ Lohnkonto uploads no longer
+    // require one long-running multipart request on the production server.
+    const session: any = await api('working-time/lexware-archive/begin/', {
+      method: 'POST',
+      body: JSON.stringify({ filename: file.name, size: file.size, period }),
+    });
+    const size = Number(session.chunk_size);
+    const count = Number(session.chunks);
+    if (!size || !count) throw new Error('Ungültige Antwort vom Lexware Upload Server.');
+    for (let index = 0; index < count; index += 1) {
+      const body = new FormData();
+      body.append('upload_token', session.upload_token);
+      body.append('index', String(index));
+      body.append('chunk', file.slice(index * size, Math.min(file.size, (index + 1) * size)), file.name);
+      await api('working-time/lexware-archive/chunk/', { method: 'POST', body });
+      setMessage(`Jahresnachweis ${file.name}: Teil ${index + 1} von ${count} übertragen.`);
+    }
+    return api('working-time/lexware-archive/finish/', {
+      method: 'POST',
+      body: JSON.stringify({ upload_token: session.upload_token }),
+    });
+  }
+
   async function importLexware() {
     if (!lexwareFiles.length) {
       setMessage('Bitte mindestens eine Lexware Datei auswählen.');
@@ -661,13 +725,29 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
           .map(match => String(match?.[1] || '')),
       ].filter(Boolean)));
       if (autoMode && years.length === 1) form.append('year', years[0]);
-      lexwareFiles.forEach(file => form.append('files', file));
-
-      const result: any = await api('working-time/lexware-import/', { method: 'POST', body: form });
+      const largeAnnual = lexwareFiles.filter(file =>
+        file.size > 8 * 1024 * 1024
+        && file.name.toLowerCase().endsWith('.pdf')
+        && /lohnkonto|lohnjournal|lohnsteuerbescheinigung|meldebescheinigung/i.test(file.name)
+      );
+      const regularFiles = lexwareFiles.filter(file => !largeAnnual.includes(file));
+      if (largeAnnual.length && autoMode) {
+        throw new Error('Große Jahresnachweise bitte mit einem konkreten Monat separat hochladen.');
+      }
+      const annualResults = [];
+      for (const file of largeAnnual) {
+        annualResults.push(await archiveLargeLexwarePdf(file, lexwarePeriod));
+      }
+      regularFiles.forEach(file => form.append('files', file));
+      const result: any = regularFiles.length
+        ? await api('working-time/lexware-import/', { method: 'POST', body: form })
+        : { files: largeAnnual.length, employees: [], archived_documents: [], unmatched_count: 0 };
       await loadRows();
       setUnmatchedReport(null);
       const archiveErrors = Array.isArray(result?.archive_errors) ? result.archive_errors : [];
-      const archived = Array.isArray(result?.archived_documents) ? result.archived_documents.length : 0;
+      const archived = (Array.isArray(result?.archived_documents) ? result.archived_documents.length : 0)
+        + annualResults.filter(row => row.status === 'archived').length;
+      const alreadyArchived = annualResults.filter(row => row.status === 'already_archived').length;
       const periods = Array.isArray(result?.detected_periods) && result.detected_periods.length
         ? result.detected_periods.map((item: string) => monthLabel(item)).join(', ')
         : (lexwarePeriod ? monthLabel(lexwarePeriod) : '');
@@ -678,6 +758,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         `${result?.files || lexwareFiles.length} Datei(en), ` +
         `${result?.employees?.length || 0} Mitarbeiter Monatszuordnungen, ` +
         `${archived} Nachweise archiviert. ` +
+        (alreadyArchived ? `${alreadyArchived} bereits zuvor archiviert. ` : '') +
         (unmatchedRows
           ? `${unmatchedUnique} eindeutige nicht zugeordnete Fälle (${unmatchedRows} Nachweiszeilen).`
           : 'Alle Nachweise zugeordnet.') +
@@ -916,6 +997,21 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
         {unmatchedReport.unmatched.length > 0 && <ul>{unmatchedReport.unmatched.map(item => <li key={item.employee_name}><strong>{item.employee_name}</strong> · {item.rows} Nachweiszeile(n) · {item.sources.join(', ')}</li>)}</ul>}
         {unmatchedReport.errors?.length > 0 && <p>{unmatchedReport.errors.length} Archivdateien konnten nicht gelesen werden.</p>}
       </div>}
+
+      {visibleArchiveRows.length > 0 && <section className="payroll-unmatched-report" aria-label="Lexware Historie ohne Zeiterfassung">
+        <b>Lexware Historie ohne Zeiterfassung · {visibleArchiveRows.length} Abrechnungen</b>
+        <small>Nur tatsächlich importierte Lexware Beträge. Keine bestätigten Ist Stunden vorhanden; kein künstlicher Soll Wert oder Saldo.</small>
+        <div className="payroll-archive-scroll"><table aria-label="Historische Lexware Abrechnungen">
+          <thead><tr><th>Mitarbeiter</th><th>Monat</th><th>Brutto</th><th>Netto</th><th>Auszahlungsbetrag</th><th>Nachweis</th></tr></thead>
+          <tbody>{visibleArchiveRows.map((item, index) => <tr key={`${item.worker_id}:${item.period}:${index}`}>
+            <td>{item.employee_name}</td><td>{monthLabel(item.period)}</td>
+            <td>{item.gross_amount == null ? 'Nicht erfasst' : money(item.gross_amount)}</td>
+            <td>{item.net_amount == null ? 'Nicht erfasst' : money(item.net_amount)}</td>
+            <td>{item.transferred_amount == null ? 'Nicht belegt' : money(item.transferred_amount)}</td>
+            <td>{item.historical_profile ? 'Historische Personalakte' : 'Nur Lexware, keine IST Zeiten'}</td>
+          </tr>)}</tbody>
+        </table></div>
+      </section>}
 
       <div className="payroll-record-list" data-testid="payroll-record-list">
         {visibleRows.map(row => {

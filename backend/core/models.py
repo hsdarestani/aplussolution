@@ -107,6 +107,7 @@ class WorkerProfile(TimestampedModel):
         PART = 'teilzeit', 'Teilzeit'
         FULL = 'vollzeit', 'Vollzeit'
         STUDENT = 'student', 'Studentische Aushilfe'
+        HISTORICAL = 'historisch', 'Historische Akte (Lohnart unbekannt)'
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='worker_profile')
     employee_number = models.CharField(max_length=50, unique=True)
