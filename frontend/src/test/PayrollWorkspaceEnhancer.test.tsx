@@ -124,6 +124,49 @@ describe('PayrollWorkspaceEnhancer', () => {
     expect((select as HTMLSelectElement).value).toBe('');
   });
 
+  it('counts current-month approved hours in the calendar-year total even when Lexware closes the prior month', async () => {
+    const akeel = (month: string, hours: string, gross: string) => ({
+      ...row,
+      id: `akeel-${month}`,
+      worker_id: 'akeel-worker',
+      employee_name: 'Akeel Zafar',
+      year_month: month,
+      ist_hours: hours,
+      is_open_month: false,
+      payroll_statement: gross ? { gross_amount: gross, transferred_amount: '100.00' } : null,
+    });
+    apiMock.mockImplementation((path: string) => {
+      if (path.startsWith('working-time/records/?')) return Promise.resolve({ results: [
+        akeel('2026-06', '17.50', '300.00'),
+        akeel('2026-09', '13.50', '250.00'),
+        akeel('2026-10', '14.75', ''),
+      ] });
+      if (path === 'working-time/settings/') return Promise.resolve({
+        employees: [{ worker_id: 'akeel-worker', employee_name: 'Akeel Zafar' }],
+      });
+      if (path === 'working-time/lexware-readiness/?year=2026') return Promise.resolve({
+        year: 2026,
+        expected_through: '2026-09',
+        no_additional_import_required: true,
+        complete_months: 9,
+        expected_months: 9,
+        core_documents_present: 45,
+        core_documents_expected: 45,
+        annual_complete: true,
+      });
+      if (path === 'working-time/lexware-history/?year=2026') return Promise.resolve({ results: [] });
+      return Promise.resolve({ results: [] });
+    });
+    render(<PayrollWorkspaceEnhancer />);
+    const workspace = await screen.findByTestId('payroll-workspace');
+    await waitFor(() => expect(within(workspace).getByText('45,75 Std.')).toBeInTheDocument());
+    expect(within(workspace).getByText(/einschließlich laufendem Monat/)).toBeInTheDocument();
+    expect(within(workspace).getAllByText('Akeel Zafar').length).toBeGreaterThan(0);
+    expect(within(workspace).getByText('Oktober 2026')).toBeInTheDocument();
+    expect(within(workspace).getByText('550,00 €')).toBeInTheDocument();
+    expect(within(workspace).getByText('200,00 €')).toBeInTheDocument();
+  });
+
   it('reviews unmatched employees from archived PDFs without another import', async () => {
     const existingHandler = apiMock.getMockImplementation();
     apiMock.mockImplementation((path: string, options?: RequestInit) => {
