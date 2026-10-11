@@ -477,25 +477,26 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
       && (month === 'all' || !month || row.period === month)),
     [historicalPayrollRows, selectedWorkerId, month],
   );
-  const reviewRows = useMemo(
+  // Attendance belongs to the selected calendar year, including approved
+  // hours from the current month. Lexware's document cutoff is a separate
+  // payroll-review scope and must not truncate the worked-hours dashboard.
+  const yearAttendanceRows = useMemo(
     () => workerRows.filter(row =>
-      row.year_month.startsWith(`${reviewYear}-`)
-      && !row.is_open_month
-      && (!reviewThrough || row.year_month <= reviewThrough)
+      row.year_month.startsWith(`${reviewYear}-`) && !row.is_open_month
     ),
-    [workerRows, reviewYear, reviewThrough],
+    [workerRows, reviewYear],
   );
   const visibleRows = useMemo(
     () => month === 'all' || !month
-      ? reviewRows
+      ? yearAttendanceRows
       : workerRows.filter(row => row.year_month === month),
-    [workerRows, reviewRows, month],
+    [workerRows, yearAttendanceRows, month],
   );
   const summaryRows = useMemo(
     () => month && month !== 'all'
       ? workerRows.filter(row => row.year_month === month)
-      : reviewRows,
-    [workerRows, reviewRows, month],
+      : yearAttendanceRows,
+    [workerRows, yearAttendanceRows, month],
   );
 
   useEffect(() => {
@@ -522,13 +523,18 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
   const selectedEmployee = employeeOptions.find(item => item.worker_id === selectedWorkerId);
   const selectedSetting = settingsRows.find(item => item.worker_id === selectedWorkerId);
   const closedSummaryRows = summaryRows.filter(row => !row.is_open_month);
+  const payrollSummaryRows = closedSummaryRows.filter(row =>
+    (month !== 'all' && Boolean(month))
+    || !reviewThrough
+    || row.year_month <= reviewThrough
+  );
   const summary = {
     ist: summaryRows.reduce((sum, row) => sum + number(row.ist_hours), 0),
-    paid: summaryRows.reduce((sum, row) => sum + number(row.balance_reference_hours ?? row.paid_total_hours ?? row.soll_hours), 0),
+    paid: payrollSummaryRows.reduce((sum, row) => sum + number(row.balance_reference_hours ?? row.paid_total_hours ?? row.soll_hours), 0),
     saldo: summaryRows.reduce((sum, row) => sum + number(row.monthly_balance_hours ?? 0), 0),
     gross: closedSummaryRows.reduce((sum, row) => sum + number(row.gross_with_surcharges ?? row.gross_amount), 0),
-    lexwareGross: closedSummaryRows.reduce((sum, row) => sum + number(row.payroll_statement?.gross_amount), 0),
-    transferred: closedSummaryRows.reduce((sum, row) => sum + number(row.payroll_statement?.transferred_amount), 0),
+    lexwareGross: payrollSummaryRows.reduce((sum, row) => sum + number(row.payroll_statement?.gross_amount), 0),
+    transferred: payrollSummaryRows.reduce((sum, row) => sum + number(row.payroll_statement?.transferred_amount), 0),
   };
 
   async function loadDetail(row: PayrollRow) {
@@ -972,7 +978,7 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
           <span>{selectedEmployee?.employee_name || 'Gesamte Belegschaft'}</span>
           <b>{visibleRows.length} Monatskonten</b>
           <small>{month === 'all'
-            ? `Prüfjahr ${reviewYear}${reviewThrough ? ` · abgeschlossen bis ${monthLabel(reviewThrough)}` : ''}`
+            ? `Arbeitszeiten ${reviewYear}${reviewThrough ? ` · Lexware geprüft bis ${monthLabel(reviewThrough)}` : ''}`
             : monthLabel(month)}</small>
         </div>
       </section>
@@ -1004,8 +1010,8 @@ export default function PayrollWorkspaceEnhancer({ standalone = false }: { stand
       </section>}
 
       <section className="payroll-summary" aria-label="Lohnübersicht">
-        <div><span>Gearbeitet</span><strong>{decimal(summary.ist)} Std.</strong><small>Ist Zeit</small></div>
-        <div><span>Bezahlt oder Soll</span><strong>{decimal(summary.paid)} Std.</strong><small>bei Gehalt gilt die vertragliche Sollzeit</small></div>
+        <div><span>Gearbeitet</span><strong>{decimal(summary.ist)} Std.</strong><small>{month === 'all' ? 'Alle erfassten Ist Zeiten im Kalenderjahr, einschließlich laufendem Monat' : 'Ist Zeit im ausgewählten Monat'}</small></div>
+        <div><span>Bezahlt oder Soll</span><strong>{decimal(summary.paid)} Std.</strong><small>{month === 'all' && reviewThrough ? `Prüfzeitraum bis ${monthLabel(reviewThrough)}; bei Gehalt gilt Sollzeit` : 'Bei Gehalt gilt die vertragliche Sollzeit'}</small></div>
         <div><span>Saldo</span><strong className={summary.saldo < 0 ? 'negative' : 'positive'}>{signedDecimal(summary.saldo)} Std.</strong><small>offenes Zeitkonto</small></div>
         <div><span>Lexware Brutto</span><strong>{money(summary.lexwareGross)}</strong><small>Lohnabrechnungen</small></div>
         <div><span>Lexware Auszahlung</span><strong>{money(summary.transferred)}</strong><small>Zahlungsliste oder Bankexport</small></div>
