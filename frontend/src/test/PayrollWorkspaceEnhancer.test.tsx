@@ -162,9 +162,16 @@ describe('PayrollWorkspaceEnhancer', () => {
     await waitFor(() => expect(within(workspace).getByText('45,75 Std.')).toBeInTheDocument());
     expect(within(workspace).getByText(/einschließlich laufendem Monat/)).toBeInTheDocument();
     expect(within(workspace).getAllByText('Akeel Zafar').length).toBeGreaterThan(0);
-    expect(within(workspace).getByText('Oktober 2026')).toBeInTheDocument();
+    expect(within(workspace).getAllByText('Oktober 2026').length).toBeGreaterThan(0);
     expect(within(workspace).getByText('550,00 €')).toBeInTheDocument();
     expect(within(workspace).getByText('200,00 €')).toBeInTheDocument();
+
+    // Selecting October must show only the current month's real hours,
+    // without requiring its Lexware payslip to have been imported.
+    fireEvent.change(within(workspace).getByLabelText('Arbeitszeitkonto Monat'), {
+      target: { value: '2026-10' },
+    });
+    await waitFor(() => expect(within(workspace).getByText('14,75 Std.')).toBeInTheDocument());
   });
 
   it('reviews unmatched employees from archived PDFs without another import', async () => {
