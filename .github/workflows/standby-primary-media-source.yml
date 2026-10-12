@@ -1,0 +1,94 @@
+name: Stage safe media and runtime recovery snapshots on primary
+on:
+  push:
+    branches: [ops/standby-refresh-20261012]
+    paths:
+      - '.github/workflows/standby-primary-media-source.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PRIMARY_HOST: ${{ secrets.STRATO_HOST }}
+      PRIMARY_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Read-only media ACL and atomically packaged A+ app configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRIMARY_HOST" && test -n "$PRIMARY_KEY"
+          test "$PRIMARY_HOST" != "82.165.187.14"
+          umask 077
+          KEY="$RUNNER_TEMP/aplus-media-read-key"
+          printf '%s\n' "$PRIMARY_KEY" | tr -d '\r' > "$KEY"
+          chmod 600 "$KEY"
+          mkdir -p "$HOME/.ssh"
+          ssh-keyscan -T 10 -H "$PRIMARY_HOST" >> "$HOME/.ssh/known_hosts" 2>/dev/null
+          ssh -i "$KEY" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes root@"$PRIMARY_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          test -s .env
+          test -n "$(docker compose ps -q db --status running)"
+          if ! command -v rsync >/dev/null 2>&1 || ! command -v setfacl >/dev/null 2>&1; then
+            DEBIAN_FRONTEND=noninteractive apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq rsync acl
+          fi
+          CID="$(docker compose ps -q backend)"
+          MEDIA="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/app/media"}}{{.Source}}{{end}}{{end}}' "$CID")"
+          test -d "$MEDIA"
+          test "$MEDIA" = /var/lib/docker/volumes/aplussolution_media_data/_data
+          for parent in /var/lib/docker /var/lib/docker/volumes /var/lib/docker/volumes/aplussolution_media_data; do
+            setfacl -m u:aplusstandby:--x "$parent"
+          done
+          setfacl -R -m u:aplusstandby:rX "$MEDIA"
+          find "$MEDIA" -type d -exec setfacl -m d:u:aplusstandby:rX {} +
+          sudo -u aplusstandby test -r "$MEDIA"
+          echo READ_ONLY_MEDIA_ACCOUNT_READY
+
+          install -d -m 700 -o aplusstandby -g aplusstandby /home/aplusstandby/recovery
+          cat >/usr/local/sbin/aplus-stage-recovery-config <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          umask 077
+          cd /opt/aplussolution
+          DST=/home/aplusstandby/recovery
+          TMP="$DST/.aplus-app-source-$.tgz"
+          tar --exclude='.git' --exclude='.env' --exclude='node_modules' --exclude='__pycache__' --exclude='*.pyc' -czf "$TMP" .
+          chown aplusstandby:aplusstandby "$TMP"
+          chmod 600 "$TMP"
+          mv -f "$TMP" "$DST/app-source.tgz"
+          install -m 600 -o aplusstandby -g aplusstandby .env "$DST/.env.next"
+          mv -f "$DST/.env.next" "$DST/aplussolution.env"
+          touch "$DST/last_snapshot_success"
+          chown aplusstandby:aplusstandby "$DST/last_snapshot_success"
+          echo RECOVERY_CONFIG_SNAPSHOT_WRITTEN
+          SCRIPT
+          chmod 700 /usr/local/sbin/aplus-stage-recovery-config
+          cat >/etc/systemd/system/aplus-stage-recovery-config.service <<'UNIT'
+          [Unit]
+          Description=Package A+ Solution code and secure runtime config for standby
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/aplus-stage-recovery-config
+          UNIT
+          cat >/etc/systemd/system/aplus-stage-recovery-config.timer <<'UNIT'
+          [Unit]
+          Description=Refresh A+ Solution standby runtime snapshot every ten minutes
+          [Timer]
+          OnBootSec=5min
+          OnUnitActiveSec=10min
+          Persistent=true
+          [Install]
+          WantedBy=timers.target
+          UNIT
+          systemctl daemon-reload
+          systemctl enable --now aplus-stage-recovery-config.timer
+          systemctl start aplus-stage-recovery-config.service
+          test -s /home/aplusstandby/recovery/app-source.tgz
+          test -s /home/aplusstandby/recovery/aplussolution.env
+          echo PRIMARY_MEDIA_AND_RUNTIME_EXPORT_READY
+          REMOTE
