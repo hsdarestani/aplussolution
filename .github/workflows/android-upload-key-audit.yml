@@ -1,0 +1,52 @@
+name: Audit existing Android upload key (no build, no upload)
+
+on:
+  push:
+    branches: ['recovery/android-upload-key-audit-20261012']
+    paths: ['.github/workflows/android-upload-key-audit.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Check private signing secret availability without exposing values
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for field in KEYSTORE STORE_PASS ALIAS KEY_PASS; do
+            if [ -z "${!field}" ]; then
+              echo "$field=MISSING"
+              missing=1
+            else
+              echo "$field=PRESENT"
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "ANDROID_UPLOAD_KEY_RECOVERY=INCOMPLETE"
+            exit 0
+          fi
+          umask 077
+          KEYFILE="$RUNNER_TEMP/upload-key-audit.jks"
+          trap 'rm -f "$KEYFILE"' EXIT
+          if ! printf '%s' "$KEYSTORE" | base64 --decode > "$KEYFILE"; then
+            echo "ANDROID_UPLOAD_KEY_RECOVERY=INVALID_BASE64"
+            exit 1
+          fi
+          if ! KEY_INFO="$(keytool -list -v -keystore "$KEYFILE" -storepass "$STORE_PASS" -alias "$ALIAS" 2>/dev/null)"; then
+            echo "ANDROID_UPLOAD_KEY_RECOVERY=INVALID_KEYSTORE_OR_PASSWORD"
+            exit 1
+          fi
+          FINGERPRINT="$(printf '%s\n' "$KEY_INFO" | sed -n 's/.*SHA256: //p' | head -n 1 | tr -d '\r')"
+          test -n "$FINGERPRINT"
+          echo "ANDROID_UPLOAD_KEY_RECOVERY=KEYSTORE_USABLE"
+          echo "ANDROID_UPLOAD_CERT_SHA256=$FINGERPRINT"
