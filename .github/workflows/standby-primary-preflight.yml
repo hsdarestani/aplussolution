@@ -58,3 +58,5 @@ jobs:
           echo "PRIMARY_READ_ONLY_AUDIT_COMPLETE"
           REMOTE
           rm -f "$KEY"
+
+# Post-standby streaming verification on 2026-10-12.
