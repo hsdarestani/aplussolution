@@ -38,10 +38,14 @@ jobs:
           echo "=== DATABASE SIZE ==="
           docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select pg_size_pretty(pg_database_size(current_database()))"' </dev/null
           echo "=== WAL AND SLOTS ==="
-          docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select name || chr(61) || setting || unit from pg_settings where name in (''wal_level'',''max_wal_senders'',''max_replication_slots'',''wal_keep_size'',''max_slot_wal_keep_size'') order by name;"' </dev/null || true
-          docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select slot_name,slot_type,active,coalesce(pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(),restart_lsn)),''n/a'') from pg_replication_slots;"' </dev/null || true
+          docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "show wal_level; show max_wal_senders; show max_replication_slots; show wal_keep_size; show max_slot_wal_keep_size;"' </dev/null || true
+          docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select slot_name,slot_type,active,pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) from pg_replication_slots;"' </dev/null || true
           echo "=== CURRENT STREAMERS ==="
           docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select application_name,state,sync_state from pg_stat_replication"' </dev/null || true
+          echo "=== POSTGRES VOLUME SIZE ==="
+          D="$(docker compose ps -q db)"
+          DBM="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Source}}{{end}}{{end}}' "$D")"
+          if [ -d "$DBM" ]; then timeout 30 du -sh "$DBM" || true; else echo POSTGRES_MOUNT_NOT_AVAILABLE; fi
           echo "=== DISK FREE ==="
           df -h /
           echo "=== MEDIA VOLUME SIZE ==="
