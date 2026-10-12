@@ -1,0 +1,41 @@
+name: Probe trusted STRATO Telegram relay
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/probe-strato-telegram-relay.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      SSH_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Test owned foreign server, read only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$SSH_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/strato_key"
+          chmod 600 "$HOME/.ssh/strato_key"
+          ssh -i "$HOME/.ssh/strato_key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 "root@$HOST" 'bash -s' <<'REMOTE'
+          set -uo pipefail
+          echo '=== STRATO Telegram outbound ==='
+          getent ahostsv4 api.telegram.org | awk 'NR==1{print "telegram_ipv4="$1}' || true
+          curl -4 -ksS --max-time 12 -o /dev/null -w 'telegram_http=%{http_code} tcp=%{time_connect} tls=%{time_appconnect}\n' https://api.telegram.org/ || true
+          echo '=== Health ==='
+          free -m | head -n 3
+          df -h / | tail -n 1
+          command -v sshd >/dev/null && echo sshd_present=yes || echo sshd_present=no
+          command -v systemctl >/dev/null && echo systemd_present=yes || echo systemd_present=no
+          echo '=== SSH port forwarding policy ==='
+          if command -v sshd >/dev/null; then
+            sshd -T 2>/dev/null | grep -E '^(allowtcpforwarding|permitopen|gatewayports) ' | head -n 4 || true
+          fi
+          echo 'STRATO_RELAY_PROBE_END'
+          REMOTE
