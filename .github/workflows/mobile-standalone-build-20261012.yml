@@ -1,0 +1,106 @@
+name: A+ Solution Standalone Android and iOS Build
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/mobile-standalone-build-20261012.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Android APK and AAB (no Publisher)
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Build native Android APK and unsigned release AAB
+        working-directory: frontend
+        env:
+          VITE_API_URL: https://app.aplus-solution.de/api
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run build
+          rm -rf android
+          npx cap add android
+          npx cap sync android
+          python3 -m pip install --quiet --disable-pip-version-check pillow
+          node scripts/prepare-native.mjs android
+          cd android
+          ./gradlew --no-daemon assembleDebug bundleRelease
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          test -s app/build/outputs/bundle/release/app-release.aab
+      - name: Upload Android installable debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: aplus-solution-android-debug-apk
+          path: frontend/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload Android unsigned release AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: aplus-solution-android-release-unsigned-aab
+          path: frontend/android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+          retention-days: 30
+
+  ios:
+    name: iOS simulator App and Xcode project (no Publisher)
+    runs-on: macos-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Prepare native iOS Xcode project
+        working-directory: frontend
+        env:
+          VITE_API_URL: https://app.aplus-solution.de/api
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run build
+          rm -rf ios
+          npx cap add ios
+          npx cap sync ios
+          node scripts/prepare-native.mjs ios
+      - name: Compile unsigned iOS simulator application
+        working-directory: frontend/ios
+        run: |
+          set -euo pipefail
+          xcodebuild -workspace App/App.xcworkspace \
+            -scheme App -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO build
+          test -d build/DerivedData/Build/Products/Debug-iphonesimulator/App.app
+      - name: Upload iOS simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: aplus-solution-ios-simulator-app
+          path: frontend/ios/build/DerivedData/Build/Products/Debug-iphonesimulator/App.app/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload iOS Xcode project
+        uses: actions/upload-artifact@v4
+        with:
+          name: aplus-solution-ios-xcode-project
+          path: |
+            frontend/ios/App/
+            frontend/ios/capacitor-cordova-ios-plugins/
+            frontend/ios/Podfile
+            frontend/ios/Podfile.lock
+          if-no-files-found: error
+          retention-days: 30
