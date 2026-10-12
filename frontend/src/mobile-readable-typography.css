@@ -11,6 +11,8 @@
   html {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
+    /* Keep native app gestures usable without allowing double-tap/pinch zoom. */
+    touch-action: pan-x pan-y;
   }
 
   body,

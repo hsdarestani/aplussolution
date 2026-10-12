@@ -228,6 +228,9 @@ open class APlusBridgeViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         super.capacitorDidLoad()
         bridge?.registerPluginInstance(APlusCalendarSubscriptionPlugin())
+        // Do not let iOS retain a magnified, horizontally clipped worker schedule.
+        // Normal page scrolling and the calendar's week swipe remain available.
+        webView?.scrollView.pinchGestureRecognizer?.isEnabled = false
     }
 }
 `;
