@@ -1,0 +1,53 @@
+name: Authorize new A+ standby key on STRATO primary
+on:
+  push:
+    branches: [ops/standby-refresh-20261012]
+    paths:
+      - '.github/workflows/standby-primary-authorize.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      PRIMARY_HOST: ${{ secrets.STRATO_HOST }}
+      PRIMARY_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Authorize dedicated standby key without touching app or DB
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRIMARY_HOST" && test -n "$PRIMARY_KEY"
+          test "$PRIMARY_HOST" != "82.165.187.14"
+          umask 077
+          K="$RUNNER_TEMP/primary-standby-auth-key"
+          printf '%s\n' "$PRIMARY_KEY" | tr -d '\r' > "$K"
+          chmod 600 "$K"
+          mkdir -p "$HOME/.ssh"
+          ssh-keyscan -T 10 -H "$PRIMARY_HOST" >> "$HOME/.ssh/known_hosts" 2>/dev/null
+          ssh -i "$K" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 root@"$PRIMARY_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          test -s /root/aplus-replication.secret
+          test "$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select pg_is_in_recovery()"' </dev/null | tr -d '[:space:]')" = f
+          systemctl is-active --quiet aplus-postgres-repl-source.service
+          ss -lnt | grep -q '127.0.0.1:55432'
+          echo PRIMARY_REPLICATION_ENDPOINT_READY
+
+          getent passwd aplusstandby >/dev/null || useradd -m -s /bin/bash aplusstandby
+          install -d -m 700 -o aplusstandby -g aplusstandby /home/aplusstandby/.ssh
+          touch /home/aplusstandby/.ssh/authorized_keys
+          PUB='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVPGCcPVdPmtJ0h1+9smdFKMii2uJIZxn2gEYBJ18xQ'
+          if ! grep -Fq "$PUB" /home/aplusstandby/.ssh/authorized_keys; then
+            printf 'restrict,port-forwarding,permitopen="127.0.0.1:55432" %s\n' "$PUB" >> /home/aplusstandby/.ssh/authorized_keys
+          fi
+          chown aplusstandby:aplusstandby /home/aplusstandby/.ssh/authorized_keys
+          chmod 600 /home/aplusstandby/.ssh/authorized_keys
+          install -m 600 -o aplusstandby -g aplusstandby /root/aplus-replication.secret /home/aplusstandby/replication_password
+          echo STANDBY_SSH_REPLICATION_IDENTITY_AUTHORIZED
+          REMOTE
+          rm -f "$K"
