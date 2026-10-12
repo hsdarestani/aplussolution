@@ -1,0 +1,56 @@
+name: Read-only A+ Solution primary replication audit
+on:
+  push:
+    branches: [ops/standby-refresh-20261012]
+    paths:
+      - '.github/workflows/standby-primary-preflight.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      PRIMARY_HOST: ${{ secrets.STRATO_HOST }}
+      PRIMARY_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Inspect production PostgreSQL and media without modifying data
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRIMARY_HOST" && test -n "$PRIMARY_KEY"
+          test "$PRIMARY_HOST" != "82.165.187.14"
+          umask 077
+          KEY="$RUNNER_TEMP/aplus-primary-audit-key"
+          printf '%s\n' "$PRIMARY_KEY" | tr -d '\r' > "$KEY"
+          chmod 600 "$KEY"
+          mkdir -p "$HOME/.ssh"
+          ssh-keyscan -T 10 -H "$PRIMARY_HOST" >> "$HOME/.ssh/known_hosts" 2>/dev/null
+          test -s "$HOME/.ssh/known_hosts"
+          ssh -i "$KEY" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 root@"$PRIMARY_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          echo "=== PRODUCTION ROLE ==="
+          docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select pg_is_in_recovery()"' </dev/null
+          echo "=== DATABASE SIZE ==="
+          docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select pg_size_pretty(pg_database_size(current_database()))"' </dev/null
+          echo "=== WAL AND SLOTS ==="
+          docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select name || chr(61) || setting || unit from pg_settings where name in (''wal_level'',''max_wal_senders'',''max_replication_slots'',''wal_keep_size'',''max_slot_wal_keep_size'') order by name;"' </dev/null || true
+          docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select slot_name,slot_type,active,coalesce(pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(),restart_lsn)),''n/a'') from pg_replication_slots;"' </dev/null || true
+          echo "=== CURRENT STREAMERS ==="
+          docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select application_name,state,sync_state from pg_stat_replication"' </dev/null || true
+          echo "=== DISK FREE ==="
+          df -h /
+          echo "=== MEDIA VOLUME SIZE ==="
+          C="$(docker compose ps -q backend)"
+          test -n "$C"
+          M="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/app/media"}}{{.Source}}{{end}}{{end}}' "$C")"
+          if [ -d "$M" ]; then timeout 30 du -sh "$M" || true; else echo 'MEDIA_MOUNT_NOT_AVAILABLE'; fi
+          echo "=== REPLICATION SERVICES ==="
+          systemctl list-unit-files 'aplus*' --no-pager --no-legend || true
+          echo "PRIMARY_READ_ONLY_AUDIT_COMPLETE"
+          REMOTE
+          rm -f "$KEY"
