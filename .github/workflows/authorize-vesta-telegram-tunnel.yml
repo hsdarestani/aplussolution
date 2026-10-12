@@ -1,0 +1,43 @@
+name: Authorize isolated Vesta Telegram SSH tunnel
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/authorize-vesta-telegram-tunnel.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      SSH_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Install restricted SSH forwarding-only principal without restarting STRATO services
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$SSH_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/strato_key"
+          chmod 600 "$HOME/.ssh/strato_key"
+          ssh -i "$HOME/.ssh/strato_key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 "root@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          USER=vesta-telegram-tunnel
+          if ! id "$USER" >/dev/null 2>&1; then useradd --create-home --shell /usr/sbin/nologin "$USER"; fi
+          GROUP="$(id -gn "$USER")"
+          HOME_DIR="$(getent passwd "$USER" | cut -d: -f6)"
+          install -d -m 700 -o "$USER" -g "$GROUP" "$HOME_DIR/.ssh"
+          touch "$HOME_DIR/.ssh/authorized_keys"
+          chmod 600 "$HOME_DIR/.ssh/authorized_keys"
+          AUTH_LINE='restrict,port-forwarding,permitopen="api.telegram.org:443",command="/bin/false" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFIPgymFsYnd7JV3X8DAtWwXP3V+Cxk0SJN82zfbhuvE vesta-telegram-tunnel-2026'
+          if ! grep -Fq 'vesta-telegram-tunnel-2026' "$HOME_DIR/.ssh/authorized_keys"; then
+            printf '%s\n' "$AUTH_LINE" >> "$HOME_DIR/.ssh/authorized_keys"
+          fi
+          chown "$USER:$GROUP" "$HOME_DIR/.ssh/authorized_keys"
+          sshd -t
+          echo 'vesta_telegram_tunnel_key=authorized_for_api_telegram_only'
+          echo 'existing_production_services=unchanged'
+          REMOTE
