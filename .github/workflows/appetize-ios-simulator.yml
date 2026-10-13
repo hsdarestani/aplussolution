@@ -1,0 +1,73 @@
+name: Build A+ Solution for Appetize (iOS Simulator)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/appetize-ios-simulator.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ios-simulator:
+    name: Build iOS .app ZIP for Appetize
+    runs-on: macos-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout latest source
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build production frontend and native iOS project
+        working-directory: frontend
+        env:
+          VITE_API_URL: https://app.aplus-solution.de/api
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run build
+          rm -rf ios
+          npx cap add ios
+          npx cap sync ios
+          node scripts/prepare-native.mjs ios
+
+      - name: Compile unsigned iOS Simulator application (ARM64)
+        working-directory: frontend/ios
+        run: |
+          set -euo pipefail
+          xcodebuild -workspace App/App.xcworkspace \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/DerivedData \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO build
+          APP_PATH="build/DerivedData/Build/Products/Debug-iphonesimulator/App.app"
+          test -d "$APP_PATH"
+          test -s "$APP_PATH/App"
+          xcrun lipo -archs "$APP_PATH/App"
+
+      - name: Package Appetize-ready ZIP containing App.app
+        working-directory: frontend/ios
+        run: |
+          set -euo pipefail
+          APP_PATH="build/DerivedData/Build/Products/Debug-iphonesimulator/App.app"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$GITHUB_WORKSPACE/APlusSolution-Appetize-iOS.zip"
+          unzip -t "$GITHUB_WORKSPACE/APlusSolution-Appetize-iOS.zip" > /dev/null
+          unzip -Z1 "$GITHUB_WORKSPACE/APlusSolution-Appetize-iOS.zip" | grep -q '^App.app/Info.plist$'
+
+      - name: Upload Appetize-ready file
+        uses: actions/upload-artifact@v4
+        with:
+          name: APlusSolution-Appetize-iOS
+          path: APlusSolution-Appetize-iOS.zip
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
