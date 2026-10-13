@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//A+ Solution GmbH//Calendar Compatibility Check//DE
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+X-WR-CALNAME:A+ Solution Kalender Kompatibilitaetstest
+X-WR-TIMEZONE:Europe/Berlin
+BEGIN:VEVENT
+UID:calendar-compatibility-2027@aplus-solution.de
+DTSTAMP:20261013T170000Z
+DTSTART:20271005T100000Z
+DTEND:20271005T110000Z
+SUMMARY:A+ Solution Testtermin
+DESCRIPTION:Oeffentlicher Testeintrag ohne personenbezogene Daten
+END:VEVENT
+END:VCALENDAR
