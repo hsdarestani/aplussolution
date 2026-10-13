@@ -11,6 +11,8 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      PRIMARY_HOST: ${{ secrets.STRATO_HOST }}
     steps:
       - name: Inspect public HTTP status without revealing calendar tokens
         shell: bash
@@ -22,4 +24,22 @@ jobs:
             echo "PUBLIC_PATH=$path HTTP=$code"
             grep -Ei '^(content-type|x-aplus-origin|location|server|cf-cache-status):' /tmp/calendar-headers || true
             echo "BODY_PREFIX=$(head -c 60 /tmp/calendar-body | tr '\n' ' ')"
+          done
+
+      - name: Compare Cloudflare and direct primary paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRIMARY_HOST"
+          for path in /health/ /calendar/invalid.ics /api/calendar/feed/invalid.ics; do
+            for route in direct cloudflare; do
+              url="https://app.aplus-solution.de$path"
+              if [ "$route" = direct ]; then
+                code=$(curl -sS --max-time 20 --resolve "app.aplus-solution.de:443:$PRIMARY_HOST" -o /tmp/route-response -w '%{http_code}' "$url") || true
+              else
+                code=$(curl -sS --max-time 20 -o /tmp/route-response -w '%{http_code}' "$url") || true
+              fi
+              printf 'ROUTE_COMPARE %s %s status=%s type=' "$route" "$path" "$code"
+              if head -c 32 /tmp/route-response | grep -q 'Kalenderfeed'; then echo 'plain-error'; elif head -c 50 /tmp/route-response | grep -q '<!doctype html'; then echo 'spa-html'; elif head -c 80 /tmp/route-response | grep -q '"status"'; then echo 'json-health'; else echo 'other'; fi
+            done
           done
