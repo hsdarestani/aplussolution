@@ -1,0 +1,86 @@
+name: Hotfix verified Apple Calendar 406 negotiation
+on:
+  push:
+    branches: [feature/apple-calendar-secure-subscription-20261013]
+    paths: ['.github/workflows/hotfix-calendar-accept-406.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 11
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stage validated ICS view only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$KEY" > "$HOME/.ssh/cal-406"
+          chmod 600 "$HOME/.ssh/cal-406"
+          scp -q -i "$HOME/.ssh/cal-406" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null backend/core/calendar_sync.py root@"$HOST":/tmp/aplus-calendar-406-hotfix.py
+      - name: Apply backend view hotfix with fail-safe restoration
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/cal-406" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          cid=$(docker compose ps -q backend)
+          test -n "$cid"
+          test "$(docker inspect -f '{{.State.Running}}' "$cid")" = true
+          test -s /tmp/aplus-calendar-406-hotfix.py
+          grep -Fq "@require_http_methods(['GET', 'HEAD'])" /tmp/aplus-calendar-406-hotfix.py
+          python3 -m py_compile /tmp/aplus-calendar-406-hotfix.py
+          saved=/tmp/calendar-406-rollback
+          mkdir -p "$saved"
+          cp backend/core/calendar_sync.py "$saved/on-disk.py"
+          docker cp "$cid":/app/core/calendar_sync.py "$saved/in-container.py"
+          restore() {
+            echo "CALENDAR_406_HOTFIX_FAILED_ROLLING_BACK"
+            cp "$saved/on-disk.py" backend/core/calendar_sync.py || true
+            docker cp "$saved/in-container.py" "$cid":/app/core/calendar_sync.py || true
+            docker compose restart backend || true
+          }
+          trap restore ERR
+          cp /tmp/aplus-calendar-406-hotfix.py backend/core/calendar_sync.py
+          docker cp /tmp/aplus-calendar-406-hotfix.py "$cid":/app/core/calendar_sync.py
+          docker compose exec -T backend python -m py_compile /app/core/calendar_sync.py </dev/null
+          docker compose restart backend
+          running=0
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 5 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/ >/dev/null; then running=1; break; fi
+            sleep 3
+          done
+          test "$running" -eq 1
+          docker compose exec -T backend python manage.py check </dev/null
+          # A real, signed employee feed must succeed with EXACT Accept:
+          # text/calendar. No token or employee details are written to CI logs.
+          docker compose exec -T backend python manage.py shell --no-imports -c "from core.models import WorkerProfile; from core.calendar_sync import _calendar_token; import requests; worker=WorkerProfile.objects.filter(active=True,user__is_active=True).first(); assert worker is not None; url='https://app.aplus-solution.de/calendar/'+_calendar_token(worker)+'.ics'; opts={'headers':{'Accept':'text/calendar'},'timeout':20}; responses=[requests.get(url,**opts),requests.head(url,**opts),requests.get('https://app.aplus-solution.de/calendar-compatibility-test.ics',**opts)]; assert all(r.status_code==200 and r.headers.get('Content-Type','').startswith('text/calendar') for r in responses); assert responses[0].content.startswith(b'BEGIN:VCALENDAR\r\n') and responses[2].content.startswith(b'BEGIN:VCALENDAR\r\n'); print('SIGNED_AND_FIXTURE_CALENDAR_ACCEPT_200',len(responses))" </dev/null
+          echo "CALENDAR_406_RESOLVED_ON_ORIGIN"
+          trap - ERR
+          rm -rf "$saved" /tmp/aplus-calendar-406-hotfix.py
+          REMOTE
+      - name: Verify public HTTPS response with iOS Calendar Accept header
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 5); do
+            code=$(curl -sS --max-time 20 -H 'Accept: text/calendar' -H 'Cache-Control: no-cache' -o /tmp/cal-body -D /tmp/cal-headers -w '%{http_code}' 'https://app.aplus-solution.de/calendar-compatibility-test.ics?accept_verification=1')
+            if [ "$code" = 200 ] && grep -Eqi '^content-type: text/calendar' /tmp/cal-headers &&
+               head -c 20 /tmp/cal-body | grep -q 'BEGIN:VCALENDAR'; then
+              echo "APPLE_ACCEPT_200_PUBLIC_HTTPS"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::iCalendar Accept:text/calendar still fails public HTTPS"
+          exit 1
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/cal-406" /tmp/cal-body /tmp/cal-headers
