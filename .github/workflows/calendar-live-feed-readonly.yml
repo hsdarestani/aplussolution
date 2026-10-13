@@ -76,7 +76,7 @@ jobs:
                   if 'DTSTART' in event and 'DTEND' in event and event['DTSTART'][0] >= event['DTEND'][0]:
                       problems['reversed_time'] += 1
               print('AUDIT',label, 'http', response.status_code, 'redirects',len(response.history),'content_type', response.headers.get('Content-Type',''), 'disposition_present',bool(response.headers.get('Content-Disposition')),'cache_control',response.headers.get('Cache-Control',''),'events',len(events),'bytes',len(raw),'max_line_bytes',max(line_lens,default=0),'problems',dict(problems))
-          url = 'https://app.aplus-solution.de/api/calendar/feed/'+_calendar_token(staffed.worker)+'.ics'
+          url = 'https://app.aplus-solution.de/calendar/'+_calendar_token(staffed.worker)+'.ics'
           for ua in ['curl/8.0', 'CalendarAgent/1.0 (iPhone; iOS 26)']:
               summarize('worker_'+ua.split('/')[0],requests.get(url,timeout=25,headers={'User-Agent':ua}))
           summarize('static_test', requests.get('https://app.aplus-solution.de/calendar-compatibility-test.ics',timeout=25))
