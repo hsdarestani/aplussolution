@@ -216,8 +216,6 @@ def calendar_feed(request, token):
         'METHOD:PUBLISH',
         'X-WR-CALNAME:A+ Solution Dienstplan',
         'X-WR-TIMEZONE:Europe/Berlin',
-        'REFRESH-INTERVAL;VALUE=DURATION:PT15M',
-        'X-PUBLISHED-TTL:PT15M',
     ]
 
     for shift in _assigned_shifts(worker):
@@ -235,21 +233,18 @@ def calendar_feed(request, token):
             'BEGIN:VEVENT',
             f'UID:shift-{shift.pk}@aplus-solution.de',
             f'DTSTAMP:{_utc_stamp(now)}',
-            f'LAST-MODIFIED:{_utc_stamp(shift.updated_at)}',
-            f'SEQUENCE:{max(0, int(shift.updated_at.timestamp()))}',
             f'DTSTART:{_utc_stamp(shift.starts_at)}',
             f'DTEND:{_utc_stamp(shift.ends_at)}',
             f'SUMMARY:{_ics_escape(summary)}',
             f'LOCATION:{_ics_escape(shift.location.name)}',
             f'DESCRIPTION:{_ics_escape(chr(10).join(description_bits))}',
-            f'CATEGORIES:{_ics_escape("A+ Solution," + worker_name)}',
-            'STATUS:CONFIRMED',
             'END:VEVENT',
         ])
 
     lines.append('END:VCALENDAR')
     response = HttpResponse('\r\n'.join(_fold_ical_line(line) for line in lines) + '\r\n', content_type='text/calendar; charset=utf-8')
-    response['Content-Disposition'] = 'inline; filename="aplus-dienstplan.ics"'
-    response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    # Match the proven-working subscription fixture: serve raw text/calendar,
+    # not a downloadable attachment. Clients manage refresh intervals.
+    response['Cache-Control'] = 'private, max-age=0, must-revalidate'
     response['X-Robots-Tag'] = 'noindex, nofollow'
     return response
