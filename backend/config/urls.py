@@ -4,7 +4,7 @@ from django.contrib import admin
 from django.http import JsonResponse
 from django.urls import include, path
 
-from core import order_file_import_views
+from core import calendar_sync, order_file_import_views
 
 
 def contract_source_health(request):
@@ -27,6 +27,7 @@ def contract_source_health(request):
 
 
 urlpatterns = [
+    path('calendar/<str:token>.ics', calendar_sync.calendar_feed),
     path('admin/', admin.site.urls),
     path('api/automation/orders/parse-file/', order_file_import_views.parse_order_file),
     path('api/automation/orders/approve-file/', order_file_import_views.approve_order_file),
