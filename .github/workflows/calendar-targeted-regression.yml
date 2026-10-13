@@ -4,6 +4,9 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/calendar-targeted-regression.yml'
+      - 'backend/core/calendar_sync.py'
+      - 'backend/config/urls.py'
+      - 'backend/tests/test_calendar_sync.py'
   workflow_dispatch:
 permissions:
   contents: read
