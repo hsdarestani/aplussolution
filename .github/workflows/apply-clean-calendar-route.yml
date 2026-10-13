@@ -57,22 +57,22 @@ jobs:
             docker cp /tmp/cal-route-backup/container-calendar.py "$b":/app/core/calendar_sync.py
             docker cp /tmp/cal-route-backup/container-urls.py "$b":/app/config/urls.py
             docker compose restart backend || true
-            docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile || true
+            docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile </dev/null || true
           }
           trap 'restore' ERR
           grep -Fq 'handle /calendar/*' /tmp/cal-route-staged/Caddyfile
           grep -Fq 'calendar/<str:token>.ics' /tmp/cal-route-staged/urls.py
           grep -Fq "f'/calendar/{token}.ics'" /tmp/cal-route-staged/calendar_sync.py
           cat /tmp/cal-route-staged/Caddyfile > Caddyfile
-          docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile </dev/null
           cp /tmp/cal-route-staged/calendar_sync.py backend/core/calendar_sync.py
           cp /tmp/cal-route-staged/urls.py backend/config/urls.py
           docker cp backend/core/calendar_sync.py "$b":/app/core/calendar_sync.py
           docker cp backend/config/urls.py "$b":/app/config/urls.py
-          docker compose exec -T backend python -m py_compile /app/core/calendar_sync.py /app/config/urls.py
+          docker compose exec -T backend python -m py_compile /app/core/calendar_sync.py /app/config/urls.py </dev/null
           docker compose restart backend
-          docker compose exec -T backend python manage.py check
-          docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+          docker compose exec -T backend python manage.py check </dev/null
+          docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile </dev/null
           healthy=0
           for i in $(seq 1 25); do
             if curl -fsS --max-time 6 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/ | grep -q '"ok"'; then healthy=1; break; fi
@@ -82,6 +82,7 @@ jobs:
           code=$(curl -sS --max-time 12 -o /dev/null -w '%{http_code}' --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/calendar/invalid.ics)
           test "$code" = 404
           echo "CLEAN_CALENDAR_ROUTE_ACTIVE"
+          # Explicit marker confirms the heredoc reached the end of this patch.
           trap - ERR
           rm -rf /tmp/cal-route-staged /tmp/cal-route-backup
           REMOTE
