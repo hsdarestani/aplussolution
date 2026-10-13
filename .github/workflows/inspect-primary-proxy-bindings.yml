@@ -1,0 +1,43 @@
+name: Inspect Strato public HTTPS proxy binding (read only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-primary-proxy-bindings.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Identify the public and loopback listener without modifying config
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST"
+          test -n "$KEY"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/readkey
+          chmod 600 ~/.ssh/readkey
+          ssh -i ~/.ssh/readkey -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          echo "CADDY_COMPOSE:"
+          docker compose ps caddy --format json | head -c 900 || true
+          echo
+          echo "PUBLIC_PORT_LISTENER_PROCESSES:"
+          ss -ltnp '( sport = :443 )' | sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/IP/g' | head -n 20 || true
+          echo "DOCKER_CADDY_PORT_BINDINGS:"
+          c=$(docker compose ps -q caddy)
+          docker inspect "$c" --format '{{json .HostConfig.PortBindings}}' | sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/IP/g'
+          echo "CADDY_LIVE_CALENDAR_CONFIG:"
+          docker compose exec -T caddy sh -c "wget -qO- http://127.0.0.1:2019/config/apps/http/servers 2>/dev/null | grep -o '/calendar/[^\" ]*' | head -n 5" || true
+          echo "PRODUCTION_COMPOSE_FILES:"
+          ls -1 docker-compose*.yml docker-compose*.yaml 2>/dev/null || true
+          REMOTE
+          rm -f ~/.ssh/readkey
