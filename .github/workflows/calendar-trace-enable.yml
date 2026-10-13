@@ -1,0 +1,71 @@
+name: Enable privacy-safe calendar subscription HTTP trace
+on:
+  push:
+    branches: [feature/apple-calendar-secure-subscription-20261013]
+    paths: ['.github/workflows/calendar-trace-enable.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  activate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      SSH_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare private SSH access
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$SSH_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/calendar_trace"
+          chmod 600 "$HOME/.ssh/calendar_trace"
+      - name: Apply temporary in-memory Caddy access logging with no calendar tokens
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/calendar_trace" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          cid=$(docker compose ps -q caddy)
+          test -n "$cid"
+          test "$(docker inspect -f '{{.State.Running}}' "$cid")" = true
+          # The mounted Caddyfile and repo stay unchanged. Container-only
+          # temporary configuration disappears on restart. Revert with
+          # caddy reload --config /etc/caddy/Caddyfile.
+          python3 - <<'PY'
+          from pathlib import Path
+          config=Path('Caddyfile').read_text()
+          marker='    @compressNonCalendar {'
+          assert config.count(marker)==1
+          addition="""    # Temporary debug logging: private bearer-token URL, IP, cookies and
+    # all request headers are removed before logs are encoded.
+    log calendar_subscription_trace {
+        output stdout
+        format filter {
+            request>uri replace REDACTED
+            request>headers delete
+            request>remote_ip delete
+            request>client_ip delete
+            request>remote_port delete
+        }
+    }
+    @notCalendarRequest {
+        not path /calendar/* /api/calendar/feed/* /calendar-compatibility-test.ics
+    }
+    log_skip @notCalendarRequest
+
+"""
+          Path('/tmp/aplus-calendar-trace.Caddyfile').write_text(config.replace(marker,addition+marker,1))
+          PY
+          docker cp /tmp/aplus-calendar-trace.Caddyfile "$cid":/tmp/aplus-calendar-trace.Caddyfile
+          docker compose exec -T caddy caddy validate --config /tmp/aplus-calendar-trace.Caddyfile --adapter caddyfile </dev/null
+          docker compose exec -T caddy caddy reload --config /tmp/aplus-calendar-trace.Caddyfile --adapter caddyfile </dev/null
+          curl -fsS --max-time 20 https://app.aplus-solution.de/health/ >/dev/null
+          echo 'SAFE_CALENDAR_TRACE_ENABLED_CONFIG_ON_DISK_UNCHANGED'
+          REMOTE
+      - name: Delete temporary SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/calendar_trace"
