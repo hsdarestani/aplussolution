@@ -68,7 +68,6 @@ import Settings from './Settings';
 import MobileMoreMenu from './MobileMoreMenu';
 import { akteHref, openAkte } from './entityNavigation';
 import { openAppleCalendarSubscription } from './appleCalendarSubscription';
-import { diagnoseWorkerCalendarFeed } from './calendarFeedDiagnostics';
 
 type View =
   | 'dashboard'
@@ -3010,8 +3009,6 @@ function Profile({ user }: { user: User }) {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [calendarSync, setCalendarSync] = useState<any>();
   const [calendarLoading, setCalendarLoading] = useState(false);
-  const [calendarDiagnostic, setCalendarDiagnostic] = useState('');
-  const [calendarChecking, setCalendarChecking] = useState(false);
 
   useEffect(() => {
     if (user.role !== 'worker') return;
@@ -3043,35 +3040,23 @@ function Profile({ user }: { user: User }) {
   }, [user.role]);
 
   async function openAppleCalendar() {
-    const url = String(calendarSync?.webcal_url || '');
+    // Now that the signed ICS endpoint accepts text/calendar, launch the native
+    // Apple Calendar subscription flow directly. Safari is used only if the
+    // device explicitly refuses to open the calendar deep link.
+    const deepLink = String(calendarSync?.webcal_url || '');
+    const fallback = String(calendarSync?.apple_setup_url || '');
     try {
-      await openAppleCalendarSubscription(url);
+      await openAppleCalendarSubscription(deepLink);
     } catch (error: any) {
+      if (fallback) {
+        try {
+          await openAppleCalendarSubscription(fallback);
+          return;
+        } catch {
+          // Keep the original error, instead of reporting fallback as success.
+        }
+      }
       setToast(error?.message || 'Apple Kalender konnte nicht geöffnet werden.');
-    }
-  }
-
-  async function checkCalendarFeed() {
-    if (calendarChecking) return;
-    setCalendarChecking(true);
-    setCalendarDiagnostic('Prüfung läuft …');
-    try {
-      const result = await diagnoseWorkerCalendarFeed(String(calendarSync?.https_feed_url || calendarSync?.feed_url || ''));
-      setCalendarDiagnostic(result);
-    } catch (error: any) {
-      setCalendarDiagnostic(error?.message || 'Kalenderfeed-Prüfung fehlgeschlagen.');
-    } finally {
-      setCalendarChecking(false);
-    }
-  }
-
-  async function copyCalendarLink() {
-    if (!calendarSync?.feed_url) return;
-    try {
-      await navigator.clipboard.writeText(calendarSync.feed_url);
-      setToast('Kalenderlink wurde kopiert.');
-    } catch {
-      setToast('Kalenderlink konnte nicht kopiert werden.');
     }
   }
 
@@ -3134,15 +3119,8 @@ function Profile({ user }: { user: User }) {
           <h3>Dienstplan mit Kalender synchronisieren</h3>
           <p>Einmal abonnieren. Danach werden deine zugewiesenen Schichten sowie spätere Änderungen und Löschungen automatisch über das Kalenderabo aktualisiert.</p>
           {calendarLoading ? <p>Kalenderlink wird geladen …</p> : calendarSync ? <>
-            <IonButton type="button" onClick={() => void openAppleCalendar()} expand="block">iPhone / Apple Kalender</IonButton>
-            <IonButton href={calendarSync.google_url} target="_blank" fill="outline" expand="block">Google Kalender</IonButton>
-            <IonButton href={calendarSync.outlook_url} target="_blank" fill="outline" expand="block">Outlook Kalender</IonButton>
-            <IonButton type="button" fill="clear" expand="block" onClick={() => void copyCalendarLink()}>Kalenderlink kopieren</IonButton>
-            {import.meta.env.VITE_CALENDAR_DIAGNOSTICS === '1' && <>
-              <IonButton type="button" fill="outline" expand="block" disabled={calendarChecking} onClick={() => void checkCalendarFeed()}>{calendarChecking ? 'Kalenderfeed wird geprüft …' : 'Kalenderfeed testen (Appetize)'}</IonButton>
-              {calendarDiagnostic && <small role="status">{calendarDiagnostic}</small>}
-            </>}
-            <small>Der Link ist persönlich und darf nicht weitergegeben werden. Änderungen erscheinen automatisch, sobald der jeweilige Kalenderanbieter das Abo erneut abruft.</small>
+            <IonButton type="button" onClick={() => void openAppleCalendar()} expand="block">Apple Kalender verbinden</IonButton>
+            <small>Nach einmaligem Abonnieren erscheinen neue und geänderte Schichten automatisch in Apple Kalender, sobald dieser das Abo aktualisiert.</small>
           </> : <p>Kalendersynchronisierung ist momentan nicht verfügbar.</p>}
         </div>}
         <div className="panel form">
