@@ -28,24 +28,58 @@ jobs:
           from core.models import WorkerProfile, Shift
           from core.calendar_sync import _calendar_token
           from django.utils import timezone
-          from datetime import timedelta
-          import requests
-          today = timezone.now()
-          original = WorkerProfile.objects.filter(active=True).order_by('pk').first()
-          staffed_shift = Shift.objects.filter(
-              worker__active=True,
-              starts_at__gte=today - timedelta(days=90),
-              starts_at__lte=today + timedelta(days=540)
-          ).exclude(status__in=[Shift.Status.DRAFT, Shift.Status.CANCELLED]).select_related('worker').first()
-          print('AVAILABLE_POPULATED_SAMPLE',bool(staffed_shift))
-          for label, worker in [('first', original), ('staffed', staffed_shift.worker if staffed_shift else None)]:
-              if worker is None:
-                  continue
-              url = 'https://app.aplus-solution.de/api/calendar/feed/' + _calendar_token(worker) + '.ics'
-              for ua in ['curl/8.0','CalendarAgent/1.0 (iPhone; iOS 26)']:
-                  resp = requests.get(url,timeout=25,headers={'User-Agent':ua})
-                  body = resp.content
-                  print('CHECK',label,ua.split('/')[0],'status',resp.status_code,'mime_calendar',resp.headers.get('content-type','').startswith('text/calendar'),'bytes',len(body),'events',body.count(b'BEGIN:VEVENT'),'crlf',body.startswith(b'BEGIN:VCALENDAR\r\n') and body.endswith(b'END:VCALENDAR\r\n'),'html',b'<html' in body[:300].lower())
+          from datetime import timedelta, datetime
+          from collections import Counter
+          import requests, re
+          now = timezone.now()
+          staffed = Shift.objects.filter(worker__active=True, starts_at__gte=now-timedelta(days=90), starts_at__lte=now+timedelta(days=540)).exclude(status__in=[Shift.Status.DRAFT, Shift.Status.CANCELLED]).select_related('worker').first()
+          assert staffed is not None
+          def summarize(label, response):
+              raw = response.content
+              problems = Counter()
+              try:
+                  content = raw.decode('utf-8')
+              except UnicodeDecodeError:
+                  problems['invalid_utf8'] += 1
+                  content = ''
+              physical = content.split('\r\n')
+              line_lens = [len(line.encode('utf-8')) for line in physical]
+              if any(length > 75 for length in line_lens): problems['line_over_75'] += 1
+              if '\n' in content.replace('\r\n',''): problems['bare_lf'] += 1
+              unfolded = re.sub(r'\r\n[ \t]', '',content).split('\r\n')
+              if unfolded.count('BEGIN:VCALENDAR') != 1: problems['missing_begin'] += 1
+              if unfolded.count('END:VCALENDAR') != 1: problems['missing_end'] += 1
+              events = []
+              event = None
+              for line in unfolded:
+                  if line == 'BEGIN:VEVENT':
+                      if event is not None: problems['nested_event'] += 1
+                      event = {}
+                  elif line == 'END:VEVENT':
+                      if event is None: problems['orphan_event_end'] += 1
+                      else: events.append(event)
+                      event = None
+                  elif event is not None and ':' in line:
+                      prop,val = line.split(':',1)
+                      event.setdefault(prop,[]).append(val)
+              if event is not None: problems['unclosed_event'] += 1
+              unique_ids = set()
+              for event in events:
+                  for key in ('UID','DTSTAMP','DTSTART','DTEND','SUMMARY'):
+                      if len(event.get(key,[])) != 1: problems['missing_or_duplicate_'+key] += 1
+                  uid = event.get('UID',[''])[0]
+                  if uid in unique_ids: problems['duplicate_uid'] += 1
+                  unique_ids.add(uid)
+                  for key in ('DTSTAMP','DTSTART','DTEND','LAST-MODIFIED'):
+                      if key in event and not re.fullmatch(r'\d{8}T\d{6}Z',event[key][0]):
+                          problems['bad_timestamp_'+key] += 1
+                  if 'DTSTART' in event and 'DTEND' in event and event['DTSTART'][0] >= event['DTEND'][0]:
+                      problems['reversed_time'] += 1
+              print('AUDIT',label, 'http', response.status_code, 'redirects',len(response.history),'content_type', response.headers.get('Content-Type',''), 'disposition_present',bool(response.headers.get('Content-Disposition')),'cache_control',response.headers.get('Cache-Control',''),'events',len(events),'bytes',len(raw),'max_line_bytes',max(line_lens,default=0),'problems',dict(problems))
+          url = 'https://app.aplus-solution.de/api/calendar/feed/'+_calendar_token(staffed.worker)+'.ics'
+          for ua in ['curl/8.0', 'CalendarAgent/1.0 (iPhone; iOS 26)']:
+              summarize('worker_'+ua.split('/')[0],requests.get(url,timeout=25,headers={'User-Agent':ua}))
+          summarize('static_test', requests.get('https://app.aplus-solution.de/calendar-compatibility-test.ics',timeout=25))
           PY
       - name: Delete temporary SSH key
         if: always()
