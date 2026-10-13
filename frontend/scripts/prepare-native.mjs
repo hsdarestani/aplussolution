@@ -207,8 +207,9 @@ class APlusCalendarSubscriptionPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func open(_ call: CAPPluginCall) {
         guard let value = call.getString("url"),
               let url = URL(string: value),
-              url.scheme?.lowercased() == "webcal",
-              let host = url.host, !host.isEmpty else {
+              let scheme = url.scheme?.lowercased(),
+              (scheme == "webcal" || scheme == "https"),
+              url.host?.lowercased() == "app.aplus-solution.de" else {
             call.reject("Ungültiger Kalenderlink.")
             return
         }
