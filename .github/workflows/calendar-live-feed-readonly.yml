@@ -1,0 +1,42 @@
+name: Read only live calendar response diagnostics
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/calendar-live-feed-readonly.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Check a real signed calendar feed without disclosing URL or user data
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST"
+          test -n "$KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$KEY" > "$HOME/.ssh/calkey"
+          chmod 600 "$HOME/.ssh/calkey"
+          ssh -i "$HOME/.ssh/calkey" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" 'cd /opt/aplussolution && docker compose exec -T backend python manage.py shell' <<'PY'
+          from core.models import WorkerProfile
+          from core.calendar_sync import _calendar_token
+          import requests
+          import re
+          sample = WorkerProfile.objects.filter(active=True).order_by('pk').first()
+          assert sample is not None
+          url = 'https://app.aplus-solution.de/api/calendar/feed/' + _calendar_token(sample) + '.ics'
+          for agent in ['curl/8.0', 'CalendarAgent/1.0 (iPhone; iOS 26)']:
+              resp = requests.get(url, timeout=25, headers={'User-Agent':agent})
+              content = resp.content
+              print('CHECK', agent.split('/')[0], 'status', resp.status_code, 'mime_calendar', resp.headers.get('content-type','').startswith('text/calendar'), 'bytes',len(content), 'events',content.count(b'BEGIN:VEVENT'), 'crlf',content.startswith(b'BEGIN:VCALENDAR\r\n') and content.endswith(b'END:VCALENDAR\r\n'), 'html',b'<html' in content[:300].lower())
+          PY
+      - name: Delete temporary SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/calkey"
