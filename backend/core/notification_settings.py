@@ -6,6 +6,7 @@ from django.db import OperationalError, ProgrammingError
 
 from .push_models import NotificationPushRule
 from .models import Notification
+from .contract_notification_policy import suppress_contract_end_notice
 
 
 @dataclass(frozen=True)
@@ -297,6 +298,9 @@ def all_push_rule_payloads() -> list[dict]:
 
 def render_push_notification(notification) -> tuple[bool, str, str, str]:
     key = notification_rule_key(notification)
+    # Also checked at delivery time: queued/retried native pushes stay muted.
+    if suppress_contract_end_notice(notification.user, notification.kind):
+        return False, '', '', key
     rule = push_rule_payload(key)
     title = str(getattr(notification, 'title', '') or '')
     body = str(getattr(notification, 'body', '') or '')
