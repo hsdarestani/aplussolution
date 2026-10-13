@@ -218,7 +218,14 @@ def calendar_feed(request, token):
         'X-WR-TIMEZONE:Europe/Berlin',
     ]
 
-    for shift in _assigned_shifts(worker):
+    shifts = _assigned_shifts(worker)
+    # Temporary, read-only Apple Calendar compatibility probe. It changes
+    # only the output of an explicitly requested signed URL; existing
+    # subscribed URLs continue to include every assigned shift.
+    if request.query_params.get('qa_events') == '1':
+        shifts = shifts[:1]
+
+    for shift in shifts:
         description_bits = [
             f'Kunde: {shift.client.name}',
             f'Einsatzort: {shift.location.name}',
