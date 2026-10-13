@@ -1,0 +1,67 @@
+name: Apply uncompressed Apple Calendar feeds
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-uncompressed-calendar-feeds.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      SSH_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stage Caddy calendar-only compression change
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$SSH_KEY"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/calendar_config
+          chmod 600 ~/.ssh/calendar_config
+          scp -q -i ~/.ssh/calendar_config -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null Caddyfile root@"$HOST":/tmp/aplus-no-gzip-Caddyfile
+
+      - name: Apply and verify origin plus CDN without exposing signed URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/calendar_config -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          backup=/tmp/aplus-Caddyfile-pre-calendar-gzip
+          cp Caddyfile "$backup"
+          rollback() {
+            cp "$backup" Caddyfile
+            docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile </dev/null || true
+            echo "Original Caddyfile restored"
+          }
+          trap rollback ERR
+          grep -Fq 'encode @compressNonCalendar zstd gzip' /tmp/aplus-no-gzip-Caddyfile
+          cp /tmp/aplus-no-gzip-Caddyfile Caddyfile
+          docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile </dev/null
+          docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile </dev/null
+          url=$(docker compose exec -T backend python manage.py shell --no-imports -c "from core.models import WorkerProfile; from core.calendar_sync import _calendar_token; w=WorkerProfile.objects.filter(pk__startswith='fb07c9',active=True).first(); assert w; print('https://app.aplus-solution.de/calendar/'+_calendar_token(w)+'.ics')" </dev/null | tr -d '\r')
+          for route in origin public; do
+            if [ "$route" = origin ]; then
+              curl --noproxy '*' -fsS --max-time 20 --resolve app.aplus-solution.de:443:127.0.0.1 -H 'Accept-Encoding: gzip, deflate' -D /tmp/cal-headers -o /tmp/cal-body "$url"
+            else
+              curl -fsS --max-time 20 -H 'Accept-Encoding: gzip, deflate' -D /tmp/cal-headers -o /tmp/cal-body "$url"
+            fi
+            grep -Eqi '^content-type: text/calendar' /tmp/cal-headers
+            ! grep -Eqi '^content-encoding: (gzip|zstd|br)' /tmp/cal-headers
+            head -c 20 /tmp/cal-body | grep -q 'BEGIN:VCALENDAR'
+            echo "CALENDAR_UNCOMPRESSED_OK route=$route"
+          done
+          curl -fsS --max-time 20 https://app.aplus-solution.de/health/ | grep -q '"ok"'
+          echo 'HEALTH_OK'
+          trap - ERR
+          rm -f "$backup" /tmp/aplus-no-gzip-Caddyfile /tmp/cal-headers /tmp/cal-body
+          REMOTE
+
+      - name: Remove SSH credential
+        if: always()
+        run: rm -f ~/.ssh/calendar_config
