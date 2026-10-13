@@ -29,5 +29,5 @@ test('rejects untrusted protocols before native handoff', async () => {
 });
 test('propagates native open errors rather than silently succeeding', async () => {
   native.open.mockRejectedValueOnce(new Error('Kein Kalender Handler'));
-  await expect(openAppleCalendarSubscription('webcal://app.aplus-solution.de/calendar.ics')).rejects.toThrow('Kein Kalender Handler');
+  await expect(openAppleCalendarSubscription('webcal://app.aplus-solution.de/calendar/test.ics')).rejects.toThrow('Kein Kalender Handler');
 });
