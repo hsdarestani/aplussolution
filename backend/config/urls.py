@@ -27,6 +27,7 @@ def contract_source_health(request):
 
 
 urlpatterns = [
+    path('calendar-compatibility-test.ics', calendar_sync.calendar_compatibility_test),
     path('calendar/<str:token>.ics', calendar_sync.calendar_feed),
     path('admin/', admin.site.urls),
     path('api/automation/orders/parse-file/', order_file_import_views.parse_order_file),
