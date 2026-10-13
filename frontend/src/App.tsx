@@ -3051,6 +3051,29 @@ function Profile({ user }: { user: User }) {
     }
   }
 
+  async function openDiagnosticCalendar(kind: 'fixture' | 'one-shift') {
+    const feed = String(calendarSync?.https_feed_url || calendarSync?.feed_url || '');
+    const secure = kind === 'fixture'
+      ? 'https://app.aplus-solution.de/calendar-compatibility-test.ics'
+      : feed;
+    if (!secure.startsWith('https://app.aplus-solution.de/')) {
+      setCalendarDiagnostic('Kalenderlink ist ungültig oder nicht verfügbar.');
+      return;
+    }
+    const candidate = kind === 'fixture'
+      ? secure
+      : secure + (secure.includes('?') ? '&' : '?') + 'qa_events=1';
+    const deepLink = candidate.replace(/^https:\/\//, 'webcal://');
+    setCalendarDiagnostic(kind === 'fixture'
+      ? 'Öffne den öffentlichen Testkalender über denselben iOS Button.'
+      : 'Öffne einen signierten Kalender mit nur einer echten Schicht. Bitte nicht hinzufügen.');
+    try {
+      await openAppleCalendarSubscription(deepLink);
+    } catch (error: any) {
+      setCalendarDiagnostic(error?.message || 'Apple Kalender konnte nicht geöffnet werden.');
+    }
+  }
+
   async function checkCalendarFeed() {
     if (calendarChecking) return;
     setCalendarChecking(true);
@@ -3140,6 +3163,8 @@ function Profile({ user }: { user: User }) {
             <IonButton type="button" fill="clear" expand="block" onClick={() => void copyCalendarLink()}>Kalenderlink kopieren</IonButton>
             {import.meta.env.VITE_CALENDAR_DIAGNOSTICS === '1' && <>
               <IonButton type="button" fill="outline" expand="block" disabled={calendarChecking} onClick={() => void checkCalendarFeed()}>{calendarChecking ? 'Kalenderfeed wird geprüft …' : 'Kalenderfeed testen (Appetize)'}</IonButton>
+              <IonButton type="button" fill="outline" color="secondary" expand="block" onClick={() => void openDiagnosticCalendar('fixture')}>Testkalender über Apple Button öffnen</IonButton>
+              <IonButton type="button" fill="outline" color="secondary" expand="block" onClick={() => void openDiagnosticCalendar('one-shift')}>Nur 1 echte Schicht über Apple Button öffnen</IonButton>
               {calendarDiagnostic && <small role="status">{calendarDiagnostic}</small>}
             </>}
             <small>Der Link ist persönlich und darf nicht weitergegeben werden. Änderungen erscheinen automatisch, sobald der jeweilige Kalenderanbieter das Abo erneut abruft.</small>
