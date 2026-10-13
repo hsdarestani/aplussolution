@@ -209,10 +209,13 @@ border-radius:8px;font-size:.92rem}
 <body><main>
 <h1>Schichtplan in Apple Kalender</h1>
 <p>Tippe auf <strong>Kalender abonnieren</strong> und bestätige das Abo in Apple Kalender. Änderungen deiner Schichten werden danach vom Kalender automatisch abgerufen.</p>
-<a class="button" href="__WEBCAL__">Kalender abonnieren</a>
+<a class="button" href="__HTTPS__">Kalender abonnieren</a>
+<p class="note">Falls der Kalender nicht als Abo geöffnet wird, kannst du alternativ die Kalender App direkt öffnen.</p>
+<a href="__WEBCAL__">Alternativ in Apple Kalender öffnen</a>
 <p class="note">Falls Apple Kalender eine unsichere Verbindung meldet, wähle Abbrechen. Nutze dann in Apple Kalender die Funktion Kalender hinzufügen, Abo Kalender hinzufügen und füge die HTTPS Adresse unten ein.</p>
 <label for="feed">Persönlicher HTTPS Kalenderlink</label>
-<input id="feed" type="text" readonly value="__HTTPS__" onclick="this.select()" aria-label="Persönlicher HTTPS Kalenderlink">
+<input id="feed" type="text" readonly value="__HTTPS__" aria-label="Persönlicher HTTPS Kalenderlink">
+<p class="note">Zum Kopieren das Feld gedrückt halten.</p>
 <p class="note">Dieser Link ist privat. Teile ihn nicht mit anderen Personen. Die Aktualisierung kann je nach Apple Kalender einige Zeit dauern.</p>
 </main></body></html>"""
     html = html.replace('__WEBCAL__', escape(deep_link)).replace('__HTTPS__', escape(secure_feed))
