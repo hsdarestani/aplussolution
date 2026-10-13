@@ -214,6 +214,35 @@ def test_worker_feed_uses_apple_accepted_minimal_calendar_format(auth_worker, sh
 
 
 @pytest.mark.django_db
+@override_settings(ALLOWED_HOSTS=['testserver', 'app.aplus-solution.de'])
+def test_calendar_accept_header_never_returns_drf_406(auth_worker, shift):
+    """Apple Calendar sends Accept: text/calendar (no JSON fallback)."""
+    shift.status = Shift.Status.CONFIRMED
+    shift.starts_at = timezone.now() + timedelta(days=3)
+    shift.ends_at = shift.starts_at + timedelta(hours=2)
+    shift.save(update_fields=['status', 'starts_at', 'ends_at', 'updated_at'])
+
+    url = auth_worker.get(
+        '/api/calendar/subscription/',
+        HTTP_HOST='app.aplus-solution.de',
+    ).data['https_feed_url']
+    signed_path = urlsplit(url).path
+    legacy_path = '/api/calendar/feed/' + signed_path.split('/')[-1]
+    for path in (signed_path, legacy_path, '/calendar-compatibility-test.ics'):
+        for accept in ('text/calendar', 'text/calendar; charset=utf-8', 'text/html', '*/*'):
+            response = Client().get(path, HTTP_ACCEPT=accept, HTTP_HOST='app.aplus-solution.de')
+            assert response.status_code == 200, (path.split('/')[1], accept, response.status_code)
+            assert response['Content-Type'].startswith('text/calendar')
+            assert response.content.startswith(bytes([66,69,71,73,78,58,86,67,65,76,69,78,68,65,82,13,10]))
+            assert response.content.count(b'BEGIN:VEVENT') >= 1
+        head = Client().head(path, HTTP_ACCEPT='text/calendar', HTTP_HOST='app.aplus-solution.de')
+        assert head.status_code == 200
+        assert head['Content-Type'].startswith('text/calendar')
+
+    assert Client().get('/calendar/invalid.ics', HTTP_ACCEPT='text/calendar').status_code == 404
+
+
+@pytest.mark.django_db
 def test_calendar_subscription_is_worker_only(auth_admin):
     response = auth_admin.get('/api/calendar/subscription/')
     assert response.status_code == 403
