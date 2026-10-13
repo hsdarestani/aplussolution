@@ -1,0 +1,50 @@
+name: Inspect calendar requests without secrets
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/trace-calendar-requests-safe.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Check recent calendar request patterns without logging tokens
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$KEY" > "$HOME/.ssh/calendarlogs"
+          chmod 600 "$HOME/.ssh/calendarlogs"
+          cat > /tmp/calendar_logs_analyze.py <<'PY'
+          import sys, re, collections
+          lines = [line for line in sys.stdin if '/calendar/' in line or '/api/calendar/feed/' in line or 'calendar-compatibility-test.ics' in line]
+          method = collections.Counter()
+          status = collections.Counter()
+          kinds = collections.Counter()
+          qa = 0
+          for line in lines:
+              kind = 'fixture' if 'calendar-compatibility-test.ics' in line else 'signed'
+              kinds[kind] += 1
+              if 'qa_events=1' in line: qa += 1
+              match = re.search(r'\b(GET|POST|HEAD|OPTIONS|PROPFIND|REPORT)\b',line)
+              method[match.group(1) if match else 'not_logged'] += 1
+              code = re.search(r'(?<!\d)(200|201|301|302|304|400|401|403|404|405|429|500|502|503)(?!\d)',line)
+              status[code.group(1) if code else 'not_logged'] += 1
+          print('CALENDAR_LOG_LINES',len(lines))
+          print('PATH_KIND_COUNTS',dict(kinds))
+          print('METHOD_COUNTS',dict(method))
+          print('STATUS_COUNTS',dict(status))
+          print('QA_ONE_EVENT_REQUESTS',qa)
+          PY
+          ssh -i "$HOME/.ssh/calendarlogs" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" 'cd /opt/aplussolution && docker compose logs --since=3h --no-color caddy backend 2>&1' | python3 /tmp/calendar_logs_analyze.py
+      - name: Delete diagnostic credentials
+        if: always()
+        run: rm -f "$HOME/.ssh/calendarlogs" /tmp/calendar_logs_analyze.py
