@@ -1,0 +1,25 @@
+name: Check same-domain Apple Calendar probe
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/check-calendar-probe.yml'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Validate synthetic calendar feed on A+ Solution hostname
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://app.aplus-solution.de/calendar-compatibility-test.ics"
+          curl --proto '=https' -fsS --max-time 20 -D /tmp/headers -o /tmp/calendar "$url"
+          cat /tmp/headers
+          head -n 7 /tmp/calendar
+          grep -qi '^content-type: text/calendar' /tmp/headers
+          grep -q '^BEGIN:VCALENDAR' /tmp/calendar
+          grep -q '^END:VCALENDAR' /tmp/calendar
