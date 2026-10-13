@@ -28,6 +28,7 @@ jobs:
         working-directory: frontend
         env:
           VITE_API_URL: https://app.aplus-solution.de/api
+          VITE_CALENDAR_DIAGNOSTICS: '1'
         run: |
           set -euo pipefail
           npm install --no-audit --no-fund
