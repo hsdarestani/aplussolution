@@ -89,8 +89,8 @@ def test_apple_subscription_uses_unescaped_url_safe_signed_token(auth_worker):
     result = Client().get(urlsplit(feed).path, HTTP_HOST='app.aplus-solution.de')
     assert result.status_code == 200
     assert result['Content-Type'].startswith('text/calendar')
-    assert result.content.startswith(b'BEGIN:VCALENDAR\\r\\n')
-    assert result.content.endswith(b'END:VCALENDAR\\r\\n')
+    assert result.content.startswith(b'BEGIN:VCALENDAR\r\n')
+    assert result.content.endswith(b'END:VCALENDAR\r\n')
 
 
 @pytest.mark.django_db
@@ -103,7 +103,7 @@ def test_old_signed_calendar_links_remain_valid(worker_user):
     response = Client().get(encoded_path)
     assert response.status_code == 200
     assert response['Content-Type'].startswith('text/calendar')
-    assert response.content.startswith(b'BEGIN:VCALENDAR\\r\\n')
+    assert response.content.startswith(b'BEGIN:VCALENDAR\r\n')
 
 
 @pytest.mark.django_db
