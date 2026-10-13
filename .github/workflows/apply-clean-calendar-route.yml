@@ -1,0 +1,97 @@
+name: Hot apply clean signed Apple Calendar route
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-clean-calendar-route.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stage the three route files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST"
+          test -n "$KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$KEY" > "$HOME/.ssh/cal_key"
+          chmod 600 "$HOME/.ssh/cal_key"
+          opts="-i $HOME/.ssh/cal_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
+          ssh $opts root@"$HOST" 'mkdir -p /tmp/cal-route-staged'
+          scp $opts Caddyfile root@"$HOST":/tmp/cal-route-staged/Caddyfile
+          scp $opts backend/core/calendar_sync.py root@"$HOST":/tmp/cal-route-staged/calendar_sync.py
+          scp $opts backend/config/urls.py root@"$HOST":/tmp/cal-route-staged/urls.py
+      - name: Validate and hot apply with automatic rollback on failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/cal_key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          b=$(docker compose ps -q backend)
+          e=$(docker compose ps -q caddy)
+          test -n "$b"
+          test -n "$e"
+          test "$(docker inspect -f '{{.State.Running}}' "$b")" = true
+          test "$(docker inspect -f '{{.State.Running}}' "$e")" = true
+          mkdir -p /tmp/cal-route-backup
+          docker cp "$b":/app/core/calendar_sync.py /tmp/cal-route-backup/container-calendar.py
+          docker cp "$b":/app/config/urls.py /tmp/cal-route-backup/container-urls.py
+          cp Caddyfile /tmp/cal-route-backup/Caddyfile
+          cp backend/core/calendar_sync.py /tmp/cal-route-backup/disk-calendar.py
+          cp backend/config/urls.py /tmp/cal-route-backup/disk-urls.py
+          restore() {
+            echo "Restoring the original live calendar route"
+            cat /tmp/cal-route-backup/Caddyfile > Caddyfile
+            cp /tmp/cal-route-backup/disk-calendar.py backend/core/calendar_sync.py
+            cp /tmp/cal-route-backup/disk-urls.py backend/config/urls.py
+            docker cp /tmp/cal-route-backup/container-calendar.py "$b":/app/core/calendar_sync.py
+            docker cp /tmp/cal-route-backup/container-urls.py "$b":/app/config/urls.py
+            docker compose restart backend || true
+            docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile || true
+          }
+          trap 'restore' ERR
+          grep -Fq 'handle /calendar/*' /tmp/cal-route-staged/Caddyfile
+          grep -Fq 'calendar/<str:token>.ics' /tmp/cal-route-staged/urls.py
+          grep -Fq "f'/calendar/{token}.ics'" /tmp/cal-route-staged/calendar_sync.py
+          cat /tmp/cal-route-staged/Caddyfile > Caddyfile
+          docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          cp /tmp/cal-route-staged/calendar_sync.py backend/core/calendar_sync.py
+          cp /tmp/cal-route-staged/urls.py backend/config/urls.py
+          docker cp backend/core/calendar_sync.py "$b":/app/core/calendar_sync.py
+          docker cp backend/config/urls.py "$b":/app/config/urls.py
+          docker compose exec -T backend python -m py_compile /app/core/calendar_sync.py /app/config/urls.py
+          docker compose restart backend
+          docker compose exec -T backend python manage.py check
+          docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+          healthy=0
+          for i in $(seq 1 25); do
+            if curl -fsS --max-time 6 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/ | grep -q '"ok"'; then healthy=1; break; fi
+            sleep 3
+          done
+          test "$healthy" -eq 1
+          code=$(curl -sS --max-time 12 -o /dev/null -w '%{http_code}' --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/calendar/invalid.ics)
+          test "$code" = 404
+          echo "CLEAN_CALENDAR_ROUTE_ACTIVE"
+          trap - ERR
+          rm -rf /tmp/cal-route-staged /tmp/cal-route-backup
+          REMOTE
+      - name: Confirm public production health and signed-route routing
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 https://app.aplus-solution.de/health/ | grep -q '"ok"'
+          code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' https://app.aplus-solution.de/calendar/invalid.ics)
+          test "$code" = 404
+          echo "PUBLIC_CLEAN_CALENDAR_ROUTE_READY"
+      - name: Remove temporary key
+        if: always()
+        run: rm -f "$HOME/.ssh/cal_key"
