@@ -1,0 +1,88 @@
+name: Pilot secure Apple Calendar setup route on STRATO
+on:
+  push:
+    branches: [feature/apple-calendar-secure-subscription-20261013]
+    paths:
+      - '.github/workflows/pilot-apple-calendar-setup.yml'
+permissions:
+  contents: read
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 11
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy validated calendar files without touching Docker images
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$KEY" > "$HOME/.ssh/calendar-pilot"
+          chmod 600 "$HOME/.ssh/calendar-pilot"
+          opts="-i $HOME/.ssh/calendar-pilot -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
+          ssh $opts root@"$HOST" 'mkdir -p /tmp/aplus-calendar-pilot'
+          scp $opts backend/core/calendar_sync.py root@"$HOST":/tmp/aplus-calendar-pilot/calendar_sync.py
+          scp $opts backend/config/urls.py root@"$HOST":/tmp/aplus-calendar-pilot/urls.py
+
+      - name: Apply the add-only route safely, with rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/calendar-pilot" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          container=$(docker compose ps -q backend)
+          test -n "$container"
+          test "$(docker inspect -f '{{.State.Running}}' "$container")" = true
+          stage=/tmp/aplus-calendar-pilot
+          test -s "$stage/calendar_sync.py" && test -s "$stage/urls.py"
+          grep -Fq "def calendar_subscribe_page(request, token)" "$stage/calendar_sync.py"
+          grep -Fq "calendar/subscribe/<str:token>" "$stage/urls.py"
+          python3 -m py_compile "$stage/calendar_sync.py" "$stage/urls.py"
+          backup=/tmp/aplus-calendar-pilot-backup
+          mkdir -p "$backup"
+          cp backend/core/calendar_sync.py "$backup/disk_cal.py"
+          cp backend/config/urls.py "$backup/disk_urls.py"
+          docker cp "$container":/app/core/calendar_sync.py "$backup/running_cal.py"
+          docker cp "$container":/app/config/urls.py "$backup/running_urls.py"
+          undo() {
+            echo "RESTORE_OLD_CALENDAR_HANDLERS"
+            cp "$backup/disk_cal.py" backend/core/calendar_sync.py || true
+            cp "$backup/disk_urls.py" backend/config/urls.py || true
+            docker cp "$backup/running_cal.py" "$container":/app/core/calendar_sync.py || true
+            docker cp "$backup/running_urls.py" "$container":/app/config/urls.py || true
+            docker compose restart backend || true
+          }
+          trap undo ERR
+          cp "$stage/calendar_sync.py" backend/core/calendar_sync.py
+          cp "$stage/urls.py" backend/config/urls.py
+          docker cp "$stage/calendar_sync.py" "$container":/app/core/calendar_sync.py
+          docker cp "$stage/urls.py" "$container":/app/config/urls.py
+          docker compose exec -T backend python manage.py check </dev/null
+          docker compose restart backend
+          healthy=0
+          for attempt in $(seq 1 35); do
+            if curl -fsS --max-time 6 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/ >/dev/null; then healthy=1; break; fi
+            sleep 3
+          done
+          test "$healthy" -eq 1
+          docker compose exec -T backend python manage.py shell --no-imports -c "from core.models import WorkerProfile; from core.calendar_sync import _calendar_token; import requests; worker=WorkerProfile.objects.filter(active=True,user__is_active=True).first(); assert worker is not None; t=_calendar_token(worker); page=requests.get('https://app.aplus-solution.de/calendar/subscribe/'+t,timeout=25); feed=requests.get('https://app.aplus-solution.de/calendar/'+t+'.ics',timeout=25); assert page.status_code==200 and 'text/html' in page.headers.get('Content-Type','') and 'webcal://app.aplus-solution.de/calendar/' in page.text and 'no-store' in page.headers.get('Cache-Control',''); assert feed.status_code==200 and feed.content.startswith(b'BEGIN:VCALENDAR\r\n'); print('SIGNED_SAFARI_SETUP_AND_EXISTING_ICS_OK')" </dev/null
+          echo 'CALENDAR_SAFARI_PILOT_HEALTHY'
+          trap - ERR
+          rm -rf "$stage" "$backup"
+          REMOTE
+      - name: Check public HTTPS and signed-route invalid token protection
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 https://app.aplus-solution.de/health/ >/dev/null
+          code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' https://app.aplus-solution.de/calendar/subscribe/not-a-valid-signed-token)
+          test "$code" = 404
+          echo 'PUBLIC_PILOT_ROUTE_AUTH_CHECK_OK'
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/calendar-pilot"
