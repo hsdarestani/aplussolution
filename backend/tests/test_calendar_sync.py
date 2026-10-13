@@ -152,6 +152,28 @@ def test_calendar_subscription_is_worker_only(auth_admin):
 
 
 @pytest.mark.django_db
+@override_settings(ALLOWED_HOSTS=['testserver', 'app.aplus-solution.de'])
+def test_calendar_head_preflight_matches_get_for_native_apple_calendar(auth_worker):
+    feed_url = auth_worker.get(
+        '/api/calendar/subscription/',
+        HTTP_HOST='app.aplus-solution.de',
+    ).data['https_feed_url']
+    clean_path = urlsplit(feed_url).path
+    assert clean_path.startswith('/calendar/')
+    old_path = '/api/calendar/feed/' + clean_path.rsplit('/', 1)[-1]
+
+    for path in (clean_path, old_path):
+        get_response = Client().get(path, HTTP_HOST='app.aplus-solution.de')
+        head_response = Client().head(path, HTTP_HOST='app.aplus-solution.de')
+        assert get_response.status_code == 200
+        assert head_response.status_code == 200
+        assert get_response['Content-Type'].startswith('text/calendar')
+        assert head_response['Content-Type'].startswith('text/calendar')
+
+    assert Client().head('/calendar/invalid.ics', HTTP_HOST='app.aplus-solution.de').status_code == 404
+
+
+@pytest.mark.django_db
 def test_calendar_feed_rejects_bad_token():
     response = Client().get('/api/calendar/feed/not-a-valid-token.ics')
     assert response.status_code == 404
