@@ -1,0 +1,91 @@
+name: Collect Apple Calendar trace and disable temporary logging
+on:
+  push:
+    branches: [feature/apple-calendar-secure-subscription-20261013]
+    paths: ['.github/workflows/calendar-trace-finalize.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  collect_and_stop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      SSH_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Prepare SSH credentials and safe report parser
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$SSH_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/calendar_final"
+          chmod 600 "$HOME/.ssh/calendar_final"
+          cat > /tmp/parse_calendar_trace.py <<'PY'
+          import collections, datetime, json, sys
+          counts = collections.Counter()
+          methods = collections.Counter()
+          statuses = collections.Counter()
+          minutes = collections.defaultdict(lambda: collections.Counter())
+          sizes = collections.Counter()
+          protocols = collections.Counter()
+          privacy_errors = 0
+          for line in sys.stdin:
+              ix = line.find('{')
+              if ix < 0: continue
+              try:
+                  x = json.loads(line[ix:])
+              except (json.JSONDecodeError, UnicodeDecodeError): continue
+              if x.get('logger') != 'http.log.access.calendar_subscription_trace': continue
+              r = x.get('request') or {}
+              if r.get('uri') != 'REDACTED' or any(k in r for k in ('headers','remote_ip','client_ip','remote_port')):
+                  privacy_errors += 1
+                  # Never print private request fields or original log lines.
+                  continue
+              method = str(r.get('method','unknown'))
+              status = str(x.get('status','unknown'))
+              rawtime = x.get('ts',0)
+              try:
+                  at=datetime.datetime.fromtimestamp(float(rawtime),datetime.timezone.utc).strftime('%Y-%m-%dT%H:%MZ')
+              except Exception: at='unknown'
+              counts['logged'] += 1
+              methods[method] += 1
+              statuses[status] += 1
+              minutes[at][method+'_'+status] += 1
+              protocols[str(r.get('proto','unknown'))] += 1
+              sizes['empty' if x.get('size',0)==0 else 'nonempty'] += 1
+          print('SAFE_CALENDAR_TRACE_TOTAL',counts['logged'])
+          print('SAFE_CALENDAR_TRACE_METHODS',dict(sorted(methods.items())))
+          print('SAFE_CALENDAR_TRACE_STATUSES',dict(sorted(statuses.items())))
+          print('SAFE_CALENDAR_TRACE_PROTOCOLS',dict(sorted(protocols.items())))
+          print('SAFE_CALENDAR_TRACE_RESPONSE_BODY',dict(sorted(sizes.items())))
+          print('SAFE_CALENDAR_TRACE_BY_UTC_MINUTE',json.dumps({k:dict(v) for k,v in sorted(minutes.items())},sort_keys=True))
+          print('SAFE_CALENDAR_TRACE_PRIVACY_FILTER_ERRORS',privacy_errors)
+          PY
+      - name: Read anonymized Caddy logs since trace was enabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/calendar_final" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" \
+            'cd /opt/aplussolution && docker compose logs --since=24h --no-color caddy 2>&1' \
+            | python3 /tmp/parse_calendar_trace.py
+      - name: Stop temporary Calendar tracing and restore original mounted Caddyfile
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/calendar_final" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile </dev/null
+          docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile </dev/null
+          sleep 2
+          curl -fsS --max-time 20 https://app.aplus-solution.de/health/ | grep -q '"ok"'
+          status=$(curl -sS --max-time 18 -o /dev/null -w '%{http_code}' https://app.aplus-solution.de/calendar-compatibility-test.ics)
+          test "$status" = 200
+          echo 'CALENDAR_TRACE_DISABLED_AND_PRODUCTION_HEALTHY'
+          REMOTE
+      - name: Remove private key and parser
+        if: always()
+        run: rm -f "$HOME/.ssh/calendar_final" /tmp/parse_calendar_trace.py
