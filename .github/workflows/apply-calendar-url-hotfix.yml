@@ -1,0 +1,73 @@
+name: Apply calendar URL-safe backend patch without rebuild
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-calendar-url-hotfix.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      SSH_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Apply validated calendar module to running backend with rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST"
+          test -n "$SSH_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/calendar_key"
+          chmod 600 "$HOME/.ssh/calendar_key"
+          ssh -i "$HOME/.ssh/calendar_key" \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 \
+            root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          source=backend/core/calendar_sync.py
+          test -s "$source"
+          grep -Fq "sep='~'" "$source"
+          container=$(docker compose ps -q backend)
+          test -n "$container"
+          test "$(docker inspect -f '{{.State.Running}}' "$container")" = true
+          backup=/tmp/aplus-calendar-sync-before-hotfix.py
+          docker cp "$container":/app/core/calendar_sync.py "$backup"
+          restore_old() {
+            echo 'Calendar backend health failed: restoring previous module'
+            docker cp "$backup" "$container":/app/core/calendar_sync.py
+            docker compose restart backend
+          }
+          docker cp "$source" "$container":/app/core/calendar_sync.py
+          docker compose restart backend
+          ok=0
+          for attempt in $(seq 1 25); do
+            if docker compose exec -T backend curl -fsS --max-time 5 http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            sleep 3
+          done
+          if [ "$ok" -ne 1 ]; then
+            restore_old
+            exit 1
+          fi
+          docker compose exec -T backend python manage.py shell -c "from core.calendar_sync import _calendar_token, _worker_from_token; from django.core import signing; from core.calendar_sync import CALENDAR_SIGNING_SALT; from types import SimpleNamespace; t=_calendar_token(SimpleNamespace(pk='00000000-0000-0000-0000-000000000001')); assert '~' in t and ':' not in t and '%' not in t; assert signing.Signer(salt=CALENDAR_SIGNING_SALT,sep='~').unsign(t)=='00000000-0000-0000-0000-000000000001'; print('CALENDAR_SAFE_URL_TOKEN_OK')"
+          echo 'CALENDAR_BACKEND_PATCH_APPLIED'
+          rm -f "$backup"
+          REMOTE
+      - name: Check production HTTPS after hotfix
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 https://app.aplus-solution.de/health/ | grep -q '"ok"'
+          code=$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' https://app.aplus-solution.de/api/calendar/feed/invalid.ics)
+          test "$code" = 404
+          echo 'PRODUCTION_CALENDAR_HEALTH_OK'
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/calendar_key"
