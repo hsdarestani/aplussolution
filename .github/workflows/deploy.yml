@@ -129,6 +129,10 @@ jobs:
 
           docker compose pull db redis caddy || true
 
+          # Build while the previous production containers are still running.
+          # A Docker Hub timeout must never stop an otherwise healthy service.
+          docker compose build backend frontend celery celery-beat
+
           # A cancelled Compose recreate can leave temporary containers named
           # like <hex>_aplussolution-backend-1. They are not production
           # service containers, but Docker reserves their names and the next
@@ -168,7 +172,9 @@ jobs:
             fi
           done
 
-          docker compose up -d --build --remove-orphans
+          # Images are already built. Do not access Docker Hub while replacing
+          # production containers, and never start a new build after stopping them.
+          docker compose up -d --no-build --pull never --remove-orphans
           docker compose up -d --force-recreate --no-deps caddy
 
           # If HA replication is configured, refresh its loopback bridge after
