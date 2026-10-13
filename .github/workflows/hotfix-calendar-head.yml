@@ -63,6 +63,9 @@ jobs:
           # Ensure the live HTTP response uses the same standards-friendly
           # subscription headers as the accepted public calendar fixture.
           docker compose exec -T backend python manage.py shell -c "from core.models import WorkerProfile; from core.calendar_sync import _calendar_token; import requests; w=WorkerProfile.objects.filter(active=True,user__is_active=True).first(); assert w is not None; url='https://app.aplus-solution.de/calendar/'+_calendar_token(w)+'.ics'; r=requests.get(url,timeout=20); assert r.status_code==200 and r.content.startswith(b'BEGIN:VCALENDAR\\r\\n'); assert 'Content-Disposition' not in r.headers; assert 'no-store' not in r.headers.get('Cache-Control',''); assert b'REFRESH-INTERVAL' not in r.content and b'X-PUBLISHED-TTL' not in r.content; print('LIVE_ICAL_COMPAT_HEADERS_OK')" </dev/null
+          # A read-only QA endpoint check with the affected signed URL.
+          # Print only event counts, never employee data or the signed token.
+          docker compose exec -T backend python manage.py shell --no-imports -c "from core.models import WorkerProfile; from core.calendar_sync import _calendar_token; import requests; w=WorkerProfile.objects.filter(pk__startswith='fb07c9',active=True).first(); assert w is not None; url='https://app.aplus-solution.de/calendar/'+_calendar_token(w)+'.ics'; normal=requests.get(url,timeout=25); single=requests.get(url+'?qa_events=1',timeout=25); assert normal.status_code==200 and single.status_code==200; n=normal.content.count(b'BEGIN:VEVENT'); q=single.content.count(b'BEGIN:VEVENT'); assert n>1 and q==1; print('AFFECTED_SIGNED_CALENDAR_QA_READY',n,q)" </dev/null
           echo "CALENDAR_COMPAT_PATCH_APPLIED"
           trap - ERR
           rm -f "$backup" "$diskbackup" /tmp/aplus-calendar-head-v2.py
