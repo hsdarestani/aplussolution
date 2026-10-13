@@ -68,7 +68,6 @@ import Settings from './Settings';
 import MobileMoreMenu from './MobileMoreMenu';
 import { akteHref, openAkte } from './entityNavigation';
 import { openAppleCalendarSubscription } from './appleCalendarSubscription';
-import { diagnoseWorkerCalendarFeed } from './calendarFeedDiagnostics';
 
 type View =
   | 'dashboard'
@@ -3010,9 +3009,6 @@ function Profile({ user }: { user: User }) {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [calendarSync, setCalendarSync] = useState<any>();
   const [calendarLoading, setCalendarLoading] = useState(false);
-  const [calendarDiagnostic, setCalendarDiagnostic] = useState('');
-  const [calendarChecking, setCalendarChecking] = useState(false);
-  const [showCalendarHelp, setShowCalendarHelp] = useState(false);
 
   useEffect(() => {
     if (user.role !== 'worker') return;
@@ -3044,57 +3040,23 @@ function Profile({ user }: { user: User }) {
   }, [user.role]);
 
   async function openAppleCalendar() {
-    // The setup page opens in Safari, so the final subscription gesture is
-    // initiated in the browser rather than Capacitor's WKWebView.
-    const url = String(calendarSync?.apple_setup_url || calendarSync?.webcal_url || '');
+    // Now that the signed ICS endpoint accepts text/calendar, launch the native
+    // Apple Calendar subscription flow directly. Safari is used only if the
+    // device explicitly refuses to open the calendar deep link.
+    const deepLink = String(calendarSync?.webcal_url || '');
+    const fallback = String(calendarSync?.apple_setup_url || '');
     try {
-      await openAppleCalendarSubscription(url);
-      setShowCalendarHelp(true);
+      await openAppleCalendarSubscription(deepLink);
     } catch (error: any) {
-      setShowCalendarHelp(true);
-      setToast(error?.message || 'Apple Kalender konnte nicht geöffnet werden.');
-    }
-  }
-
-  async function checkCalendarFeed() {
-    if (calendarChecking) return;
-    setCalendarChecking(true);
-    setCalendarDiagnostic('Prüfung läuft …');
-    try {
-      const result = await diagnoseWorkerCalendarFeed(String(calendarSync?.https_feed_url || calendarSync?.feed_url || ''));
-      setCalendarDiagnostic(result);
-    } catch (error: any) {
-      setCalendarDiagnostic(error?.message || 'Kalenderfeed-Prüfung fehlgeschlagen.');
-    } finally {
-      setCalendarChecking(false);
-    }
-  }
-
-  async function copyCalendarLink() {
-    const url = String(calendarSync?.https_feed_url || calendarSync?.feed_url || '');
-    if (!url.startsWith('https://app.aplus-solution.de/')) {
-      setToast('Kalenderlink konnte nicht geladen werden.');
-      return;
-    }
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(url);
-      } else {
-        const input = document.createElement('textarea');
-        input.value = url;
-        input.setAttribute('readonly', 'true');
-        input.style.position = 'fixed';
-        input.style.top = '-1000px';
-        document.body.appendChild(input);
-        input.select();
-        const copied = document.execCommand('copy');
-        input.remove();
-        if (!copied) throw new Error('Clipboard failed');
+      if (fallback) {
+        try {
+          await openAppleCalendarSubscription(fallback);
+          return;
+        } catch {
+          // Keep the original error, instead of reporting fallback as success.
+        }
       }
-      setToast('Sicherer Kalenderlink wurde kopiert.');
-    } catch {
-      setShowCalendarHelp(true);
-      setToast('Link konnte nicht kopiert werden. Nutze den Link auf der Einrichtungsseite.');
+      setToast(error?.message || 'Apple Kalender konnte nicht geöffnet werden.');
     }
   }
 
@@ -3158,20 +3120,7 @@ function Profile({ user }: { user: User }) {
           <p>Einmal abonnieren. Danach werden deine zugewiesenen Schichten sowie spätere Änderungen und Löschungen automatisch über das Kalenderabo aktualisiert.</p>
           {calendarLoading ? <p>Kalenderlink wird geladen …</p> : calendarSync ? <>
             <IonButton type="button" onClick={() => void openAppleCalendar()} expand="block">Apple Kalender verbinden</IonButton>
-            <IonButton href={calendarSync.google_url} target="_blank" fill="outline" expand="block">Google Kalender</IonButton>
-            <IonButton href={calendarSync.outlook_url} target="_blank" fill="outline" expand="block">Outlook Kalender</IonButton>
-            <IonButton type="button" fill="clear" expand="block" onClick={() => void copyCalendarLink()}>Sicheren Kalenderlink kopieren</IonButton>
-            <IonButton type="button" fill="clear" expand="block" onClick={() => setShowCalendarHelp((previous) => !previous)}>{showCalendarHelp ? 'Anleitung ausblenden' : 'Hilfe mit Apple Kalender'}</IonButton>
-            {showCalendarHelp && <div className="calendar-sync-help" role="note">
-              <p>Tippe auf Apple Kalender verbinden und im Browser auf Kalender abonnieren. Bestätige dann in Apple Kalender.</p>
-              <p>Bei einer Warnung über eine unsichere Verbindung nicht fortfahren. Stattdessen Apple Kalender öffnen, Kalender hinzufügen und Abo Kalender hinzufügen wählen. Den sicheren HTTPS Link oben einfügen.</p>
-              <p>Apple Kalender bestimmt selbst, wann Änderungen deiner Schichten abgerufen werden.</p>
-            </div>}
-            {import.meta.env.VITE_CALENDAR_DIAGNOSTICS === '1' && <>
-              <IonButton type="button" fill="outline" expand="block" disabled={calendarChecking} onClick={() => void checkCalendarFeed()}>{calendarChecking ? 'Kalenderfeed wird geprüft …' : 'Kalenderfeed testen (Appetize)'}</IonButton>
-              {calendarDiagnostic && <small role="status">{calendarDiagnostic}</small>}
-            </>}
-            <small>Der Link ist persönlich und darf nicht weitergegeben werden. Änderungen erscheinen automatisch, sobald der jeweilige Kalenderanbieter das Abo erneut abruft.</small>
+            <small>Nach einmaligem Abonnieren erscheinen neue und geänderte Schichten automatisch in Apple Kalender, sobald dieser das Abo aktualisiert.</small>
           </> : <p>Kalendersynchronisierung ist momentan nicht verfügbar.</p>}
         </div>}
         <div className="panel form">
