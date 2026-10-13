@@ -107,7 +107,10 @@ def _public_calendar_feed_url(request, token: str) -> str:
         or request.get_host()
     ).split(',', 1)[0].strip()
     host_only = raw_host.split(':', 1)[0].strip('[]').lower()
-    path = f'/api/calendar/feed/{token}.ics'
+    # Put new subscriptions on a clean, HTTPS-only endpoint. Old /api links
+    # remain valid for existing subscribers and Google/Outlook bookmarks.
+    path = (f'/calendar/{token}.ics' if host_only == 'app.aplus-solution.de'
+            else f'/api/calendar/feed/{token}.ics')
 
     # Never derive the public production scheme from the internal proxy hop.
     # Apple Calendar rejects an HTTP subscription before it even fetches the
