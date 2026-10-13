@@ -46,9 +46,9 @@ def test_calendar_subscription_forces_https_for_public_host(auth_worker):
 
     assert response.status_code == 200
     payload = response.data
-    assert payload['feed_url'].startswith('https://app.aplus-solution.de/api/calendar/feed/')
-    assert payload['webcal_url'].startswith('webcal://app.aplus-solution.de/api/calendar/feed/')
-    assert 'cid=https%3A%2F%2Fapp.aplus-solution.de%2Fapi%2Fcalendar%2Ffeed%2F' in payload['google_url']
+    assert payload['feed_url'].startswith('https://app.aplus-solution.de/calendar/')
+    assert payload['webcal_url'].startswith('webcal://app.aplus-solution.de/calendar/')
+    assert 'cid=https%3A%2F%2Fapp.aplus-solution.de%2Fcalendar%2F' in payload['google_url']
 
 
 @pytest.mark.django_db
@@ -63,8 +63,8 @@ def test_ios_calendar_subscription_opens_native_webcal_with_https_feed(auth_work
     assert response.status_code == 200
     payload = response.data
     assert payload['feed_url'] == ''
-    assert payload['https_feed_url'].startswith('https://app.aplus-solution.de/api/calendar/feed/')
-    assert payload['webcal_url'].startswith('webcal://app.aplus-solution.de/api/calendar/feed/')
+    assert payload['https_feed_url'].startswith('https://app.aplus-solution.de/calendar/')
+    assert payload['webcal_url'].startswith('webcal://app.aplus-solution.de/calendar/')
     assert payload['webcal_url'].endswith('.ics')
     assert 'calendar.google.com' in payload['google_url']
     assert response['Cache-Control'].startswith('private, no-store')
@@ -81,7 +81,7 @@ def test_apple_subscription_uses_unescaped_url_safe_signed_token(auth_worker):
     assert response.status_code == 200
     payload = response.data
     feed = payload['https_feed_url']
-    assert feed.startswith('https://app.aplus-solution.de/api/calendar/feed/')
+    assert feed.startswith('https://app.aplus-solution.de/calendar/')
     assert '%3A' not in feed.upper()
     assert '%' not in urlsplit(feed).path
     assert '~' in urlsplit(feed).path
@@ -91,6 +91,15 @@ def test_apple_subscription_uses_unescaped_url_safe_signed_token(auth_worker):
     assert result['Content-Type'].startswith('text/calendar')
     assert result.content.startswith(b'BEGIN:VCALENDAR\r\n')
     assert result.content.endswith(b'END:VCALENDAR\r\n')
+
+
+@pytest.mark.django_db
+def test_clean_root_calendar_route_is_signed_and_does_not_require_login(auth_worker):
+    link = auth_worker.get('/api/calendar/subscription/').data['https_feed_url']
+    # A local Django host preserves the original route for development.
+    worker_link = urlsplit(link).path
+    assert Client().get(worker_link).status_code == 200
+    assert Client().get('/calendar/invalid-token.ics').status_code == 404
 
 
 @pytest.mark.django_db
