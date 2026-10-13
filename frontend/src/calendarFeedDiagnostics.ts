@@ -18,7 +18,7 @@ export async function diagnoseWorkerCalendarFeed(feedUrl: string): Promise<strin
   if (parsed.hostname !== 'app.aplus-solution.de') {
     throw new Error('Unerwarteter Kalender-Server. Bitte Support kontaktieren.');
   }
-  if (!/^\/api\/calendar\/feed\/[^/]+\.ics$/.test(parsed.pathname)) {
+  if (!/^\/(?:calendar|api\/calendar\/feed)\/[^/]+\.ics$/.test(parsed.pathname)) {
     throw new Error('Kalenderpfad ist ungültig.');
   }
 

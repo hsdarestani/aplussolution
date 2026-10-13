@@ -62,12 +62,51 @@ def test_ios_calendar_subscription_opens_native_webcal_with_https_feed(auth_work
 
     assert response.status_code == 200
     payload = response.data
-    assert payload['feed_url'] == ''
+    assert payload['feed_url'] == payload['https_feed_url']
     assert payload['https_feed_url'].startswith('https://app.aplus-solution.de/calendar/')
+    assert payload['apple_setup_url'].startswith('https://app.aplus-solution.de/calendar/subscribe/')
     assert payload['webcal_url'].startswith('webcal://app.aplus-solution.de/calendar/')
     assert payload['webcal_url'].endswith('.ics')
     assert 'calendar.google.com' in payload['google_url']
     assert response['Cache-Control'].startswith('private, no-store')
+
+
+@pytest.mark.django_db
+@override_settings(ALLOWED_HOSTS=['testserver', 'app.aplus-solution.de'])
+def test_ios_safari_calendar_setup_uses_same_signed_https_worker_feed(auth_worker, worker_user):
+    payload = auth_worker.get(
+        '/api/calendar/subscription/',
+        HTTP_HOST='app.aplus-solution.de',
+        HTTP_USER_AGENT='Mozilla/5.0 (iPhone; CPU iPhone OS 17_2)',
+    ).data
+    from core.calendar_sync import _calendar_token
+    token = _calendar_token(worker_user.worker_profile)
+    assert payload['feed_url'] == payload['https_feed_url']
+    assert payload['apple_setup_url'] == f'https://app.aplus-solution.de/calendar/subscribe/{token}'
+
+    response = Client().get(
+        urlsplit(payload['apple_setup_url']).path,
+        HTTP_HOST='app.aplus-solution.de',
+    )
+    assert response.status_code == 200
+    assert response['Content-Type'].startswith('text/html')
+    html = response.content.decode('utf-8')
+    assert f'href="webcal://app.aplus-solution.de/calendar/{token}.ics"' in html
+    assert f'value="https://app.aplus-solution.de/calendar/{token}.ics"' in html
+    assert response['Referrer-Policy'] == 'no-referrer'
+    assert response['X-Frame-Options'] == 'DENY'
+    assert 'no-store' in response['Cache-Control']
+    assert 'script-src' not in response['Content-Security-Policy']
+    assert worker_user.get_full_name() not in html
+
+    assert Client().get('/calendar/subscribe/invalid-signed-token').status_code == 404
+    assert Client().get(f'/calendar/subscribe/{token}tampered').status_code == 404
+
+
+@pytest.mark.django_db
+def test_non_worker_cannot_get_personal_calendar_setup_link(auth_admin):
+    response = auth_admin.get('/api/calendar/subscription/')
+    assert response.status_code == 403
 
 
 @pytest.mark.django_db
@@ -172,6 +211,35 @@ def test_worker_feed_uses_apple_accepted_minimal_calendar_format(auth_worker, sh
     assert 'CATEGORIES:' not in content
     assert 'LAST-MODIFIED:' not in content
     assert all(len(line.encode('utf-8')) <= 75 for line in content.split('\r\n'))
+
+
+@pytest.mark.django_db
+@override_settings(ALLOWED_HOSTS=['testserver', 'app.aplus-solution.de'])
+def test_calendar_accept_header_never_returns_drf_406(auth_worker, shift):
+    """Apple Calendar sends Accept: text/calendar (no JSON fallback)."""
+    shift.status = Shift.Status.CONFIRMED
+    shift.starts_at = timezone.now() + timedelta(days=3)
+    shift.ends_at = shift.starts_at + timedelta(hours=2)
+    shift.save(update_fields=['status', 'starts_at', 'ends_at', 'updated_at'])
+
+    url = auth_worker.get(
+        '/api/calendar/subscription/',
+        HTTP_HOST='app.aplus-solution.de',
+    ).data['https_feed_url']
+    signed_path = urlsplit(url).path
+    legacy_path = '/api/calendar/feed/' + signed_path.split('/')[-1]
+    for path in (signed_path, legacy_path, '/calendar-compatibility-test.ics'):
+        for accept in ('text/calendar', 'text/calendar; charset=utf-8', 'text/html', '*/*'):
+            response = Client().get(path, HTTP_ACCEPT=accept, HTTP_HOST='app.aplus-solution.de')
+            assert response.status_code == 200, (path.split('/')[1], accept, response.status_code)
+            assert response['Content-Type'].startswith('text/calendar')
+            assert response.content.startswith(bytes([66,69,71,73,78,58,86,67,65,76,69,78,68,65,82,13,10]))
+            assert response.content.count(b'BEGIN:VEVENT') >= 1
+        head = Client().head(path, HTTP_ACCEPT='text/calendar', HTTP_HOST='app.aplus-solution.de')
+        assert head.status_code == 200
+        assert head['Content-Type'].startswith('text/calendar')
+
+    assert Client().get('/calendar/invalid.ics', HTTP_ACCEPT='text/calendar').status_code == 404
 
 
 @pytest.mark.django_db

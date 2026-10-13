@@ -1,0 +1,58 @@
+name: Inspect anonymized Apple Calendar HTTP trace
+on:
+  push:
+    branches: [feature/apple-calendar-secure-subscription-20261013]
+    paths: ['.github/workflows/calendar-trace-report.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      SSH_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Read only redacted calendar request summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$SSH_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/calendar_trace_read"
+          chmod 600 "$HOME/.ssh/calendar_trace_read"
+          # Generate synthetic control from outside the server to ensure
+          # access logging is functioning, without touching employee URLs.
+          curl -fsS --max-time 18 -o /dev/null https://app.aplus-solution.de/calendar-compatibility-test.ics
+          ssh -i "$HOME/.ssh/calendar_trace_read" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" 'cd /opt/aplussolution && docker compose logs --since=30m --no-color caddy 2>&1' | python3 -c '
+          import sys,json,collections
+          statuses=collections.Counter()
+          methods=collections.Counter()
+          protocols=collections.Counter()
+          sizes=collections.Counter()
+          valid=0
+          for line in sys.stdin:
+              pos=line.find("{")
+              if pos<0: continue
+              try: x=json.loads(line[pos:])
+              except Exception: continue
+              if "http.log.access.calendar_subscription_trace" not in x.get("logger",""): continue
+              valid+=1
+              request=x.get("request",{})
+              statuses[str(x.get("status"))]+=1
+              methods[str(request.get("method"))]+=1
+              protocols[str(request.get("proto"))]+=1
+              sizes["0" if x.get("size",0)==0 else "nonzero"]+=1
+              if request.get("uri")!="REDACTED": raise SystemExit("Privacy invariant failed: unredacted URI in log")
+              if "remote_ip" in request or "client_ip" in request or "headers" in request:
+                  raise SystemExit("Privacy invariant failed: request identity in log")
+          print("REDACTED_CALENDAR_REQUEST_COUNT",valid)
+          print("REQUEST_METHODS",dict(methods))
+          print("RESPONSE_STATUSES",dict(statuses))
+          print("REQUEST_PROTOCOLS",dict(protocols))
+          print("RESPONSE_BODY_SIZES",dict(sizes))
+          '
+      - name: Delete SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/calendar_trace_read"

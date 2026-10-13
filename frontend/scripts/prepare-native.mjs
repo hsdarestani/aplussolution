@@ -194,8 +194,8 @@ function patchIosCalendarSubscription() {
   // Embedding the plugin here avoids an unreferenced Swift file in pbxproj.
   const swift = String.raw`
 
-// Native Apple Calendar subscription launcher. WKWebView does not reliably
-// dispatch webcal:// URLs, so UIApplication must invoke the OS URL handler.
+// Open the secure calendar subscription setup page in Safari, allowing a user
+// gesture to initiate the webcal subscription. Legacy webcal is also accepted.
 @objc(APlusCalendarSubscriptionPlugin)
 class APlusCalendarSubscriptionPlugin: CAPPlugin, CAPBridgedPlugin {
     let identifier = "APlusCalendarSubscriptionPlugin"
@@ -207,8 +207,13 @@ class APlusCalendarSubscriptionPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func open(_ call: CAPPluginCall) {
         guard let value = call.getString("url"),
               let url = URL(string: value),
-              url.scheme?.lowercased() == "webcal",
-              let host = url.host, !host.isEmpty else {
+              let scheme = url.scheme?.lowercased(),
+              let host = url.host?.lowercased(),
+              host == "app.aplus-solution.de",
+              url.user == nil, url.password == nil, url.port == nil,
+              url.fragment == nil,
+              ((scheme == "https" && url.path.hasPrefix("/calendar/subscribe/") && url.query == nil)
+               || (scheme == "webcal" && url.path.hasPrefix("/calendar/") && url.path.hasSuffix(".ics"))) else {
             call.reject("Ungültiger Kalenderlink.")
             return
         }

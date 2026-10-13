@@ -3,9 +3,13 @@ name: Build A+ Solution for Appetize (iOS Simulator)
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, feature/apple-calendar-secure-subscription-20261013]
     paths:
       - '.github/workflows/appetize-ios-simulator.yml'
+      - 'frontend/src/appleCalendarSubscription.ts'
+      - 'frontend/scripts/prepare-native.mjs'
+      - 'frontend/src/App.tsx'
+      - 'frontend/src/calendarFeedDiagnostics.ts'
 
 permissions:
   contents: read
