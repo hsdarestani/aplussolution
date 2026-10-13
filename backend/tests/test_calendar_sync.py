@@ -218,6 +218,27 @@ def test_public_compatibility_fixture_is_real_ics_not_frontend_html():
 
 
 @pytest.mark.django_db
+def test_signed_calendar_one_event_qa_probe_does_not_change_normal_subscription(auth_worker, shift):
+    shift.status = Shift.Status.CONFIRMED
+    shift.starts_at = timezone.now() + timedelta(days=2)
+    shift.ends_at = shift.starts_at + timedelta(hours=3)
+    shift.save(update_fields=['status', 'starts_at', 'ends_at', 'updated_at'])
+
+    url = auth_worker.get('/api/calendar/subscription/').data['https_feed_url']
+    path = urlsplit(url).path
+    normal = Client().get(path)
+    limited = Client().get(path + '?qa_events=1')
+    assert normal.status_code == 200 and limited.status_code == 200
+    assert limited['Content-Type'].startswith('text/calendar')
+    assert limited.content.count(b'BEGIN:VEVENT') == 1
+    assert f'UID:shift-{shift.pk}@aplus-solution.de'.encode() in limited.content
+    assert limited.content.startswith(b'BEGIN:VCALENDAR\r\n')
+    assert limited.content.endswith(b'END:VCALENDAR\r\n')
+    assert normal.content.count(b'BEGIN:VEVENT') >= 1
+    assert Client().get('/calendar/invalid.ics?qa_events=1').status_code == 404
+
+
+@pytest.mark.django_db
 def test_calendar_feed_rejects_bad_token():
     response = Client().get('/api/calendar/feed/not-a-valid-token.ics')
     assert response.status_code == 404
