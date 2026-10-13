@@ -1,0 +1,46 @@
+name: Audit Calendar native HTTP semantics
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/calendar-http-semantics.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Test HEAD, GET and Apple-like clients on live feed without leaking worker URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST"; test -n "$KEY"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/calendar_audit
+          chmod 600 ~/.ssh/calendar_audit
+          ssh -i ~/.ssh/calendar_audit -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" 'cd /opt/aplussolution && docker compose exec -T backend python manage.py shell' <<'PY'
+          import requests
+          from datetime import timedelta
+          from django.utils import timezone
+          from core.models import Shift, WorkerProfile
+          from core.calendar_sync import _calendar_token
+          now=timezone.now()
+          staffed=Shift.objects.filter(worker__active=True,starts_at__gte=now-timedelta(days=90),starts_at__lte=now+timedelta(days=540)).select_related('worker').first()
+          assert staffed is not None
+          feed='https://app.aplus-solution.de/calendar/'+_calendar_token(staffed.worker)+'.ics'
+          for method in ('HEAD','GET'):
+              for ua in ('iOS/26.0 (23A341) dataaccessd/1.0','CalendarAgent/1.0 (iPhone; iOS 26)','Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X)'):
+                  try:
+                      response=requests.request(method,feed,timeout=22,allow_redirects=False,headers={'User-Agent':ua,'Accept':'text/calendar, */*','Accept-Encoding':'gzip, deflate'})
+                      print('SAMPLE',method,'agent=',ua.split(' ')[0],'status=',response.status_code,'content_type=',response.headers.get('content-type',''),'content_encoding=',response.headers.get('content-encoding','none'),'content_disposition=',bool(response.headers.get('content-disposition')),'www_authenticate=',bool(response.headers.get('www-authenticate')),'redirect=',bool(response.headers.get('location')),'body_calendar=',method=='GET' and response.content.startswith(b'BEGIN:VCALENDAR'),'events=',response.content.count(b'BEGIN:VEVENT') if method=='GET' else 0)
+                  except Exception as exc:
+                      print('SAMPLE',method,'agent=',ua.split(' ')[0],'error_type=',type(exc).__name__)
+          PY
+      - name: Clean credentials
+        if: always()
+        run: rm -f ~/.ssh/calendar_audit
