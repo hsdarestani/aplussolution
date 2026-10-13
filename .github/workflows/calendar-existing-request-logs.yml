@@ -1,0 +1,25 @@
+name: Diagnose Calendar requests from existing logs
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/calendar-existing-request-logs.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Aggregate recent calendar HTTP status without exposing URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/read_logs
+          chmod 600 ~/.ssh/read_logs
+          ssh -i ~/.ssh/read_logs -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" 'cd /opt/aplussolution && docker compose logs --since=3h --no-color backend caddy 2>&1 | python3 -c "import sys,re,collections; lines=sys.stdin; stats=collections.Counter(); found=0; agents=collections.Counter(); sample=collections.Counter(); statuses=collections.Counter(); methods=collections.Counter(); recent=[]; pattern=re.compile(r\"(?:/api/calendar/feed/|/calendar/|calendar-compatibility-test\\.ics)\"); \nfor line in lines: \n if pattern.search(line): \n  found+=1; method=re.search(r\"\\b(GET|HEAD|PROPFIND|OPTIONS|POST)\\b\",line); status=re.search(r\"\\s(200|201|301|302|304|400|401|403|404|405|429|500|502|503|522)\\b\",line); methods[method.group(1) if method else \"unlogged\"]+=1; statuses[status.group(1) if status else \"unlogged\"]+=1; sample[\"fixture\" if \"calendar-compatibility-test.ics\" in line else \"signed\"]+=1; \nprint(\"TOTAL_RELEVANT_LOG_LINES\",found); print(\"METHODS\",dict(methods)); print(\"STATUS\",dict(statuses)); print(\"KINDS\",dict(sample))"' || true
+          rm -f ~/.ssh/read_logs
