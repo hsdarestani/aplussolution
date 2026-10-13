@@ -146,6 +146,35 @@ def test_calendar_feed_folds_multibyte_long_notes(auth_worker, shift):
 
 
 @pytest.mark.django_db
+def test_worker_feed_uses_apple_accepted_minimal_calendar_format(auth_worker, shift):
+    shift.status = Shift.Status.CONFIRMED
+    shift.starts_at = timezone.now() + timedelta(days=1)
+    shift.ends_at = shift.starts_at + timedelta(hours=2)
+    shift.notes = 'Einsatznotiz Beispiel'
+    shift.save(update_fields=['status', 'starts_at', 'ends_at', 'notes', 'updated_at'])
+
+    subscription = auth_worker.get('/api/calendar/subscription/').data
+    path = urlsplit(subscription['https_feed_url']).path
+    response = Client().get(path)
+    assert response.status_code == 200
+    assert response['Content-Type'].startswith('text/calendar')
+    assert 'Content-Disposition' not in response
+    assert 'no-store' not in response['Cache-Control']
+    content = response.content.decode('utf-8')
+    assert content.startswith('BEGIN:VCALENDAR\r\n')
+    assert content.endswith('END:VCALENDAR\r\n')
+    assert f'UID:shift-{shift.pk}@aplus-solution.de' in content
+    assert 'SUMMARY:' in content and 'DTSTART:' in content and 'DTEND:' in content
+    assert 'Einsatznotiz Beispiel' in content
+    assert 'X-PUBLISHED-TTL' not in content
+    assert 'REFRESH-INTERVAL' not in content
+    assert 'SEQUENCE:' not in content
+    assert 'CATEGORIES:' not in content
+    assert 'LAST-MODIFIED:' not in content
+    assert all(len(line.encode('utf-8')) <= 75 for line in content.split('\r\n'))
+
+
+@pytest.mark.django_db
 def test_calendar_subscription_is_worker_only(auth_admin):
     response = auth_admin.get('/api/calendar/subscription/')
     assert response.status_code == 403
