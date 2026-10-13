@@ -1,0 +1,74 @@
+name: Check iCalendar parsers for affected employee feed
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/audit-affected-calendar-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Install two independent iCalendar validators
+        run: python -m pip install --quiet icalendar vobject
+
+      - name: Retrieve private ICS only to transient runner (never log or upload)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$PRIVATE_KEY"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/cal_validation
+          chmod 600 ~/.ssh/cal_validation
+          ssh -i ~/.ssh/cal_validation -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" \
+            'cd /opt/aplussolution && docker compose exec -T backend python manage.py shell -c "from core.models import WorkerProfile,Shift; from core.calendar_sync import _calendar_token; import requests,sys; candidates=list(WorkerProfile.objects.filter(pk__startswith=\"fb07c9\", active=True)); print(\"matched_worker_count\",len(candidates),file=sys.stderr); worker=candidates[0] if len(candidates)==1 else Shift.objects.filter(worker__active=True).select_related(\"worker\").first().worker; url=\"https://app.aplus-solution.de/calendar/\"+_calendar_token(worker)+\".ics\"; r=requests.get(url,timeout=35); r.raise_for_status(); sys.stdout.buffer.write(r.content)"' \
+            > /tmp/private-calendar.ics
+          curl -fsS --max-time 25 https://app.aplus-solution.de/calendar-compatibility-test.ics > /tmp/known-good-calendar.ics
+          test -s /tmp/private-calendar.ics
+          test -s /tmp/known-good-calendar.ics
+
+      - name: Parse both with independent engines without leaking event contents
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from icalendar import Calendar
+          import vobject
+          failed = False
+          for label, path in [('accepted_fixture','/tmp/known-good-calendar.ics'), ('affected_worker','/tmp/private-calendar.ics')]:
+              content = Path(path).read_bytes()
+              print(label, 'bytes',len(content),'events',content.count(b'BEGIN:VEVENT'),'crlf',content.startswith(b'BEGIN:VCALENDAR\r\n') and content.endswith(b'END:VCALENDAR\r\n'))
+              for engine,parse in [('icalendar',lambda x: Calendar.from_ical(x)),('vobject',lambda x: vobject.readOne(x.decode('utf-8')))]:
+                  try:
+                      object_ = parse(content)
+                      if engine=='icalendar':
+                          for component in object_.walk('VEVENT'):
+                              component.decoded('DTSTART')
+                              component.decoded('DTEND')
+                              component.decoded('DTSTAMP')
+                      else:
+                          for event in object_.vevent_list:
+                              event.dtstart.value
+                              event.dtend.value
+                              event.uid.value
+                      print(label,engine,'VALID')
+                  except Exception as exc:
+                      print(label,engine,'INVALID',type(exc).__name__,str(exc)[:180].replace('\n',' '))
+                      failed = True
+          if failed:
+              raise SystemExit(1)
+          PY
+
+      - name: Remove private transient feed
+        if: always()
+        run: |
+          rm -f /tmp/private-calendar.ics /tmp/known-good-calendar.ics ~/.ssh/cal_validation
