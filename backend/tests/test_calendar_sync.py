@@ -1,7 +1,8 @@
 from datetime import timedelta
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import pytest
+from django.core import signing
 from django.test import Client, override_settings
 from django.utils import timezone
 
@@ -67,6 +68,50 @@ def test_ios_calendar_subscription_opens_native_webcal_with_https_feed(auth_work
     assert payload['webcal_url'].endswith('.ics')
     assert 'calendar.google.com' in payload['google_url']
     assert response['Cache-Control'].startswith('private, no-store')
+
+
+@pytest.mark.django_db
+@override_settings(ALLOWED_HOSTS=['testserver', 'app.aplus-solution.de'])
+def test_apple_subscription_uses_unescaped_url_safe_signed_token(auth_worker):
+    response = auth_worker.get(
+        '/api/calendar/subscription/',
+        HTTP_HOST='app.aplus-solution.de',
+        HTTP_USER_AGENT='CalendarAgent/1.0 (iPhone; iOS 26)',
+    )
+    assert response.status_code == 200
+    payload = response.data
+    feed = payload['https_feed_url']
+    assert feed.startswith('https://app.aplus-solution.de/api/calendar/feed/')
+    assert '%3A' not in feed.upper()
+    assert '%' not in urlsplit(feed).path
+    assert '~' in urlsplit(feed).path
+    assert payload['webcal_url'] == feed.replace('https://', 'webcal://', 1)
+    result = Client().get(urlsplit(feed).path, HTTP_HOST='app.aplus-solution.de')
+    assert result.status_code == 200
+    assert result['Content-Type'].startswith('text/calendar')
+    assert result.content.startswith(b'BEGIN:VCALENDAR\\r\\n')
+    assert result.content.endswith(b'END:VCALENDAR\\r\\n')
+
+
+@pytest.mark.django_db
+def test_old_signed_calendar_links_remain_valid(worker_user):
+    old_token = signing.Signer(salt='aplus.worker-calendar.v1').sign(
+        str(worker_user.worker_profile.pk)
+    )
+    assert ':' in old_token
+    encoded_path = '/api/calendar/feed/' + quote(old_token, safe='') + '.ics'
+    response = Client().get(encoded_path)
+    assert response.status_code == 200
+    assert response['Content-Type'].startswith('text/calendar')
+    assert response.content.startswith(b'BEGIN:VCALENDAR\\r\\n')
+
+
+@pytest.mark.django_db
+def test_url_safe_calendar_feed_rejects_tampering(auth_worker):
+    subscription = auth_worker.get('/api/calendar/subscription/')
+    path = urlsplit(subscription.data['https_feed_url']).path
+    assert '~' in path
+    assert Client().get(path.replace('~', '-')).status_code == 404
 
 
 @pytest.mark.django_db
