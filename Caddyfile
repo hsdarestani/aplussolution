@@ -1,5 +1,8 @@
 {$APP_DOMAIN:app.aplus-solution.de}, solution.smarbiz.sbs {
-    encode zstd gzip
+    @compressNonCalendar {
+        not path /calendar/* /api/calendar/feed/* /calendar-compatibility-test.ics
+    }
+    encode @compressNonCalendar zstd gzip
 
     # The public calendar compatibility fixture must never fall through to SPA HTML.
     # Keep it on the same backend as the live calendar subscriptions.
