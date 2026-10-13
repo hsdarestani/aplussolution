@@ -6,6 +6,7 @@ from urllib.parse import quote, urlsplit
 from django.core import signing
 from django.db.models import Q
 from django.http import HttpResponse
+from django.views.decorators.http import require_http_methods
 from django.utils.html import escape
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
@@ -229,8 +230,10 @@ border-radius:8px;font-size:.92rem}
     return response
 
 
-@api_view(['GET', 'HEAD'])
-@permission_classes([AllowAny])
+# A subscribed calendar requests Accept: text/calendar without any JSON fallback.
+# DRF's content negotiation rejects that as HTTP 406 before entering the view.
+# Use native Django for public, signed ICS feeds (GET and HEAD).
+@require_http_methods(['GET', 'HEAD'])
 def calendar_compatibility_test(request):
     """Public synthetic iCalendar fixture, independent of SPA/frontend deploys.
 
@@ -264,8 +267,10 @@ def calendar_compatibility_test(request):
     return response
 
 
-@api_view(['GET', 'HEAD'])
-@permission_classes([AllowAny])
+# A subscribed calendar requests Accept: text/calendar without any JSON fallback.
+# DRF's content negotiation rejects that as HTTP 406 before entering the view.
+# Use native Django for public, signed ICS feeds (GET and HEAD).
+@require_http_methods(['GET', 'HEAD'])
 def calendar_feed(request, token):
     worker = _worker_from_token(token)
     if not worker:
@@ -287,7 +292,7 @@ def calendar_feed(request, token):
     # Temporary, read-only Apple Calendar compatibility probe. It changes
     # only the output of an explicitly requested signed URL; existing
     # subscribed URLs continue to include every assigned shift.
-    if request.query_params.get('qa_events') == '1':
+    if request.GET.get('qa_events') == '1':
         shifts = shifts[:1]
 
     for shift in shifts:
