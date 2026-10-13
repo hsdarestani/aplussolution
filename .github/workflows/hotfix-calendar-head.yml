@@ -1,4 +1,4 @@
-name: Hotfix native Apple Calendar HEAD support
+name: Hotfix Apple Calendar signed feed compatibility
 on:
   push:
     branches: [main]
@@ -60,7 +60,10 @@ jobs:
           test "$ready" = yes
           docker compose exec -T backend python manage.py check </dev/null
           docker compose exec -T backend python manage.py shell -c "from core.models import WorkerProfile; from core.calendar_sync import _calendar_token; import requests; w=WorkerProfile.objects.filter(active=True,user__is_active=True).first(); assert w is not None; token=_calendar_token(w); url='https://app.aplus-solution.de/calendar/'+token+'.ics'; old='https://app.aplus-solution.de/api/calendar/feed/'+token+'.ics'; resp=[requests.request(m,u,timeout=20) for u in (url,old) for m in ('GET','HEAD')]; assert all(r.status_code==200 and r.headers.get('Content-Type','').startswith('text/calendar') for r in resp); print('LIVE_ICAL_GET_AND_HEAD_OK',len(resp))" </dev/null
-          echo "CALENDAR_HEAD_PATCH_APPLIED"
+          # Ensure the live HTTP response uses the same standards-friendly
+          # subscription headers as the accepted public calendar fixture.
+          docker compose exec -T backend python manage.py shell -c "from core.models import WorkerProfile; from core.calendar_sync import _calendar_token; import requests; w=WorkerProfile.objects.filter(active=True,user__is_active=True).first(); assert w is not None; url='https://app.aplus-solution.de/calendar/'+_calendar_token(w)+'.ics'; r=requests.get(url,timeout=20); assert r.status_code==200 and r.content.startswith(b'BEGIN:VCALENDAR\\r\\n'); assert 'Content-Disposition' not in r.headers; assert 'no-store' not in r.headers.get('Cache-Control',''); assert b'REFRESH-INTERVAL' not in r.content and b'X-PUBLISHED-TTL' not in r.content; print('LIVE_ICAL_COMPAT_HEADERS_OK')" </dev/null
+          echo "CALENDAR_COMPAT_PATCH_APPLIED"
           trap - ERR
           rm -f "$backup" "$diskbackup" /tmp/aplus-calendar-head-v2.py
           REMOTE
