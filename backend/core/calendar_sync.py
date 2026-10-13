@@ -6,6 +6,7 @@ from urllib.parse import quote
 from django.core import signing
 from django.db.models import Q
 from django.http import HttpResponse
+from django.utils.html import escape
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
@@ -140,15 +141,14 @@ def calendar_subscription(request):
     encoded_feed = quote(feed_url, safe='')
     calendar_name = quote('A+ Solution Dienstplan', safe='')
 
-    # The already released iOS app prefers webcal_url when feed_url is
-    # empty. Keep this backwards-compatibility path until older builds are
-    # retired; the new client always reads https_feed_url for copy/Google.
-    user_agent = str(request.META.get('HTTP_USER_AGENT') or '').lower()
-    is_ios = 'iphone' in user_agent or 'ipad' in user_agent
-    client_feed_url = '' if is_ios else feed_url
+    # Keep the same canonical HTTPS link for every platform. In particular,
+    # emptying feed_url on iOS breaks the copy link fallback for subscribers.
+    # Existing webcal_url is retained for older installed app versions.
+    setup_url = _public_calendar_feed_url(request, token).rsplit('/calendar/', 1)[0] + f'/calendar/subscribe/{token}'
 
     response = Response({
-        'feed_url': client_feed_url,
+        'feed_url': feed_url,
+        'apple_setup_url': setup_url,
         'https_feed_url': feed_url,
         'webcal_url': webcal_url,
         'google_url': f'https://calendar.google.com/calendar/render?cid={encoded_feed}',
@@ -161,6 +161,67 @@ def calendar_subscription(request):
     # reused after the server-side HTTPS fix.
     response['Cache-Control'] = 'private, no-store, max-age=0'
     response['Pragma'] = 'no-cache'
+    return response
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def calendar_subscribe_page(request, token):
+    """Safari handoff for a signed calendar subscription.
+
+    A user initiated webcal link in Safari is an alternative to dispatching
+    custom URL schemes directly from Capacitor's WKWebView. When iOS cannot
+    complete the direct subscription, the HTTPS URL is always available for
+    the system Calendar's Add Subscription Calendar flow.
+    """
+    worker = _worker_from_token(token)
+    if worker is None:
+        return HttpResponse('Kalenderlink nicht gefunden.', status=404, content_type='text/plain; charset=utf-8')
+
+    secure_feed = _public_calendar_feed_url(request, token)
+    if not secure_feed.startswith('https://'):
+        return HttpResponse('Für dieses Kalenderabo ist HTTPS erforderlich.', status=400,
+                            content_type='text/plain; charset=utf-8')
+    deep_link = secure_feed.replace('https://', 'webcal://', 1)
+    html = """<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>A+ Solution Kalender</title>
+<style>
+:root{color-scheme:light;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+body{background:#f3f6f9;color:#102c3e;margin:0;padding:32px 16px}
+main{max-width:450px;background:white;margin:10vh auto 0;padding:28px 24px;
+border-radius:18px;box-shadow:0 8px 32px #0b23351c}
+h1{font-size:1.35rem;margin:0 0 16px}
+p{font-size:.94rem;line-height:1.55}
+a.button{display:block;background:#07324b;color:white;text-align:center;
+font-weight:650;text-decoration:none;padding:15px 12px;border-radius:10px;margin-top:24px}
+label{display:block;font-size:.84rem;margin:20px 0 6px}
+input{box-sizing:border-box;width:100%;padding:12px 10px;border:1px solid #b9c7d2;
+border-radius:8px;font-size:.92rem}
+.note{font-size:.79rem;color:#455967}
+</style>
+</head>
+<body><main>
+<h1>Schichtplan in Apple Kalender</h1>
+<p>Tippe auf <strong>Kalender abonnieren</strong> und bestätige das Abo in Apple Kalender. Änderungen deiner Schichten werden danach vom Kalender automatisch abgerufen.</p>
+<a class="button" href="__WEBCAL__">Kalender abonnieren</a>
+<p class="note">Falls Apple Kalender eine unsichere Verbindung meldet, wähle Abbrechen. Nutze dann in Apple Kalender die Funktion Kalender hinzufügen, Abo Kalender hinzufügen und füge die HTTPS Adresse unten ein.</p>
+<label for="feed">Persönlicher HTTPS Kalenderlink</label>
+<input id="feed" type="text" readonly value="__HTTPS__" onclick="this.select()" aria-label="Persönlicher HTTPS Kalenderlink">
+<p class="note">Dieser Link ist privat. Teile ihn nicht mit anderen Personen. Die Aktualisierung kann je nach Apple Kalender einige Zeit dauern.</p>
+</main></body></html>"""
+    html = html.replace('__WEBCAL__', escape(deep_link)).replace('__HTTPS__', escape(secure_feed))
+    response = HttpResponse(html, content_type='text/html; charset=utf-8')
+    response['Cache-Control'] = 'private, no-store, max-age=0'
+    response['Referrer-Policy'] = 'no-referrer'
+    response['X-Content-Type-Options'] = 'nosniff'
+    response['X-Frame-Options'] = 'DENY'
+    response['Content-Security-Policy'] = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    response['X-Robots-Tag'] = 'noindex, nofollow'
     return response
 
 
