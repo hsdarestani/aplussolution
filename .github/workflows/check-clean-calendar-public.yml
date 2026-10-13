@@ -43,3 +43,16 @@ jobs:
               if head -c 32 /tmp/route-response | grep -q 'Kalenderfeed'; then echo 'plain-error'; elif head -c 50 /tmp/route-response | grep -q '<!doctype html'; then echo 'spa-html'; elif head -c 80 /tmp/route-response | grep -q '"status"'; then echo 'json-health'; else echo 'other'; fi
             done
           done
+
+      - name: Confirm direct origin does not traverse an HTTP proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRIMARY_HOST"
+          for path in /health/ /calendar/invalid.ics; do
+            outcome=$(curl --noproxy '*' -sS --max-time 20 --resolve "app.aplus-solution.de:443:$PRIMARY_HOST" -o /tmp/direct-check -w '%{http_code} %{remote_ip}' "https://app.aplus-solution.de$path") || true
+            read -r status connected <<< "$outcome"
+            if [ "$connected" = "$PRIMARY_HOST" ]; then origin=yes; else origin=no; fi
+            if head -c 32 /tmp/direct-check | grep -q 'Kalenderfeed'; then kind=calendar-404; elif head -c 50 /tmp/direct-check | grep -q '<!doctype html'; then kind=spa-html; else kind=other; fi
+            echo "DIRECT_ORIGIN_TEST path=$path status=$status connected_to_strato_secret=$origin type=$kind"
+          done
