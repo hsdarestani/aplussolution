@@ -20,13 +20,24 @@ CALENDAR_HTTPS_HOST_SUFFIXES = ('aplus-solution.de', 'smarbiz.sbs')
 
 
 def _calendar_token(worker: WorkerProfile) -> str:
-    return signing.Signer(salt=CALENDAR_SIGNING_SALT).sign(str(worker.pk))
+    # The default Django Signer separator is a colon, which becomes %3A when
+    # embedded in a calendar subscription URL. Some external calendar clients
+    # rewrite or double-encode percent escapes. The tilde is RFC 3986-safe
+    # in a URL path, so no percent escapes are needed for new subscriptions.
+    return signing.Signer(salt=CALENDAR_SIGNING_SALT, sep='~').sign(str(worker.pk))
 
 
 def _worker_from_token(token: str):
-    try:
-        worker_id = signing.Signer(salt=CALENDAR_SIGNING_SALT).unsign(token)
-    except signing.BadSignature:
+    # Existing subscriptions must keep working indefinitely. Fall back to
+    # the legacy ":" format, including links saved before this change.
+    worker_id = None
+    for sep in ('~', ':'):
+        try:
+            worker_id = signing.Signer(salt=CALENDAR_SIGNING_SALT, sep=sep).unsign(token)
+            break
+        except signing.BadSignature:
+            continue
+    if worker_id is None:
         return None
     return (
         WorkerProfile.objects.select_related('user')
@@ -116,7 +127,7 @@ def calendar_subscription(request):
     except WorkerProfile.DoesNotExist:
         return Response({'detail': 'Mitarbeiterprofil wurde nicht gefunden.'}, status=404)
 
-    token = quote(_calendar_token(worker), safe='')
+    token = _calendar_token(worker)  # URL-safe: no percent encoding required.
     feed_url = _public_calendar_feed_url(request, token)
     # webcal is the iOS Calendar subscription deep link. The receiving
     # server upgrades its HTTP fetch to HTTPS; the actual feed URL remains
