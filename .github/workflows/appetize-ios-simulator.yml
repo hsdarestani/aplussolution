@@ -9,6 +9,7 @@ on:
       - 'frontend/src/appleCalendarSubscription.ts'
       - 'frontend/scripts/prepare-native.mjs'
       - 'frontend/src/App.tsx'
+      - 'frontend/src/calendarFeedDiagnostics.ts'
 
 permissions:
   contents: read
