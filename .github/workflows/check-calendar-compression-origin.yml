@@ -1,0 +1,40 @@
+name: Locate calendar gzip source (origin vs CDN)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/check-calendar-compression-origin.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Compare origin and CDN calendar headers without private URLs in logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$PRIVATE_KEY"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/calendar_read
+          chmod 600 ~/.ssh/calendar_read
+          feed=$(ssh -i ~/.ssh/calendar_read -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$HOST" 'cd /opt/aplussolution && docker compose exec -T backend python manage.py shell --no-imports -c "from core.models import WorkerProfile; from core.calendar_sync import _calendar_token; w=WorkerProfile.objects.filter(pk__startswith=\"fb07c9\",active=True).first(); assert w; print(\"https://app.aplus-solution.de/calendar/\"+_calendar_token(w)+\".ics\")"')
+          fixture=https://app.aplus-solution.de/calendar-compatibility-test.ics
+          for label in fixture worker; do
+            if [ "$label" = fixture ]; then url="$fixture"; else url="$feed"; fi
+            for source in cdn origin; do
+              if [ "$source" = origin ]; then
+                curl --noproxy '*' -fsS --max-time 20 --resolve "app.aplus-solution.de:443:$HOST" -H 'Accept-Encoding: gzip, deflate' -D /tmp/calhdr -o /dev/null "$url"
+              else
+                curl -fsS --max-time 20 -H 'Accept-Encoding: gzip, deflate' -D /tmp/calhdr -o /dev/null "$url"
+              fi
+              echo "COMPARE_SOURCE=$source FEED=$label"
+              grep -Ei '^(content-type|content-encoding|cache-control|server|cf-cache-status|vary):' /tmp/calhdr || true
+            done
+          done
+          rm -f ~/.ssh/calendar_read /tmp/calhdr
