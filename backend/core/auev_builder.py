@@ -14,6 +14,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
+from pypdf import PdfReader
 
 from .document_engine import convert_docx_to_pdf
 from .models import AuevExport, AuevSetting, ClientCompany, Shift
@@ -543,15 +544,46 @@ def _add_cell_paragraph(cell, text='', size=11, bold=False, before=0, after=0):
     return p
 
 
-def _new_docx(data):
+def _new_docx(data, compact_level=0):
     if len(data['rows']) > 25:
         raise ValueError('Die neue Vorlage bietet Platz für maximal 25 Mitarbeiterzeilen.')
 
     doc = _base_document(True)
     section = doc.sections[0]
+
+    # The new ANÜ template must always remain a single A4 landscape page.
+    # Start with readable typography and only tighten automatically when the
+    # generated PDF would otherwise spill onto a second page.
+    compact_level = max(0, min(int(compact_level or 0), 3))
+    margin_map = {
+        0: (0.45, 0.45, 0.55, 0.55),
+        1: (0.38, 0.38, 0.50, 0.50),
+        2: (0.32, 0.32, 0.45, 0.45),
+        3: (0.28, 0.28, 0.40, 0.40),
+    }
+    top_m, bottom_m, left_m, right_m = margin_map[compact_level]
+    section.top_margin = Cm(top_m)
+    section.bottom_margin = Cm(bottom_m)
+    section.left_margin = Cm(left_m)
+    section.right_margin = Cm(right_m)
+    section.header_distance = Cm(0.18)
+    section.footer_distance = Cm(0.18)
+
     footer_p = section.footer.paragraphs[0]
     footer_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    _font(footer_p.add_run(str(data['sequence_number'])), size=18, bold=True)
+    footer_size = [16, 15, 14, 13][compact_level]
+    _font(footer_p.add_run(str(data['sequence_number'])), size=footer_size, bold=True)
+
+    title_size = [13.6, 13.0, 12.4, 11.8][compact_level]
+    body_size = [10.8, 10.4, 10.0, 9.6][compact_level]
+    heading_size = [11.2, 10.8, 10.4, 10.0][compact_level]
+    table_size = [8.7, 8.4, 8.1, 7.8][compact_level]
+    name_size = [8.5, 8.2, 7.9, 7.6][compact_level]
+    row_height = [0.44, 0.41, 0.38, 0.35][compact_level]
+    header_height = [0.66, 0.62, 0.58, 0.54][compact_level]
+    gap_small = [2, 1, 0, 0][compact_level]
+    gap_section = [4, 3, 2, 1][compact_level]
+    gap_signature = [8, 5, 3, 1][compact_level]
 
     outer = doc.add_table(rows=1, cols=2)
     outer.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -562,9 +594,9 @@ def _new_docx(data):
     left.text = ''
     right.text = ''
 
-    _add_cell_paragraph(left, 'Anhang 1: Einzelarbeitnehmerüberlassungsvertrag', size=14.5, bold=True, after=5)
-    _add_cell_paragraph(left, 'Zwischen', size=12, after=1)
-    client_p = _add_cell_paragraph(left, data['settings']['client_contract_text'], size=11.5, after=1)
+    _add_cell_paragraph(left, 'Anhang 1: Einzelarbeitnehmerüberlassungsvertrag', size=title_size, bold=True, after=gap_section)
+    _add_cell_paragraph(left, 'Zwischen', size=body_size, after=gap_small)
+    client_p = _add_cell_paragraph(left, data['settings']['client_contract_text'], size=body_size, after=gap_small)
     pPr = client_p._p.get_or_add_pPr()
     pBdr = OxmlElement('w:pBdr')
     bottom = OxmlElement('w:bottom')
@@ -573,59 +605,59 @@ def _new_docx(data):
     bottom.set(qn('w:color'), '777777')
     pBdr.append(bottom)
     pPr.append(pBdr)
-    _add_cell_paragraph(left, 'und', size=12, after=1)
-    _add_cell_paragraph(left, 'A+ Solution GmbH, Carl-Sonnenschein Straße 57, 65936 Frankfurt a.M.', size=11.5, after=0)
-    _add_cell_paragraph(left, '(Personaldienstleister)', size=11.5, after=0)
-    _add_cell_paragraph(left, 'wird folgender Arbeitnehmerüberlassungsvertrag geschlossen:', size=11.5, after=8)
+    _add_cell_paragraph(left, 'und', size=body_size, after=gap_small)
+    _add_cell_paragraph(left, 'A+ Solution GmbH, Carl-Sonnenschein Straße 57, 65936 Frankfurt a.M.', size=body_size, after=0)
+    _add_cell_paragraph(left, '(Personaldienstleister)', size=body_size, after=0)
+    _add_cell_paragraph(left, 'wird folgender Arbeitnehmerüberlassungsvertrag geschlossen:', size=body_size, after=gap_section)
 
-    _add_cell_paragraph(left, '§ 1 Erlaubnis zur Arbeitnehmerüberlassung', size=11.5, bold=True, after=1)
+    _add_cell_paragraph(left, '§ 1 Erlaubnis zur Arbeitnehmerüberlassung', size=heading_size, bold=True, after=gap_small)
     permit = data['settings']['permit_date_de'] or '__________'
     _add_cell_paragraph(
         left,
         'Der Personaldienstleister erklärt, im Besitz einer befristeten Erlaubnis zur Arbeitnehmerüberlassung zu sein, '
         'zuletzt erteilt und nicht widerrufen von der Bundesagentur für Arbeit, Agentur für Arbeit Düsseldorf am '
         f'{permit} in Düsseldorf.',
-        size=11.5,
-        after=7,
+        size=body_size,
+        after=gap_section,
     )
 
-    _add_cell_paragraph(left, '§ 2 Rahmenvereinbarung', size=11.5, bold=True, after=1)
+    _add_cell_paragraph(left, '§ 2 Rahmenvereinbarung', size=heading_size, bold=True, after=gap_small)
     framework = data['settings']['framework_date_de'] or '__________'
     _add_cell_paragraph(
         left,
         'Die Rahmenvereinbarung zur Arbeitnehmerüberlassung vom '
         f'{framework} zwischen Auftraggeber und Personaldienstleister findet auf diesen Arbeitnehmerüberlassungsvertrag Anwendung.',
-        size=10.5,
-        after=7,
+        size=body_size,
+        after=gap_section,
     )
 
-    _add_cell_paragraph(left, '§ 3 Gegenstand des Vertrages / Überlassungsbedingungen', size=11.5, bold=True, after=1)
+    _add_cell_paragraph(left, '§ 3 Gegenstand des Vertrages / Überlassungsbedingungen', size=heading_size, bold=True, after=gap_small)
     effective = data['settings']['effective_date_de'] or data['first_shift_date_de']
     _add_cell_paragraph(
         left,
         'Der Personaldienstleister überlässt mit Wirkung zum '
         f'{effective} an den Auftraggeber folgende Zeitarbeitnehmer an den in § 2 Absatz 2 der Rahmenvereinbarung festgelegten Betrieb.',
-        size=11.5,
-        after=18,
+        size=body_size,
+        after=gap_section,
     )
 
     _add_cell_paragraph(
         left,
         f'Dieser Einzelarbeitnehmerüberlassungsvertrag wird zunächst befristet bis zum  {data["last_shift_date_de"]}',
-        size=11.5,
-        after=12,
+        size=body_size,
+        after=gap_section,
     )
-    doc.add_paragraph().paragraph_format.space_after = Pt(14)
+    doc.add_paragraph().paragraph_format.space_after = Pt(gap_signature)
 
     sig = left.add_table(rows=2, cols=2)
     _no_table_borders(sig)
     _set_table_widths(sig, [6.0, 6.0])
-    _set_cell_text(sig.cell(0, 0), data['signature_date_de'], size=10.5)
-    _set_cell_text(sig.cell(0, 1), '', size=10.5)
+    _set_cell_text(sig.cell(0, 0), data['signature_date_de'], size=body_size)
+    _set_cell_text(sig.cell(0, 1), '', size=body_size)
     _bottom_border(sig.cell(0, 0))
     _bottom_border(sig.cell(0, 1))
-    _set_cell_text(sig.cell(1, 0), '[Datum, Unterschrift Personaldienstleister]', size=9.2)
-    _set_cell_text(sig.cell(1, 1), '[Datum, Unterschrift Auftraggeber]', size=9.2)
+    _set_cell_text(sig.cell(1, 0), '[Datum, Unterschrift Personaldienstleister]', size=max(body_size - 1.3, 8.0))
+    _set_cell_text(sig.cell(1, 1), '[Datum, Unterschrift Auftraggeber]', size=max(body_size - 1.3, 8.0))
 
     employee = right.add_table(rows=26, cols=6)
     employee.alignment = WD_TABLE_ALIGNMENT.RIGHT
@@ -636,11 +668,11 @@ def _new_docx(data):
         _set_cell_text(
             employee.cell(0, idx),
             value,
-            size=9.0,
+            size=table_size,
             bold=True,
             align=WD_ALIGN_PARAGRAPH.CENTER if idx in {0, 2, 3, 4} else None,
         )
-    employee.rows[0].height = Cm(0.72)
+    employee.rows[0].height = Cm(header_height)
     employee.rows[0].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
 
     for index in range(25):
@@ -655,11 +687,11 @@ def _new_docx(data):
             _set_cell_text(
                 cells[col],
                 value,
-                size=9.0 if col != 1 else 8.8,
+                size=table_size if col != 1 else name_size,
                 bold=col == 0 and bool(value),
                 align=WD_ALIGN_PARAGRAPH.CENTER if col in {0, 2, 3, 4} else None,
             )
-        employee.rows[index + 1].height = Cm(0.48)
+        employee.rows[index + 1].height = Cm(row_height)
         employee.rows[index + 1].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
 
     _set_table_widths(employee, widths)
@@ -702,6 +734,30 @@ def _document_data(client, start, end, signature_date, sequence_number):
     }
 
 
+def _build_export_files(data, template_key):
+    if template_key != AuevExport.Template.NEW:
+        docx_bytes = _classic_docx(data)
+        return docx_bytes, convert_docx_to_pdf(docx_bytes)
+
+    last_pdf = None
+    last_docx = None
+    for compact_level in range(4):
+        docx_bytes = _new_docx(data, compact_level=compact_level)
+        pdf_bytes = convert_docx_to_pdf(docx_bytes)
+        last_docx, last_pdf = docx_bytes, pdf_bytes
+        try:
+            page_count = len(PdfReader(io.BytesIO(pdf_bytes)).pages)
+        except Exception:
+            page_count = 1
+        if page_count == 1:
+            return docx_bytes, pdf_bytes
+
+    raise ValueError(
+        'Die neue Vorlage konnte mit diesem Inhalt nicht auf eine Seite komprimiert werden. '
+        'Bitte den Zeitraum verkürzen oder weniger Mitarbeiterzeilen verwenden.'
+    )
+
+
 @transaction.atomic
 def generate_export(*, client, start, end, template_key, signature_date, actor=None, sequence_number=None):
     if template_key not in {AuevExport.Template.CLASSIC, AuevExport.Template.NEW}:
@@ -717,11 +773,7 @@ def generate_export(*, client, start, end, template_key, signature_date, actor=N
         raise ValueError(f'Die ANÜ Nummer {sequence} existiert für diesen Kunden bereits.')
 
     data = _document_data(client, start, end, signature_date, sequence)
-    if template_key == AuevExport.Template.NEW:
-        docx_bytes = _new_docx(data)
-    else:
-        docx_bytes = _classic_docx(data)
-    pdf_bytes = convert_docx_to_pdf(docx_bytes)
+    docx_bytes, pdf_bytes = _build_export_files(data, template_key)
 
     weeks = data['weeks']
     stem = f'ANÜ - {data["settings"]["file_label"]} ({sequence}) KW{"-".join(str(item) for item in weeks)}'
@@ -777,11 +829,7 @@ def update_export(*, export, client, start, end, template_key, signature_date, a
         raise ValueError(f'Die ANÜ Nummer {sequence} existiert für diesen Kunden bereits.')
 
     data = _document_data(client, start, end, signature_date, sequence)
-    if template_key == AuevExport.Template.NEW:
-        docx_bytes = _new_docx(data)
-    else:
-        docx_bytes = _classic_docx(data)
-    pdf_bytes = convert_docx_to_pdf(docx_bytes)
+    docx_bytes, pdf_bytes = _build_export_files(data, template_key)
 
     weeks = data['weeks']
     stem = f'ANÜ - {data["settings"]["file_label"]} ({sequence}) KW{"-".join(str(item) for item in weeks)}'
