@@ -12,7 +12,9 @@ const nativeCalendar = registerPlugin<NativeCalendarSubscription>('APlusCalendar
  * to UIApplication.shared.open through our registered native bridge.
  */
 export async function openAppleCalendarSubscription(url: string): Promise<void> {
-  if (!/^webcal:\/\/[a-z0-9.-]+\//i.test(url)) {
+  // A/B diagnostics: allow opening the same subscription as a literal HTTPS URL.
+  // A webcal:// dispatch can fall back to HTTP on some Calendar handlers.
+  if (!/^(?:webcal|https):\/\/app\.aplus-solution\.de\//i.test(url)) {
     throw new Error('Ungültiger Kalenderlink.');
   }
 
