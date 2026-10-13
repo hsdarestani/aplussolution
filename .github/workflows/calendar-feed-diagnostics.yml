@@ -1,0 +1,47 @@
+name: Diagnose Apple Calendar public feed
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/calendar-feed-diagnostics.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check-calendar-transport:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Inspect HTTPS transport and anonymous calendar endpoint
+        shell: bash
+        run: |
+          set -uo pipefail
+          failure=0
+          for host in app.aplus-solution.de solution.smarbiz.sbs; do
+            echo "::group::Check ${host}"
+            echo "DNS:"
+            getent ahostsv4 "$host" | awk '{print $1}' | sort -u || true
+            echo "TLS certificate identity and expiry:"
+            timeout 15 bash -c 'echo | openssl s_client -connect "$1:443" -servername "$1" -verify_return_error 2>/dev/null | openssl x509 -noout -subject -issuer -dates' bash "$host" || true
+            for path in /health/ /api/calendar/feed/not-a-valid-token.ics; do
+              url="https://${host}${path}"
+              file=$(mktemp)
+              echo "Request path: ${path}"
+              code=$(curl --proto '=https' -sS --max-time 25 --connect-timeout 10 --location --output "$file" --write-out '%{http_code}' "$url")
+              exitcode=$?
+              echo "status: ${code:-none}; curl_exit: $exitcode"
+              echo "body_prefix: $(head -c 100 "$file")"
+              if [ "$exitcode" != 0 ]; then failure=1; fi
+              if [ "$path" = '/health/' ] && [ "$code" != '200' ]; then failure=1; fi
+              if [[ "$path" == /api/calendar/feed/* ]] && [ "$code" != '404' ]; then failure=1; fi
+              rm -f "$file"
+            done
+            echo "::endgroup::"
+          done
+          if [ "$failure" -ne 0 ]; then
+            echo "::error::At least one public HTTPS calendar transport check failed"
+            exit 1
+          fi
