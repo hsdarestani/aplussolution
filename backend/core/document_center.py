@@ -10,6 +10,7 @@ from django.utils import timezone
 from .document_catalog import CATALOG_BY_SLUG
 from .document_catalog_service import ensure_document_catalog
 from .document_engine import contract_data, format_value
+from .contract_notification_policy import suppress_contract_end_notice
 from .models import Contract, ContractSignature, ContractTemplate, Notification, User
 from .services import required_signature_roles
 
@@ -311,6 +312,8 @@ def _create_notice(contract, event_key, title, body, recipients):
     notifications = 0
     emailed = []
     for user in recipients:
+        if suppress_contract_end_notice(user, f'{event_key}-{contract.id}'):
+            continue
         _, created = Notification.objects.get_or_create(
             user=user,
             kind=f'{event_key}-{contract.id}',
