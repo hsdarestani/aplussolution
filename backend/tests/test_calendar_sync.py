@@ -174,6 +174,21 @@ def test_calendar_head_preflight_matches_get_for_native_apple_calendar(auth_work
 
 
 @pytest.mark.django_db
+def test_public_compatibility_fixture_is_real_ics_not_frontend_html():
+    for method in ('get', 'head'):
+        response = getattr(Client(), method)('/calendar-compatibility-test.ics')
+        assert response.status_code == 200
+        assert response['Content-Type'].startswith('text/calendar')
+        assert '<html' not in response.content.decode('utf-8').lower()
+        if method == 'get':
+            assert response.content.startswith(b'BEGIN:VCALENDAR\r\n')
+            assert response.content.endswith(b'END:VCALENDAR\r\n')
+            assert response.content.count(b'BEGIN:VEVENT') == 1
+            assert b'SUMMARY:A+ Solution Testtermin' in response.content
+            assert all(len(line) <= 75 for line in response.content.split(b'\r\n'))
+
+
+@pytest.mark.django_db
 def test_calendar_feed_rejects_bad_token():
     response = Client().get('/api/calendar/feed/not-a-valid-token.ics')
     assert response.status_code == 404
