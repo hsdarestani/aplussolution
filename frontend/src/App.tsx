@@ -3051,7 +3051,7 @@ function Profile({ user }: { user: User }) {
     }
   }
 
-  async function openDiagnosticCalendar(kind: 'fixture' | 'one-shift') {
+  async function openDiagnosticCalendar(kind: 'fixture' | 'one-shift', scheme: 'webcal' | 'https' = 'webcal') {
     const feed = String(calendarSync?.https_feed_url || calendarSync?.feed_url || '');
     const secure = kind === 'fixture'
       ? 'https://app.aplus-solution.de/calendar-compatibility-test.ics'
@@ -3063,7 +3063,7 @@ function Profile({ user }: { user: User }) {
     const candidate = kind === 'fixture'
       ? secure
       : secure + (secure.includes('?') ? '&' : '?') + 'qa_events=1';
-    const deepLink = candidate.replace(/^https:\/\//, 'webcal://');
+    const deepLink = scheme === 'https' ? candidate : candidate.replace(/^https:\/\//, 'webcal://');
     setCalendarDiagnostic(kind === 'fixture'
       ? 'Öffne den öffentlichen Testkalender über denselben iOS Button.'
       : 'Öffne einen signierten Kalender mit nur einer echten Schicht. Bitte nicht hinzufügen.');
@@ -3165,6 +3165,8 @@ function Profile({ user }: { user: User }) {
               <IonButton type="button" fill="outline" expand="block" disabled={calendarChecking} onClick={() => void checkCalendarFeed()}>{calendarChecking ? 'Kalenderfeed wird geprüft …' : 'Kalenderfeed testen (Appetize)'}</IonButton>
               <IonButton type="button" fill="outline" color="secondary" expand="block" onClick={() => void openDiagnosticCalendar('fixture')}>Testkalender über Apple Button öffnen</IonButton>
               <IonButton type="button" fill="outline" color="secondary" expand="block" onClick={() => void openDiagnosticCalendar('one-shift')}>Nur 1 echte Schicht über Apple Button öffnen</IonButton>
+              <IonButton type="button" fill="outline" color="tertiary" expand="block" onClick={() => void openDiagnosticCalendar('fixture', 'https')}>HTTPS Testkalender direkt aus iOS öffnen</IonButton>
+              <IonButton type="button" fill="outline" color="tertiary" expand="block" onClick={() => void openDiagnosticCalendar('one-shift', 'https')}>HTTPS 1 Schicht direkt aus iOS öffnen</IonButton>
               {calendarDiagnostic && <small role="status">{calendarDiagnostic}</small>}
             </>}
             <small>Der Link ist persönlich und darf nicht weitergegeben werden. Änderungen erscheinen automatisch, sobald der jeweilige Kalenderanbieter das Abo erneut abruft.</small>
