@@ -166,6 +166,41 @@ def calendar_subscription(request):
 
 @api_view(['GET', 'HEAD'])
 @permission_classes([AllowAny])
+def calendar_compatibility_test(request):
+    """Public synthetic iCalendar fixture, independent of SPA/frontend deploys.
+
+    This contains no user data and deliberately serves the known-good test
+    at a stable HTTPS URL to distinguish transport problems from worker feeds.
+    """
+    lines = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//A+ Solution GmbH//Calendar Compatibility Check//DE',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
+        'X-WR-CALNAME:A+ Solution Kalender Kompatibilitaetstest',
+        'X-WR-TIMEZONE:Europe/Berlin',
+        'BEGIN:VEVENT',
+        'UID:calendar-compatibility-2027@aplus-solution.de',
+        'DTSTAMP:20261013T170000Z',
+        'DTSTART:20271005T100000Z',
+        'DTEND:20271005T110000Z',
+        'SUMMARY:A+ Solution Testtermin',
+        'DESCRIPTION:Oeffentlicher Testeintrag ohne personenbezogene Daten',
+        'END:VEVENT',
+        'END:VCALENDAR',
+    ]
+    response = HttpResponse(
+        '\r\n'.join(_fold_ical_line(line) for line in lines) + '\r\n',
+        content_type='text/calendar; charset=utf-8',
+    )
+    response['Cache-Control'] = 'public, max-age=0, no-cache, must-revalidate'
+    response['X-Robots-Tag'] = 'noindex, nofollow'
+    return response
+
+
+@api_view(['GET', 'HEAD'])
+@permission_classes([AllowAny])
 def calendar_feed(request, token):
     worker = _worker_from_token(token)
     if not worker:
