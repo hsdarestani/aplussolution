@@ -164,7 +164,7 @@ def calendar_subscription(request):
     return response
 
 
-@api_view(['GET'])
+@api_view(['GET', 'HEAD'])
 @permission_classes([AllowAny])
 def calendar_feed(request, token):
     worker = _worker_from_token(token)
