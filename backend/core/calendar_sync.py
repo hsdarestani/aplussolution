@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta, timezone as datetime_timezone
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from django.core import signing
 from django.db.models import Q
@@ -144,7 +144,8 @@ def calendar_subscription(request):
     # Keep the same canonical HTTPS link for every platform. In particular,
     # emptying feed_url on iOS breaks the copy link fallback for subscribers.
     # Existing webcal_url is retained for older installed app versions.
-    setup_url = _public_calendar_feed_url(request, token).rsplit('/calendar/', 1)[0] + f'/calendar/subscribe/{token}'
+    parsed_feed = urlsplit(feed_url)
+    setup_url = f'{parsed_feed.scheme}://{parsed_feed.netloc}/calendar/subscribe/{token}'
 
     response = Response({
         'feed_url': feed_url,
