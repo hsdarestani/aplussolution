@@ -3012,6 +3012,7 @@ function Profile({ user }: { user: User }) {
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [calendarDiagnostic, setCalendarDiagnostic] = useState('');
   const [calendarChecking, setCalendarChecking] = useState(false);
+  const [showCalendarHelp, setShowCalendarHelp] = useState(false);
 
   useEffect(() => {
     if (user.role !== 'worker') return;
@@ -3043,10 +3044,14 @@ function Profile({ user }: { user: User }) {
   }, [user.role]);
 
   async function openAppleCalendar() {
-    const url = String(calendarSync?.webcal_url || '');
+    // The setup page opens in Safari, so the final subscription gesture is
+    // initiated in the browser rather than Capacitor's WKWebView.
+    const url = String(calendarSync?.apple_setup_url || calendarSync?.webcal_url || '');
     try {
       await openAppleCalendarSubscription(url);
+      setShowCalendarHelp(true);
     } catch (error: any) {
+      setShowCalendarHelp(true);
       setToast(error?.message || 'Apple Kalender konnte nicht geöffnet werden.');
     }
   }
@@ -3066,12 +3071,30 @@ function Profile({ user }: { user: User }) {
   }
 
   async function copyCalendarLink() {
-    if (!calendarSync?.feed_url) return;
+    const url = String(calendarSync?.https_feed_url || calendarSync?.feed_url || '');
+    if (!url.startsWith('https://app.aplus-solution.de/')) {
+      setToast('Kalenderlink konnte nicht geladen werden.');
+      return;
+    }
     try {
-      await navigator.clipboard.writeText(calendarSync.feed_url);
-      setToast('Kalenderlink wurde kopiert.');
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const input = document.createElement('textarea');
+        input.value = url;
+        input.setAttribute('readonly', 'true');
+        input.style.position = 'fixed';
+        input.style.top = '-1000px';
+        document.body.appendChild(input);
+        input.select();
+        const copied = document.execCommand('copy');
+        input.remove();
+        if (!copied) throw new Error('Clipboard failed');
+      }
+      setToast('Sicherer Kalenderlink wurde kopiert.');
     } catch {
-      setToast('Kalenderlink konnte nicht kopiert werden.');
+      setShowCalendarHelp(true);
+      setToast('Link konnte nicht kopiert werden. Nutze den Link auf der Einrichtungsseite.');
     }
   }
 
@@ -3134,10 +3157,16 @@ function Profile({ user }: { user: User }) {
           <h3>Dienstplan mit Kalender synchronisieren</h3>
           <p>Einmal abonnieren. Danach werden deine zugewiesenen Schichten sowie spätere Änderungen und Löschungen automatisch über das Kalenderabo aktualisiert.</p>
           {calendarLoading ? <p>Kalenderlink wird geladen …</p> : calendarSync ? <>
-            <IonButton type="button" onClick={() => void openAppleCalendar()} expand="block">iPhone / Apple Kalender</IonButton>
+            <IonButton type="button" onClick={() => void openAppleCalendar()} expand="block">Apple Kalender verbinden</IonButton>
             <IonButton href={calendarSync.google_url} target="_blank" fill="outline" expand="block">Google Kalender</IonButton>
             <IonButton href={calendarSync.outlook_url} target="_blank" fill="outline" expand="block">Outlook Kalender</IonButton>
-            <IonButton type="button" fill="clear" expand="block" onClick={() => void copyCalendarLink()}>Kalenderlink kopieren</IonButton>
+            <IonButton type="button" fill="clear" expand="block" onClick={() => void copyCalendarLink()}>Sicheren Kalenderlink kopieren</IonButton>
+            <IonButton type="button" fill="clear" expand="block" onClick={() => setShowCalendarHelp((previous) => !previous)}>{showCalendarHelp ? 'Anleitung ausblenden' : 'Hilfe mit Apple Kalender'}</IonButton>
+            {showCalendarHelp && <div className="calendar-sync-help" role="note">
+              <p>Tippe auf Apple Kalender verbinden und im Browser auf Kalender abonnieren. Bestätige dann in Apple Kalender.</p>
+              <p>Bei einer Warnung über eine unsichere Verbindung nicht fortfahren. Stattdessen Apple Kalender öffnen, Kalender hinzufügen und Abo Kalender hinzufügen wählen. Den sicheren HTTPS Link oben einfügen.</p>
+              <p>Apple Kalender bestimmt selbst, wann Änderungen deiner Schichten abgerufen werden.</p>
+            </div>}
             {import.meta.env.VITE_CALENDAR_DIAGNOSTICS === '1' && <>
               <IonButton type="button" fill="outline" expand="block" disabled={calendarChecking} onClick={() => void checkCalendarFeed()}>{calendarChecking ? 'Kalenderfeed wird geprüft …' : 'Kalenderfeed testen (Appetize)'}</IonButton>
               {calendarDiagnostic && <small role="status">{calendarDiagnostic}</small>}
