@@ -33,6 +33,14 @@ jobs:
           staffed=Shift.objects.filter(worker__active=True,starts_at__gte=now-timedelta(days=90),starts_at__lte=now+timedelta(days=540)).select_related('worker').first()
           assert staffed is not None
           feed='https://app.aplus-solution.de/calendar/'+_calendar_token(staffed.worker)+'.ics'
+          fixture='https://app.aplus-solution.de/calendar-compatibility-test.ics'
+          affected=WorkerProfile.objects.filter(pk__startswith='fb07c9',active=True).first()
+          assert affected is not None, 'Screenshot worker prefix did not match'
+          affected_url='https://app.aplus-solution.de/calendar/'+_calendar_token(affected)+'.ics'
+          for label, target in [('fixture',fixture),('affected',affected_url)]:
+              for accept_encoding in ('gzip, deflate','identity'):
+                  response=requests.get(target,timeout=25,headers={'Accept-Encoding':accept_encoding,'User-Agent':'CalendarAgent/1.0 (iPhone; iOS 17.2)'})
+                  print('COMPRESSION_AUDIT',label,'request_encoding',accept_encoding,'status',response.status_code,'response_encoding',response.headers.get('Content-Encoding','identity'),'bytes',len(response.content),'events',response.content.count(b'BEGIN:VEVENT'),'type_ok',response.headers.get('Content-Type','').startswith('text/calendar'))
           for method in ('HEAD','GET'):
               for ua in ('iOS/26.0 (23A341) dataaccessd/1.0','CalendarAgent/1.0 (iPhone; iOS 26)','Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X)'):
                   try:
