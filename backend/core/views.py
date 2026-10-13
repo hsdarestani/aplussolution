@@ -25,6 +25,7 @@ from .services import audit, sign_contract
 from .document_engine import DocumentGenerationError, contract_data, generate_contract_files, generate_worker_packet, validate_required_fields
 from . import oauth
 from .workforce_scope import canonical_client_name
+from .contract_notification_policy import visible_notifications_for_user
 
 
 def scoped(qs, user, worker_field='worker', client_field='client'):
@@ -833,7 +834,8 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = NotificationSerializer
 
     def get_queryset(self):
-        return Notification.objects.filter(user=self.request.user).order_by('-created_at')
+        notifications = Notification.objects.filter(user=self.request.user)
+        return visible_notifications_for_user(notifications, self.request.user).order_by('-created_at')
 
     @action(detail=True, methods=['post'])
     def read(self, request, pk=None):
