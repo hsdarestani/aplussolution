@@ -63,6 +63,7 @@ jobs:
         run: |
           set -euo pipefail
           scp -q -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ConnectTimeout=20             /tmp/aplus-frontend-dist.tgz root@"$PRIMARY_HOST":/tmp/aplus-frontend-dist.tgz
+          scp -q -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 frontend/nginx.conf root@"$PRIMARY_HOST":/tmp/aplus-frontend-nginx.conf
 
       - name: Replace live frontend files on current STRATO primary
         run: |
@@ -81,12 +82,20 @@ jobs:
           rm -f /tmp/aplus-frontend-dist.tgz
 
           # Preserve hashed assets still referenced by open browser sessions.
-          docker exec "$cid" nginx -t
+          # Deploy the checked-in nginx MIME mapping alongside static assets.
+          # Keep a rollback copy in case the updated server config is invalid.
+          docker cp "$cid":/etc/nginx/conf.d/default.conf /tmp/aplus-frontend-nginx-backup.conf
+          docker cp /tmp/aplus-frontend-nginx.conf "$cid":/etc/nginx/conf.d/default.conf
+          if ! docker exec "$cid" nginx -t; then
+            docker cp /tmp/aplus-frontend-nginx-backup.conf "$cid":/etc/nginx/conf.d/default.conf
+            echo 'Restored previous nginx config after failed validation' >&2
+            exit 1
+          fi
           docker cp /tmp/aplus-frontend-dist/. "$cid":/usr/share/nginx/html/
-          docker exec "$cid" nginx -t
           docker exec "$cid" nginx -s reload
 
           rm -rf /tmp/aplus-frontend-dist
+          rm -f /tmp/aplus-frontend-nginx.conf /tmp/aplus-frontend-nginx-backup.conf
           REMOTE
 
       - name: Verify public production
