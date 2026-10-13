@@ -15,33 +15,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 7
     steps:
-      - name: Inspect HTTPS transport and anonymous calendar endpoint
+      - name: Check production HTTPS, encoded tokens, and iOS Calendar user agent
         shell: bash
         run: |
           set -uo pipefail
-          failure=0
-          for host in app.aplus-solution.de solution.smarbiz.sbs; do
-            echo "::group::Check ${host}"
-            echo "DNS:"
-            getent ahostsv4 "$host" | awk '{print $1}' | sort -u || true
-            echo "TLS certificate identity and expiry:"
-            timeout 15 bash -c 'echo | openssl s_client -connect "$1:443" -servername "$1" -verify_return_error 2>/dev/null | openssl x509 -noout -subject -issuer -dates' bash "$host" || true
-            for path in /health/ /api/calendar/feed/not-a-valid-token.ics; do
-              url="https://${host}${path}"
-              file=$(mktemp)
-              echo "Request path: ${path}"
-              code=$(curl --proto '=https' -sS --max-time 25 --connect-timeout 10 --location --output "$file" --write-out '%{http_code}' "$url")
-              exitcode=$?
-              echo "status: ${code:-none}; curl_exit: $exitcode"
-              echo "body_prefix: $(head -c 100 "$file")"
-              if [ "$exitcode" != 0 ]; then failure=1; fi
-              if [ "$path" = '/health/' ] && [ "$code" != '200' ]; then failure=1; fi
-              if [[ "$path" == /api/calendar/feed/* ]] && [ "$code" != '404' ]; then failure=1; fi
-              rm -f "$file"
+          host=app.aplus-solution.de
+          url="https://$host"
+          echo "::group::Primary production TLS"
+          echo | openssl s_client -connect "$host:443" -servername "$host" -verify_return_error 2>/dev/null | openssl x509 -noout -subject -issuer -dates
+          failed=0
+          for test_path in /health/ /api/calendar/feed/not-a-valid-token.ics /api/calendar/feed/dummy%3Asignature.ics; do
+            for agent in 'curl/8.0' 'CalendarAgent/1.0 (iPhone; iOS 26)'; do
+              f=$(mktemp)
+              code=$(curl -sS --proto '=https' --max-time 20 --location -A "$agent" -o "$f" -w '%{http_code}' "$url$test_path")
+              rc=$?
+              echo "path=$test_path agent=$agent http=$code curl_exit=$rc body=$(head -c 70 "$f")"
+              if [ "$rc" != 0 ] || { [ "$test_path" = '/health/' ] && [ "$code" != '200' ]; } || { [ "$test_path" != '/health/' ] && [ "$code" != '404' ]; }; then failed=1; fi
+              rm -f "$f"
             done
-            echo "::endgroup::"
           done
-          if [ "$failure" -ne 0 ]; then
-            echo "::error::At least one public HTTPS calendar transport check failed"
-            exit 1
-          fi
+          echo "::endgroup::"
+          echo "::group::HTTP-to-HTTPS redirect"
+          curl -sS -I --max-time 15 http://app.aplus-solution.de/health/ | head -n 12 || true
+          echo "::endgroup::"
+          echo "::group::Fallback domain check (warning only)"
+          c=$(curl -sS --max-time 25 -o /dev/null -w '%{http_code}' https://solution.smarbiz.sbs/health/); echo "fallback health=$c"
+          if [ "$c" != '200' ]; then echo "::warning::Legacy solution.smarbiz.sbs origin unhealthy (not used by production calendar links)"; fi
+          echo "::endgroup::"
+          test "$failed" = 0
