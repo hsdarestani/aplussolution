@@ -593,6 +593,13 @@ def _new_docx(data, compact_level=0):
     right = outer.cell(0, 1)
     left.text = ''
     right.text = ''
+    for cell in (left, right):
+        for paragraph in cell.paragraphs:
+            paragraph.paragraph_format.space_before = Pt(0)
+            paragraph.paragraph_format.space_after = Pt(0)
+            paragraph.paragraph_format.line_spacing = Pt(1)
+            if paragraph.runs:
+                _font(paragraph.runs[0], size=1)
 
     _add_cell_paragraph(left, 'Anhang 1: Einzelarbeitnehmerüberlassungsvertrag', size=title_size, bold=True, after=gap_section)
     _add_cell_paragraph(left, 'Zwischen', size=body_size, after=gap_small)
@@ -739,12 +746,9 @@ def _build_export_files(data, template_key):
         docx_bytes = _classic_docx(data)
         return docx_bytes, convert_docx_to_pdf(docx_bytes)
 
-    last_pdf = None
-    last_docx = None
     for compact_level in range(4):
         docx_bytes = _new_docx(data, compact_level=compact_level)
         pdf_bytes = convert_docx_to_pdf(docx_bytes)
-        last_docx, last_pdf = docx_bytes, pdf_bytes
         try:
             page_count = len(PdfReader(io.BytesIO(pdf_bytes)).pages)
         except Exception:
