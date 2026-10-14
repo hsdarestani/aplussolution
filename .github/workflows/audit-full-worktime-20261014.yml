@@ -229,20 +229,69 @@ jobs:
                   rw['monthly_count']=len(rw['months'])
                   out.append(rw)
               out.sort(key=lambda w:(w['employee_name'].casefold(),w['employee_number']))
+                        from core.models import PayrollStatement
+              for account in WorkingTimeAccountRecord.objects.all().iterator():
+                  wid=str(account.worker_id)
+                  ym=account.year_month.isoformat()[:7]
+                  if wid in R and ym in R[wid]['months']:
+                      R[wid]['months'][ym]['paid_total_hours_saved']=str(account.paid_total_hours) if account.paid_total_hours is not None else None
+                      R[wid]['months'][ym]['soll_hours']=str(account.soll_hours)
+                      R[wid]['months'][ym]['saldo_cumulative']=str(account.saldo_cumulative)
+              for statement in PayrollStatement.objects.all().iterator():
+                  wid=str(statement.worker_id)
+                  ym=statement.period.isoformat()[:7]
+                  if wid not in R or ym not in R[wid]['months']:continue
+                  row=R[wid]['months'][ym]
+                  row['lexware_statement']=True
+                  slips=[s for s in (statement.raw_data or []) if isinstance(s,dict) and s.get('kind')=='payslip']
+                  if slips:
+                      last=max(enumerate(slips),key=lambda pair:(bool(pair[1].get('is_correction')),pair[0]))[1]
+                      row['lexware_quantity']=str(last.get('quantity') or '')
+                      row['lexware_compensation_type']=str(last.get('compensation_type') or '')
+              by_shift=defaultdict(list)
+              unlinked=[]
+              for ent in TimeEntry.objects.select_related('shift').all().iterator():
+                  if ent.clock_in>NOW:continue
+                  wid=str(ent.worker_id)
+                  if wid not in R:continue
+                  valid=bool(ent.approved or ent.wiw_time_id)
+                  mins=0;rawmins=0;repaired=False
+                  if ent.clock_out:
+                      rawmins=max(0,int((ent.clock_out-ent.clock_in).total_seconds()//60)-int(ent.effective_break_minutes))
+                      local_s,local_e,repaired=_effective_local_interval(ent,TZ)
+                      mins=max(0,int((local_e-local_s).total_seconds()//60)-int(ent.effective_break_minutes))
+                  row={'employee_number':R[wid]['employee_number'],'entry_id':str(ent.pk),
+                       'shift_id':str(ent.shift_id) if ent.shift_id else '',
+                       'start':timezone.localtime(ent.clock_in,TZ).isoformat(),
+                       'end':timezone.localtime(ent.clock_out,TZ).isoformat() if ent.clock_out else '',
+                       'break_minutes':int(ent.effective_break_minutes),
+                       'raw_hours':fmt(rawmins) if ent.clock_out else '',
+                       'counted_hours':fmt(mins) if ent.clock_out and valid else '0.00',
+                       'status':'historical_wiw' if ent.wiw_time_id else ('approved' if ent.approved else 'pending'),
+                       'approved':bool(ent.approved),'rollover_adjusted':repaired,
+                       'edit_reason':(ent.edit_reason or '')[:150]}
+                  if ent.shift_id:by_shift[(str(ent.shift_id),wid)].append(row)
+                  else:unlinked.append(row)
+              shift_rows=[]
+              for sid,s in sorted(shifts.items(),key=lambda item:item[1].starts_at):
+                  if s.status in ('cancelled','draft') or s.ends_at>NOW:continue
+                  for wid in sorted(shift_workers[sid]):
+                      if wid not in R:continue
+                      entries=by_shift.get((sid,wid),[])
+                      actual_minutes=sum(int(Decimal(e['counted_hours'])*60) for e in entries)
+                      shift_rows.append({'worker':R[wid]['employee_name'],
+                            'employee_number':R[wid]['employee_number'],
+                            'date':timezone.localtime(s.starts_at,TZ).date().isoformat(),
+                            'shift_id':sid,'client':s.client.name if s.client_id else '',
+                            'location':s.location.name if s.location_id else '',
+                            'start':timezone.localtime(s.starts_at,TZ).isoformat(),
+                            'end':timezone.localtime(s.ends_at,TZ).isoformat(),
+                            'planned_break_minutes':int(s.break_minutes),
+                            'planned_hours':fmt(shift_plan(s)),
+                            'counted_hours':str(sum((Decimal(e['counted_hours']) for e in entries),Decimal(0)).quantize(TWO)),
+                            'time_entries':len(entries),
+                            'source':'WIW' if s.wiw_shift_id else 'A+',
+                            'status':s.status})
               print(json.dumps({'as_of':NOW.isoformat(),'earliest_entry':seen_start.isoformat() if seen_start else None,
                                 'latest_entry':seen_end.isoformat() if seen_end else None,
-                                'summary':summary,'workers':out},ensure_ascii=False,default=str,separators=(',',':')))
-          PY
-          python3 -m json.tool "$RUNNER_TEMP/attendance-audit.json" >/dev/null
-          gzip -n -c "$RUNNER_TEMP/attendance-audit.json" > "$RUNNER_TEMP/attendance-audit.json.gz"
-          openssl cms -encrypt -binary -aes-256-cbc -in "$RUNNER_TEMP/attendance-audit.json.gz" -out "$RUNNER_TEMP/attendance-audit.cms" -outform DER "$RUNNER_TEMP/audit-recipient.pem"
-          echo 'AUDIT_ENCRYPTED_BEGIN'
-          base64 -w0 "$RUNNER_TEMP/attendance-audit.cms" | fold -w 160
-          echo 'AUDIT_ENCRYPTED_END'
-          rm -f "$RUNNER_TEMP/attendance-audit.json" "$RUNNER_TEMP/attendance-audit.json.gz" "$RUNNER_TEMP/audit-recipient.pem" "$HOME/.ssh/audit_strato_key"
-      - name: Retain only encrypted audit artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: encrypted-full-worktime-audit
-          path: ${{ runner.temp }}/attendance-audit.cms
-          retention-days: 1
+                                'summary':summary,'workers':out,'shift_rows':shift_rows,'entry_rows':[r for rows in by_shift.values() for r in rows]+unlinked},ensure_ascii=False,default=str,separators=(',',':')))
