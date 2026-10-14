@@ -1,0 +1,199 @@
+name: Restore historical WIW employee names once
+on:
+  push:
+    branches: [audit/full-worktime-2026-10-14]
+    paths: ['.github/workflows/restore-wiw-historical-names-once.yml']
+permissions:
+  contents: read
+jobs:
+  restore-names:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Safely update only inactive archived profile display names on Strato
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/wiw_restore_key"
+          chmod 600 "$HOME/.ssh/wiw_restore_key"
+          ssh -i "$HOME/.ssh/wiw_restore_key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 root@"$STRATO_HOST" 'cd /opt/aplussolution && docker compose exec -T backend python -' <<'PY'
+          import os, django, json
+          from django.db import transaction
+          from django.utils import timezone
+          os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+          django.setup()
+          from core.models import User, WorkerProfile, Shift, TimeEntry, WorkingTimeAccountRecord, PayrollStatement
+          mapping = {
+            "48430856": [
+              "Alexandre",
+              "Marques Costa"
+            ],
+            "48430861": [
+              "Melis",
+              "Yilmaz"
+            ],
+            "48430862": [
+              "Ioana",
+              "Paius"
+            ],
+            "48430863": [
+              "Christopher",
+              "Skozcny"
+            ],
+            "48430864": [
+              "Doris",
+              "Adz"
+            ],
+            "48430865": [
+              "Delina",
+              "Tewolde"
+            ],
+            "48430866": [
+              "Ziynet",
+              "Igdedali"
+            ],
+            "48430867": [
+              "Ines",
+              "Jordan"
+            ],
+            "48431075": [
+              "Ernis",
+              "Danjolli"
+            ],
+            "48431268": [
+              "Ashkan",
+              "A"
+            ],
+            "50117298": [
+              "Duygu",
+              "Engin"
+            ],
+            "50399093": [
+              "Helena",
+              "Hakshia"
+            ],
+            "50399124": [
+              "Arianna",
+              "Zangrossi"
+            ],
+            "50400059": [
+              "Pinar",
+              "Koca"
+            ],
+            "50431492": [
+              "Saaid",
+              "Aldarwish"
+            ],
+            "50439292": [
+              "Wesley",
+              "Maina"
+            ],
+            "50439303": [
+              "Valentina",
+              "Chouliaras"
+            ],
+            "50440051": [
+              "Isabell",
+              "Dietrich"
+            ],
+            "50440062": [
+              "Christopher",
+              "Skoczny"
+            ],
+            "50440205": [
+              "Christian",
+              "Trulli"
+            ],
+            "50509164": [
+              "Isra",
+              "Bouzayen"
+            ],
+            "50558263": [
+              "Isabelle",
+              "Arcanjo Köhler"
+            ],
+            "50585029": [
+              "Leila",
+              "Telge"
+            ],
+            "51512151": [
+              "Perla",
+              "Demirova"
+            ],
+            "51582320": [
+              "Salsabila",
+              "Iminwarek"
+            ],
+            "51631461": [
+              "Marie",
+              "Kraß"
+            ],
+            "51710602": [
+              "Connor",
+              "Filsinger"
+            ],
+            "51720094": [
+              "Antonia",
+              "Adamova"
+            ],
+            "51983992": [
+              "Marla",
+              "Amelie"
+            ],
+            "52111254": [
+              "Andre Richi",
+              "Kingue"
+            ],
+            "52175350": [
+              "Cipriano Fabrizio",
+              "Di Tella"
+            ],
+            "52241771": [
+              "Abdel",
+              "Akhayad"
+            ],
+            "52382786": [
+              "Dilan",
+              "Kalkan"
+            ]
+          }
+          counts = {'source_ids':len(mapping),'updated':0,'already_named':0,'not_present':0,'existing_name_conflict':0,'not_archival':0,'active_guard':0}
+          with transaction.atomic():
+              before = [Shift.objects.count(),TimeEntry.objects.count(),WorkingTimeAccountRecord.objects.count(),PayrollStatement.objects.count()]
+              profiles = {str(w.wiw_user_id):w for w in WorkerProfile.objects.select_for_update().select_related('user').filter(wiw_user_id__in=mapping.keys())}
+              for wid, names in mapping.items():
+                  worker = profiles.get(wid)
+                  if worker is None:
+                      counts['not_present'] += 1
+                      continue
+                  user = worker.user
+                  if not (worker.employee_number == 'WIW-HIST-' + wid and str(user.wiw_id or '') == wid and str(user.email or '').lower() == 'wiw-' + wid + '@sync.invalid'):
+                      counts['not_archival'] += 1
+                      continue
+                  if user.is_active or worker.active or user.is_staff or user.is_superuser or user.is_onboarded:
+                      counts['active_guard'] += 1
+                      continue
+                  existing = [(user.first_name or '').strip(),(user.last_name or '').strip()]
+                  if existing == names:
+                      counts['already_named'] += 1
+                      continue
+                  if any(existing):
+                      counts['existing_name_conflict'] += 1
+                      continue
+                  user.first_name, user.last_name = names
+                  user.save(update_fields=['first_name','last_name'])
+                  counts['updated'] += 1
+              after = [Shift.objects.count(),TimeEntry.objects.count(),WorkingTimeAccountRecord.objects.count(),PayrollStatement.objects.count()]
+              assert before == after, 'Unexpected shift/attendance/payroll count change'
+              assert counts['updated'] + counts['already_named'] >= 20, 'Too few names matched: transaction rolled back'
+              # Verify no formerly inactive worker was activated during restoration.
+              assert not WorkerProfile.objects.filter(wiw_user_id__in=mapping.keys(), employee_number__startswith='WIW-HIST-', active=True).exists()
+              print(json.dumps({'result':'success','counts':counts,'historical_shift_time_payroll_counts_unchanged':True}, ensure_ascii=False))
+          
+          PY
