@@ -295,3 +295,17 @@ jobs:
               print(json.dumps({'as_of':NOW.isoformat(),'earliest_entry':seen_start.isoformat() if seen_start else None,
                                 'latest_entry':seen_end.isoformat() if seen_end else None,
                                 'summary':summary,'workers':out,'shift_rows':shift_rows,'entry_rows':[r for rows in by_shift.values() for r in rows]+unlinked},ensure_ascii=False,default=str,separators=(',',':')))
+          PY
+          python3 -m json.tool "$RUNNER_TEMP/attendance-audit.json" >/dev/null
+          gzip -n -c "$RUNNER_TEMP/attendance-audit.json" > "$RUNNER_TEMP/attendance-audit.json.gz"
+          openssl cms -encrypt -binary -aes-256-cbc -in "$RUNNER_TEMP/attendance-audit.json.gz" -out "$RUNNER_TEMP/attendance-audit.cms" -outform DER "$RUNNER_TEMP/audit-recipient.pem"
+          echo 'AUDIT_ENCRYPTED_BEGIN'
+          base64 -w0 "$RUNNER_TEMP/attendance-audit.cms" | fold -w 160
+          echo 'AUDIT_ENCRYPTED_END'
+          rm -f "$RUNNER_TEMP/attendance-audit.json" "$RUNNER_TEMP/attendance-audit.json.gz" "$RUNNER_TEMP/audit-recipient.pem" "$HOME/.ssh/audit_strato_key"
+      - name: Retain only encrypted audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: encrypted-full-worktime-audit
+          path: ${{ runner.temp }}/attendance-audit.cms
+          retention-days: 1
