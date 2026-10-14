@@ -54,247 +54,103 @@ jobs:
           os.environ.setdefault('DJANGO_SETTINGS_MODULE','config.settings')
           django.setup()
           from collections import defaultdict, Counter
-          from decimal import Decimal, ROUND_HALF_UP
-          from zoneinfo import ZoneInfo
+          from datetime import datetime, timedelta
           from django.db import connection, transaction
           from django.utils import timezone
-          from core.models import WorkerProfile, Shift, TimeEntry, WorkingTimeAccountRecord
+          from core.models import Shift, TimeEntry
           from core.shift_slots import ShiftSlot
-          from core.payroll_engine import _effective_local_interval
-          
-          TZ=ZoneInfo('Europe/Berlin')
-          NOW=timezone.now()
-          TWO=Decimal('0.01')
-          def hours(minutes):
-              return (Decimal(minutes)/Decimal(60)).quantize(TWO,rounding=ROUND_HALF_UP)
-          def fmt(minutes):
-              return str(hours(minutes))
-          def month(dt):
-              return timezone.localtime(dt,TZ).date().replace(day=1).isoformat()
-          def add_issue(w,kind,details=None):
-              w['issue_counts'][kind]+=1
-              if details is not None and len(w['examples'])<90:
-                  w['examples'].append({'kind':kind,**details})
-          def shift_plan(s):
-              return max(0,int((s.ends_at-s.starts_at).total_seconds()//60)-int(s.break_minutes or 0))
+          now=timezone.now()
+          def strid(v):
+              if isinstance(v,dict):v=v.get('id')
+              return str(v or '').strip()
+          def interval_ratio(a,b,c,d):
+              if not b or not c or not d or b<=a or d<=c:return 0.0
+              intersect=max(0,(min(b,d)-max(a,c)).total_seconds())
+              short=min((b-a).total_seconds(),(d-c).total_seconds())
+              return intersect/short if short else 0.0
           with transaction.atomic():
-              with connection.cursor() as cursor:
-                  cursor.execute('SET TRANSACTION READ ONLY')
-              workers=list(WorkerProfile.objects.select_related('user').all())
-              R={}
-              for w in workers:
-                  R[str(w.pk)]={
-                      'employee_name': w.user.get_full_name() or str(w.user.email),
-                      'employee_number':w.employee_number,'active':bool(w.active),
-                      'employment_type':w.employment_type,
-                      'planned_minutes':0,'scheduled_shifts':0,'past_shifts_missing_time':0,
-                      'closed_entries':0,'open_entries':0,'counted_entries':0,'pending_entries':0,
-                      'raw_closed_minutes':0,'counted_minutes':0,'pending_minutes':0,
-                      'dashboard_hours':Decimal('0'),'account_months':0,
-                      'issue_counts':Counter(),'examples':[],'months':{},'legacy_months':[]
-                  }
-              shift_workers=defaultdict(set)
-              shifts={}
-              for s in Shift.objects.filter(starts_at__lte=NOW).order_by('starts_at').iterator():
-                  sid=str(s.id)
-                  shifts[sid]=s
-                  if s.worker_id: shift_workers[sid].add(str(s.worker_id))
-              for slot in ShiftSlot.objects.filter(status='claimed',worker__isnull=False,shift_id__in=list(shifts.keys())).only('shift_id','worker_id','confirmation_status').iterator():
-                  sid=str(slot.shift_id)
-                  shift_workers[sid].add(str(slot.worker_id))
+              with connection.cursor() as cursor:cursor.execute('SET TRANSACTION READ ONLY')
+              shifts={str(s.id):s for s in Shift.objects.filter(ends_at__lt=now).select_related('worker__user').iterator()}
+              shiftworkers=defaultdict(set)
               for sid,s in shifts.items():
-                  if s.status in ('draft','cancelled') or s.ends_at>NOW: continue
-                  for wid in shift_workers[sid]:
-                      if wid not in R: continue
-                      rw=R[wid]; rw['scheduled_shifts']+=1; rw['planned_minutes']+=shift_plan(s)
-              expected=defaultdict(int)
-              closed_by_worker=defaultdict(list)
-              entries_by_shift=defaultdict(set)
-              unapproved_by_worker=defaultdict(int)
-              seen_start=None; seen_end=None
-              for e in TimeEntry.objects.select_related('shift').all().order_by('clock_in','id').iterator():
+                  if s.worker_id:shiftworkers[sid].add(str(s.worker_id))
+              for slot in ShiftSlot.objects.filter(status='claimed',worker__isnull=False,shift_id__in=list(shifts.keys())).only('shift_id','worker_id').iterator():
+                  shiftworkers[str(slot.shift_id)].add(str(slot.worker_id))
+              all_times=list(TimeEntry.objects.select_related('worker__user').all().iterator())
+              by_link=defaultdict(list)
+              by_wiw=defaultdict(list)
+              by_worker=defaultdict(list)
+              for e in all_times:
                   wid=str(e.worker_id)
-                  if wid not in R: continue
-                  rw=R[wid]
-                  if e.clock_in>NOW:
-                      add_issue(rw,'future_clock_in',{'entry':str(e.pk),'clock_in':e.clock_in.isoformat()})
-                      continue
-                  if e.clock_out is None:
-                      rw['open_entries']+=1
-                      add_issue(rw,'unfinished_entry',{'entry':str(e.pk),'clock_in':e.clock_in.isoformat()})
-                      continue
-                  rw['closed_entries']+=1
-                  start=e.clock_in; end=e.clock_out
-                  seen_start=min(seen_start,start) if seen_start else start
-                  seen_end=max(seen_end,end) if seen_end else end
-                  gross=max(0,int((end-start).total_seconds()//60))
-                  breakmin=int(e.effective_break_minutes)
-                  raw_work=max(0,gross-breakmin)
-                  rw['raw_closed_minutes']+=raw_work
-                  accepted=bool(e.approved or e.wiw_time_id)
-                  if e.clock_out<=e.clock_in:
-                      add_issue(rw,'nonpositive_duration',{'entry':str(e.pk),'in':start.isoformat(),'out':end.isoformat()})
-                  if end>NOW:
-                      add_issue(rw,'future_clock_out',{'entry':str(e.pk),'out':end.isoformat()})
-                  if breakmin>gross:
-                      add_issue(rw,'break_exceeds_duration',{'entry':str(e.pk),'break_minutes':breakmin,'gross_minutes':gross})
-                  if gross>18*60:
-                      add_issue(rw,'very_long_record',{'entry':str(e.pk),'gross_minutes':gross})
-                  if e.shift_id:
-                      sid=str(e.shift_id)
-                      entries_by_shift[(sid,wid)].add(str(e.pk))
-                      if sid in shift_workers and wid not in shift_workers[sid]:
-                          add_issue(rw,'current_shift_worker_differs',{'entry':str(e.pk),'shift':sid})
-                  else:
-                      add_issue(rw,'time_without_shift',{'entry':str(e.pk),'month':month(start)})
-                  if accepted:
-                      local_start,local_end,repaired=_effective_local_interval(e,TZ)
-                      corrected_gross=max(0,int((local_end-local_start).total_seconds()//60))
-                      accepted_minutes=max(0,corrected_gross-breakmin)
-                      rw['counted_entries']+=1
-                      rw['counted_minutes']+=accepted_minutes
-                      expected[(wid,month(start))]+=accepted_minutes
-                      if repaired:
-                          add_issue(rw,'rollover_corrected',{'entry':str(e.pk),'raw_minutes':raw_work,'used_minutes':accepted_minutes})
-                      if e.approved and e.shift_id and (start<e.shift.starts_at or end>e.shift.ends_at):
-                          add_issue(rw,'approved_outside_schedule',{'entry':str(e.pk),'month':month(start)})
-                  else:
-                      rw['pending_entries']+=1
-                      rw['pending_minutes']+=raw_work
-                      unapproved_by_worker[wid]+=1
-                  closed_by_worker[wid].append((start,end,str(e.pk)))
-              for wid,intervals in closed_by_worker.items():
-                  previous_end=None; previous_id=None
-                  for start,end,eid in intervals:
-                      if previous_end and start<previous_end:
-                          add_issue(R[wid],'overlapping_time_entries',{'entry':eid,'prior_entry':previous_id})
-                      if previous_end is None or end>previous_end:
-                          previous_end=end; previous_id=eid
+                  by_worker[wid].append(e)
+                  if e.shift_id:by_link[(str(e.shift_id),wid)].append(e)
+                  remote=strid((e.wiw_payload or {}).get('shift_id') or (e.wiw_payload or {}).get('shift'))
+                  if remote:by_wiw[remote].append(e)
+              missing=[]
+              summary=Counter()
+              group_stats=defaultdict(Counter)
+              candidates=[]
+              consumed=set()
               for sid,s in shifts.items():
-                  if s.status in ('draft','cancelled') or s.ends_at>NOW:continue
-                  for wid in shift_workers[sid]:
-                      if wid in R and (sid,wid) not in entries_by_shift:
-                          R[wid]['past_shifts_missing_time']+=1
-                          if R[wid]['past_shifts_missing_time']<=15:
-                              add_issue(R[wid],'scheduled_shift_without_time_entry',{'shift':sid,'date':timezone.localtime(s.starts_at,TZ).date().isoformat(),'planned_minutes':shift_plan(s)})
-                          else:
-                              R[wid]['issue_counts']['scheduled_shift_without_time_entry']+=1
-              for a in WorkingTimeAccountRecord.objects.select_related('worker__user').all().order_by('worker_id','year_month').iterator():
-                  wid=str(a.worker_id)
-                  if wid not in R:continue
-                  rw=R[wid]
-                  ym=a.year_month.isoformat()
-                  if a.year_month>timezone.localtime(NOW,TZ).date().replace(day=1):continue
-                  key=(wid,ym)
-                  is_source=a.source=='aplus_time_entries'
-                  rw['account_months']+=1
-                  rw['dashboard_hours']+=Decimal(str(a.ist_hours))
-                  expected_hours=hours(expected.get(key,0))
-                  actual_db_hours=Decimal(str(a.ist_hours))
-                  item={'month':ym[:7],'source':a.source,'expected_counted_hours':str(expected_hours),
-                        'dashboard_ist_hours':str(actual_db_hours),'difference_hours':str((actual_db_hours-expected_hours).quantize(TWO)),
-                        'raw_snapshot_count':len(a.raw_entries or [])}
-                  rw['months'][ym[:7]]=item
-                  if not is_source:
-                      rw['legacy_months'].append(ym[:7])
-                      if expected.get(key,0):
-                          add_issue(rw,'legacy_month_has_attendance_unverified',{'month':ym[:7],'ledger_source':a.source})
-                  else:
-                      if abs(actual_db_hours-expected_hours)>=Decimal('0.01'):
-                          add_issue(rw,'ledger_hours_mismatch',{'month':ym[:7],'ledger_hours':str(actual_db_hours),'expected_hours':str(expected_hours)})
-                      snapshot_minutes=sum(int(r.get('worked_minutes') or 0) for r in (a.raw_entries or []) if isinstance(r,dict))
-                      if abs(hours(snapshot_minutes)-actual_db_hours)>=Decimal('0.01'):
-                          add_issue(rw,'ledger_snapshot_mismatch',{'month':ym[:7],'snapshot_hours':str(hours(snapshot_minutes)),'ledger_hours':str(actual_db_hours)})
-              for (wid,ym),mins in expected.items():
-                  if wid in R and ym[:7] not in R[wid]['months']:
-                      add_issue(R[wid],'missing_monthly_account',{'month':ym[:7],'expected_hours':fmt(mins)})
-              summary={'employees':len(R),'past_shifts':sum(w['scheduled_shifts'] for w in R.values()),
-                       'completed_entries':sum(w['closed_entries'] for w in R.values()),
-                       'open_entries':sum(w['open_entries'] for w in R.values()),
-                       'counted_entries':sum(w['counted_entries'] for w in R.values()),
-                       'pending_entries':sum(w['pending_entries'] for w in R.values()),
-                       'planned_hours':fmt(sum(w['planned_minutes'] for w in R.values())),
-                       'closed_raw_hours':fmt(sum(w['raw_closed_minutes'] for w in R.values())),
-                       'counted_hours':fmt(sum(w['counted_minutes'] for w in R.values())),
-                       'pending_hours':fmt(sum(w['pending_minutes'] for w in R.values())),
-                       'dashboard_hours':str(sum((w['dashboard_hours'] for w in R.values()),Decimal(0)).quantize(TWO)),
-                       'missing_time_shifts':sum(w['past_shifts_missing_time'] for w in R.values()),
-                       'issue_counts':dict(sum((w['issue_counts'] for w in R.values()),Counter()))}
-              out=[]
-              for wid,rw in R.items():
-                  rw['dashboard_hours']=str(rw['dashboard_hours'].quantize(TWO))
-                  for key in ('planned_minutes','raw_closed_minutes','counted_minutes','pending_minutes'):
-                      rw[key.replace('_minutes','_hours')]=fmt(rw.pop(key))
-                  rw['issue_counts']=dict(rw['issue_counts'])
-                  rw['monthly_count']=len(rw['months'])
-                  out.append(rw)
-              out.sort(key=lambda w:(w['employee_name'].casefold(),w['employee_number']))
-              from core.models import PayrollStatement
-              for account in WorkingTimeAccountRecord.objects.all().iterator():
-                  wid=str(account.worker_id)
-                  ym=account.year_month.isoformat()[:7]
-                  if wid in R and ym in R[wid]['months']:
-                      R[wid]['months'][ym]['paid_total_hours_saved']=str(account.paid_total_hours) if account.paid_total_hours is not None else None
-                      R[wid]['months'][ym]['soll_hours']=str(account.soll_hours)
-                      R[wid]['months'][ym]['saldo_cumulative']=str(account.saldo_cumulative)
-              for statement in PayrollStatement.objects.all().iterator():
-                  wid=str(statement.worker_id)
-                  ym=statement.period.isoformat()[:7]
-                  if wid not in R or ym not in R[wid]['months']:continue
-                  row=R[wid]['months'][ym]
-                  row['lexware_statement']=True
-                  slips=[s for s in (statement.raw_data or []) if isinstance(s,dict) and s.get('kind')=='payslip']
-                  if slips:
-                      last=max(enumerate(slips),key=lambda pair:(bool(pair[1].get('is_correction')),pair[0]))[1]
-                      row['lexware_quantity']=str(last.get('quantity') or '')
-                      row['lexware_compensation_type']=str(last.get('compensation_type') or '')
-              by_shift=defaultdict(list)
-              unlinked=[]
-              for ent in TimeEntry.objects.select_related('shift').all().iterator():
-                  if ent.clock_in>NOW:continue
-                  wid=str(ent.worker_id)
-                  if wid not in R:continue
-                  valid=bool(ent.approved or ent.wiw_time_id)
-                  mins=0;rawmins=0;repaired=False
-                  if ent.clock_out:
-                      rawmins=max(0,int((ent.clock_out-ent.clock_in).total_seconds()//60)-int(ent.effective_break_minutes))
-                      local_s,local_e,repaired=_effective_local_interval(ent,TZ)
-                      mins=max(0,int((local_e-local_s).total_seconds()//60)-int(ent.effective_break_minutes))
-                  row={'employee_number':R[wid]['employee_number'],'entry_id':str(ent.pk),
-                       'shift_id':str(ent.shift_id) if ent.shift_id else '',
-                       'start':timezone.localtime(ent.clock_in,TZ).isoformat(),
-                       'end':timezone.localtime(ent.clock_out,TZ).isoformat() if ent.clock_out else '',
-                       'break_minutes':int(ent.effective_break_minutes),
-                       'raw_hours':fmt(rawmins) if ent.clock_out else '',
-                       'counted_hours':fmt(mins) if ent.clock_out and valid else '0.00',
-                       'status':'historical_wiw' if ent.wiw_time_id else ('approved' if ent.approved else 'pending'),
-                       'approved':bool(ent.approved),'rollover_adjusted':repaired,
-                       'edit_reason':(ent.edit_reason or '')[:150]}
-                  if ent.shift_id:by_shift[(str(ent.shift_id),wid)].append(row)
-                  else:unlinked.append(row)
-              shift_rows=[]
-              for sid,s in sorted(shifts.items(),key=lambda item:item[1].starts_at):
-                  if s.status in ('cancelled','draft') or s.ends_at>NOW:continue
-                  for wid in sorted(shift_workers[sid]):
-                      if wid not in R:continue
-                      entries=by_shift.get((sid,wid),[])
-                      actual_minutes=sum(int(Decimal(e['counted_hours'])*60) for e in entries)
-                      shift_rows.append({'worker':R[wid]['employee_name'],
-                            'employee_number':R[wid]['employee_number'],
-                            'date':timezone.localtime(s.starts_at,TZ).date().isoformat(),
-                            'shift_id':sid,'client':s.client.name if s.client_id else '',
-                            'location':s.location.name if s.location_id else '',
-                            'start':timezone.localtime(s.starts_at,TZ).isoformat(),
-                            'end':timezone.localtime(s.ends_at,TZ).isoformat(),
-                            'planned_break_minutes':int(s.break_minutes),
-                            'planned_hours':fmt(shift_plan(s)),
-                            'counted_hours':str(sum((Decimal(e['counted_hours']) for e in entries),Decimal(0)).quantize(TWO)),
-                            'time_entries':len(entries),
-                            'source':'WIW' if s.wiw_shift_id else 'A+',
-                            'status':s.status})
-              print(json.dumps({'as_of':NOW.isoformat(),'earliest_entry':seen_start.isoformat() if seen_start else None,
-                                'latest_entry':seen_end.isoformat() if seen_end else None,
-                                'summary':summary,'workers':out,'shift_rows':shift_rows,'entry_rows':[r for rows in by_shift.values() for r in rows]+unlinked},ensure_ascii=False,default=str,separators=(',',':')))
+                  if s.status in ('draft','cancelled'):continue
+                  for wid in sorted(shiftworkers.get(sid,set())):
+                      if by_link.get((sid,wid)):continue
+                      is_wiw=bool(s.wiw_shift_id)
+                      worker=(s.worker if s.worker_id and str(s.worker_id)==wid else None)
+                      if worker is None and wid in by_worker and by_worker[wid]:worker=by_worker[wid][0].worker
+                      if worker is None:
+                          from core.models import WorkerProfile
+                          worker=WorkerProfile.objects.select_related('user').filter(pk=wid).first()
+                      synthetic=bool(worker and worker.user.email.lower().endswith('@sync.invalid'))
+                      remote=by_wiw.get(str(s.wiw_shift_id),[]) if is_wiw else []
+                      exact_same=[e for e in remote if str(e.worker_id)==wid]
+                      exact_other=[e for e in remote if str(e.worker_id)!=wid]
+                      overlap_unlinked=[e for e in by_worker.get(wid,[]) if e.shift_id is None and e.clock_out and interval_ratio(e.clock_in,e.clock_out,s.starts_at,s.ends_at)>=0.7]
+                      overlap_other=[e for e in by_worker.get(wid,[]) if e.shift_id is not None and str(e.shift_id)!=sid and e.clock_out and interval_ratio(e.clock_in,e.clock_out,s.starts_at,s.ends_at)>=0.7]
+                      year=s.starts_at.date().year
+                      group=('WIW' if is_wiw else 'A+')+('_historical_stub' if synthetic else '_person')
+                      rec={'shift_id':sid,'employee_number':worker.employee_number if worker else '',
+                           'employee_name':worker.user.get_full_name() if worker else '',
+                           'date':timezone.localtime(s.starts_at).date().isoformat(),
+                           'source':'WIW' if is_wiw else 'A+','historical_stub':synthetic,
+                           'worker_active':bool(worker and worker.active),'shift_wiw_id':str(s.wiw_shift_id or ''),
+                           'external_time_same_worker_ids':[str(e.id) for e in exact_same],
+                           'external_time_other_worker_ids':[str(e.id) for e in exact_other],
+                           'overlap_unlinked_ids':[str(e.id) for e in overlap_unlinked],
+                           'overlap_other_shift_ids':[str(e.id) for e in overlap_other]}
+                      if exact_same:
+                          rec['classification']='external_id_matching_attendance'
+                      elif exact_other:
+                          rec['classification']='external_id_worker_mismatch'
+                      elif overlap_unlinked:
+                          rec['classification']='time_overlap_unlinked_candidate'
+                      elif overlap_other:
+                          rec['classification']='time_overlap_linked_elsewhere'
+                      elif synthetic:
+                          rec['classification']='wiw_archival_unverified'
+                      elif is_wiw:
+                          rec['classification']='wiw_import_no_matched_attendance'
+                      else:
+                          rec['classification']='aplus_unreported_needs_review'
+                      summary[rec['classification']]+=1
+                      group_stats[group][rec['classification']]+=1
+                      missing.append(rec)
+              # Out-of-band source evidence: unlinked WIW times with matching remote shift identity
+              unlinked=[e for e in all_times if e.shift_id is None and e.wiw_time_id]
+              unlinked_external=Counter()
+              for e in unlinked:
+                  remote=strid((e.wiw_payload or {}).get('shift_id') or (e.wiw_payload or {}).get('shift'))
+                  if not remote:unlinked_external['source_missing_shift_reference']+=1;continue
+                  target=[s for s in shifts.values() if str(s.wiw_shift_id or '')==remote]
+                  if target:unlinked_external['shift_wiw_id_exists']+=1
+                  else:unlinked_external['shift_wiw_id_not_in_past_shifts']+=1
+              out={'as_of':now.isoformat(),'missing_total':len(missing),
+                   'classifications':dict(summary),
+                   'by_group':{key:dict(counter) for key,counter in group_stats.items()},
+                   'historical_unlinked_wiw_times':len(unlinked),
+                   'unlinked_external_reference':dict(unlinked_external),
+                   'rows':missing}
+              print(json.dumps(out,default=str,separators=(',',':')))
           PY
           python3 -m json.tool "$RUNNER_TEMP/attendance-audit.json" >/dev/null
           gzip -n -c "$RUNNER_TEMP/attendance-audit.json" > "$RUNNER_TEMP/attendance-audit.json.gz"
