@@ -1,0 +1,248 @@
+name: Read-only complete attendance audit (2026-10-14)
+on:
+  push:
+    branches: [audit/full-worktime-2026-10-14]
+    paths: ['.github/workflows/audit-full-worktime-20261014.yml']
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Read attendance, shifts and ledger without modifying production
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/audit_strato_key"
+          chmod 600 "$HOME/.ssh/audit_strato_key"
+          cat > "$RUNNER_TEMP/audit-recipient.pem" <<'CERT'
+          -----BEGIN CERTIFICATE-----
+          MIIENTCCAp2gAwIBAgIUbFBWaMdGc+fPGqXW6uEJ2oARRW8wDQYJKoZIhvcNAQEL
+          BQAwKjEoMCYGA1UEAwwfQXBsdXMgV29ya2ZvcmNlIEF1ZGl0IFRlbXBvcmFyeTAe
+          Fw0yNjEwMTQwNjM3MzVaFw0yNjEwMTUwNjM3MzVaMCoxKDAmBgNVBAMMH0FwbHVz
+          IFdvcmtmb3JjZSBBdWRpdCBUZW1wb3JhcnkwggGiMA0GCSqGSIb3DQEBAQUAA4IB
+          jwAwggGKAoIBgQCgw10PCViGmIxnD5BewTPZBllYtgwkv7S+Vgd8ZsAi9Qe6/Sau
+          ooH7KO9iQzpol6pCbJT0y6TpUCcxw7bMjhwAdjlzIrqZXqMtPxiLIl3antm0ijWd
+          P/tG8/eIhr7sGu/UZw9U8M1mt3BVH4lMSdATkTXotKt/NC53MDUEJacxLTtZKER2
+          EyaTO/HTP+3urSghuvhLMac1RwIDMD/r5O3CEO66shXlJz88xCdpy4BbZVdFUxs2
+          yQMG7OYVPE0v20Q1q5ZyTXmVfSYtqY5IMFm0yCJCdM283La74YSBxxv7r421F9Vc
+          uKuE86g2fTteN/2MTi6B0q415QTY7sO6p+1AIICvQffQinMqKpXhff0Tz79KKStC
+          DqIu2uUGZ7NHxFxk9hsDKldV+xWuppu0Hkbe1jlg6Te562hFloiLrUOqA84rVs5/
+          c0E6N22zHxN/0MP5HZWus2npzP33+AKJ2prLa9fdAO5PTG8CDcnjkSW7pxCD0FH+
+          Zks7iWi6GzNSw7ECAwEAAaNTMFEwHQYDVR0OBBYEFAuS+rALCSj6/WiaJWkRCtu+
+          C9jIMB8GA1UdIwQYMBaAFAuS+rALCSj6/WiaJWkRCtu+C9jIMA8GA1UdEwEB/wQF
+          MAMBAf8wDQYJKoZIhvcNAQELBQADggGBAH+GFfCnaag8ZNDX2+dEbaSpLUMNtIyD
+          md3JlrQK+HP1mbFAj82s7/76C3vrZuXzmIiuaqU+0rxpdjWGOyZQRkWpg9kvM1Og
+          EYcEJLJRSV/WFvMTrrxlyueZgDyWu1Xw91m+/QibSwPPeqFr8T80qH2LJP355Ayn
+          NsXP3jHuT1UDf9D8iizZExqKdm1E/IwH78zyHk2xUZYjWSD0rS4SiGYuaoKlmxN6
+          WKjt9l2SkBbMuLFdhwXoIFeM1UC7GwcuUvyv1burW0GPYH1zQIwDHJXpQ7SnV04A
+          ECJkWiemvc0XVjM4N8H88/voELjH5TLRDK0frZvGUXZKhN2hRD7dQ0+EClZfRaEB
+          EFCg+aWsZtY88uqqOwMkoyhs5XRabf4alVy9R8Fa3+4BJ3ou+m1D9GzHnifXxkVg
+          xCHhC0tabreBZYw862lstRiTl21eg+AHXJO2xvFq6xw/MgccCfryzMTlTj8PpoJp
+          k3aujL8f0t1tvPhl+oFVzgAyata1rp/Clg==
+          -----END CERTIFICATE-----
+          CERT
+          ssh -i "$HOME/.ssh/audit_strato_key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 root@"$STRATO_HOST" 'cd /opt/aplussolution && docker compose exec -T backend python -' <<'PY' > "$RUNNER_TEMP/attendance-audit.json"
+          import os, django, json
+          os.environ.setdefault('DJANGO_SETTINGS_MODULE','config.settings')
+          django.setup()
+          from collections import defaultdict, Counter
+          from decimal import Decimal, ROUND_HALF_UP
+          from zoneinfo import ZoneInfo
+          from django.db import connection, transaction
+          from django.utils import timezone
+          from core.models import WorkerProfile, Shift, TimeEntry, WorkingTimeAccountRecord
+          from core.shift_slots import ShiftSlot
+          from core.payroll_engine import _effective_local_interval
+          
+          TZ=ZoneInfo('Europe/Berlin')
+          NOW=timezone.now()
+          TWO=Decimal('0.01')
+          def hours(minutes):
+              return (Decimal(minutes)/Decimal(60)).quantize(TWO,rounding=ROUND_HALF_UP)
+          def fmt(minutes):
+              return str(hours(minutes))
+          def month(dt):
+              return timezone.localtime(dt,TZ).date().replace(day=1).isoformat()
+          def add_issue(w,kind,details=None):
+              w['issue_counts'][kind]+=1
+              if details is not None and len(w['examples'])<90:
+                  w['examples'].append({'kind':kind,**details})
+          def shift_plan(s):
+              return max(0,int((s.ends_at-s.starts_at).total_seconds()//60)-int(s.break_minutes or 0))
+          with transaction.atomic():
+              with connection.cursor() as cursor:
+                  cursor.execute('SET TRANSACTION READ ONLY')
+              workers=list(WorkerProfile.objects.select_related('user').all())
+              R={}
+              for w in workers:
+                  R[str(w.pk)]={
+                      'employee_name': w.user.get_full_name() or str(w.user.email),
+                      'employee_number':w.employee_number,'active':bool(w.active),
+                      'employment_type':w.employment_type,
+                      'planned_minutes':0,'scheduled_shifts':0,'past_shifts_missing_time':0,
+                      'closed_entries':0,'open_entries':0,'counted_entries':0,'pending_entries':0,
+                      'raw_closed_minutes':0,'counted_minutes':0,'pending_minutes':0,
+                      'dashboard_hours':Decimal('0'),'account_months':0,
+                      'issue_counts':Counter(),'examples':[],'months':{},'legacy_months':[]
+                  }
+              shift_workers=defaultdict(set)
+              shifts={}
+              for s in Shift.objects.filter(starts_at__lte=NOW).order_by('starts_at').iterator():
+                  sid=str(s.id)
+                  shifts[sid]=s
+                  if s.worker_id: shift_workers[sid].add(str(s.worker_id))
+              for slot in ShiftSlot.objects.filter(status='claimed',worker__isnull=False,shift_id__in=list(shifts.keys())).only('shift_id','worker_id','confirmation_status').iterator():
+                  sid=str(slot.shift_id)
+                  shift_workers[sid].add(str(slot.worker_id))
+              for sid,s in shifts.items():
+                  if s.status in ('draft','cancelled') or s.ends_at>NOW: continue
+                  for wid in shift_workers[sid]:
+                      if wid not in R: continue
+                      rw=R[wid]; rw['scheduled_shifts']+=1; rw['planned_minutes']+=shift_plan(s)
+              expected=defaultdict(int)
+              closed_by_worker=defaultdict(list)
+              entries_by_shift=defaultdict(set)
+              unapproved_by_worker=defaultdict(int)
+              seen_start=None; seen_end=None
+              for e in TimeEntry.objects.select_related('shift').all().order_by('clock_in','id').iterator():
+                  wid=str(e.worker_id)
+                  if wid not in R: continue
+                  rw=R[wid]
+                  if e.clock_in>NOW:
+                      add_issue(rw,'future_clock_in',{'entry':str(e.pk),'clock_in':e.clock_in.isoformat()})
+                      continue
+                  if e.clock_out is None:
+                      rw['open_entries']+=1
+                      add_issue(rw,'unfinished_entry',{'entry':str(e.pk),'clock_in':e.clock_in.isoformat()})
+                      continue
+                  rw['closed_entries']+=1
+                  start=e.clock_in; end=e.clock_out
+                  seen_start=min(seen_start,start) if seen_start else start
+                  seen_end=max(seen_end,end) if seen_end else end
+                  gross=max(0,int((end-start).total_seconds()//60))
+                  breakmin=int(e.effective_break_minutes)
+                  raw_work=max(0,gross-breakmin)
+                  rw['raw_closed_minutes']+=raw_work
+                  accepted=bool(e.approved or e.wiw_time_id)
+                  if e.clock_out<=e.clock_in:
+                      add_issue(rw,'nonpositive_duration',{'entry':str(e.pk),'in':start.isoformat(),'out':end.isoformat()})
+                  if end>NOW:
+                      add_issue(rw,'future_clock_out',{'entry':str(e.pk),'out':end.isoformat()})
+                  if breakmin>gross:
+                      add_issue(rw,'break_exceeds_duration',{'entry':str(e.pk),'break_minutes':breakmin,'gross_minutes':gross})
+                  if gross>18*60:
+                      add_issue(rw,'very_long_record',{'entry':str(e.pk),'gross_minutes':gross})
+                  if e.shift_id:
+                      sid=str(e.shift_id)
+                      entries_by_shift[(sid,wid)].add(str(e.pk))
+                      if sid in shift_workers and wid not in shift_workers[sid]:
+                          add_issue(rw,'current_shift_worker_differs',{'entry':str(e.pk),'shift':sid})
+                  else:
+                      add_issue(rw,'time_without_shift',{'entry':str(e.pk),'month':month(start)})
+                  if accepted:
+                      local_start,local_end,repaired=_effective_local_interval(e,TZ)
+                      corrected_gross=max(0,int((local_end-local_start).total_seconds()//60))
+                      accepted_minutes=max(0,corrected_gross-breakmin)
+                      rw['counted_entries']+=1
+                      rw['counted_minutes']+=accepted_minutes
+                      expected[(wid,month(start))]+=accepted_minutes
+                      if repaired:
+                          add_issue(rw,'rollover_corrected',{'entry':str(e.pk),'raw_minutes':raw_work,'used_minutes':accepted_minutes})
+                      if e.approved and e.shift_id and (start<e.shift.starts_at or end>e.shift.ends_at):
+                          add_issue(rw,'approved_outside_schedule',{'entry':str(e.pk),'month':month(start)})
+                  else:
+                      rw['pending_entries']+=1
+                      rw['pending_minutes']+=raw_work
+                      unapproved_by_worker[wid]+=1
+                  closed_by_worker[wid].append((start,end,str(e.pk)))
+              for wid,intervals in closed_by_worker.items():
+                  previous_end=None; previous_id=None
+                  for start,end,eid in intervals:
+                      if previous_end and start<previous_end:
+                          add_issue(R[wid],'overlapping_time_entries',{'entry':eid,'prior_entry':previous_id})
+                      if previous_end is None or end>previous_end:
+                          previous_end=end; previous_id=eid
+              for sid,s in shifts.items():
+                  if s.status in ('draft','cancelled') or s.ends_at>NOW:continue
+                  for wid in shift_workers[sid]:
+                      if wid in R and (sid,wid) not in entries_by_shift:
+                          R[wid]['past_shifts_missing_time']+=1
+                          if R[wid]['past_shifts_missing_time']<=15:
+                              add_issue(R[wid],'scheduled_shift_without_time_entry',{'shift':sid,'date':timezone.localtime(s.starts_at,TZ).date().isoformat(),'planned_minutes':shift_plan(s)})
+                          else:
+                              R[wid]['issue_counts']['scheduled_shift_without_time_entry']+=1
+              for a in WorkingTimeAccountRecord.objects.select_related('worker__user').all().order_by('worker_id','year_month').iterator():
+                  wid=str(a.worker_id)
+                  if wid not in R:continue
+                  rw=R[wid]
+                  ym=a.year_month.isoformat()
+                  if a.year_month>timezone.localtime(NOW,TZ).date().replace(day=1):continue
+                  key=(wid,ym)
+                  is_source=a.source=='aplus_time_entries'
+                  rw['account_months']+=1
+                  rw['dashboard_hours']+=Decimal(str(a.ist_hours))
+                  expected_hours=hours(expected.get(key,0))
+                  actual_db_hours=Decimal(str(a.ist_hours))
+                  item={'month':ym[:7],'source':a.source,'expected_counted_hours':str(expected_hours),
+                        'dashboard_ist_hours':str(actual_db_hours),'difference_hours':str((actual_db_hours-expected_hours).quantize(TWO)),
+                        'raw_snapshot_count':len(a.raw_entries or [])}
+                  rw['months'][ym[:7]]=item
+                  if not is_source:
+                      rw['legacy_months'].append(ym[:7])
+                      if expected.get(key,0):
+                          add_issue(rw,'legacy_month_has_attendance_unverified',{'month':ym[:7],'ledger_source':a.source})
+                  else:
+                      if abs(actual_db_hours-expected_hours)>=Decimal('0.01'):
+                          add_issue(rw,'ledger_hours_mismatch',{'month':ym[:7],'ledger_hours':str(actual_db_hours),'expected_hours':str(expected_hours)})
+                      snapshot_minutes=sum(int(r.get('worked_minutes') or 0) for r in (a.raw_entries or []) if isinstance(r,dict))
+                      if abs(hours(snapshot_minutes)-actual_db_hours)>=Decimal('0.01'):
+                          add_issue(rw,'ledger_snapshot_mismatch',{'month':ym[:7],'snapshot_hours':str(hours(snapshot_minutes)),'ledger_hours':str(actual_db_hours)})
+              for (wid,ym),mins in expected.items():
+                  if wid in R and ym[:7] not in R[wid]['months']:
+                      add_issue(R[wid],'missing_monthly_account',{'month':ym[:7],'expected_hours':fmt(mins)})
+              summary={'employees':len(R),'past_shifts':sum(w['scheduled_shifts'] for w in R.values()),
+                       'completed_entries':sum(w['closed_entries'] for w in R.values()),
+                       'open_entries':sum(w['open_entries'] for w in R.values()),
+                       'counted_entries':sum(w['counted_entries'] for w in R.values()),
+                       'pending_entries':sum(w['pending_entries'] for w in R.values()),
+                       'planned_hours':fmt(sum(w['planned_minutes'] for w in R.values())),
+                       'closed_raw_hours':fmt(sum(w['raw_closed_minutes'] for w in R.values())),
+                       'counted_hours':fmt(sum(w['counted_minutes'] for w in R.values())),
+                       'pending_hours':fmt(sum(w['pending_minutes'] for w in R.values())),
+                       'dashboard_hours':str(sum((w['dashboard_hours'] for w in R.values()),Decimal(0)).quantize(TWO)),
+                       'missing_time_shifts':sum(w['past_shifts_missing_time'] for w in R.values()),
+                       'issue_counts':dict(sum((w['issue_counts'] for w in R.values()),Counter()))}
+              out=[]
+              for wid,rw in R.items():
+                  rw['dashboard_hours']=str(rw['dashboard_hours'].quantize(TWO))
+                  for key in ('planned_minutes','raw_closed_minutes','counted_minutes','pending_minutes'):
+                      rw[key.replace('_minutes','_hours')]=fmt(rw.pop(key))
+                  rw['issue_counts']=dict(rw['issue_counts'])
+                  rw['monthly_count']=len(rw['months'])
+                  out.append(rw)
+              out.sort(key=lambda w:(w['employee_name'].casefold(),w['employee_number']))
+              print(json.dumps({'as_of':NOW.isoformat(),'earliest_entry':seen_start.isoformat() if seen_start else None,
+                                'latest_entry':seen_end.isoformat() if seen_end else None,
+                                'summary':summary,'workers':out},ensure_ascii=False,default=str,separators=(',',':')))
+          PY
+          python3 -m json.tool "$RUNNER_TEMP/attendance-audit.json" >/dev/null
+          gzip -n -c "$RUNNER_TEMP/attendance-audit.json" > "$RUNNER_TEMP/attendance-audit.json.gz"
+          openssl cms -encrypt -binary -aes-256-cbc -in "$RUNNER_TEMP/attendance-audit.json.gz" -out "$RUNNER_TEMP/attendance-audit.cms" -outform DER "$RUNNER_TEMP/audit-recipient.pem"
+          echo 'AUDIT_ENCRYPTED_BEGIN'
+          base64 -w0 "$RUNNER_TEMP/attendance-audit.cms" | fold -w 160
+          echo 'AUDIT_ENCRYPTED_END'
+          rm -f "$RUNNER_TEMP/attendance-audit.json" "$RUNNER_TEMP/attendance-audit.json.gz" "$RUNNER_TEMP/audit-recipient.pem" "$HOME/.ssh/audit_strato_key"
+      - name: Retain only encrypted audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: encrypted-full-worktime-audit
+          path: ${{ runner.temp }}/attendance-audit.cms
+          retention-days: 1
