@@ -229,7 +229,7 @@ jobs:
                   rw['monthly_count']=len(rw['months'])
                   out.append(rw)
               out.sort(key=lambda w:(w['employee_name'].casefold(),w['employee_number']))
-                        from core.models import PayrollStatement
+              from core.models import PayrollStatement
               for account in WorkingTimeAccountRecord.objects.all().iterator():
                   wid=str(account.worker_id)
                   ym=account.year_month.isoformat()[:7]
