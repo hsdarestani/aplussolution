@@ -8,7 +8,7 @@ It must not be merged to main until the owner separately approves the combined r
 ## Why two layers are needed
 
 1. `frontend/src/AppAvailabilityGuard.tsx` displays an A+ branded screen inside a **running**
-   web app or newly built Capacitor shell when the backend health endpoint fails
+   web app or newly built Capacitor shell when the DB-aware, read-only \`/api/status/ready/\` endpoint fails
    twice, 6 seconds apart. It preserves authentication, state, forms and history.
    It never forcibly reloads the WebView or resurrects the legacy PWA service worker.
    While healthy, a low-cost heartbeat runs around once per minute; during an
@@ -22,7 +22,7 @@ It must not be merged to main until the owner separately approves the combined r
    times out, it returns the self-contained maintenance page directly from the
    Cloudflare edge with HTTP 503 and Cache-Control: no-store. API, authentication,
    media, downloads and calendar traffic are never replaced by HTML.
-   A separate `/__aplus/availability` check verifies **both** the backend health
+   A separate `/__aplus/availability` check verifies **both** the backend + database readiness
    and frontend HTML before the maintenance page redirects back to the app.
 
 The HTML fallback **cannot** help a new visitor during total STRATO outage
@@ -84,7 +84,7 @@ Never tell customers that the native screen is active before confirming a store 
    update in the same planned release, without Docker-wide stop or database
    migrations. Use prebuilt images and a health-gated cutover; do not run
    `docker compose up --build` on the memory-constrained primary.
-5. Check health endpoint, primary identity, native existing worker account
+5. Check \`/health/\` and \`/api/status/ready/\`, primary identity, native existing worker account
    OpenShifts (20.10.2026: two open slots 08:30–13:00), and claim atomicity.
    Verify that personal hours are unchanged and HK is not exposed.
 6. If any test fails, rollback application version; leave database and
