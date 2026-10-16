@@ -67,6 +67,15 @@ green_compose() {
   test -s "$COMPOSE_FILE" || fail "Green compose file not staged"
   docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
 }
+green_health_pass() {
+  local cid
+  cid="$(green_compose ps -q backend-green)" || return 1
+  [[ -n "$cid" ]] || return 1
+  [[ "$(docker inspect -f '{{.State.Health.Status}}' "$cid" 2>/dev/null)" == healthy ]] || return 1
+  cid="$(green_compose ps -q frontend-green)" || return 1
+  [[ -n "$cid" ]] || return 1
+  [[ "$(docker inspect -f '{{.State.Health.Status}}' "$cid" 2>/dev/null)" == healthy ]]
+}
 green_ready() {
   local cid
   cid="$(green_compose ps -q backend-green)"
@@ -103,7 +112,7 @@ stage() {
   green_compose pull backend-green frontend-green
   green_compose up -d --no-build --pull never backend-green frontend-green
   for attempt in $(seq 1 36); do
-    if green_ready >/dev/null 2>&1; then
+    if green_health_pass; then
       green_ready
       info "Green ready; BLUE ROUTING IS UNCHANGED"
       return
