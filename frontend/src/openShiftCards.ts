@@ -3,7 +3,9 @@
  * preserve the same card count, rather than collapsing an N-person demand
  * into one parent Shift row. The real Shift ID is never replaced.
  */
-export function expandOpenShiftCards<T extends Record<string, any>>(shifts: T[]): T[] {
+export function expandOpenShiftCards<T extends Record<string, any>>(
+  shifts: T[],
+): Array<T & { source_shift_id: string; _open_slot_id: string; _available_open_slot: boolean }> {
   return shifts.flatMap((shift) => {
     const slots = Array.isArray(shift.slot_cards)
       ? shift.slot_cards.filter((slot: any) => slot?.status === 'open' && slot?.is_open)
