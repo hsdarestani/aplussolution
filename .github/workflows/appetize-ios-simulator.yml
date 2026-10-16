@@ -2,6 +2,12 @@ name: Build A+ Solution for Appetize (iOS Simulator)
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'frontend/src/saveSchedulePdf.ts'
+      - 'frontend/src/test/saveSchedulePdf.test.ts'
+      - '.github/workflows/appetize-ios-simulator.yml'
   push:
     branches: [main]
     paths:
