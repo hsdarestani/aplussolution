@@ -54,6 +54,9 @@ rollback() {
   code=$?
   if (( switched == 1 && completed == 0 )); then
     echo "AUTOMATIC_ROLLBACK_TRIGGERED exit=$code"
+    # This path did not have an override at preflight; ensure rollback stays
+    # durable through future compose invocations and host restarts.
+    rm -f /opt/aplussolution/docker-compose.override.yml
     timeout 240 docker compose -f docker-compose.yml -f "$old" up -d --no-deps --no-build --pull never backend frontend || true
     docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
     for i in $(seq 1 25); do
