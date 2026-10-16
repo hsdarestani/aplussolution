@@ -1,4 +1,5 @@
 name: Activate A+ Cloudflare edge fallback (approved)
+# Retry after the owner updated Cloudflare Workers Routes Edit permission.
 on:
   push:
     branches: [deploy/aplus-cloudflare-edge-20261016]
