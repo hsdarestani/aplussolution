@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from django.db.models import Count, Q
+from django.utils import timezone
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from .models import Shift, User, WorkerProfile
 from .shift_api import ShiftApiSerializer
-from .shift_rules import normalized_groups
+from .shift_rules import normalized_groups, shift_visible_to_worker
 from .shift_slots import ShiftSlot
 
 
@@ -74,6 +75,57 @@ def _expand_service_shift_cards(rows, visible_worker_ids, requester_worker_id):
     return expanded
 
 
+
+def _service_open_shift_cards(worker: WorkerProfile, request):
+    """Expose one read-only Service Zeitplan card per available ShiftSlot.
+
+    Existing installed mobile clients render one row per card; they cannot
+    expand the parent Shift's open_count. The display id is the slot UUID,
+    while source_shift_id keeps the real Shift UUID for modern pickup flows.
+    """
+    qs = (
+        Shift.objects.select_related('order', 'client', 'location', 'position')
+        .filter(
+            status=Shift.Status.PUBLISHED,
+            starts_at__gte=timezone.now(),
+            slots__status=ShiftSlot.Status.OPEN,
+            slots__worker__isnull=True,
+        )
+        .exclude(slots__worker=worker)
+        .distinct()
+        .order_by('starts_at')
+    )
+    visible = [shift for shift in qs if shift_visible_to_worker(shift, worker)]
+    serialized = ShiftApiSerializer(visible, many=True, context={'request': request}).data
+    cards = []
+    for raw in serialized:
+        for slot in raw.get('slot_cards') or []:
+            if slot.get('status') != ShiftSlot.Status.OPEN or not slot.get('is_open'):
+                continue
+            slot_id = str(slot['id'])
+            shift_id = str(raw['id'])
+            display_worker = {
+                'id': f'available-slot-{slot_id}',
+                'slot_id': slot_id,
+                'name': 'OpenShift',
+                'is_me': False,
+                'avatar': '',
+            }
+            cards.append({
+                **raw,
+                'id': slot_id,
+                'source_shift_id': shift_id,
+                '_open_slot_id': slot_id,
+                '_available_open_slot': True,
+                'required_count': 1,
+                'open_count': 1,
+                'filled_count': 0,
+                'assigned_workers': [display_worker],
+                'slot_cards': [slot],
+            })
+    return cards
+
+
 @api_view(['GET'])
 def employee_schedule(request):
     """Worker Dienstplan with Service-peer visibility.
@@ -116,6 +168,8 @@ def employee_schedule(request):
     data = ShiftApiSerializer(qs, many=True, context={'request': request}).data
     if service_schedule:
         data = _expand_service_shift_cards(data, visible_worker_ids, worker.id)
+        data.extend(_service_open_shift_cards(worker, request))
+        data.sort(key=lambda shift: shift.get('starts_at') or '')
     return Response({
         'service_schedule': service_schedule,
         'shifts': data,
