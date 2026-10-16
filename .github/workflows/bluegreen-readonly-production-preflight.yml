@@ -1,0 +1,65 @@
+name: READ ONLY STRATO capacity preflight (NEVER DEPLOY)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/bluegreen-readonly-production-preflight.yml'
+      - 'deploy/bluegreen/**'
+
+permissions:
+  contents: read
+
+jobs:
+  readonly-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      SSH_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Probe public app first, without touching production
+        run: |
+          set -euo pipefail
+          curl -fsS --connect-timeout 6 --max-time 15 https://app.aplus-solution.de/health/ | grep -q '"ok"'
+          echo PUBLIC_LIVENESS_OK
+      - name: Collect read-only system resource and current containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST"
+          test -n "$SSH_KEY"
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/aplus_audit
+          trap 'rm -f ~/.ssh/aplus_audit' EXIT
+          timeout 95 ssh -i ~/.ssh/aplus_audit -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -o ServerAliveInterval=9 -o ServerAliveCountMax=2 root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          export LC_ALL=C
+          free_mem_mb=$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)
+          docker_free_mb=$(df -Pm /var/lib/docker | awk 'END{print $4}')
+          load1=$(awk '{print $1}' /proc/loadavg)
+          echo "AUDIT_AVAILABLE_RAM_MB=$free_mem_mb"
+          echo "AUDIT_DOCKER_DISK_FREE_MB=$docker_free_mb"
+          echo "AUDIT_LOAD_1M=$load1"
+          echo "AUDIT_HOST_APP_LIVENESS:"
+          curl -fsS --connect-timeout 3 --max-time 10 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/ | grep -q '"ok"'
+          echo "ORIGIN_LIVENESS_OK"
+          echo "AUDIT_REQUIRED_SERVICES:"
+          cd /opt/aplussolution
+          for service in db redis backend frontend caddy celery celery-beat; do
+            container=$(timeout 10 docker compose ps -q "$service")
+            test -n "$container"
+            state=$(timeout 10 docker inspect -f '{{.State.Running}}' "$container")
+            test "$state" = true
+            echo "$service=RUNNING"
+          done
+          echo "AUDIT_SINGLE_POSTGRES_PRIMARY:"
+          timeout 12 docker compose exec -T db sh -c 'psql -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT NOT pg_is_in_recovery()"' | grep -qx t
+          echo DB_IS_PRIMARY
+          echo "AUDIT_CAPACITY_GATE:"
+          if [ "$free_mem_mb" -lt 1800 ] || [ "$docker_free_mb" -lt 6144 ]; then
+            echo "::error::Not enough safe free capacity to stage green containers on current primary"
+            exit 20
+          fi
+          echo RESOURCE_PREFLIGHT_PASSED
+          REMOTE
