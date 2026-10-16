@@ -1,0 +1,74 @@
+name: Build immutable blue-green images (NO DEPLOY)
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type BUILD_ONLY to build/publish packages, without contacting STRATO"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: aplus-bluegreen-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-images:
+    if: ${{ inputs.confirmation == 'BUILD_ONLY' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Authenticate GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build backend on GitHub runner (never on STRATO)
+        uses: docker/build-push-action@v6
+        id: backend
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/aplus-bluegreen-backend:${{ github.sha }}
+          cache-from: type=gha,scope=aplus-bluegreen-backend
+          cache-to: type=gha,mode=max,scope=aplus-bluegreen-backend
+      - name: Build frontend on GitHub runner (never on STRATO)
+        uses: docker/build-push-action@v6
+        id: frontend
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            VITE_API_URL=https://app.aplus-solution.de/api
+          tags: ghcr.io/${{ github.repository_owner }}/aplus-bluegreen-frontend:${{ github.sha }}
+          cache-from: type=gha,scope=aplus-bluegreen-frontend
+          cache-to: type=gha,mode=max,scope=aplus-bluegreen-frontend
+      - name: Show immutable image pins for approved future staging
+        env:
+          BACKEND_DIGEST: ${{ steps.backend.outputs.digest }}
+          FRONTEND_DIGEST: ${{ steps.frontend.outputs.digest }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Prebuilt images — no origin touched"
+            echo ""
+            echo "Manually review before staging on STRATO:"
+            echo '\`\`\`'
+            echo 'bash'
+            echo "BACKEND_IMAGE=ghcr.io/$OWNER/aplus-bluegreen-backend@$BACKEND_DIGEST"
+            echo "FRONTEND_IMAGE=ghcr.io/$OWNER/aplus-bluegreen-frontend@$FRONTEND_DIGEST"
+            echo '\`\`\`'
+            echo ""
+            echo "No server, DNS, Cloudflare Worker, or app deployment took place."
+          } >> "$GITHUB_STEP_SUMMARY"

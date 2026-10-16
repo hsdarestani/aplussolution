@@ -1,0 +1,48 @@
+name: Maintenance fallback static validation (NO DEPLOY)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'edge/**'
+      - 'frontend/public/maintenance.html'
+      - 'frontend/src/AppAvailabilityGuard.tsx'
+      - 'frontend/src/app-availability.css'
+      - 'frontend/src/api.ts'
+      - '.github/workflows/maintenance-fallback-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  edge-dry-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify self-contained maintenance document
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          html = Path('frontend/public/maintenance.html').read_text()
+          worker = Path('edge/worker.mjs').read_text()
+          assert '<!doctype html>' in html.lower()
+          assert 'id="retry"' in html
+          assert '/__aplus/availability' in html
+          assert 'https://' not in html
+          assert 'localStorage' not in html
+          assert 'window.location.replace' in html
+          assert 'MAINTENANCE_MODE' in worker
+          assert 'isHtmlNavigation' in worker
+          assert 'Cache-Control' in worker
+          print('STATIC_MAINTENANCE_FALLBACK_CHECK_OK')
+          PY
+      - name: Bundle Cloudflare Worker locally without deployment
+        working-directory: edge
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --dry-run --outdir /tmp/aplus-edge-dry-run
+          test -n "$(find /tmp/aplus-edge-dry-run -name '*.js' -o -name '*.mjs' | head -n 1)"
+          echo EDGE_DRY_RUN_OK

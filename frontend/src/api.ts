@@ -40,13 +40,21 @@ async function request(url: string, options: RequestInit): Promise<Response> {
   let lastError: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
-      return await fetch(url, options);
+      const response = await fetch(url, options);
+      // Only signal possible origin outages; the guard independently checks
+      // /health/ twice before showing a full-screen fallback. Normal API
+      // errors, 401/403 and client connectivity do not revoke the session.
+      if ([502, 503, 504, 520, 521, 522, 523, 524].includes(response.status)) {
+        window.dispatchEvent(new Event('aplus-backend-possibly-unavailable'));
+      }
+      return response;
     } catch (error: any) {
       if (error?.name === 'AbortError') throw error;
       lastError = error;
       if (attempt + 1 < maxAttempts) await new Promise((resolve) => window.setTimeout(resolve, 800));
     }
   }
+  window.dispatchEvent(new Event('aplus-backend-possibly-unavailable'));
   console.warn('A+ API network request failed', lastError);
   throw new Error('Der A+ Server ist momentan nicht erreichbar. Bitte kurz warten und erneut versuchen.');
 }

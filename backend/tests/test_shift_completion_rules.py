@@ -69,7 +69,10 @@ def test_worker_open_shifts_respect_client_and_zeitplan_preferences(
     response = auth_worker.get('/api/shifts/available/')
     assert response.status_code == 200, response.data
     rows = response.data.get('results', response.data)
-    ids = {str(row['id']) for row in rows}
-    assert str(allowed.id) in ids
-    assert str(blocked_group.id) not in ids
-    assert str(blocked_client.id) not in ids
+    # Installed mobile clients receive one row per available slot ID,
+    # while source_shift_id retains the canonical parent shift UUID.
+    parent_ids = {str(row.get('source_shift_id')) for row in rows}
+    assert str(allowed.id) in parent_ids
+    assert str(blocked_group.id) not in parent_ids
+    assert str(blocked_client.id) not in parent_ids
+    assert all(row['id'] != row['source_shift_id'] for row in rows)

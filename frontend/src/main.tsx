@@ -25,6 +25,7 @@ import FriendlyDateTimePicker from './FriendlyDateTimePicker';
 import WorkflowCompletionEnhancer from './WorkflowCompletionEnhancer';
 import OrderDocumentImportEnhancer from './OrderDocumentImportEnhancer';
 import ApiHealthBanner from './ApiHealthBanner';
+import AppAvailabilityGuard from './AppAvailabilityGuard';
 import HeaderQuickAccess from './HeaderQuickAccess';
 import ScheduleMobileEnhancer from './ScheduleMobileEnhancer';
 import ScheduleEntryFilterEnhancer from './ScheduleEntryFilterEnhancer';
@@ -172,6 +173,7 @@ function renderApp() {
           <AppLaunchSplash />
           <App />
           <ResumeAwareEnhancers />
+          <AppAvailabilityGuard />
         </>
       )}
     </React.StrictMode>,

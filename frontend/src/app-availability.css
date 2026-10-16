@@ -1,0 +1,31 @@
+.aplus-availability{position:fixed;inset:0;z-index:2147483000;display:grid;grid-template-columns:minmax(250px,39%) 1fr;background:#f7f9f8;color:#16374a;font-family:"Avenir Next",Avenir,"Segoe UI",system-ui,sans-serif;overflow:auto;overscroll-behavior:contain}
+.aplus-availability-visual{background:radial-gradient(circle at 80% 70%,#195060,#071f33 65%);color:#e4d098;min-height:100vh;padding:clamp(25px,5vw,72px);position:relative;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}
+.aplus-availability-visual:before,.aplus-availability-visual:after{content:"";position:absolute;border:1px solid #d4b56c36;border-radius:50%;width:min(72vw,600px);aspect-ratio:1;top:16%;left:14%}
+.aplus-availability-visual:after{width:min(50vw,420px);left:40%;top:33%;opacity:.65}
+.aplus-availability-brand{font-size:42px;font-weight:800;letter-spacing:-.12em;position:relative;z-index:1}.aplus-availability-brand span{color:#d5b76d}
+.aplus-availability-orbit{align-self:center;width:clamp(160px,20vw,275px);height:clamp(160px,20vw,275px);border:1px dashed #b79d6360;border-radius:50%;display:grid;place-items:center;position:relative;z-index:1;animation:aplus-availability-turn 24s linear infinite}
+.aplus-availability-orbit:before{content:"";position:absolute;inset:23px;border:1px solid #bea46a77;border-radius:50%}
+.aplus-availability-clock{font-size:clamp(100px,11vw,175px);font-weight:200;color:#d9c58f;line-height:1;transform:translateY(-9px)}
+.aplus-availability-brandline{font-size:12px;font-weight:700;letter-spacing:.21em;color:#b4c8ca;position:relative;z-index:1}
+.aplus-availability-content{padding:clamp(32px,7vw,120px);display:flex;flex-direction:column;align-items:flex-start;justify-content:center;max-width:840px}
+.aplus-availability-pill{font-size:12px;background:#e8eeeb;border:1px solid #d8e0dc;padding:9px 13px;border-radius:40px;color:#42616d;font-weight:750;letter-spacing:.03em;display:flex;gap:10px;align-items:center}
+.aplus-availability-pill i{display:inline-block;width:8px;height:8px;border-radius:50%;background:#ad8d53;box-shadow:0 0 0 5px #ad8d5327;animation:aplus-availability-pulse 2s infinite}
+.aplus-availability-kicker{margin-top:36px;color:#a18b5a;font-weight:800;letter-spacing:.24em}
+.aplus-availability h1{font-size:clamp(42px,5vw,74px);font-weight:780;letter-spacing:-.055em;line-height:1.1;margin:18px 0 24px;color:#0c2d40}
+.aplus-availability h1 em{font-style:normal;color:#a88d57}
+.aplus-availability-content>p{margin:0;max-width:510px;color:#627987;font-size:17px;line-height:1.85}
+.aplus-availability-status{border:1px solid #e0e9e6;background:#fff;box-shadow:0 20px 75px #153a4310;padding:24px;border-radius:18px;display:flex;flex-direction:column;width:min(100%,510px);margin-top:35px}
+.aplus-availability-status small{font-size:11px;color:#8395a0;font-weight:750;letter-spacing:.17em}
+.aplus-availability-status strong{color:#1a3d50;font-size:20px;margin:12px 0 9px}
+.aplus-availability-status span{font-size:12px;line-height:1.6;color:#7d929c}
+.aplus-availability-sweep{height:5px;border-radius:5px;overflow:hidden;background:#eef1f0;margin-top:24px}
+.aplus-availability-sweep i{width:37%;height:100%;background:linear-gradient(90deg,#ba9859,#edd69c);display:block;animation:aplus-availability-sweep 3.1s ease-in-out infinite}
+.aplus-availability-retry{margin-top:30px;border:0;background:#0d354b;color:white;border-radius:10px;font-size:14px;font-weight:750;min-height:51px;padding:0 25px;cursor:pointer;display:flex;align-items:center;gap:13px}
+.aplus-availability-retry:disabled{opacity:.65}.aplus-availability-retry:focus-visible{outline:3px solid #b2935d;outline-offset:3px}
+.aplus-availability-retry span{font-size:21px}
+.aplus-availability-footer{font-size:12px;color:#869aa0;margin-top:58px}
+@keyframes aplus-availability-turn{to{transform:rotate(360deg)}}
+@keyframes aplus-availability-pulse{50%{opacity:.5;box-shadow:0 0 0 9px #ad8d5314}}
+@keyframes aplus-availability-sweep{0%{transform:translateX(-110%)}50%{transform:translateX(160%)}100%{transform:translateX(320%)}}
+@media(max-width:750px){.aplus-availability{display:block}.aplus-availability-visual{min-height:208px;padding:27px 30px}.aplus-availability-orbit{position:absolute;right:35px;top:-6px;width:190px;height:190px;opacity:.4}.aplus-availability-brandline{margin-top:auto}.aplus-availability-content{padding:38px 26px 60px}.aplus-availability h1{font-size:43px;margin-top:16px}.aplus-availability-kicker{margin-top:32px}.aplus-availability-footer{margin-top:46px}}
+@media(prefers-reduced-motion:reduce){.aplus-availability-orbit,.aplus-availability-pill i,.aplus-availability-sweep i{animation:none}}

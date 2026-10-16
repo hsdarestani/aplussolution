@@ -187,9 +187,11 @@ def test_service_worker_sees_two_distinct_open_slots_in_legacy_service_zeitplan(
     available = client.get('/api/shifts/available/')
     assert available.status_code == 200
     results = available.data.get('results', []) if isinstance(available.data, dict) else available.data
-    parent = next(row for row in results if str(row['id']) == str(shift.id))
-    assert parent['open_count'] == 2
-    assert len([slot for slot in parent['slot_cards'] if slot['is_open']]) == 2
+    open_rows = [row for row in results if row.get('source_shift_id') == str(shift.id)]
+    assert len(open_rows) == 2
+    assert {row['id'] for row in open_rows} == slot_ids
+    assert all(row['open_count'] == 1 for row in open_rows)
+    assert all(len(row['slot_cards']) == 1 and row['slot_cards'][0]['is_open'] for row in open_rows)
 
 
 @pytest.mark.django_db

@@ -25,6 +25,29 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Static validate Blue Green release without server access
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n deploy/bluegreen/release.sh
+          mkdir -p /tmp/aplus-bluegreen-ci
+          printf 'DJANGO_SECRET_KEY=ci-only\nDATABASE_URL=sqlite:///test.sqlite3\n' > /tmp/aplus-bluegreen-ci/.env
+          sed 's|/opt/aplussolution/.env|/tmp/aplus-bluegreen-ci/.env|' deploy/bluegreen/compose.green.yml > /tmp/aplus-bluegreen-ci/compose.yml
+          export BACKEND_IMAGE="ghcr.io/example/backend@sha256:$(printf '0%.0s' {1..64})"
+          export FRONTEND_IMAGE="ghcr.io/example/frontend@sha256:$(printf '0%.0s' {1..64})"
+          docker compose -f /tmp/aplus-bluegreen-ci/compose.yml config --quiet
+          python3 - <<'PY'
+          from pathlib import Path
+          s = Path('deploy/bluegreen/release.sh').read_text()
+          compose = Path('deploy/bluegreen/compose.green.yml').read_text()
+          assert all(x in s for x in ('I_APPROVE_CUTOVER', 'I_APPROVE_ROLLBACK', 'caddy reload', 'migrate --check', 'flock -n'))
+          assert all(x not in s for x in ('docker compose stop', 'docker compose down', 'docker compose rm', 'docker compose build'))
+          assert 'aplussolution_default' in compose
+          assert 'aplussolution_media_data' in compose
+          assert 'celery:' not in compose
+          assert 'db:' not in compose
+          print('BLUEGREEN_STATIC_VALIDATION_OK')
+          PY
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -69,7 +92,11 @@ jobs:
         run: npm run build
 
   deploy:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !contains(github.event.head_commit.message, '[frontend-only]'))
+    # PERMANENT SAFETY GATE for the legacy stop/rm/recreate production path.
+    # This job remains in YAML for audit/reference only. The future release
+    # must use the separately reviewed, manual blue-green runbook.
+    # A normal merge to main MUST NEVER stop the live Caddy or app containers.
+    if: ${{ false }}
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 35

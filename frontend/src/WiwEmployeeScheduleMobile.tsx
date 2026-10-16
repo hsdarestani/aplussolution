@@ -294,7 +294,14 @@ export default function WiwEmployeeScheduleMobile() {
   async function claim(shift: any) {
     setBusy(true);
     try {
-      const result: any = await api(`shifts/${shift.source_shift_id || shift.id}/claim/`, { method: 'POST', body: '{}' });
+      // Prefer the actual open ShiftSlot UUID so the selected card is claimed,
+      // not an arbitrary available slot on the same parent demand.
+      // Old API responses with no real slot UUID continue to use Shift ID.
+      const selectedSlot = String(shift._open_slot_id || '');
+      const claimId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(selectedSlot)
+        ? selectedSlot
+        : String(shift.source_shift_id || shift.id);
+      const result: any = await api(`shifts/${claimId}/claim/`, { method: 'POST', body: '{}' });
       setSelected(undefined);
       if (result?.pending_approval) {
         setMessage('Schichtübernahme wurde zur Freigabe gesendet.');

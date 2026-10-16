@@ -38,6 +38,26 @@ describe('OpenShift slot cards', () => {
     expect(rows[0]._open_slot_id).toBe('slot-b');
   });
 
+  it('does not invent open cards when authoritative slot_cards are all closed', () => {
+    const rows = expandOpenShiftCards([{ ...shift, open_count: 0, slot_cards: [
+      { id: 'slot-a', status: 'claimed', is_open: false },
+      { id: 'slot-b', status: 'claimed', is_open: false },
+    ] }]);
+    expect(rows).toHaveLength(0);
+  });
+
+  it('supports the slot-alias API response without duplicating cards', () => {
+    const parentId = 'parent-1';
+    const slots = ['slot-a', 'slot-b'].map((id) => ({
+      ...shift, id, source_shift_id: parentId,
+      open_count: 1, slot_cards: [{ id, status: 'open', is_open: true }],
+    }));
+    const rows = expandOpenShiftCards(slots);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row._open_slot_id)).toEqual(['slot-a', 'slot-b']);
+    expect(rows.every((row) => row.source_shift_id === parentId)).toBe(true);
+  });
+
   it('supports older API responses that return just open_count', () => {
     expect(expandOpenShiftCards([{ id: 'legacy', open_count: 3 }]).map((row) => row._open_slot_id))
       .toEqual(['open-0', 'open-1', 'open-2']);

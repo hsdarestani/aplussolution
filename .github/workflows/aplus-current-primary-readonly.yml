@@ -1,0 +1,41 @@
+name: Temporary read-only A+ PostgreSQL primary vs standby identity
+on:
+  push:
+    branches: [fix/native-open-shift-available-slot-alias-20261016]
+    paths: ['.github/workflows/aplus-current-primary-readonly.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PRIMARY_HOST: ${{ secrets.STRATO_HOST }}
+      PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Read primary WAL position and counts (no mutations)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRIMARY_HOST" && test -n "$PRIVATE_KEY"
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          key="$RUNNER_TEMP/aplus-primary-lsn.key"
+          printf '%s\n' "$PRIVATE_KEY" > "$key"
+          chmod 600 "$key"
+          trap 'rm -f "$key"' EXIT
+          timeout 115 ssh -i "$key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2 root@"$PRIMARY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          echo PRIMARY_ORIGIN_ALIVE_BEGIN
+          curl -fsS --connect-timeout 3 --max-time 10 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/
+          echo PRIMARY_ORIGIN_ALIVE_END
+          docker compose exec -T db sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select '\''PRIMARY_IN_RECOVERY='\''||pg_is_in_recovery() union all select '\''PRIMARY_WAL_LSN='\''||pg_current_wal_lsn()::text union all select '\''PRIMARY_SHIFT_COUNT='\''||(select count(*)::text from core_shift)"'
+          volume_path="$(docker volume inspect -f '{{.Mountpoint}}' aplussolution_media_data 2>/dev/null || true)"
+          if test -n "$volume_path" && test -d "$volume_path"; then
+            du -sm "$volume_path" | awk '{print "PRIMARY_MEDIA_VOLUME_MB="$1}'
+          else
+            echo PRIMARY_MEDIA_VOLUME_UNVERIFIED=yes
+          fi
+          echo PRIMARY_READONLY_AUDIT_COMPLETE=yes
+          REMOTE

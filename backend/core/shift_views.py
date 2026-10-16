@@ -219,16 +219,65 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
             })
         return Response(history)
 
+    @staticmethod
+    def _expand_available_slot_cards(serialized_shifts):
+        """Compatibility for installed clients that draw one card per API row.
+
+        Old mobile binaries cannot expand the Shift's slot_cards themselves.
+        Expose each open slot as a distinct display row, preserving the
+        canonical parent Shift ID in source_shift_id for updated web clients.
+        """
+        result = []
+        for shift in serialized_shifts:
+            parent_id = str(shift['id'])
+            for slot in shift.get('slot_cards') or []:
+                if slot.get('status') != ShiftSlot.Status.OPEN or not slot.get('is_open'):
+                    continue
+                slot_id = str(slot['id'])
+                result.append({
+                    **shift,
+                    'id': slot_id,
+                    'source_shift_id': parent_id,
+                    '_open_slot_id': slot_id,
+                    '_available_open_slot': True,
+                    'slot_cards': [slot],
+                    'open_count': 1,
+                    'filled_count': 0,
+                })
+        return result
+
+    @staticmethod
+    def _resolve_open_slot_claim_id(pk, worker):
+        """Map old mobile slot-card UUIDs to Shift UUIDs without changing DB."""
+        if Shift.objects.filter(pk=pk).exists():
+            return pk, None
+        slot = ShiftSlot.objects.select_related('shift').filter(pk=pk).first()
+        if slot is None:
+            return pk, None
+        if (
+            slot.status != ShiftSlot.Status.OPEN
+            or slot.worker_id is not None
+            or slot.shift.status != Shift.Status.PUBLISHED
+        ):
+            raise ValueError('Diese OpenShift Position ist nicht mehr verfügbar.')
+        if not shift_visible_to_worker(slot.shift, worker):
+            raise ValueError('Diese OpenShift ist für dich nicht freigegeben.')
+        return slot.shift_id, slot.pk
+
     @action(detail=False, methods=['get'])
     def available(self, request):
         if request.user.role != User.Role.WORKER:
             return Response({'detail': 'Nur Mitarbeiter können verfügbare Schichten abrufen.'}, status=403)
         worker = request.user.worker_profile
         qs = self.filter_queryset(self.base_queryset().filter(
-            status=Shift.Status.PUBLISHED, starts_at__gte=timezone.now(), slots__status='open'
+            status=Shift.Status.PUBLISHED, starts_at__gte=timezone.now(),
+            slots__status=ShiftSlot.Status.OPEN, slots__worker__isnull=True,
         ).exclude(slots__worker=worker).distinct())
         visible = [shift for shift in qs if shift_visible_to_worker(shift, worker)]
-        return self._list_response(visible)
+        page = self.paginate_queryset(visible)
+        serialized = self.get_serializer(page if page is not None else visible, many=True).data
+        cards = self._expand_available_slot_cards(serialized)
+        return self.get_paginated_response(cards) if page is not None else Response(cards)
 
     @action(detail=False, methods=['get'])
     def mine(self, request):
@@ -460,15 +509,22 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
         if request.user.role != User.Role.WORKER:
             return Response({'detail': 'Nur Mitarbeiter können eine offene Schicht übernehmen.'}, status=403)
         worker = request.user.worker_profile
+        try:
+            shift_id, selected_slot_id = self._resolve_open_slot_claim_id(pk, worker)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=400)
         policy = get_policy()
         if policy.pickup_approval_required:
             try:
-                shift = Shift.objects.select_related('location', 'position').get(pk=pk)
+                shift = Shift.objects.select_related('location', 'position').get(pk=shift_id)
                 if shift.status != Shift.Status.PUBLISHED:
                     return Response({'detail': 'Diese Schicht ist nicht zur Übernahme veröffentlicht.'}, status=400)
                 ensure_slots(shift)
                 ensure_worker_can_claim(worker, shift)
-                if not shift.slots.filter(status=ShiftSlot.Status.OPEN, worker__isnull=True).exists():
+                available_slots = shift.slots.filter(status=ShiftSlot.Status.OPEN, worker__isnull=True)
+                if selected_slot_id:
+                    available_slots = available_slots.filter(pk=selected_slot_id)
+                if not available_slots.exists():
                     return Response({'detail': 'Diese Schicht ist bereits vollständig besetzt.'}, status=400)
                 pickup, created = ShiftPickupRequest.objects.get_or_create(
                     shift=shift, worker=worker, status=ShiftPickupRequest.Status.PENDING
@@ -487,7 +543,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
                 detail = detail[0] if isinstance(detail, list) else detail
                 return Response({'detail': str(detail)}, status=400)
         try:
-            slot = claim_shift(pk, worker)
+            slot = claim_shift(shift_id, worker, preferred_slot_id=selected_slot_id)
         except Exception as exc:
             detail = getattr(exc, 'detail', str(exc))
             detail = detail[0] if isinstance(detail, list) else detail
@@ -498,7 +554,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
         )
         notify_admins_shift_claimed(slot)
         audit(request, 'shift.claimed', slot.shift, {'slot': str(slot.id)})
-        return Response(self.get_serializer(self.base_queryset().get(pk=pk)).data)
+        return Response(self.get_serializer(self.base_queryset().get(pk=shift_id)).data)
 
     @action(detail=True, methods=['post'])
     def release(self, request, pk=None):

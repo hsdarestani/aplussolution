@@ -1,0 +1,61 @@
+name: A+ Prebuild release images OFF HOST (no deployment)
+on:
+  push:
+    branches: [fix/native-open-shift-available-slot-alias-20261016]
+    paths: ['.github/workflows/aplus-prebuild-20261016.yml']
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: aplus-prebuild-once-20261016
+  cancel-in-progress: false
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    steps:
+      - name: Checkout exact feature commit
+        uses: actions/checkout@v4
+      - name: Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Authenticate GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push immutable backend
+        id: backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/aplus-bluegreen-backend:${{ github.sha }}
+          cache-from: type=gha,scope=aplus-backend-20261016
+          cache-to: type=gha,mode=max,scope=aplus-backend-20261016
+      - name: Build and push immutable frontend
+        id: frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            VITE_API_URL=https://app.aplus-solution.de/api
+          tags: ghcr.io/${{ github.repository_owner }}/aplus-bluegreen-frontend:${{ github.sha }}
+          cache-from: type=gha,scope=aplus-frontend-20261016
+          cache-to: type=gha,mode=max,scope=aplus-frontend-20261016
+      - name: Release image digests
+        env:
+          BDIGEST: ${{ steps.backend.outputs.digest }}
+          FDIGEST: ${{ steps.frontend.outputs.digest }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          test -n "$BDIGEST" && test -n "$FDIGEST"
+          printf 'BACKEND_IMAGE=ghcr.io/%s/aplus-bluegreen-backend@%s\n' "$OWNER" "$BDIGEST" >> "$GITHUB_STEP_SUMMARY"
+          printf 'FRONTEND_IMAGE=ghcr.io/%s/aplus-bluegreen-frontend@%s\n' "$OWNER" "$FDIGEST" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Image build completed entirely on GitHub Actions; STRATO was never contacted.' >> "$GITHUB_STEP_SUMMARY"

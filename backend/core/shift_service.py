@@ -101,7 +101,7 @@ def ensure_worker_can_claim(worker: WorkerProfile, shift: Shift) -> None:
 
 
 @transaction.atomic
-def claim_shift(shift_id, worker: WorkerProfile, bypass_approval=False) -> ShiftSlot:
+def claim_shift(shift_id, worker: WorkerProfile, bypass_approval=False, preferred_slot_id=None) -> ShiftSlot:
     shift = Shift.objects.select_for_update().select_related('location', 'position').get(pk=shift_id)
     if shift.status != Shift.Status.PUBLISHED:
         raise ValidationError('Diese Schicht ist nicht zur Übernahme veröffentlicht.')
@@ -109,9 +109,12 @@ def claim_shift(shift_id, worker: WorkerProfile, bypass_approval=False) -> Shift
     if ShiftSlot.objects.filter(shift=shift, worker=worker, status=ShiftSlot.Status.CLAIMED).exists():
         raise ValidationError('Du hast diese Schicht bereits übernommen.')
     ensure_worker_can_claim(worker, shift)
-    slot = ShiftSlot.objects.select_for_update().filter(
+    available_slots = ShiftSlot.objects.select_for_update().filter(
         shift=shift, status=ShiftSlot.Status.OPEN, worker__isnull=True
-    ).order_by('created_at').first()
+    )
+    if preferred_slot_id is not None:
+        available_slots = available_slots.filter(pk=preferred_slot_id)
+    slot = available_slots.order_by('created_at').first()
     if not slot:
         raise ValidationError('Diese Schicht ist bereits vollständig besetzt.')
     slot.worker = worker
