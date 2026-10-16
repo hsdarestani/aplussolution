@@ -69,7 +69,11 @@ jobs:
         run: npm run build
 
   deploy:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !contains(github.event.head_commit.message, '[frontend-only]'))
+    # PERMANENT SAFETY GATE for the legacy stop/rm/recreate production path.
+    # This job remains in YAML for audit/reference only. The future release
+    # must use the separately reviewed, manual blue-green runbook.
+    # A normal merge to main MUST NEVER stop the live Caddy or app containers.
+    if: ${{ false }}
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 35
