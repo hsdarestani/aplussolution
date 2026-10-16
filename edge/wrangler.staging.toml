@@ -1,0 +1,10 @@
+name = "aplus-availability-fallback-staging"
+main = "worker.mjs"
+compatibility_date = "2026-10-01"
+workers_dev = true
+preview_urls = false
+
+# No production routes, no DNS changes and no writes to STRATO.
+[vars]
+STAGING_MODE = "true"
+MAINTENANCE_MODE = "auto"
