@@ -7,6 +7,8 @@ const OUTAGE_EVENT = 'aplus-backend-possibly-unavailable';
 const PING_MS = 60000;
 const RECOVERY_MS = 30000;
 const CONFIRM_MS = 6000;
+// E2E/localhost has no real backend readiness endpoint. Never mask test pages.
+const ENABLE_AVAILABILITY_GUARD = Capacitor.isNativePlatform() || import.meta.env.PROD || import.meta.env.MODE === 'test';
 const HEALTH_URL = Capacitor.isNativePlatform()
   ? 'https://app.aplus-solution.de/api/status/ready/'
   : '/api/status/ready/';
@@ -38,6 +40,7 @@ export default function AppAvailabilityGuard() {
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
+    if (!ENABLE_AVAILABILITY_GUARD) return;
     let cancelled = false;
     let inflight = false;
     let failures = 0;
@@ -108,7 +111,7 @@ export default function AppAvailabilityGuard() {
     return () => window.clearInterval(interval);
   }, [availability]);
 
-  if (availability === 'normal') return null;
+  if (!ENABLE_AVAILABILITY_GUARD || availability === 'normal') return null;
 
   const offline = availability === 'offline';
   // Only show a countdown when there is a real, explicitly provided ETA.
