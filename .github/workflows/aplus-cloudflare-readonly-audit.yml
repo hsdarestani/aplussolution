@@ -1,4 +1,5 @@
 name: A+ Cloudflare edge access and DNS audit (READ ONLY)
+# Credential recheck after user created the scoped token; no Cloudflare changes.
 on:
   push:
     branches: [main]
