@@ -42,15 +42,26 @@ host_preflight() {
   mem="$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)"
   disk="$(df -Pm /var/lib/docker | awk 'END {print $4}')"
   info "Available RAM ${mem}MB; Docker disk ${disk}MB"
-  [[ "$mem" =~ ^[0-9]+$ ]] && ((mem>=MIN_MEM_MB)) \
-    || fail "Not enough available RAM for parallel green. Use another host."
-  [[ "$disk" =~ ^[0-9]+$ ]] && ((disk>=MIN_DISK_MB)) \
-    || fail "Not enough disk for green images. Use another host."
+  if [[ "$MODE" == preflight || "$MODE" == stage ]]; then
+    [[ "$mem" =~ ^[0-9]+$ ]] && ((mem>=MIN_MEM_MB)) \
+      || fail "Not enough available RAM for parallel green. Use another host."
+    [[ "$disk" =~ ^[0-9]+$ ]] && ((disk>=MIN_DISK_MB)) \
+      || fail "Not enough disk for green images. Use another host."
+  fi
 }
 
 blue_caddy() {
   cd "$APP_DIR"
   docker compose ps -q caddy
+}
+load_images() {
+  test -f "$GREEN_DIR/images.env" || fail "Explicit pinned images.env required"
+  set -a
+  # shellcheck disable=SC1091
+  source "$GREEN_DIR/images.env"
+  set +a
+  [[ "${BACKEND_IMAGE:-}" == *@sha256:* ]] || fail "backend must use immutable sha256 digest"
+  [[ "${FRONTEND_IMAGE:-}" == *@sha256:* ]] || fail "frontend must use immutable sha256 digest"
 }
 green_compose() {
   test -s "$COMPOSE_FILE" || fail "Green compose file not staged"
@@ -86,14 +97,8 @@ PY
 }
 stage() {
   host_preflight
-  test -f "$GREEN_DIR/images.env" || fail "Explicit pinned images.env required"
-  # IMAGE pins must be immutable release digests. Never use :latest.
-  set -a
-  # shellcheck disable=SC1091
-  source "$GREEN_DIR/images.env"
-  set +a
-  [[ "${BACKEND_IMAGE:-}" == *@sha256:* ]] || fail "backend must use immutable sha256 digest"
-  [[ "${FRONTEND_IMAGE:-}" == *@sha256:* ]] || fail "frontend must use immutable sha256 digest"
+  # Only immutable, externally built container images are allowed.
+  load_images
   info "Downloading prebuilt green images only (no docker build)"
   green_compose pull backend-green frontend-green
   green_compose up -d --no-build --pull never backend-green frontend-green
@@ -127,6 +132,7 @@ reload_blue() {
 cutover() {
   [[ "$ACK" == "I_APPROVE_CUTOVER" ]] || fail "Explicit I_APPROVE_CUTOVER confirmation required"
   host_preflight
+  load_images
   green_ready
   local cid
   cid="$(blue_caddy)"
@@ -134,13 +140,16 @@ cutover() {
   prepare_caddy "$cid"
   info "Switching only Caddy runtime routing; keeping BLUE containers running"
   local switched=0
-  rollback_on_error() {
+  rollback_on_exit() {
+    local code=$?
     if ((switched==1)); then
       reload_blue "$cid" || true
-      echo "AUTOMATIC_RUNTIME_ROLLBACK_ATTEMPTED" >&2
+      echo "AUTOMATIC_RUNTIME_ROLLBACK_ATTEMPTED exit=$code" >&2
     fi
   }
-  trap rollback_on_error ERR
+  # EXIT catches explicit errors and fail() exits too (unlike ERR alone).
+  # A process kill or total host outage still requires external edge fallback.
+  trap rollback_on_exit EXIT
   switched=1
   docker exec "$cid" caddy reload --config /tmp/aplus-green.Caddyfile --adapter caddyfile
   for i in $(seq 1 12); do
@@ -155,7 +164,7 @@ cutover() {
     sleep 3
   done
   switched=0
-  trap - ERR
+  trap - EXIT
   info "CUTOVER_HEALTHY: BLUE containers retained for rollback"
 }
 rollback() {
