@@ -1,0 +1,59 @@
+name: Compare current main browser E2E baseline (NO DEPLOY)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/baseline-browser-compare.yml'
+      - 'frontend/src/WiwEmployeeScheduleMobile.tsx'
+      - 'frontend/src/AppAvailabilityGuard.tsx'
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout current production branch, not PR
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install main branch frontend
+        working-directory: frontend
+        run: npm install --no-audit --no-fund --package-lock=false
+      - name: Install Chromium in CI runner only
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run baseline browser tests against local mock/dev server only
+        id: baseline
+        working-directory: frontend
+        continue-on-error: true
+        env:
+          CI: "1"
+        run: |
+          set -o pipefail
+          npm run test:e2e 2>&1 | tee /tmp/aplus-main-e2e-baseline.log
+      - name: Report exactly which existing main tests fail
+        if: always()
+        run: |
+          {
+            echo "## Main branch baseline (NO PROD ACCESS)"
+            echo "This checkout used ref=main and local Playwright dev server; no STRATO activity."
+            echo '\`\`\`'
+            echo 'text'
+            sed -n '/  [0-9][0-9]* failed/,+25p' /tmp/aplus-main-e2e-baseline.log | tail -n 45
+            echo '\`\`\`'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: main-branch-e2e-baseline
+          path: |
+            /tmp/aplus-main-e2e-baseline.log
+            frontend/playwright-report/
+          retention-days: 5
