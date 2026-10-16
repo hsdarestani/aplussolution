@@ -150,7 +150,7 @@ def test_qa_staffing_publish_claim_release_roundtrip(auth_admin, auth_worker, co
     available = auth_worker.get('/api/shifts/available/')
     assert available.status_code == 200
     available_rows = available.data['results'] if isinstance(available.data, dict) else available.data
-    assert any(str(item['id']) == str(shift_id) for item in available_rows)
+    assert any(str(item.get('source_shift_id')) == str(shift_id) for item in available_rows)
 
     claimed = auth_worker.post(f'/api/shifts/{shift_id}/claim/', {}, format='json')
     assert claimed.status_code == 200
