@@ -1,0 +1,152 @@
+name: Activate A+ Cloudflare edge fallback (approved)
+on:
+  push:
+    branches: [deploy/aplus-cloudflare-edge-20261016]
+    paths: ['.github/workflows/aplus-cloudflare-production-20261016.yml']
+permissions:
+  contents: read
+concurrency:
+  group: aplus-cloudflare-production-route
+  cancel-in-progress: false
+jobs:
+  activate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Audit zone, token, proxied DNS and conflicting routes (read only)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request
+          token=os.environ['CLOUDFLARE_API_TOKEN']
+          assert token, 'Scoped token is missing'
+          def get(p):
+              q=urllib.request.Request('https://api.cloudflare.com/client/v4/'+p,headers={'Authorization':'Bearer '+token,'Accept':'application/json'})
+              with urllib.request.urlopen(q,timeout=16) as r: d=json.load(r)
+              assert d['success'], 'Cloudflare read not successful'
+              return d['result']
+          assert get('user/tokens/verify')['status']=='active'
+          z=next(z for z in get('zones?name=aplus-solution.de') if z['name']=='aplus-solution.de')
+          assert z['status']=='active'
+          records=get('zones/'+z['id']+'/dns_records?name=app.aplus-solution.de')
+          targets=[r for r in records if r['name']=='app.aplus-solution.de' and r['type'] in ('A','AAAA','CNAME')]
+          assert targets and all(r.get('proxied') is True for r in targets)
+          routes=get('zones/'+z['id']+'/workers/routes?per_page=100')
+          assert not any('app.aplus-solution.de' in r.get('pattern','') or r.get('pattern','').startswith('*.aplus-solution.de/') for r in routes), 'Worker Route conflict'
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write('CLOUDFLARE_ACCOUNT_ID='+z['account']['id']+'\n')
+              f.write('CF_ZONE_ID='+z['id']+'\n')
+          print('CLOUDFLARE_PRODUCTION_PREFLIGHT_PASSED')
+          PY
+      - name: Confirm live origin before any routing changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 16 https://app.aplus-solution.de/api/status/ready/ | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'
+          curl -fsS --max-time 16 -H 'Accept: text/html' https://app.aplus-solution.de/ | grep -q '<div id="root"'
+      - name: Validate production Worker and dry-run locally
+        working-directory: edge
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          w=Path('worker.mjs').read_text()
+          c=Path('wrangler.toml').read_text()
+          h=Path('../frontend/public/maintenance.html').read_text()
+          assert 'STAGING_MODE' not in w
+          assert 'workers_dev = false' in c
+          assert 'MAINTENANCE_MODE = "auto"' in c
+          assert 'if (!isHtmlNavigation(request, url)) return fetch(request)' in w
+          assert '(?:api|admin|calendar|static|media|assets)' in w
+          assert 'X-Aplus-Fallback' in w and '/__aplus/availability' in w
+          assert '<!doctype html>' in h.lower()
+          print('EDGE_SOURCE_REVIEW_OK')
+          PY
+          npx --yes wrangler@4 deploy --config wrangler.toml --dry-run --outdir /tmp/aplus-edge-release-dry-run
+      - name: Upload production Worker script without attaching to any route
+        working-directory: edge
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --config wrangler.toml
+          echo PRODUCTION_WORKER_UPLOADED_ROUTE_STILL_UNCHANGED
+      - name: Attach only A+ app route, smoke test and auto-revert on failure
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os,json,time,sys,urllib.request,urllib.error
+          token=os.environ['CLOUDFLARE_API_TOKEN']; zid=os.environ['CF_ZONE_ID']
+          base='https://api.cloudflare.com/client/v4/'
+          route_id=None
+          path='zones/'+zid+'/workers/routes'
+          def cf(method,p,data=None):
+              q=urllib.request.Request(base+p,method=method,data=json.dumps(data).encode() if data is not None else None,
+                   headers={'Authorization':'Bearer '+token,'Accept':'application/json','Content-Type':'application/json'})
+              with urllib.request.urlopen(q,timeout=18) as r: j=json.load(r)
+              assert j.get('success'), 'Cloudflare operation failed'
+              return j.get('result')
+          def req(p,accept='text/html',method='GET'):
+              r=urllib.request.Request('https://app.aplus-solution.de'+p,method=method,
+                   headers={'Accept':accept,'Cache-Control':'no-cache','User-Agent':'aplus-edge-release-check'})
+              try:
+                  with urllib.request.urlopen(r,timeout=17) as x: return x.status,dict(x.headers),x.read(160000)
+              except urllib.error.HTTPError as x: return x.code,dict(x.headers),x.read(120000)
+          def h(headers,key):
+              return next((v for k,v in headers.items() if k.lower()==key.lower()),'')
+          def smoke():
+              status,headers,body=req('/__aplus/availability?probe='+str(time.time()),'application/json')
+              assert status==200 and json.loads(body)['status']=='ok' and 'json' in h(headers,'content-type').lower()
+              status,headers,body=req('/')
+              assert status==200 and b'<div id="root"' in body and not h(headers,'X-Aplus-Fallback')
+              status,headers,body=req('/api/status/ready/','application/json')
+              assert status==200 and json.loads(body)['status']=='ok' and not h(headers,'X-Aplus-Fallback')
+              status,headers,body=req('/maintenance.html')
+              assert status==200 and b'Gleich wieder' in body
+              status,headers,body=req('/media/cloudflare-audit-20261016-missing.png','image/png')
+              assert status==404 and not h(headers,'X-Aplus-Fallback')
+              status,headers,body=req('/calendar/cloudflare-audit-20261016-unknown.ics','text/calendar')
+              assert status in (200,400,401,403,404,410) and not h(headers,'X-Aplus-Fallback')
+          print('ATTACHING_PRODUCTION_CLOUDFLARE_WORKER_ROUTE')
+          try:
+              routes=cf('GET',path+'?per_page=100')
+              assert not any('app.aplus-solution.de' in r.get('pattern','') or r.get('pattern','').startswith('*.aplus-solution.de/') for r in routes), 'Route conflict'
+              created=cf('POST',path,{'pattern':'app.aplus-solution.de/*','script':'aplus-availability-fallback'})
+              route_id=created['id']
+              print('NEW_EDGE_ROUTE_ID='+route_id)
+              for i in range(15):
+                  try:
+                      smoke()
+                      break
+                  except Exception as e:
+                      print('SMOKE_RETRY_'+str(i+1)+' '+str(e)[:120])
+                      if i==14: raise
+                      time.sleep(6)
+              current=cf('GET',path+'?per_page=100')
+              assert any(r.get('id')==route_id and r.get('script')=='aplus-availability-fallback' for r in current)
+          except Exception as e:
+              print('CUTOVER_FAILED '+str(e)[:200],file=sys.stderr)
+              if route_id:
+                  try:
+                      current=cf('GET',path+'?per_page=100')
+                      if any(r.get('id')==route_id and r.get('script')=='aplus-availability-fallback' for r in current):
+                          cf('DELETE',path+'/'+route_id)
+                          print('AUTOMATIC_ROUTE_ROLLBACK_COMPLETED',file=sys.stderr)
+                  except Exception as re:
+                      print('URGENT_MANUAL_CLOUDFLARE_ROUTE_REMOVAL_REQUIRED '+str(re)[:200],file=sys.stderr)
+              raise
+          print('EDGE_FALLBACK_ACTIVE_ALL_PUBLIC_SMOKE_CHECKS_OK')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+              f.write('A+ Cloudflare Worker ACTIVE on app.aplus-solution.de/*\n')
+              f.write('Cloudflare Route ID: '+route_id+'\n')
+              f.write('Public HTML, JSON API, media and calendar smoke checks succeeded.\n')
+          PY
