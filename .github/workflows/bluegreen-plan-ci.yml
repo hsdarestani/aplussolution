@@ -55,6 +55,10 @@ jobs:
           assert 'db:' not in compose and 'celery:' not in compose
           assert 'network' in compose and 'aplussolution_default' in compose
           assert 'aplussolution_media_data' in compose
-          assert 'if: ${{ false }}' in legacy
+          # Split the GitHub Actions marker: do not evaluate it while building this CI job.
+          assert ('if: ' + '
+          print('NO_STOP_NO_REBUILD_AND_LEGACY_DEPLOY_DISABLED_OK')
+          PY
+ + '{{ false }}') in legacy
           print('NO_STOP_NO_REBUILD_AND_LEGACY_DEPLOY_DISABLED_OK')
           PY
