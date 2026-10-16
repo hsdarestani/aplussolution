@@ -2,9 +2,29 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.http import JsonResponse
+from django.db import connections
 from django.urls import include, path
 
 from core import calendar_sync, order_file_import_views
+
+
+def application_ready(request):
+    """Read-only readiness: alive HTTP alone is insufficient if PostgreSQL is down.
+
+    Leave /health/ as the legacy process liveness endpoint for deployments.
+    Only use this DB-aware endpoint for the customer-facing availability guard.
+    """
+    if request.method not in {'GET', 'HEAD'}:
+        return JsonResponse({'status': 'method_not_allowed'}, status=405)
+    try:
+        with connections['default'].cursor() as cursor:
+            cursor.execute('SELECT 1')
+            cursor.fetchone()
+    except Exception:
+        return JsonResponse({'status': 'unavailable'}, status=503)
+    response = JsonResponse({'status': 'ok'})
+    response['Cache-Control'] = 'no-store'
+    return response
 
 
 def contract_source_health(request):
@@ -31,6 +51,7 @@ urlpatterns = [
     path('calendar/subscribe/<str:token>', calendar_sync.calendar_subscribe_page),
     path('calendar/<str:token>.ics', calendar_sync.calendar_feed),
     path('admin/', admin.site.urls),
+    path('api/status/ready/', application_ready),
     path('api/automation/orders/parse-file/', order_file_import_views.parse_order_file),
     path('api/automation/orders/approve-file/', order_file_import_views.approve_order_file),
     path('api/', include('core.premium_override_urls')),
