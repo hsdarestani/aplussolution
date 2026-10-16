@@ -68,7 +68,7 @@ export default {
       const forced = env?.MAINTENANCE_MODE === 'on';
       const ok = !forced && await availability(url.origin);
       const configured = String(env?.MAINTENANCE_UNTIL || '').trim();
-      const until = /^\\d{4}-\\d{2}-\\d{2}T/.test(configured) && Number.isFinite(Date.parse(configured)) ? configured : null;
+      const until = /^\d{4}-\d{2}-\d{2}T/.test(configured) && Number.isFinite(Date.parse(configured)) ? configured : null;
       return Response.json({ status: ok ? 'ok' : 'unavailable', maintenance_until: until }, {
         status: ok ? 200 : 503,
         headers: { 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': url.origin },
