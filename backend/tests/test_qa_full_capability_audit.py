@@ -186,7 +186,7 @@ def test_qa_staffing_publish_claim_release_roundtrip(auth_admin, auth_worker, co
 
     reopened = auth_worker.get('/api/shifts/available/')
     reopened_rows = reopened.data['results'] if isinstance(reopened.data, dict) else reopened.data
-    reopened_shift = next(item for item in reopened_rows if str(item['id']) == str(shift_id))
+    reopened_shift = next(item for item in reopened_rows if str(item.get('source_shift_id')) == str(shift_id))
     assert reopened_shift['filled_count'] == 0
     assert reopened_shift['open_count'] == 1
 
