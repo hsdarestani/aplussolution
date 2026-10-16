@@ -1,0 +1,88 @@
+name: Emergency restore A+ production availability (no rebuild)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/emergency-recover-availability-20261016.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aplus-emergency-availability
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      PRIMARY_HOST: ${{ secrets.STRATO_HOST }}
+      PRIMARY_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Configure access
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRIMARY_HOST"
+          test -n "$PRIMARY_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$PRIMARY_KEY" > "$HOME/.ssh/strato_recover"
+          chmod 600 "$HOME/.ssh/strato_recover"
+
+      - name: Diagnose health and start existing production images only if necessary
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/strato_recover" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -o ServerAliveInterval=10 -o ServerAliveCountMax=6 root@"$PRIMARY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          test -f .env
+          echo "=== service status before ==="
+          docker compose ps -a || true
+          echo "=== available resources ==="
+          df -h /var/lib/docker /opt/aplussolution || true
+          free -m || true
+          echo "=== local health ==="
+          if curl -fsS -k --max-time 8 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/; then
+            echo "ORIGIN_ALREADY_HEALTHY - leaving running containers untouched"
+            exit 0
+          fi
+          echo "ORIGIN_UNHEALTHY - restoring existing images without build, pull, data mutation"
+          # Do not stop/remove/recreate or touch the database volumes. Avoid racing a regular rollout.
+          docker compose up -d --no-build --pull never db redis backend frontend caddy || {
+            echo "RESTORE_FIRST_ATTEMPT_FAILED"
+            docker compose ps -a || true
+            sleep 12
+            docker compose up -d --no-build --pull never db redis backend frontend caddy
+          }
+          for attempt in $(seq 1 30); do
+            if curl -fsS -k --max-time 7 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/; then
+              echo "LOCAL_ORIGIN_RESTORED"
+              docker compose ps
+              exit 0
+            fi
+            sleep 5
+          done
+          docker compose ps -a || true
+          docker compose logs --no-color --tail=100 backend frontend caddy || true
+          exit 1
+          REMOTE
+
+      - name: Verify public service
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 15); do
+            if curl -fsS --max-time 12 https://app.aplus-solution.de/health/; then
+              echo "PUBLIC_SITE_HEALTHY"
+              exit 0
+            fi
+            sleep 7
+          done
+          echo "::error::Public site remains unavailable"
+          exit 1
+      - name: Cleanup key
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_recover"
