@@ -110,3 +110,31 @@ def test_housekeeping_slot_is_neither_visible_nor_claimable_to_service_worker(
     response = client.post(f'/api/shifts/{slot.pk}/claim/', {}, format='json')
     assert response.status_code == 400
     assert ShiftSlot.objects.get(pk=slot.pk).worker_id is None
+
+
+@pytest.mark.django_db
+def test_open_slots_on_already_claimed_parent_are_hidden_from_same_worker(
+    worker_user, second_worker, company, location, position,
+):
+    worker = worker_user.worker_profile
+    worker.schedule_groups = ['service']
+    worker.save(update_fields=['schedule_groups'])
+    second_worker.schedule_groups = ['service']
+    second_worker.save(update_fields=['schedule_groups'])
+    shift = service_shift(company, location, position)
+    slot = shift.slots.filter(status=ShiftSlot.Status.OPEN).first()
+    slot.worker = worker
+    slot.status = ShiftSlot.Status.CLAIMED
+    slot.save(update_fields=['worker', 'status'])
+
+    mine_client = APIClient()
+    mine_client.force_authenticate(worker_user)
+    mine = available_rows(mine_client)
+    assert not any(row['source_shift_id'] == str(shift.pk) for row in mine)
+
+    peer_client = APIClient()
+    peer_client.force_authenticate(second_worker.user)
+    peer = available_rows(peer_client)
+    rows = [row for row in peer if row['source_shift_id'] == str(shift.pk)]
+    assert len(rows) == 1
+    assert rows[0]['id'] != str(slot.pk)
