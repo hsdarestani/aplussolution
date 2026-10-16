@@ -64,6 +64,37 @@ async function availability(origin) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    // Staging is a separate workers.dev Worker: read-only probes only.
+    // Never proxy authentication, API writes, calendars or private media
+    // through this publicly accessible test hostname.
+    if (env?.STAGING_MODE === 'true') {
+      if (request.method !== 'GET') {
+        return new Response('Method not allowed', { status: 405 });
+      }
+      if (url.pathname === '/__aplus/simulate-outage') {
+        return maintenancePage(env);
+      }
+      if (url.pathname === '/__aplus/availability') {
+        const healthy = await availability('https://app.aplus-solution.de');
+        return Response.json({ status: healthy ? 'ok' : 'unavailable' }, {
+          status: healthy ? 200 : 503,
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
+      if (url.pathname !== '/') {
+        return new Response('Not found', { status: 404 });
+      }
+      // Read-only comparison: request only the anonymous homepage.
+      try {
+        const upstream = await fetch(originRequest(new URL('/', 'https://app.aplus-solution.de')), {
+          signal: AbortSignal.timeout(9000),
+        });
+        if (ERROR_STATUSES.has(upstream.status)) return maintenancePage(env);
+        return upstream;
+      } catch {
+        return maintenancePage(env);
+      }
+    }
     if (url.pathname === '/__aplus/availability') {
       const forced = env?.MAINTENANCE_MODE === 'on';
       const ok = !forced && await availability(url.origin);
