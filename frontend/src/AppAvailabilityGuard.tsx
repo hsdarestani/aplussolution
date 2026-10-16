@@ -8,8 +8,8 @@ const PING_MS = 60000;
 const RECOVERY_MS = 30000;
 const CONFIRM_MS = 6000;
 const HEALTH_URL = Capacitor.isNativePlatform()
-  ? 'https://app.aplus-solution.de/health/'
-  : '/health/';
+  ? 'https://app.aplus-solution.de/api/status/ready/'
+  : '/api/status/ready/';
 
 async function checkHealth() {
   const controller = new AbortController();
