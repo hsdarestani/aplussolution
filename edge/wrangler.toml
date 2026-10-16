@@ -1,0 +1,24 @@
+name = "aplus-availability-fallback"
+main = "worker.mjs"
+compatibility_date = "2026-10-01"
+workers_dev = false
+
+# This is intentionally NOT an active production route.
+# During a separately approved deployment, attach app.aplus-solution.de/*
+# only after DNS/Worker ownership is verified, so a dead STRATO origin
+# can still serve the maintenance page from Cloudflare's edge.
+# Never attach the route in the normal app deploy workflow.
+#
+# [routes]
+# pattern = "app.aplus-solution.de/*"
+# zone_name = "aplus-solution.de"
+
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
+
+[vars]
+MAINTENANCE_MODE = "auto"
+# Set only for an actual scheduled window, ISO8601 UTC/offset.
+# MAINTENANCE_UNTIL = "2026-10-16T20:00:00+02:00"
