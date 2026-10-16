@@ -31,5 +31,11 @@ jobs:
           curl -fsS --connect-timeout 3 --max-time 10 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/
           echo PRIMARY_ORIGIN_ALIVE_END
           docker compose exec -T db sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select '\''PRIMARY_IN_RECOVERY='\''||pg_is_in_recovery() union all select '\''PRIMARY_WAL_LSN='\''||pg_current_wal_lsn()::text union all select '\''PRIMARY_SHIFT_COUNT='\''||(select count(*)::text from core_shift)"'
+          volume_path="$(docker volume inspect -f '{{.Mountpoint}}' aplussolution_media_data 2>/dev/null || true)"
+          if test -n "$volume_path" && test -d "$volume_path"; then
+            du -sm "$volume_path" | awk '{print "PRIMARY_MEDIA_VOLUME_MB="$1}'
+          else
+            echo PRIMARY_MEDIA_VOLUME_UNVERIFIED=yes
+          fi
           echo PRIMARY_READONLY_AUDIT_COMPLETE=yes
           REMOTE
