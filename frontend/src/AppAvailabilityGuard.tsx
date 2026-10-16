@@ -77,9 +77,14 @@ export default function AppAvailabilityGuard() {
     const signal = () => { void probe(); };
     const online = () => { void probe(); };
     const visible = () => { if (document.visibilityState === 'visible') void probe(); };
+    let lastRoutineCheck = Date.now();
     const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void probe();
-    }, status === 'normal' ? PING_MS : RECOVERY_MS);
+      if (document.visibilityState !== 'visible') return;
+      const interval = status === 'normal' ? PING_MS : RECOVERY_MS;
+      if (Date.now() - lastRoutineCheck < interval) return;
+      lastRoutineCheck = Date.now();
+      void probe();
+    }, RECOVERY_MS);
     // One low-cost heartbeat even if no API call occurs. Do not gate App rendering.
     const initial = window.setTimeout(probe, 12000);
 
@@ -134,7 +139,10 @@ export default function AppAvailabilityGuard() {
           onClick={async () => {
             setWorking(true);
             try {
-              if (await checkHealth()) {
+              const first = await checkHealth();
+              // A single success during an unstable recovery is insufficient.
+              const second = first && await checkHealth();
+              if (second) {
                 window.dispatchEvent(new Event('aplus-app-resume'));
                 setAvailability('normal');
               }
