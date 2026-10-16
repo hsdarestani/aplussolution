@@ -31,7 +31,7 @@ jobs:
           set -euo pipefail
           bash -n deploy/bluegreen/release.sh
           mkdir -p /tmp/aplus-bluegreen-ci
-          printf 'DJANGO_SECRET_KEY=ci-only\\nDATABASE_URL=sqlite:///test.sqlite3\\n' > /tmp/aplus-bluegreen-ci/.env
+          printf 'DJANGO_SECRET_KEY=ci-only\nDATABASE_URL=sqlite:///test.sqlite3\n' > /tmp/aplus-bluegreen-ci/.env
           sed 's|/opt/aplussolution/.env|/tmp/aplus-bluegreen-ci/.env|' deploy/bluegreen/compose.green.yml > /tmp/aplus-bluegreen-ci/compose.yml
           export BACKEND_IMAGE="ghcr.io/example/backend@sha256:$(printf '0%.0s' {1..64})"
           export FRONTEND_IMAGE="ghcr.io/example/frontend@sha256:$(printf '0%.0s' {1..64})"
