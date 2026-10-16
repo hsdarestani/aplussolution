@@ -1,5 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
+import { FileViewer } from '@capacitor/file-viewer';
 
 /** Preserve the document's original display name, including umlauts/spaces. */
 export function safePdfFilename(filename: string) {
@@ -40,12 +41,24 @@ export async function saveSchedulePdf(blob: Blob, filename: string, _title = 'Di
       reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
       reader.readAsDataURL(blob);
     });
-    await Filesystem.writeFile({
+    const saved = await Filesystem.writeFile({
       path: 'Downloads/' + name,
       directory: Directory.Documents,
       data,
       recursive: true,
     });
+    // iOS: first save the actual PDF to Files, then open that exact saved file.
+    // Do not create a separate cached preview or download a second copy.
+    if (Capacitor.getPlatform() === 'ios') {
+      try {
+        await FileViewer.openDocumentFromLocalPath({ path: saved.uri });
+      } catch {
+        throw new Error(
+          'PDF wurde gespeichert, konnte aber nicht automatisch geöffnet werden. ' +
+          'Bitte unter Dateien > Auf meinem iPhone > A+ Solution > Downloads öffnen.',
+        );
+      }
+    }
     return;
   }
 
