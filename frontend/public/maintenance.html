@@ -71,10 +71,10 @@ h1 span{color:#aa915b}.copy{font-size:clamp(16px,1.25vw,19px);color:#607785;line
 <div class="brand-footer">Wir halten Ihre Einsatzplanung in Bewegung.<br>© A+ Solution GmbH</div>
 </section>
 <section class="content-side">
-<div class="pill"><span class="pulse"></span><span id="state-label">Technische Aktualisierung</span></div>
+<div class="pill"><span class="pulse"></span><span id="state-label">Verfügbarkeit wird geprüft</span></div>
 <div class="overline">KURZE UNTERBRECHUNG</div>
 <h1>Gleich wieder <span>für Sie da.</span></h1>
-<p class="copy">Wir kümmern uns gerade um die Erreichbarkeit der A+ Solution App. Ihre Schichten, Arbeitszeiten und Dokumente bleiben erhalten. Vielen Dank für Ihre Geduld.</p>
+<p class="copy">Wir kümmern uns gerade um die Erreichbarkeit der A+ Solution App. Diese Statusseite verändert weder Schichten noch Arbeitszeiten oder Dokumente. Vielen Dank für Ihre Geduld.</p>
 <section class="info" aria-live="polite">
 <div class="info-head"><div class="info-title" id="eta-label">Aktueller Status</div><span aria-hidden="true" style="font-size:24px;color:#b7a079">◷</span></div>
 <div class="info-value" id="eta-value">Wir prüfen die Verbindung</div>
@@ -127,7 +127,7 @@ h1 span{color:#aa915b}.copy{font-size:clamp(16px,1.25vw,19px);color:#607785;line
       var controller = new AbortController();
       var timeout = window.setTimeout(function () { controller.abort(); }, 8500);
       try {
-        var response = await fetch('/health/?aplus_maintenance_probe=' + Date.now(), {
+        var response = await fetch('/__aplus/availability?probe=' + Date.now(), {
           cache: 'no-store', credentials: 'omit', signal: controller.signal,
           headers: { 'Accept': 'application/json' }
         });
@@ -137,7 +137,7 @@ h1 span{color:#aa915b}.copy{font-size:clamp(16px,1.25vw,19px);color:#607785;line
       if (healthy >= 2) {
         stateLabel.textContent = 'Verbindung wiederhergestellt';
         automatic.textContent = 'Die Anwendung wird geöffnet …';
-        window.location.reload();
+        window.location.replace('/?aplus_recovered=1');
         return;
       }
       automatic.textContent = healthy ? 'Verbindung erkannt · Bestätigung läuft' : 'Wir prüfen erneut in 30 Sekunden';
