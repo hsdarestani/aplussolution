@@ -1,0 +1,60 @@
+name: Validate Blue Green plan without any production access
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'deploy/bluegreen/**'
+      - '.github/workflows/bluegreen-build-images.yml'
+      - '.github/workflows/bluegreen-plan-ci.yml'
+      - '.github/workflows/deploy.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  no-deploy-plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Static bash lint, no execution
+        run: |
+          set -euo pipefail
+          bash -n deploy/bluegreen/release.sh
+          echo "BASH_SYNTAX_OK"
+      - name: Validate isolated Docker Compose YAML using local dummy credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/aplus-bluegreen-test
+          printf 'DJANGO_SECRET_KEY=test-only\nDATABASE_URL=sqlite:///test.sqlite3\n' > /tmp/aplus-bluegreen-test/.env
+          sed 's|/opt/aplussolution/.env|/tmp/aplus-bluegreen-test/.env|' deploy/bluegreen/compose.green.yml > /tmp/aplus-bluegreen-test/compose.yml
+          export BACKEND_IMAGE="ghcr.io/example/backend@sha256:$(printf '0%.0s' {1..64})"
+          export FRONTEND_IMAGE="ghcr.io/example/frontend@sha256:$(printf '0%.0s' {1..64})"
+          docker compose -f /tmp/aplus-bluegreen-test/compose.yml config --quiet
+          echo "GREEN_COMPOSE_CONFIG_OK"
+      - name: Verify release controls and shared-state invariants
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          compose = Path('deploy/bluegreen/compose.green.yml').read_text()
+          script = Path('deploy/bluegreen/release.sh').read_text()
+          legacy = Path('.github/workflows/deploy.yml').read_text()
+          assert 'I_APPROVE_CUTOVER' in script
+          assert 'I_APPROVE_ROLLBACK' in script
+          assert 'docker compose build' not in script
+          assert 'docker compose stop' not in script
+          assert 'docker compose rm' not in script
+          assert 'docker compose down' not in script
+          assert 'aplus-green-backend' in script
+          assert 'aplus-green-frontend' in script
+          assert 'caddy reload' in script
+          assert 'trap rollback_on_exit EXIT' in script
+          assert 'migrate --check' in script
+          assert 'command:' in compose and 'gunicorn' in compose
+          assert 'db:' not in compose and 'celery:' not in compose
+          assert 'network' in compose and 'aplussolution_default' in compose
+          assert 'aplussolution_media_data' in compose
+          assert 'if: ${{ false }}' in legacy
+          print('NO_STOP_NO_REBUILD_AND_LEGACY_DEPLOY_DISABLED_OK')
+          PY
