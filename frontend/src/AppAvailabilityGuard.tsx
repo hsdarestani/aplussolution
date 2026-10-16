@@ -111,6 +111,13 @@ export default function AppAvailabilityGuard() {
   if (availability === 'normal') return null;
 
   const offline = availability === 'offline';
+  // Only show a countdown when there is a real, explicitly provided ETA.
+  // Unplanned failures have no trustworthy prediction.
+  const eta = Date.parse(document.querySelector<HTMLMetaElement>('meta[name="aplus-maintenance-until"]')?.content || '');
+  const remaining = Number.isFinite(eta) ? eta - now : -1;
+  const etaLabel = remaining > 0
+    ? 'Voraussichtlich noch ' + Math.ceil(remaining / 60000) + ' Min. (nicht garantiert)'
+    : 'Automatische Prüfung im Hintergrund · keine verbindliche Rückkehrzeit verfügbar';
   return (
     <div className="aplus-availability" role="dialog" aria-modal="true" aria-labelledby="aplus-availability-title" data-testid="aplus-availability">
       <div className="aplus-availability-visual" aria-hidden="true">
@@ -129,7 +136,7 @@ export default function AppAvailabilityGuard() {
         <div className="aplus-availability-status" aria-live="polite">
           <small>AKTUELLER STATUS</small>
           <strong>{working ? 'Verbindung wird geprüft …' : offline ? 'Warten auf Internetverbindung' : 'Wiederherstellung wird geprüft'}</strong>
-          <span>Automatische Prüfung im Hintergrund · keine verbindliche Rückkehrzeit verfügbar</span>
+          <span>{etaLabel}</span>
           <div className="aplus-availability-sweep" aria-hidden="true"><i /></div>
         </div>
         <button
