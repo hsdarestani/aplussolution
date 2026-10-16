@@ -10,8 +10,10 @@ export function expandOpenShiftCards<T extends Record<string, any>>(
     const slots = Array.isArray(shift.slot_cards)
       ? shift.slot_cards.filter((slot: any) => slot?.status === 'open' && slot?.is_open)
       : [];
-    const fallbackCount = Math.max(1, Math.min(100, Math.trunc(Number(shift.open_count) || 1)));
-    const openSlots: any[] = slots.length
+    // If the server returned slot_cards, it is authoritative. Never invent
+    // an open card when every slot is already claimed or closed.
+    const fallbackCount = Math.max(0, Math.min(100, Math.trunc(Number(shift.open_count) || 0)));
+    const openSlots: any[] = Array.isArray(shift.slot_cards)
       ? slots
       : Array.from({ length: fallbackCount }, (_, index) => ({ id: `open-${index}` }));
 
