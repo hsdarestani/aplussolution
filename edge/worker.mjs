@@ -47,7 +47,7 @@ async function availability(origin) {
   if (now - recentAvailability.at < 20000) return recentAvailability.ok;
   try {
     const [health, shell] = await Promise.all([
-      fetch(originRequest(new URL('/health/', origin), 'application/json'), { signal: AbortSignal.timeout(7500) }),
+      fetch(originRequest(new URL('/api/status/ready/', origin), 'application/json'), { signal: AbortSignal.timeout(7500) }),
       fetch(originRequest(new URL('/', origin)), { signal: AbortSignal.timeout(7500) }),
     ]);
     const data = health.ok ? await health.json() : null;
