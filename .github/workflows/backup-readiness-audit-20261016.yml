@@ -1,0 +1,57 @@
+name: Emergency read-only backup readiness audit
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backup-readiness-audit-20261016.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      BACKUP_HOST: ${{ secrets.BACKUP_HOST }}
+      SSHPASS: ${{ secrets.BACKUP_PASSWORD }}
+    steps:
+      - name: Install sshpass
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+      - name: Inspect standby safely, without promoting or writing
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$BACKUP_HOST"
+          test -n "$SSHPASS"
+          sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 root@"$BACKUP_HOST" 'bash -s' <<'REMOTE'
+          set -uo pipefail
+          echo "AUDIT_HOST_CONNECTED=true"
+          date -u '+AUDIT_UTC=%Y-%m-%dT%H:%M:%SZ'
+          uptime
+          free -m | head -n 2
+          df -h / /var/lib/docker | tail -n 2
+          echo "=== docker containers ==="
+          timeout 15 docker ps --format '{{.Names}}|{{.Status}}' | grep -E 'aplus|publisher|postgres|redis' | head -n 35 || true
+          echo "=== A+ installation ==="
+          if ! test -f /opt/aplussolution/.env; then echo "A_PLUS_ENV_MISSING=true"; exit 0; fi
+          cd /opt/aplussolution || exit 0
+          timeout 20 docker compose ps -a || true
+          echo "=== PostgreSQL read-only state ==="
+          timeout 15 docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select pg_is_in_recovery(),coalesce(pg_last_wal_receive_lsn()::text,'"'""'"'),coalesce(pg_last_wal_replay_lsn()::text,'"'""'"'),coalesce(pg_last_xact_replay_timestamp()::text,'"'""'"'),now()::text"' 2>&1 || true
+          echo "=== replication and copies ==="
+          systemctl is-active aplus-repl-from-strato.service || true
+          systemctl is-active aplus-media-pull.timer || true
+          timeout 12 docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from core_shift"' 2>&1 || true
+          echo "=== local app health ==="
+          timeout 12 curl -sk -w 'LOCAL_HTTP=%{http_code}\n' -o /dev/null --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/ || true
+          REMOTE
+      - name: Compare DNS and hosts (read-only)
+        run: |
+          set -euo pipefail
+          echo "DNS_API:"
+          getent ahostsv4 app.aplus-solution.de | awk '{print $1}' | sort -u || true
+          echo "BACKUP_IP:"
+          getent ahostsv4 "$BACKUP_HOST" | awk '{print $1}' | sort -u || true
