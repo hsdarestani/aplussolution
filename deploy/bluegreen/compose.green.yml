@@ -1,8 +1,9 @@
 # The green services share ONLY the existing Docker network and media volume.
 # This file is NEVER used by the legacy production compose command.
 # No db, redis, Caddy, Celery, migration, bootstrap or host ports.
-# WARNING: production .env and the primary DB are referenced READ-ONLY through
-# the readiness probe; never run management commands or worker jobs here.
+# WARNING: staging probes are read-only; database operations are not disabled
+# after cutover. Shared media must remain writable for authenticated uploads.
+# Never run migrations, bootstrap or Celery while preparing green.
 services:
   backend-green:
     image: ${BACKEND_IMAGE:?Set an immutable, externally built backend image}
@@ -31,7 +32,7 @@ services:
       - type: volume
         source: media_data
         target: /app/media
-        read_only: true
+        read_only: false
     mem_limit: 1024m
     pids_limit: 160
     cpus: 1.5
