@@ -143,3 +143,79 @@ def test_service_schedule_expands_multi_worker_shift_for_legacy_mobile(
     assert {row['assigned_workers'][0]['name'] for row in rows} == {'Anna Eins', 'Yohannes Kiffle'}
     assert len({str(row['id']) for row in rows}) == 2
     assert all(len(row['assigned_workers']) == 1 for row in rows)
+
+
+@pytest.mark.django_db
+def test_service_worker_sees_two_distinct_open_slots_in_legacy_service_zeitplan(
+    worker_user, company, location, position
+):
+    requester = worker_user.worker_profile
+    requester.schedule_groups = ['service']
+    requester.save(update_fields=['schedule_groups'])
+
+    starts_at = timezone.now() + timedelta(days=4)
+    shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        starts_at=starts_at,
+        ends_at=starts_at + timedelta(hours=4, minutes=30),
+        status=Shift.Status.PUBLISHED,
+        required_count=2,
+        schedule_groups=['service'],
+    )
+
+    client = APIClient()
+    client.force_authenticate(worker_user)
+    response = client.get('/api/employee/schedule/')
+    assert response.status_code == 200
+    cards = [
+        row for row in response.data['shifts']
+        if row.get('_available_open_slot') and str(row.get('source_shift_id')) == str(shift.id)
+    ]
+    slot_ids = {
+        str(slot.id) for slot in shift.slots.filter(
+            status=ShiftSlot.Status.OPEN, worker__isnull=True
+        )
+    }
+    assert len(cards) == 2
+    assert {str(card['id']) for card in cards} == slot_ids
+    assert all(card['open_count'] == 1 and card['filled_count'] == 0 for card in cards)
+    assert all(card['assigned_workers'][0]['name'] == 'OpenShift' for card in cards)
+    assert all(not card['assigned_workers'][0]['is_me'] for card in cards)
+
+    available = client.get('/api/shifts/available/')
+    assert available.status_code == 200
+    results = available.data.get('results', []) if isinstance(available.data, dict) else available.data
+    parent = next(row for row in results if str(row['id']) == str(shift.id))
+    assert parent['open_count'] == 2
+    assert len([slot for slot in parent['slot_cards'] if slot['is_open']]) == 2
+
+
+@pytest.mark.django_db
+def test_service_worker_does_not_see_housekeeping_open_slots(
+    worker_user, company, location, position
+):
+    requester = worker_user.worker_profile
+    requester.schedule_groups = ['service']
+    requester.save(update_fields=['schedule_groups'])
+    starts_at = timezone.now() + timedelta(days=4)
+    housekeeping_shift = Shift.objects.create(
+        client=company,
+        location=location,
+        position=position,
+        starts_at=starts_at,
+        ends_at=starts_at + timedelta(hours=5),
+        status=Shift.Status.PUBLISHED,
+        required_count=2,
+        schedule_groups=['housekeeping'],
+    )
+
+    client = APIClient()
+    client.force_authenticate(worker_user)
+    response = client.get('/api/employee/schedule/')
+    assert response.status_code == 200
+    assert not any(
+        str(row.get('source_shift_id')) == str(housekeeping_shift.id)
+        for row in response.data['shifts']
+    )
