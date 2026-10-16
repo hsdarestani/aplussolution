@@ -1,0 +1,56 @@
+name: A+ Cloudflare edge access and DNS audit (READ ONLY)
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/aplus-cloudflare-readonly-audit.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_TOKEN: ${{ secrets.CLOUDFLARE_TOKEN }}
+      CF_TOKEN: ${{ secrets.CF_TOKEN }}
+    steps:
+      - name: Verify scoped token and check zone, proxy, routing without writes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, json, urllib.request, urllib.parse, urllib.error
+          token=next((os.environ.get(k) for k in ('CLOUDFLARE_API_TOKEN','CF_API_TOKEN','CLOUDFLARE_TOKEN','CF_TOKEN') if os.environ.get(k)), None)
+          if not token:
+              print('CF_ACCESS_TOKEN_PRESENT=no')
+              print('CF_READONLY_AUDIT_BLOCKED=missing_scoped_api_token')
+              raise SystemExit(2)
+          print('CF_ACCESS_TOKEN_PRESENT=yes')
+          def get(path):
+              req=urllib.request.Request('https://api.cloudflare.com/client/v4/'+path,headers={'Authorization':'Bearer '+token,'Accept':'application/json'})
+              try:
+                  with urllib.request.urlopen(req,timeout=14) as r: data=json.load(r)
+              except urllib.error.HTTPError as e:
+                  print('CF_API_READ_DENIED='+str(e.code)+' path='+path.split('?')[0])
+                  raise SystemExit(3)
+              if not data.get('success'):
+                  print('CF_API_RESPONSE_UNSUCCESSFUL='+path.split('?')[0])
+                  raise SystemExit(4)
+              return data.get('result')
+          verify=get('user/tokens/verify')
+          print('CF_TOKEN_VALID='+str(verify.get('status')=='active').lower())
+          zones=get('zones?'+urllib.parse.urlencode({'name':'aplus-solution.de','per_page':30}))
+          matches=[z for z in zones if z.get('name')=='aplus-solution.de']
+          print('CF_ZONE_FOUND='+str(bool(matches)).lower())
+          if not matches: raise SystemExit(5)
+          zone=matches[0]
+          print('CF_ZONE_ACTIVE='+str(zone.get('status')=='active').lower())
+          records=get('zones/'+zone['id']+'/dns_records?'+urllib.parse.urlencode({'name':'app.aplus-solution.de','per_page':100}))
+          app=[r for r in records if r.get('name')=='app.aplus-solution.de' and r.get('type') in ('A','AAAA','CNAME')]
+          print('CF_APP_DNS_RECORDS='+str(len(app)))
+          print('CF_APP_PROXY_ENABLED='+str(bool(app) and all(r.get('proxied') is True for r in app)).lower())
+          routes=get('zones/'+zone['id']+'/workers/routes?per_page=100')
+          matches=[r.get('pattern','') for r in routes if 'app.aplus-solution.de' in r.get('pattern','')]
+          print('CF_APP_EXISTING_WORKER_ROUTES='+json.dumps(matches))
+          print('CF_READONLY_AUDIT_COMPLETE=yes')
+          PY
