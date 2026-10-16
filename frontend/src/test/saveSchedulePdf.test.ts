@@ -26,7 +26,8 @@ test('a tap saves a PDF directly to the persistent visible Files/Downloads folde
     directory: 'DOCUMENTS',
     recursive: true,
   });
-  expect(native.open).toHaveBeenCalledExactlyOnceWith({
+  expect(native.open).toHaveBeenCalledTimes(1);
+  expect(native.open).toHaveBeenCalledWith({
     path: 'file:///Documents/Downloads/Prüfung.pdf',
   });
   expect(native.write.mock.invocationCallOrder[0]).toBeLessThan(native.open.mock.invocationCallOrder[0]);
