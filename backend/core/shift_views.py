@@ -272,7 +272,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
         qs = self.filter_queryset(self.base_queryset().filter(
             status=Shift.Status.PUBLISHED, starts_at__gte=timezone.now(),
             slots__status=ShiftSlot.Status.OPEN, slots__worker__isnull=True,
-        ).distinct())
+        ).exclude(slots__worker=worker).distinct())
         visible = [shift for shift in qs if shift_visible_to_worker(shift, worker)]
         page = self.paginate_queryset(visible)
         serialized = self.get_serializer(page if page is not None else visible, many=True).data
