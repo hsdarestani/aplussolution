@@ -14,6 +14,7 @@ import { api } from './api';
 import { ShiftPlanAttachments } from './ShiftPlanAttachments';
 import GermanTimeField from './GermanTimeField';
 import { schedulePalette } from './scheduleClientPalette';
+import { expandOpenShiftCards } from './openShiftCards';
 import './wiw-schedule-mobile.css';
 import './wiw-employee-schedule-mobile.css';
 
@@ -189,7 +190,7 @@ export default function WiwEmployeeScheduleMobile() {
         api('shifts/available/?ordering=starts_at'),
       ]);
       const nextMine = Array.isArray(mineData?.shifts) ? mineData.shifts : unpack(mineData);
-      const nextOpen = unpack(openData);
+      const nextOpen = expandOpenShiftCards(unpack(openData));
       setServiceSchedule(Boolean(mineData?.service_schedule));
       setMine(nextMine);
       setOpen(nextOpen);
@@ -244,7 +245,7 @@ export default function WiwEmployeeScheduleMobile() {
 
   useEffect(() => {
     let cancelled = false;
-    if (!selected?.id || mode !== 'mine') {
+    if (!selected?.id || selected?._available_open_slot || mode !== 'mine') {
       setChangeHistory([]);
       return () => { cancelled = true; };
     }
@@ -293,7 +294,7 @@ export default function WiwEmployeeScheduleMobile() {
   async function claim(shift: any) {
     setBusy(true);
     try {
-      const result: any = await api(`shifts/${shift.id}/claim/`, { method: 'POST', body: '{}' });
+      const result: any = await api(`shifts/${shift.source_shift_id || shift.id}/claim/`, { method: 'POST', body: '{}' });
       setSelected(undefined);
       if (result?.pending_approval) {
         setMessage('Schichtübernahme wurde zur Freigabe gesendet.');
@@ -445,7 +446,7 @@ export default function WiwEmployeeScheduleMobile() {
         <DetailRow icon={briefcaseOutline}>{selected.client_name || 'A+'}</DetailRow>
         <DetailRow icon={briefcaseOutline}>{selected.position_name || 'Einsatz'}</DetailRow>
         <DetailRow icon={locationOutline}>{selected.location_name || 'Einsatzort'}</DetailRow>
-        <DetailRow icon={personOutline}>{mode === 'mine'
+        <DetailRow icon={personOutline}>{mode === 'mine' && !selected?._available_open_slot
           ? (selected?._selected_worker?.name
             ? shortPersonName(selected._selected_worker.name)
             : (assignedNames(selected) || worker.name || worker.email || 'Mitarbeiter'))
@@ -478,7 +479,7 @@ export default function WiwEmployeeScheduleMobile() {
         </article>)}
       </section> : null}
       <div className="wiw-employee-detail-actions">
-        {mode === 'open' ? (
+        {mode === 'open' || selected?._available_open_slot ? (
           <button type="button" className="primary" disabled={busy} onClick={() => void claim(selected)}>{busy ? 'Bitte warten …' : 'Schicht übernehmen'}</button>
         ) : !isOwnShift(selected) ? (
           <button type="button" disabled>Nur sichtbar · Service Zeitplan</button>
@@ -543,7 +544,7 @@ export default function WiwEmployeeScheduleMobile() {
           return <section className="wiw-day-section wiw-day-visual" id={`wiw-employee-day-${day}`} key={day}>
             <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{mode === 'open' ? dayShifts.length : dayShifts.reduce((sum, shift) => sum + Math.max(1, assignedWorkersForDisplay(shift).length), 0)}</em></header>
             {dayShifts.flatMap((shift, shiftIndex) => {
-              const openShift = mode === 'open';
+              const openShift = mode === 'open' || Boolean(shift?._available_open_slot);
               const assigned = openShift ? [undefined] : assignedWorkersForDisplay(shift);
               const workersToRender = assigned.length ? assigned : [undefined];
               return workersToRender.map((assignedWorker: any, workerIndex: number) => {
@@ -552,7 +553,7 @@ export default function WiwEmployeeScheduleMobile() {
                 const showDivider = workerIndex === 0
                   && shiftIndex > 0
                   && clientKey(dayShifts[shiftIndex - 1]) !== clientKey(shift);
-                return <React.Fragment key={`${String(shift.id)}:${assignedWorker?.slot_id || workerIndex}`}>
+                return <React.Fragment key={`${String(shift.id)}:${shift._open_slot_id || assignedWorker?.slot_id || workerIndex}`}>
                   {showDivider ? <div className="wiw-client-divider" aria-hidden="true" /> : null}
                   <button
                     type="button"
