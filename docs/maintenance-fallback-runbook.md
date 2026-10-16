@@ -1,9 +1,32 @@
 # A+ Solution — graceful downtime and OpenShift release runbook
 
-**Status: DRAFT. DO NOT DEPLOY while production stability is in question.**
+**Status: ACTIVE on Cloudflare for browser document navigations (2026-10-16).**
 
-This implementation is staged together with the native OpenShift slot fix in draft PR #225.
-It must not be merged to main until the owner separately approves the combined release.
+The A+ Solution web and OpenShift changes were released with PR #225.
+Production Cloudflare Worker `aplus-availability-fallback` was deployed on
+`app.aplus-solution.de/*` after explicit approval (Workflow run
+[38923486971](https://github.com/hsdarestani/aplussolution/actions/runs/38923486971)).
+The edge route was activated only after confirming proxied DNS and absence of
+conflicting routes. The separate Workers.dev staging Worker had passed origin-up,
+synthetic HTTP 503 and API/write-isolation tests.
+
+After route activation, public HTML, JSON API, `/maintenance.html`, 404 media
+and calendar pass-through were checked. An independent check confirmed
+`/__aplus/availability` returns JSON `status:ok` through Cloudflare.
+No STRATO service, database, DNS record or mobile binary was changed by edge activation.
+
+**Immediate rollback:** Cloudflare Dashboard → Workers & Pages →
+`aplus-availability-fallback` → Domains & Routes → remove the
+`app.aplus-solution.de/*` Worker Route ONLY. Leave DNS, STRATO services,
+Worker script and database unchanged. Re-validate homepage, API readiness and
+calendar/media handling. Route ID recorded in GitHub Actions run summary.
+
+**Scope limit:** Cloudflare fallback covers new browser HTML navigations when
+STRATO origin returns a 5xx or connection fails. It cannot make API operations
+work during an outage. Native installed app UI changes need a future store build.
+Unplanned outage ETA is unknown; the screen does not fabricate estimates.
+
+---
 
 ## Why two layers are needed
 
