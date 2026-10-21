@@ -63,7 +63,8 @@ rollback() {
     echo "AUTOMATIC_ROLLBACK_TRIGGERED exit=$code"
     # Restore the exact original production override on failure.
     install -m 600 "$archive/old-production-override.yml" /opt/aplussolution/docker-compose.override.yml
-    timeout 240 docker compose -f docker-compose.yml -f "$old" up -d --no-deps --no-build --pull never backend frontend || true
+    timeout 180 docker compose -f docker-compose.yml -f "$old" up -d --no-deps --no-build --pull never backend || true
+    timeout 180 docker compose -f docker-compose.yml -f "$old" up -d --no-deps --no-build --pull never frontend || true
     docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
     for i in $(seq 1 25); do
       if curl -fsS --connect-timeout 3 --max-time 7 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/ | grep -q '"ok"'; then
@@ -77,7 +78,10 @@ rollback() {
 trap rollback EXIT
 echo "START_CUTOVER_UTC=$(date -u +%FT%TZ)"
 switched=1
-timeout 240 docker compose -f docker-compose.yml -f "$new" up -d --no-deps --no-build --pull never backend frontend
+# Recreate services one at a time: parallel compose recreation can race with
+# Docker container removal and fail with "No such container".
+timeout 180 docker compose -f docker-compose.yml -f "$new" up -d --no-deps --no-build --pull never backend
+timeout 180 docker compose -f docker-compose.yml -f "$new" up -d --no-deps --no-build --pull never frontend
 ready=0
 for i in $(seq 1 40); do
   api_ok=0
