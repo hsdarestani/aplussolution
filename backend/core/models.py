@@ -96,6 +96,9 @@ class AuevSetting(TimestampedModel):
     client_contract_text = models.TextField(blank=True)
     file_label = models.CharField(max_length=160, blank=True)
     last_sequence_number = models.PositiveIntegerField(default=0)
+    # Kept in the database, not public MEDIA_ROOT or this public repository.
+    provider_signature_png = models.BinaryField(null=True, blank=True, editable=False)
+    provider_signature_approved_at = models.DateTimeField(null=True, blank=True, editable=False)
 
     def __str__(self):
         return f'ANÜ Einstellungen: {self.client.name if self.client_id else "Standard"}'
