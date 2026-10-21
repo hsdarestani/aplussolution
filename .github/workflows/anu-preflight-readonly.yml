@@ -1,0 +1,50 @@
+name: Read only STRATO ANÜ release preflight diagnostics
+on:
+  push:
+    branches: [main]
+    paths: ['.deploy/anu-diagnose-20261021.txt']
+permissions:
+  contents: read
+concurrency:
+  group: aplus-anu-preflight-diagnose
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      SSH_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Inspect current origin without changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$SSH_KEY"
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/anu_diag"
+          chmod 600 "$HOME/.ssh/anu_diag"
+          ssh -i "$HOME/.ssh/anu_diag" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 root@"$HOST" 'bash -s' <<'REMOTE'
+          set +e
+          cd /opt/aplussolution || { echo "APP_DIR=missing"; exit 0; }
+          echo "ENV_FILE=$([ -s .env ] && echo present || echo missing)"
+          echo "COMPOSE_OVERRIDE=$([ -e docker-compose.override.yml ] && echo present || echo absent)"
+          mem=$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)
+          disk=$(df -Pm /var/lib/docker | awk 'END{print $4}')
+          echo "FREE_MEM_MB=$mem"
+          echo "FREE_DOCKER_DISK_MB=$disk"
+          echo "MEM_GUARD=$([ "$mem" -ge 850 ] && echo pass || echo fail)"
+          echo "DISK_GUARD=$([ "$disk" -ge 3000 ] && echo pass || echo fail)"
+          for svc in db redis backend frontend caddy celery celery-beat; do
+            cid=$(docker compose ps -q "$svc" 2>/dev/null)
+            state=missing
+            if [ -n "$cid" ]; then state=$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null || echo inspect-failed); fi
+            echo "SERVICE_${svc}=$state"
+          done
+          db_primary=$(docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select NOT pg_is_in_recovery()"' </dev/null 2>/dev/null | tail -n1)
+          echo "DB_PRIMARY=$([ "$db_primary" = t ] && echo pass || echo fail)"
+          health=$(curl -fsS --max-time 10 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/ 2>/dev/null)
+          if printf '%s' "$health" | grep -q '"ok"'; then echo HEALTH=pass; else echo HEALTH=fail; fi
+          REMOTE
+          rm -f "$HOME/.ssh/anu_diag"
