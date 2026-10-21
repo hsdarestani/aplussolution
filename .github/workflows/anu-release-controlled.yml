@@ -20,6 +20,8 @@ jobs:
       GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GHCR_USER: ${{ github.actor }}
       BUILT_SOURCE_SHA: 157751392ce4003efd3784b5a05cfca044944103
+      BACKEND_IMAGE: ghcr.io/hsdarestani/aplus-bluegreen-backend@sha256:b03b912eb68929873a7fdcd2636f08b901dc417205b0bcbdfee6f9ff9645edd5
+      FRONTEND_IMAGE: ghcr.io/hsdarestani/aplus-bluegreen-frontend@sha256:fdf296b799424081c4129bcf4040425e0dded652b8581895e987fa4c702e1033
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,45 +49,10 @@ jobs:
           done
           test "$validated" = 1 || { echo "ABORT: core validation not confirmed"; exit 1; }
           echo CORE_VALIDATION_CONFIRMED
-      - uses: docker/setup-buildx-action@v3
-      - name: Authenticate GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build backend on GitHub runner (never on STRATO)
-        uses: docker/build-push-action@v6
-        id: backend
-        with:
-          context: ./backend
-          file: ./backend/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ghcr.io/${{ github.repository_owner }}/aplus-bluegreen-backend:${{ github.sha }}
-          cache-from: type=gha,scope=aplus-bluegreen-backend
-          cache-to: type=gha,mode=max,scope=aplus-bluegreen-backend
-      - name: Build frontend on GitHub runner (never on STRATO)
-        uses: docker/build-push-action@v6
-        id: frontend
-        with:
-          context: ./frontend
-          file: ./frontend/Dockerfile
-          platforms: linux/amd64
-          push: true
-          build-args: |
-            VITE_API_URL=https://app.aplus-solution.de/api
-          tags: ghcr.io/${{ github.repository_owner }}/aplus-bluegreen-frontend:${{ github.sha }}
-          cache-from: type=gha,scope=aplus-bluegreen-frontend
-          cache-to: type=gha,mode=max,scope=aplus-bluegreen-frontend
-      - name: Pin freshly built images by immutable digest
-        env:
-          BACKEND_DIGEST: ${{ steps.backend.outputs.digest }}
-          FRONTEND_DIGEST: ${{ steps.frontend.outputs.digest }}
+      - name: Reuse validated immutable backend and frontend image digests
         run: |
-          echo "BACKEND_IMAGE=ghcr.io/$GITHUB_REPOSITORY_OWNER/aplus-bluegreen-backend@$BACKEND_DIGEST" >> "$GITHUB_ENV"
-          echo "FRONTEND_IMAGE=ghcr.io/$GITHUB_REPOSITORY_OWNER/aplus-bluegreen-frontend@$FRONTEND_DIGEST" >> "$GITHUB_ENV"
-          echo IMMUTABLE_RELEASE_IMAGES_PINNED
+          test -n "$BACKEND_IMAGE" && test -n "$FRONTEND_IMAGE"
+          echo VERIFIED_PREBUILT_IMAGE_DIGESTS
       - name: Prepare secure STRATO SSH credentials
         run: |
           set -euo pipefail
