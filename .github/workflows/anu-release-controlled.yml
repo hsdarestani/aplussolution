@@ -1,0 +1,170 @@
+name: Guarded ANÜ document builder production release
+on:
+  push:
+    branches: [main]
+    paths: ['.deploy/anu-release-20261021.txt']
+permissions:
+  contents: read
+  actions: read
+  packages: write
+concurrency:
+  group: aplus-strato-safe-release-anu-20261021
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+      GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GHCR_USER: ${{ github.actor }}
+      BUILT_SOURCE_SHA: 157751392ce4003efd3784b5a05cfca044944103
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Ensure container images exactly match the application source
+        run: |
+          set -euo pipefail
+          git diff --exit-code "$BUILT_SOURCE_SHA" "$GITHUB_SHA" -- backend frontend
+          bash -n deploy/singlehost/release.sh
+          echo SOURCE_PIN_AND_SHELL_SYNTAX_OK
+      - name: Gate production replacement on latest backend/frontend CI success
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          validated=0
+          for attempt in $(seq 1 120); do
+            state="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs" --jq '[.check_runs[] | select(.name == "validate") | .conclusion] | last // ""')"
+            if [ "$state" = success ]; then validated=1; break; fi
+            if [ "$state" = failure ] || [ "$state" = cancelled ] || [ "$state" = timed_out ]; then
+              echo "ABORT: core validation concluded $state"
+              exit 1
+            fi
+            sleep 8
+          done
+          test "$validated" = 1 || { echo "ABORT: core validation not confirmed"; exit 1; }
+          echo CORE_VALIDATION_CONFIRMED
+      - uses: docker/setup-buildx-action@v3
+      - name: Authenticate GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build backend on GitHub runner (never on STRATO)
+        uses: docker/build-push-action@v6
+        id: backend
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/aplus-bluegreen-backend:${{ github.sha }}
+          cache-from: type=gha,scope=aplus-bluegreen-backend
+          cache-to: type=gha,mode=max,scope=aplus-bluegreen-backend
+      - name: Build frontend on GitHub runner (never on STRATO)
+        uses: docker/build-push-action@v6
+        id: frontend
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            VITE_API_URL=https://app.aplus-solution.de/api
+          tags: ghcr.io/${{ github.repository_owner }}/aplus-bluegreen-frontend:${{ github.sha }}
+          cache-from: type=gha,scope=aplus-bluegreen-frontend
+          cache-to: type=gha,mode=max,scope=aplus-bluegreen-frontend
+      - name: Pin freshly built images by immutable digest
+        env:
+          BACKEND_DIGEST: ${{ steps.backend.outputs.digest }}
+          FRONTEND_DIGEST: ${{ steps.frontend.outputs.digest }}
+        run: |
+          echo "BACKEND_IMAGE=ghcr.io/$GITHUB_REPOSITORY_OWNER/aplus-bluegreen-backend@$BACKEND_DIGEST" >> "$GITHUB_ENV"
+          echo "FRONTEND_IMAGE=ghcr.io/$GITHUB_REPOSITORY_OWNER/aplus-bluegreen-frontend@$FRONTEND_DIGEST" >> "$GITHUB_ENV"
+          echo IMMUTABLE_RELEASE_IMAGES_PINNED
+      - name: Prepare secure STRATO SSH credentials
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST" && test -n "$STRATO_SSH_KEY"
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$STRATO_SSH_KEY" > ~/.ssh/aplus_release
+          chmod 600 ~/.ssh/aplus_release
+      - name: Read-only origin and capacity gate BEFORE any image pull
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/aplus_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          test -s .env
+          test ! -e docker-compose.override.yml
+          test "$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)" -ge 850
+          test "$(df -Pm /var/lib/docker | awk 'END{print $4}')" -ge 3000
+          for svc in db redis backend frontend caddy celery celery-beat; do
+            cid="$(docker compose ps -q "$svc")"
+            test -n "$cid" && test "$(docker inspect -f '{{.State.Running}}' "$cid")" = true || exit 2
+          done
+          docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select NOT pg_is_in_recovery()"' </dev/null | grep -qx t
+          curl -fsS --max-time 12 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/health/ | grep -q '"ok"'
+          echo PRIMARY_READY_AND_HEALTHY
+          REMOTE
+      - name: Authenticate GHCR on primary with ephemeral credential and pre-pull images
+        shell: bash
+        run: |
+          set -euo pipefail
+          authdir="/tmp/aplus-ghcr-$GITHUB_RUN_ID"
+          ssh -i ~/.ssh/aplus_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 root@"$STRATO_HOST" "install -d -m 700 '$authdir'"
+          printf '%s' "$GHCR_TOKEN" | ssh -i ~/.ssh/aplus_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 root@"$STRATO_HOST" "DOCKER_CONFIG='$authdir' docker login ghcr.io -u '$GHCR_USER' --password-stdin" >/dev/null
+          ssh -i ~/.ssh/aplus_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -o ServerAliveInterval=10 -o ServerAliveCountMax=8 root@"$STRATO_HOST" "DOCKER_CONFIG='$authdir' timeout 1100 docker pull '$BACKEND_IMAGE' && DOCKER_CONFIG='$authdir' timeout 600 docker pull '$FRONTEND_IMAGE'"
+          echo BOTH_RELEASE_IMAGES_READY_WITHOUT_STOPPING_APP
+      - name: Apply additive ANÜ provider signature migration before cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/aplus_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -o ServerAliveInterval=12 -o ServerAliveCountMax=8 root@"$STRATO_HOST" "BACKEND_IMAGE='$BACKEND_IMAGE' bash -se" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker run --rm --network aplussolution_default --env-file /opt/aplussolution/.env "$BACKEND_IMAGE" python manage.py migrate core 0060_auev_provider_signature --noinput
+          docker run --rm --network aplussolution_default --env-file /opt/aplussolution/.env "$BACKEND_IMAGE" python manage.py migrate core 0060_auev_provider_signature --check
+          echo ANU_MIGRATION_APPLIED
+          REMOTE
+      - name: Upload app-only release script
+        run: |
+          set -euo pipefail
+          scp -q -i ~/.ssh/aplus_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 deploy/singlehost/release.sh root@"$STRATO_HOST":/tmp/aplus-controlled-release.sh
+      - name: Switch only backend and frontend with automatic rollback
+        id: cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/aplus_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -o ServerAliveInterval=12 -o ServerAliveCountMax=12 root@"$STRATO_HOST" "RELEASE_ID='$GITHUB_RUN_ID' BACKEND_IMAGE='$BACKEND_IMAGE' FRONTEND_IMAGE='$FRONTEND_IMAGE' timeout 650 bash /tmp/aplus-controlled-release.sh release"
+      - name: Verify public application and fallback assets after switch
+        id: public
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 6); do
+            curl -fsS --connect-timeout 6 --max-time 18 "https://app.aplus-solution.de/api/status/ready/?public_check=$GITHUB_RUN_ID-$i" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'
+            curl -fsS --connect-timeout 6 --max-time 18 "https://app.aplus-solution.de/maintenance.html?public_check=$GITHUB_RUN_ID-$i" | grep -q 'A+ SOLUTION'
+            sleep 3
+          done
+          echo PUBLIC_RELEASE_CONFIRMED
+      - name: Recover previous backend/frontend if public postcheck fails
+        if: failure() && steps.cutover.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/aplus_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -o ServerAliveInterval=10 -o ServerAliveCountMax=8 root@"$STRATO_HOST" "cd /opt/aplussolution && test -f '/opt/aplus-release-$GITHUB_RUN_ID/old-compose.yml' && rm -f docker-compose.override.yml && timeout 240 docker compose -f docker-compose.yml -f '/opt/aplus-release-$GITHUB_RUN_ID/old-compose.yml' up -d --no-deps --no-build --pull never backend frontend && docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile"
+          echo PUBLIC_POSTCHECK_FAILED_PREVIOUS_IMAGES_RESTORED
+      - name: Remove GHCR auth and temporary release script
+        if: always()
+        shell: bash
+        run: |
+          if [ -s ~/.ssh/aplus_release ]; then
+            ssh -i ~/.ssh/aplus_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 root@"$STRATO_HOST" "rm -f '/tmp/aplus-ghcr-$GITHUB_RUN_ID/config.json' /tmp/aplus-controlled-release.sh; rmdir '/tmp/aplus-ghcr-$GITHUB_RUN_ID' 2>/dev/null || true" || true
+          fi
+          rm -f ~/.ssh/aplus_release
