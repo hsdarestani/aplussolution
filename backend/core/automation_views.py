@@ -1,7 +1,11 @@
+import hashlib
+import io
 from datetime import date, datetime, timedelta
 from urllib.parse import quote
 import re
 from decimal import Decimal
+
+from PIL import Image, UnidentifiedImageError
 
 from django.db.models import Q
 from django.http import HttpResponse
@@ -235,6 +239,67 @@ def auev_settings(request):
         'defaults': default_values,
         'overrides': override_values,
         'effective': effective,
+    })
+
+
+@api_view(['GET', 'POST', 'DELETE'])
+@permission_classes([IsAdminOrManager])
+@parser_classes([MultiPartParser, FormParser])
+def auev_provider_signature(request):
+    """Private signer-authorised signature asset for company-wide ANÜ exports.
+
+    Only admins can install/revoke it. The PNG is stored in the database and
+    never exposed as a public media URL or returned from this endpoint.
+    """
+    setting = _auev_default_row()
+    active = bool(setting.provider_signature_png and setting.provider_signature_approved_at)
+    can_manage = request.user.role == 'admin'
+    if request.method == 'GET':
+        return Response({
+            'active': active,
+            'approved_at': setting.provider_signature_approved_at if active else None,
+            'can_manage': can_manage,
+        })
+    if not can_manage:
+        return Response({'detail': 'Nur Administratoren dürfen die Firmenunterschrift verwalten.'}, status=403)
+    if request.method == 'DELETE':
+        setting.provider_signature_png = None
+        setting.provider_signature_approved_at = None
+        setting.save(update_fields=['provider_signature_png', 'provider_signature_approved_at', 'updated_at'])
+        audit(request, 'auev.provider_signature_revoked', setting, {'scope': 'global'})
+        return Response({'active': False, 'approved_at': None, 'can_manage': True})
+
+    if str(request.data.get('signer_authorized') or '').lower() != 'true':
+        return Response({'detail': 'Die Freigabe durch den Unterschriftsberechtigten muss bestätigt werden.'}, status=400)
+    uploaded = request.FILES.get('file')
+    if not uploaded or (uploaded.size and uploaded.size > 4 * 1024 * 1024):
+        return Response({'detail': 'Bitte eine PNG oder JPG Datei bis 4 MB hochladen.'}, status=400)
+    try:
+        with Image.open(uploaded) as source:
+            if source.format not in ('PNG', 'JPEG'):
+                raise ValueError
+            if source.width > 3000 or source.height > 3000 or source.width < 25 or source.height < 25:
+                raise ValueError
+            converted = source.convert('RGBA')
+            converted.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
+            buffer = io.BytesIO()
+            converted.save(buffer, format='PNG', optimize=True)
+            content = buffer.getvalue()
+            if len(content) > 4 * 1024 * 1024:
+                raise ValueError
+    except (ValueError, OSError, UnidentifiedImageError):
+        return Response({'detail': 'Die Signaturdatei ist ungültig. Bitte PNG oder JPG verwenden.'}, status=400)
+    setting.provider_signature_png = content
+    setting.provider_signature_approved_at = timezone.now()
+    setting.save(update_fields=['provider_signature_png', 'provider_signature_approved_at', 'updated_at'])
+    audit(request, 'auev.provider_signature_installed', setting, {
+        'scope': 'global', 'sha256': hashlib.sha256(content).hexdigest(),
+        'approved_at': setting.provider_signature_approved_at.isoformat(),
+    })
+    return Response({
+        'active': True,
+        'approved_at': setting.provider_signature_approved_at,
+        'can_manage': True,
     })
 
 
