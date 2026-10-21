@@ -1,0 +1,160 @@
+name: One time release Julius Simon shifts from 2026-10-21
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-time-open-julius-simon-20261021.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: one-time-release-julius-simon-20261021
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Release named workers only without deleting shifts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST" && test -n "$STRATO_SSH_PRIVATE_KEY"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/strato_ed25519"
+          chmod 600 "$HOME/.ssh/strato_ed25519"
+          ssh -i "$HOME/.ssh/strato_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 root@"$STRATO_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python - <<'PY'
+          import os
+          from collections import Counter
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          
+          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+          import django
+          django.setup()
+          
+          from django.db import transaction
+          from django.db.models import Q
+          from django.utils import timezone
+          from core.models import WorkerProfile, Shift, AuditLog
+          from core.shift_slots import ShiftSlot
+          from core.shift_service import refresh_shift_state
+          
+          cutoff = datetime(2026, 10, 21, 0, 0, tzinfo=ZoneInfo("Europe/Berlin"))
+          names = ("Julius", "Simon")
+          profiles = list(WorkerProfile.objects.select_related("user").filter(
+              Q(user__first_name__iexact="Julius") | Q(user__first_name__iexact="Simon")
+          ).order_by("user__first_name", "user__last_name"))
+          counts = Counter(p.user.first_name.strip().casefold() for p in profiles)
+          print("TARGET_MATCH_COUNTS " + " ".join(f"{n}={counts[n.lower()]}" for n in names), flush=True)
+          if any(counts[n.lower()] != 1 for n in names):
+              raise RuntimeError("Ambiguous or missing employee; refusing any production edits.")
+          
+          worker_ids = {p.id for p in profiles}
+          per_name = {p.id: p.user.first_name.strip().casefold() for p in profiles}
+          eligible = Shift.objects.filter(starts_at__gte=cutoff).exclude(
+              status__in=[Shift.Status.CANCELLED, Shift.Status.COMPLETED]
+          )
+          target_shifts = list(eligible.filter(
+              Q(slots__worker_id__in=worker_ids) | Q(worker_id__in=worker_ids)
+          ).distinct().order_by("starts_at").values_list("pk", flat=True))
+          print("PREVIEW future_shifts=" + str(len(target_shifts)), flush=True)
+          
+          released = Counter()
+          changed_shifts = 0
+          with transaction.atomic():
+              for shift_id in target_shifts:
+                  shift = Shift.objects.select_for_update().get(pk=shift_id)
+                  if shift.starts_at < cutoff or shift.status in (Shift.Status.CANCELLED, Shift.Status.COMPLETED):
+                      continue
+                  all_slots = list(ShiftSlot.objects.select_for_update().filter(shift=shift).order_by("pk"))
+                  # Keep every non-target employee's assignment exactly as it was.
+                  other_before = {
+                      s.pk: (s.worker_id, s.status, s.source)
+                      for s in all_slots if s.worker_id not in worker_ids
+                  }
+                  to_release = [
+                      s for s in all_slots
+                      if s.worker_id in worker_ids and s.status != ShiftSlot.Status.CANCELLED
+                  ]
+                  legacy_only = shift.worker_id in worker_ids
+                  if not to_release and not legacy_only:
+                      continue
+                  now = timezone.now()
+                  removed = []
+                  for slot in to_release:
+                      removed.append(per_name[slot.worker_id])
+                      slot.worker = None
+                      slot.status = ShiftSlot.Status.OPEN
+                      slot.source = "admin_release"
+                      slot.released_at = now
+                      slot.confirmation_status = ShiftSlot.ConfirmationStatus.CONFIRMED
+                      slot.confirmation_requested_at = None
+                      slot.confirmation_decided_at = None
+                      slot.save(update_fields=[
+                          "worker", "status", "source", "released_at",
+                          "confirmation_status", "confirmation_requested_at",
+                          "confirmation_decided_at", "updated_at",
+                      ])
+                  if not to_release and legacy_only:
+                      removed.append(per_name[shift.worker_id])
+                      if not all(s.status != ShiftSlot.Status.CANCELLED for s in all_slots):
+                          pass
+                      if not any(s.status != ShiftSlot.Status.CANCELLED for s in all_slots):
+                          ShiftSlot.objects.create(shift=shift, status=ShiftSlot.Status.OPEN, source="admin_release")
+                  # For released slots, mark the shift published and let the authoritative
+                  # slot set derive the final CONFIRMED/PUBLISHED state, preserving other staff.
+                  if to_release:
+                      shift.status = Shift.Status.PUBLISHED
+                      shift.published_at = shift.published_at or now
+                      shift.worker = None
+                      shift.save(update_fields=["worker", "status", "published_at", "updated_at"])
+                  refresh_shift_state(shift)
+                  if any(
+                      (s.worker_id, s.status, s.source) != state
+                      for s in ShiftSlot.objects.filter(pk__in=other_before)
+                      for state in [other_before[s.pk]]
+                  ):
+                      raise RuntimeError("Unrelated worker assignment changed; rolling back all edits.")
+                  if ShiftSlot.objects.filter(shift=shift, worker_id__in=worker_ids).exclude(
+                      status=ShiftSlot.Status.CANCELLED
+                  ).exists():
+                      raise RuntimeError("A target employee remained assigned; rolling back.")
+                  shift.refresh_from_db()
+                  if shift.worker_id in worker_ids:
+                      raise RuntimeError("Legacy worker mirror not cleared; rolling back.")
+                  for name in removed:
+                      released[name] += 1
+                  AuditLog.objects.create(
+                      actor=None, action="shift.bulk_admin_release",
+                      object_type="Shift", object_id=str(shift.pk),
+                      metadata={"operation": "julius_simon_from_2026_10_21",
+                                "released_names": sorted(set(removed)),
+                                "released_slot_count": len(to_release),
+                                "previous_legacy_assignment": bool(legacy_only),
+                                "cutoff": "2026-10-21 Europe/Berlin"},
+                  )
+                  changed_shifts += 1
+              remaining = eligible.filter(
+                  Q(slots__worker_id__in=worker_ids, slots__status__in=[ShiftSlot.Status.CLAIMED, ShiftSlot.Status.OPEN])
+                  | Q(worker_id__in=worker_ids)
+              ).distinct().count()
+              if remaining:
+                  raise RuntimeError(f"Remaining target assignments: {remaining}; rolling back.")
+              print("COMPLETED changed_shifts={} julius_released={} simon_released={} remaining={}".format(
+                  changed_shifts, released["julius"], released["simon"], remaining
+              ), flush=True)
+          PY
+          REMOTE
+      - name: Cleanup SSH credentials
+        if: always()
+        run: rm -f "$HOME/.ssh/strato_ed25519"
