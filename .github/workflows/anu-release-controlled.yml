@@ -13,7 +13,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 65
+    timeout-minutes: 95
     env:
       STRATO_HOST: ${{ secrets.STRATO_HOST }}
       STRATO_SSH_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           git diff --exit-code "$BUILT_SOURCE_SHA" "$GITHUB_SHA" -- backend frontend
-          bash -n deploy/singlehost/release.sh
+          bash -n deploy/singlehost/anu-release.sh
           echo SOURCE_PIN_AND_SHELL_SYNTAX_OK
       - name: Gate production replacement on latest backend/frontend CI success
         env:
@@ -102,7 +102,7 @@ jobs:
           set -euo pipefail
           cd /opt/aplussolution
           test -s .env
-          test ! -e docker-compose.override.yml
+          test -s docker-compose.override.yml
           test "$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)" -ge 850
           test "$(df -Pm /var/lib/docker | awk 'END{print $4}')" -ge 3000
           for svc in db redis backend frontend caddy celery celery-beat; do
@@ -136,7 +136,7 @@ jobs:
       - name: Upload app-only release script
         run: |
           set -euo pipefail
-          scp -q -i ~/.ssh/aplus_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 deploy/singlehost/release.sh root@"$STRATO_HOST":/tmp/aplus-controlled-release.sh
+          scp -q -i ~/.ssh/aplus_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 deploy/singlehost/anu-release.sh root@"$STRATO_HOST":/tmp/aplus-controlled-release.sh
       - name: Switch only backend and frontend with automatic rollback
         id: cutover
         shell: bash
@@ -158,7 +158,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/aplus_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -o ServerAliveInterval=10 -o ServerAliveCountMax=8 root@"$STRATO_HOST" "cd /opt/aplussolution && test -f '/opt/aplus-release-$GITHUB_RUN_ID/old-compose.yml' && rm -f docker-compose.override.yml && timeout 240 docker compose -f docker-compose.yml -f '/opt/aplus-release-$GITHUB_RUN_ID/old-compose.yml' up -d --no-deps --no-build --pull never backend frontend && docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile"
+          ssh -i ~/.ssh/aplus_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -o ServerAliveInterval=10 -o ServerAliveCountMax=8 root@"$STRATO_HOST" "cd /opt/aplussolution && test -f '/opt/aplus-release-$GITHUB_RUN_ID/old-compose.yml' && install -m 600 '/opt/aplus-release-$GITHUB_RUN_ID/old-production-override.yml' docker-compose.override.yml && timeout 240 docker compose -f docker-compose.yml -f '/opt/aplus-release-$GITHUB_RUN_ID/old-compose.yml' up -d --no-deps --no-build --pull never backend frontend && docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile"
           echo PUBLIC_POSTCHECK_FAILED_PREVIOUS_IMAGES_RESTORED
       - name: Remove GHCR auth and temporary release script
         if: always()
