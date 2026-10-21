@@ -29,6 +29,21 @@ jobs:
           set +e
           cd /opt/aplussolution || { echo "APP_DIR=missing"; exit 0; }
           echo "ENV_FILE=$([ -s .env ] && echo present || echo missing)"
+          if [ -e docker-compose.override.yml ]; then
+            python3 - <<'PY'
+from pathlib import Path
+import hashlib,re
+src=Path('docker-compose.override.yml').read_text()
+print('OVERRIDE_SHA256='+hashlib.sha256(src.encode()).hexdigest()[:16])
+lines=src.splitlines()
+print('OVERRIDE_LINES='+str(len(lines)))
+for line in lines:
+    if re.match(r'^  [a-zA-Z][a-zA-Z0-9_-]*:',line):
+        print('OVERRIDE_SERVICE='+line.strip().rstrip(':'))
+    elif re.match(r'^    [a-zA-Z][a-zA-Z0-9_-]*:',line):
+        print('OVERRIDE_KEY='+line.strip().split(':',1)[0])
+PY
+          fi
           echo "COMPOSE_OVERRIDE=$([ -e docker-compose.override.yml ] && echo present || echo absent)"
           mem=$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)
           disk=$(df -Pm /var/lib/docker | awk 'END{print $4}')
