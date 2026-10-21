@@ -115,8 +115,12 @@ jobs:
         run: |
           set -euo pipefail
           for i in $(seq 1 6); do
-            curl -fsS --connect-timeout 6 --max-time 18 "https://app.aplus-solution.de/api/status/ready/?public_check=$GITHUB_RUN_ID-$i" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'
-            curl -fsS --connect-timeout 6 --max-time 18 "https://app.aplus-solution.de/maintenance.html?public_check=$GITHUB_RUN_ID-$i" | grep -q 'A+ SOLUTION'
+            # Capture first. Piping curl into grep -q with pipefail causes
+            # curl exit 23 (broken pipe) even when the response is healthy.
+            curl -fsS --connect-timeout 6 --max-time 18 -o /tmp/aplus-anu-api-check.json "https://app.aplus-solution.de/api/status/ready/?public_check=$GITHUB_RUN_ID-$i"
+            grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/aplus-anu-api-check.json
+            curl -fsS --connect-timeout 6 --max-time 18 -o /tmp/aplus-anu-public-check.html "https://app.aplus-solution.de/maintenance.html?public_check=$GITHUB_RUN_ID-$i"
+            grep -q 'A+ SOLUTION' /tmp/aplus-anu-public-check.html
             sleep 3
           done
           echo PUBLIC_RELEASE_CONFIRMED
