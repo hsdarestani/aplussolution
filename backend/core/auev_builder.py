@@ -247,6 +247,8 @@ def preview(client, start, end):
         'last_shift_date': _iso(last),
         'signature_date_default': _iso(signature),
         'calendar_weeks': weeks,
+        'week_footer': _week_footer(dates),
+        'provider_signature_active': bool(_provider_signature()),
         'sequence_number': sequence,
         'file_stem': file_stem,
         'shift_count': len(collected['shifts']),
@@ -373,6 +375,40 @@ def _page_field(paragraph):
     run._r.append(fld_char2)
 
 
+def _week_footer(dates):
+    """Show deployment ISO weeks, not an internal document sequence or page number."""
+    values = sorted({(item.isocalendar().year, item.isocalendar().week) for item in dates})
+    if not values:
+        return ''
+    if len({year for year, _ in values}) == 1:
+        return '-'.join(str(week) for _, week in values)
+    return '-'.join(f'{week}/{year}' for year, week in values)
+
+
+def _provider_signature():
+    """Return approved signature bytes only; never expose the image via an API."""
+    setting = _default_setting()
+    if not setting.provider_signature_approved_at or not setting.provider_signature_png:
+        return None
+    return bytes(setting.provider_signature_png)
+
+
+def _signature_cell(cell, date_text, image, *, size=10.5, height_cm=1.10):
+    """Embed the authorised signature inside the DOCX itself for PDF parity."""
+    if not image:
+        _set_cell_text(cell, date_text, size=size)
+        return
+    cell.text = ''
+    signature_paragraph = cell.paragraphs[0]
+    signature_paragraph.paragraph_format.space_before = Pt(0)
+    signature_paragraph.paragraph_format.space_after = Pt(0)
+    signature_paragraph.add_run().add_picture(io.BytesIO(image), height=Cm(height_cm))
+    date_paragraph = cell.add_paragraph()
+    date_paragraph.paragraph_format.space_before = Pt(0)
+    date_paragraph.paragraph_format.space_after = Pt(0)
+    _font(date_paragraph.add_run(date_text), size=size)
+
+
 def _base_document(landscape=False):
     doc = Document()
     section = doc.sections[0]
@@ -406,7 +442,8 @@ def _classic_docx(data):
     header_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     _font(header_p.add_run(str(data['sequence_number'])), size=18, bold=True)
     footer_p = section.footer.paragraphs[0]
-    _page_field(footer_p)
+    footer_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    _font(footer_p.add_run(data['week_footer']), size=12, bold=True)
 
     _paragraph(doc, 'Anhang 1: Einzelarbeitnehmerüberlassungsvertrag', size=13, bold=True, after=3)
     _paragraph(doc, 'Zwischen', after=1)
@@ -526,7 +563,7 @@ def _classic_docx(data):
     _set_table_widths(sig, [7.8, 1.2, 7.8])
     _set_cell_text(sig.cell(0, 0), '', size=10.5)
     _bottom_border(sig.cell(0, 0))
-    _set_cell_text(sig.cell(0, 2), data['signature_date_de'], size=10.5)
+    _signature_cell(sig.cell(0, 2), data['signature_date_de'], data.get('provider_signature'), size=10.5)
     _bottom_border(sig.cell(0, 2))
     _set_cell_text(sig.cell(1, 0), '[Datum, Unterschrift Auftraggeber]', size=9.5)
     _set_cell_text(sig.cell(1, 2), '[Datum, Unterschrift Personaldienstleister]', size=9.5)
@@ -572,7 +609,7 @@ def _new_docx(data, compact_level=0):
     footer_p = section.footer.paragraphs[0]
     footer_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     footer_size = [16, 15, 14, 13][compact_level]
-    _font(footer_p.add_run(str(data['sequence_number'])), size=footer_size, bold=True)
+    _font(footer_p.add_run(data['week_footer']), size=footer_size, bold=True)
 
     title_size = [13.6, 13.0, 12.4, 11.8][compact_level]
     body_size = [10.8, 10.4, 10.0, 9.6][compact_level]
@@ -659,7 +696,7 @@ def _new_docx(data, compact_level=0):
     sig = left.add_table(rows=2, cols=2)
     _no_table_borders(sig)
     _set_table_widths(sig, [6.0, 6.0])
-    _set_cell_text(sig.cell(0, 0), data['signature_date_de'], size=body_size)
+    _signature_cell(sig.cell(0, 0), data['signature_date_de'], data.get('provider_signature'), size=body_size, height_cm=[1.10, 0.95, 0.82, 0.72][compact_level])
     _set_cell_text(sig.cell(0, 1), '', size=body_size)
     _bottom_border(sig.cell(0, 0))
     _bottom_border(sig.cell(0, 1))
@@ -737,6 +774,8 @@ def _document_data(client, start, end, signature_date, sequence_number):
         'signature_date': signature_date,
         'signature_date_de': _de(signature_date),
         'weeks': weeks,
+        'week_footer': _week_footer(dates),
+        'provider_signature': _provider_signature(),
         'sequence_number': sequence_number,
     }
 
