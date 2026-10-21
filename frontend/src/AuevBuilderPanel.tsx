@@ -94,14 +94,23 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
   const [editForm, setEditForm] = useState<any>({});
   const [uploadTarget, setUploadTarget] = useState<any>();
   const replacementInputRef = useRef<HTMLInputElement>(null);
+  const signatureInputRef = useRef<HTMLInputElement>(null);
+  const [signatureStatus, setSignatureStatus] = useState<{ active: boolean; can_manage: boolean; approved_at?: string }>();
+  const [signerAuthorized, setSignerAuthorized] = useState(false);
 
   const loadExports = async () => {
     const data = await api('automation/auev-exports/');
     setExports(apiRows(data));
   };
 
+  async function loadSignatureStatus() {
+    const status: any = await api('automation/auev-provider-signature/');
+    setSignatureStatus(status);
+  }
+
   useEffect(() => {
     void loadExports().catch(() => undefined);
+    void loadSignatureStatus().catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -264,11 +273,51 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
     setSettingsForm(result.overrides || {});
   }
 
+  async function uploadCompanySignature(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!signerAuthorized) {
+      setToast('Bitte zuerst die Freigabe der unterschriftsberechtigten Person bestätigen.');
+      return;
+    }
+    setBusy('signature');
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('signer_authorized', 'true');
+      await api('automation/auev-provider-signature/', { method: 'POST', body: form });
+      await loadSignatureStatus();
+      setPreview((current: any) => current ? { ...current, provider_signature_active: true } : current);
+      setSignerAuthorized(false);
+      setToast('Firmenunterschrift gespeichert. Neue PDF und DOCX werden automatisch unterschrieben.');
+    } catch (reason: any) {
+      setToast(reason.message);
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function revokeCompanySignature() {
+    if (!window.confirm('Automatische Firmenunterschrift für neue ANÜ Dateien wirklich deaktivieren?')) return;
+    setBusy('signature');
+    try {
+      await api('automation/auev-provider-signature/', { method: 'DELETE' });
+      await loadSignatureStatus();
+      setPreview((current: any) => current ? { ...current, provider_signature_active: false } : current);
+      setToast('Automatische Firmenunterschrift deaktiviert.');
+    } catch (reason: any) {
+      setToast(reason.message);
+    } finally {
+      setBusy('');
+    }
+  }
+
   async function openSettings() {
     setSettingsClient(clientId || '');
     setSettingsOpen(true);
     try {
-      await loadSettings(clientId || '');
+      await Promise.all([loadSettings(clientId || ''), loadSignatureStatus()]);
     } catch (reason: any) {
       setToast(reason.message);
     }
@@ -314,6 +363,13 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
         accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         style={{ display: 'none' }}
         onChange={(event) => void replaceDocx(event)}
+      />
+      <input
+        ref={signatureInputRef}
+        type="file"
+        accept="image/png,image/jpeg"
+        style={{ display: 'none' }}
+        onChange={(event) => void uploadCompanySignature(event)}
       />
       <section className="panel auev-builder-panel" data-testid="auev-builder-panel">
         <div className="auev-builder-head">
@@ -372,6 +428,12 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
             <div><small>Letzter Einsatz</small><strong>{deDate(preview.last_shift_date)}</strong></div>
             <div><small>Einsätze</small><strong>{preview.shift_count || 0}</strong></div>
             <div><small>Mitarbeiterzeilen</small><strong>{preview.row_count || 0}</strong></div>
+          </div>
+        )}
+
+        {preview && !preview.provider_signature_active && (
+          <div className="auev-warning">
+            <p>Firmenunterschrift ist noch nicht freigegeben. Die Datei wird ohne Unterschrift erstellt. Die Signatur kann unter ANÜ Einstellungen eingerichtet werden.</p>
           </div>
         )}
 
@@ -553,6 +615,39 @@ export default function AuevBuilderPanel({ clients, onChanged }: Props) {
             <IonTextarea fill="outline" label="Vertragspartner Text" labelPlacement="floating" value={settingsForm.client_contract_text || ''} placeholder="Leer lassen für Kundenname plus Adresse aus Stammdaten" onIonInput={(event) => setSettingsForm({ ...settingsForm, client_contract_text: event.detail.value })} />
             <IonInput fill="outline" label="Kurzname für Dateinamen" labelPlacement="floating" value={settingsForm.file_label || ''} placeholder="Zum Beispiel Stadthaus am Markt" onIonInput={(event) => setSettingsForm({ ...settingsForm, file_label: event.detail.value })} />
             {settingsClient && <IonInput fill="outline" type="number" min="0" label="Letzte verwendete Dokumentnummer" labelPlacement="floating" value={settingsForm.last_sequence_number || 0} onIonInput={(event) => setSettingsForm({ ...settingsForm, last_sequence_number: event.detail.value })} />}
+          </div>
+
+          <div className="auev-signature-management">
+            <strong>Automatische Firmenunterschrift</strong>
+            <p>Gilt für alle Kunden und beide ANÜ Vorlagen. Die Unterschrift erscheint nur an der Stelle des Personaldienstleisters. Die Datei wird vertraulich gespeichert.</p>
+            <p><b>Status:</b> {signatureStatus?.active ? 'Aktiv, für neue Dokumente freigegeben' : 'Nicht eingerichtet'}</p>
+            {signatureStatus?.can_manage && (
+              <div className="auev-signature-actions">
+                <label>
+                  <input type="checkbox" checked={signerAuthorized} onChange={(event) => setSignerAuthorized(event.target.checked)} />
+                  Ich bestätige, dass die unterschriftsberechtigte Person die Verwendung für diese ANÜ Verträge freigegeben hat.
+                </label>
+                <div>
+                  <IonButton
+                    fill="outline"
+                    disabled={!signerAuthorized || busy === 'signature'}
+                    onClick={() => signatureInputRef.current?.click()}
+                  >
+                    {busy === 'signature' ? <IonSpinner name="dots" /> : 'Unterschrift als PNG oder JPG hochladen'}
+                  </IonButton>
+                  {signatureStatus?.active && (
+                    <IonButton
+                      fill="clear"
+                      color="danger"
+                      disabled={busy === 'signature'}
+                      onClick={() => void revokeCompanySignature()}
+                    >
+                      Automatik deaktivieren
+                    </IonButton>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="modal-actions">
