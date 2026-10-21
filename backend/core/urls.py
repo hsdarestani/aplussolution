@@ -128,6 +128,7 @@ urlpatterns = [
     path('automation/orders/packages/<uuid:pk>/generate/', automation_views.order_generate),
     path('automation/orders/sync-packages/', automation_views.order_sync_packages),
     path('automation/auev-settings/', automation_views.auev_settings),
+    path('automation/auev-provider-signature/', automation_views.auev_provider_signature),
     path('automation/auev-builder/preview/', automation_views.auev_builder_preview),
     path('automation/auev-builder/generate/', automation_views.auev_builder_generate),
     path('automation/auev-exports/', automation_views.auev_exports),
