@@ -14,6 +14,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
+from PIL import Image, ImageChops
 from pypdf import PdfReader
 
 from .document_engine import convert_docx_to_pdf
@@ -393,16 +394,63 @@ def _provider_signature():
     return bytes(setting.provider_signature_png)
 
 
+def _normalise_provider_signature_image(image_bytes):
+    """Prepare a *display copy* of the approved handwriting for DOCX and PDF.
+
+    Stored PNGs can contain a very large blank canvas and pale/low-opacity ink.
+    Word scales the entire canvas down, so the actual handwriting becomes small
+    and nearly invisible. Crop only to existing visible strokes, then reinforce
+    their opacity on a transparent background. Never replace the approved source.
+    """
+    with Image.open(io.BytesIO(image_bytes)) as original:
+        rgba = original.convert('RGBA')
+        white = Image.new('RGBA', rgba.size, (255, 255, 255, 255))
+        visible = Image.alpha_composite(white, rgba).convert('L')
+        darkness = ImageChops.invert(visible)
+
+        # Ignore near-white antialiasing and negligible canvas noise, but retain
+        # the faint real pen strokes that would otherwise be washed out.
+        bbox = darkness.point(lambda value: 255 if value >= 10 else 0).getbbox()
+        if not bbox:
+            raise ValueError('Die hinterlegte Unterschrift enthält keine erkennbaren Linien.')
+
+        padding = max(3, round(min(rgba.size) * 0.025))
+        x0 = max(0, bbox[0] - padding)
+        y0 = max(0, bbox[1] - padding)
+        x1 = min(rgba.width, bbox[2] + padding)
+        y1 = min(rgba.height, bbox[3] + padding)
+        cropped = darkness.crop((x0, y0, x1, y1))
+        # Dark pixels retain their exact geometry; only visible ink intensity
+        # changes. The rest of the document remains readable through the PNG.
+        alpha = cropped.point(lambda value: min(255, max(0, (value - 8) * 7)) if value >= 10 else 0)
+        output_image = Image.new('RGBA', cropped.size, (0, 0, 0, 0))
+        output_image.putalpha(alpha)
+        output = io.BytesIO()
+        output_image.save(output, format='PNG')
+        return output.getvalue(), output_image.size
+
+
 def _signature_cell(cell, date_text, image, *, size=10.5, height_cm=1.10):
-    """Embed the authorised signature inside the DOCX itself for PDF parity."""
+    """Embed opaque, foreground handwriting inside both editable DOCX templates."""
     if not image:
         _set_cell_text(cell, date_text, size=size)
         return
+
+    display_png, (ink_width, ink_height) = _normalise_provider_signature_image(image)
+    # Preserve the handwritten aspect ratio and cap width to the actual cell.
+    # This also keeps the compact single-page ANÜ template from overflowing.
+    image_width_cm = min(5.25, height_cm * ink_width / ink_height)
+    image_height_cm = image_width_cm * ink_height / ink_width
     cell.text = ''
     signature_paragraph = cell.paragraphs[0]
     signature_paragraph.paragraph_format.space_before = Pt(0)
     signature_paragraph.paragraph_format.space_after = Pt(0)
-    signature_paragraph.add_run().add_picture(io.BytesIO(image), height=Cm(height_cm))
+    signature_paragraph.paragraph_format.keep_with_next = True
+    signature_paragraph.add_run().add_picture(
+        io.BytesIO(display_png),
+        width=Cm(image_width_cm),
+        height=Cm(image_height_cm),
+    )
     date_paragraph = cell.add_paragraph()
     date_paragraph.paragraph_format.space_before = Pt(0)
     date_paragraph.paragraph_format.space_after = Pt(0)
