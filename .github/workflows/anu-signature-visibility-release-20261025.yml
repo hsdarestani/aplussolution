@@ -1,0 +1,126 @@
+name: Guarded ANÜ signature visibility backend-only release
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/anu-signature-visibility-release-20261025.yml'
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: aplus-strato-safe-release-anu-20261021
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      PRIMARY_HOST: ${{ secrets.STRATO_HOST }}
+      PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+      REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REGISTRY_USER: ${{ github.actor }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm signature code and safe single-service rollback procedure
+        run: |
+          set -euo pipefail
+          bash -n deploy/singlehost/shift-admin-only-release.sh
+          grep -q 'def _normalise_provider_signature_image' backend/core/auev_builder.py
+          grep -q 'test_faint_signature_is_darken_and_trimmed' backend/tests/test_auev_signature_and_footer.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Run focused ANÜ signature regression tests before building production image
+        working-directory: backend
+        env:
+          DJANGO_SECRET_KEY: anu-signature-release-test-only
+          DATABASE_URL: sqlite:///test.sqlite3
+          ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+          CORS_ALLOWED_ORIGINS: http://localhost:8080
+          CSRF_TRUSTED_ORIGINS: http://localhost:8080
+        run: |
+          set -euo pipefail
+          pip install -r requirements.txt
+          python manage.py check
+          pytest --nomigrations -q tests/test_auev_signature_and_footer.py
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push immutable backend image from validated signature source
+        id: backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/hsdarestani/aplus-bluegreen-backend:${{ github.sha }}
+          cache-from: type=gha,scope=aplus-bluegreen-backend
+          cache-to: type=gha,mode=max,scope=aplus-bluegreen-backend
+      - name: Prepare isolated SSH key
+        run: |
+          set -euo pipefail
+          test -n "$PRIMARY_HOST" && test -n "$PRIVATE_KEY"
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/shift_admin_release
+          chmod 600 ~/.ssh/shift_admin_release
+      - name: Verify live services before changes
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/shift_admin_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 root@"$PRIMARY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          test -s .env && test -s docker-compose.override.yml
+          mem="$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)"
+          echo "BACKEND_ONLY_PREFLIGHT_RAM_MB=$mem"
+          test "$mem" -ge 650
+          test "$(df -Pm /var/lib/docker | awk 'END{print $4}')" -ge 3000
+          for svc in db redis backend frontend caddy celery celery-beat; do
+            cid="$(docker compose ps -q "$svc")"
+            test -n "$cid" && test "$(docker inspect -f '{{.State.Running}}' "$cid")" = true
+          done
+          docker compose exec -T backend python manage.py migrate --check </dev/null
+          curl -fsS --max-time 12 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/api/status/ready/ -o /tmp/aplus-audit-before.json
+          grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/aplus-audit-before.json
+          REMOTE
+      - name: Prepull immutable backend and perform guarded single-service switch
+        id: cutover
+        env:
+          BACKEND_IMAGE: ghcr.io/hsdarestani/aplus-bluegreen-backend@${{ steps.backend.outputs.digest }}
+        run: |
+          set -euo pipefail
+          test "$BACKEND_IMAGE" != "ghcr.io/hsdarestani/aplus-bluegreen-backend@"
+          authdir="/tmp/aplus-admin-one-$GITHUB_RUN_ID"
+          ssh -i ~/.ssh/shift_admin_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$PRIMARY_HOST" "install -d -m 700 '$authdir'"
+          printf '%s' "$REGISTRY_TOKEN" | ssh -i ~/.ssh/shift_admin_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$PRIMARY_HOST" "DOCKER_CONFIG='$authdir' docker login ghcr.io -u '$REGISTRY_USER' --password-stdin" >/dev/null
+          ssh -i ~/.ssh/shift_admin_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=10 -o ServerAliveCountMax=8 root@"$PRIMARY_HOST" "DOCKER_CONFIG='$authdir' timeout 240 docker pull '$BACKEND_IMAGE'"
+          scp -q -i ~/.ssh/shift_admin_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null deploy/singlehost/shift-admin-only-release.sh root@"$PRIMARY_HOST":/tmp/aplus-admin-one-release.sh
+          ssh -i ~/.ssh/shift_admin_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=10 -o ServerAliveCountMax=10 root@"$PRIMARY_HOST" "RELEASE_ID='$GITHUB_RUN_ID' BACKEND_IMAGE='$BACKEND_IMAGE' timeout 450 bash /tmp/aplus-admin-one-release.sh release"
+      - name: Verify public Django Admin and health
+        id: verify
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 https://app.aplus-solution.de/api/status/ready/ -o /tmp/aplus-audit-after.json
+          grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/aplus-audit-after.json
+          status="$(curl -sS -L -o /tmp/aplus-audit-admin.html -w '%{http_code}' --max-time 20 https://app.aplus-solution.de/admin/login/)"
+          test "$status" = 200
+          grep -q 'Django' /tmp/aplus-audit-admin.html
+          echo ADMIN_RELEASE_VERIFIED
+      - name: Roll back previous backend if external health check fails
+        if: failure() && steps.cutover.outcome == 'success'
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/shift_admin_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$PRIMARY_HOST" "cd /opt/aplussolution && test -f /opt/aplus-release-$GITHUB_RUN_ID/old-production-override.yml && install -m 600 /opt/aplus-release-$GITHUB_RUN_ID/old-production-override.yml docker-compose.override.yml && timeout 200 docker compose -f docker-compose.yml -f /opt/aplus-release-$GITHUB_RUN_ID/old-production-override.yml -f /opt/aplus-release-$GITHUB_RUN_ID/rollback.yml up -d --no-deps --no-build --pull never backend"
+      - name: Clean up temporary credentials
+        if: always()
+        run: |
+          if test -s ~/.ssh/shift_admin_release; then
+            ssh -i ~/.ssh/shift_admin_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 root@"$PRIMARY_HOST" "rm -f /tmp/aplus-admin-one-release.sh '/tmp/aplus-admin-one-$GITHUB_RUN_ID/config.json'; rmdir '/tmp/aplus-admin-one-$GITHUB_RUN_ID' 2>/dev/null || true" || true
+          fi
+          rm -f ~/.ssh/shift_admin_release
