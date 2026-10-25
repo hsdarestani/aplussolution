@@ -4,9 +4,9 @@ from datetime import date
 
 from django.test import SimpleTestCase
 from docx import Document
-from PIL import Image
+from PIL import Image, ImageDraw
 
-from core.auev_builder import _classic_docx, _new_docx, _week_footer
+from core.auev_builder import _classic_docx, _new_docx, _normalise_provider_signature_image, _week_footer
 
 
 def _signature_png():
@@ -59,3 +59,48 @@ class AuevSignatureAndFooterTests(SimpleTestCase):
                 docx_bytes = build(_data(None))
                 with zipfile.ZipFile(io.BytesIO(docx_bytes)) as contents:
                     self.assertFalse(any(path.startswith('word/media/') for path in contents.namelist()))
+
+
+    def test_faint_signature_is_darken_and_trimmed_without_changing_approved_source(self):
+        canvas = Image.new('RGBA', (620, 220), (255, 255, 255, 255))
+        ink = ImageDraw.Draw(canvas)
+        ink.line((170, 110, 450, 85, 500, 105), fill=(222, 222, 222, 255), width=4)
+        source = io.BytesIO()
+        canvas.save(source, format='PNG')
+        approved_bytes = source.getvalue()
+
+        display_bytes, size = _normalise_provider_signature_image(approved_bytes)
+        self.assertEqual(source.getvalue(), approved_bytes)
+        self.assertLess(size[0], 400)
+        self.assertLess(size[1], 80)
+        with Image.open(io.BytesIO(display_bytes)) as rendered:
+            self.assertEqual(rendered.mode, 'RGBA')
+            alpha = rendered.getchannel('A')
+            self.assertGreater(alpha.getextrema()[1], 170)
+            self.assertEqual(alpha.getpixel((0, 0)), 0)
+
+        for build in (_classic_docx, _new_docx):
+            with self.subTest(template=build.__name__):
+                docx_bytes = build(_data(approved_bytes))
+                with zipfile.ZipFile(io.BytesIO(docx_bytes)) as archive:
+                    picture_name = next(name for name in archive.namelist() if name.startswith('word/media/'))
+                    with Image.open(io.BytesIO(archive.read(picture_name))) as embedded:
+                        self.assertGreater(embedded.getchannel('A').getextrema()[1], 170)
+                self.assertIn('15.10.2026', Document(io.BytesIO(docx_bytes)).element.xml)
+
+    def test_low_opacity_transparent_pen_is_visible_on_white_document(self):
+        canvas = Image.new('RGBA', (600, 200), (0, 0, 0, 0))
+        ImageDraw.Draw(canvas).line((150, 100, 430, 95), fill=(0, 0, 0, 40), width=5)
+        raw = io.BytesIO()
+        canvas.save(raw, format='PNG')
+        display_bytes, _ = _normalise_provider_signature_image(raw.getvalue())
+        with Image.open(io.BytesIO(display_bytes)) as rendered:
+            alpha = rendered.getchannel('A')
+            self.assertGreater(alpha.getextrema()[1], 170)
+            self.assertEqual(alpha.getpixel((0, 0)), 0)
+
+    def test_invisible_signature_is_rejected_instead_of_generating_blank_signed_contract(self):
+        raw = io.BytesIO()
+        Image.new('RGBA', (100, 50), (255, 255, 255, 0)).save(raw, 'PNG')
+        with self.assertRaisesRegex(ValueError, 'keine erkennbaren Linien'):
+            _normalise_provider_signature_image(raw.getvalue())
