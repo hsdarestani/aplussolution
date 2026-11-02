@@ -1214,6 +1214,7 @@ export default function WiwScheduleMobile() {
           && timeMinuteFromIso(item.ends_at) === Number(form.endAbsolute) % 1440
           && String(item.notes || '').trim() === String(form.notes || '').trim()
           && Boolean(item.confirmation_required) === Boolean(form.confirmation_required)
+          && (form.publish_now ? ['published', 'confirmed'].includes(String(item.status)) : item.status === 'draft')
           && (item.color_hue == null ? null : Number(item.color_hue)) === (form.color_hue == null ? null : Number(form.color_hue))
           && JSON.stringify([...(item.schedule_groups || [])].sort()) === JSON.stringify([...(form.schedule_groups || [])].sort());
       } catch {
