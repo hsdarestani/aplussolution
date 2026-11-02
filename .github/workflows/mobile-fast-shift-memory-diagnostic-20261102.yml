@@ -1,0 +1,44 @@
+name: A+ Solution mobile fast save RAM diagnosis (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/mobile-fast-shift-memory-diagnostic-20261102.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Inspect safe server resource headroom without changing anything
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST" && test -n "$STRATO_SSH_PRIVATE_KEY"
+          umask 077
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > /tmp/aplus-diagnostic.key
+          ssh -i /tmp/aplus-diagnostic.key -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 root@"$STRATO_HOST" 'bash -s' <<'REMOTE'
+          set -eu
+          echo 'MEMORY_KB_SUMMARY'
+          awk '/^(MemTotal|MemFree|MemAvailable|Buffers|Cached|SReclaimable|SUnreclaim|Shmem|SwapTotal|SwapFree|Dirty|Writeback|Slab|Active|Inactive):/ { print }' /proc/meminfo
+          echo 'SYSTEM_UPTIME'
+          uptime
+          echo 'MEMORY_PRESSURE'
+          cat /proc/pressure/memory 2>/dev/null || true
+          echo 'FREE_HUMAN'
+          free -m
+          echo 'PS_BY_MEMORY'
+          ps -eo pid,comm,rss --sort=-rss | head -n 16
+          echo 'DOCKER_STATS'
+          timeout 15 docker stats --no-stream --format '{{.Name}}: {{.MemUsage}}' 2>/dev/null | head -n 25 || true
+          echo 'DOCKER_SPACE'
+          df -Pm /var/lib/docker | tail -n 1
+          echo 'HEALTH'
+          curl -fsS --connect-timeout 5 --max-time 12 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/api/status/ready/ || true
+          REMOTE
+          rm -f /tmp/aplus-diagnostic.key
