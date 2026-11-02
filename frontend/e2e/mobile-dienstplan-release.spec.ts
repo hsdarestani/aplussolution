@@ -68,7 +68,7 @@ test('mobile filters stay multi-select and worker reassignment replaces the curr
   const requestBody = (await saving).postDataJSON();
   expect(requestBody.workers).toEqual(['musa']);
   expect(requestBody.publish_remaining).toBe(true);
-  await expect(form).toHaveCount(0);
+  await expect(form).toHaveCount(0, { timeout: 2000 });
 });
 
 test('dense time wheel emits feedback and the persistent note editor stays usable', async ({ page }) => {
