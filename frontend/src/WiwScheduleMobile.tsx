@@ -621,6 +621,7 @@ export default function WiwScheduleMobile() {
   const [query, setQuery] = useState('');
   const [groupFilter, setGroupFilter] = useState<string[]>(SCHEDULE_GROUPS.map((item) => item.value));
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [toast, setToast] = useState('');
   const [formOpen, setFormOpen] = useState(false);
@@ -752,7 +753,8 @@ export default function WiwScheduleMobile() {
 
   useEffect(() => {
     if (!toast) return;
-    const timer = window.setTimeout(() => setToast(''), 1300);
+    const isError = /nicht bestätigt|konnte nicht|fehlgeschlagen|fehler|nicht erreichbar|Berechtigung/i.test(toast);
+    const timer = window.setTimeout(() => setToast(''), isError ? 5000 : 2200);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
@@ -1191,6 +1193,7 @@ export default function WiwScheduleMobile() {
       return;
     }
     savingRef.current = true;
+    setSaving(true);
     setBusy(true);
     let createdShiftId = '';
     const targetWeek = monday(form.date);
@@ -1308,6 +1311,7 @@ export default function WiwScheduleMobile() {
       setToast(error.message || 'Schicht konnte nicht gespeichert werden.');
     } finally {
       savingRef.current = false;
+      setSaving(false);
       setBusy(false);
     }
   }
@@ -1528,7 +1532,7 @@ export default function WiwScheduleMobile() {
       <button type="button" className="wiw-create-fab" aria-label="Schicht anlegen" onClick={() => openCreate(anchor)}>+</button>
 
       {formOpen ? <div ref={formScreenRef} className="wiw-shift-form-screen" data-testid="wiw-shift-form">
-        <header className="wiw-form-topbar"><button type="button" onClick={() => { noteRef.current?.blur(); setTimeEditorDateOpen(false); setTimeEditor(undefined); setTimeLogOpen(false); setFormOpen(false); }}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null || (form.startMinute != null && form.endAbsolute != null && form.endAbsolute <= form.startMinute)} onClick={() => void save()}>Sichern</button></header>
+        <header className="wiw-form-topbar"><button type="button" onClick={() => { noteRef.current?.blur(); setTimeEditorDateOpen(false); setTimeEditor(undefined); setTimeLogOpen(false); setFormOpen(false); }}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || saving || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null || (form.startMinute != null && form.endAbsolute != null && form.endAbsolute <= form.startMinute)} onClick={() => void save()}>Sichern</button></header>
         {dateOpen ? <ScheduleDatePicker value={form.date} onSelect={(date) => { setForm((current) => ({ ...current, date })); setDateOpen(false); }} onClose={() => setDateOpen(false)} /> : null}
         <div ref={formScrollRef} className="wiw-form-scroll">
           <Row icon={calendarOutline} label={formatDateRow(form.date)} field="date" onClick={() => setDateOpen(true)} />
