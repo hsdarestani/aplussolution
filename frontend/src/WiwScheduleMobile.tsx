@@ -1257,7 +1257,7 @@ export default function WiwScheduleMobile() {
             const matches = rows.filter((item: any) => split
               ? !knownShiftIds.has(String(item.id))
                 && Number(item.required_count) === 1
-                && (!editing.workerId || (item.assigned_workers || []).some((w: any) => String(w.id) === editing.workerId))
+                && (!nextWorkerId || (item.assigned_workers || []).some((w: any) => String(w.id) === nextWorkerId))
               : String(item.id) === editing.shiftId);
             return matches.length === 1 ? { shift: matches[0] } : undefined;
           },
