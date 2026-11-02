@@ -1214,28 +1214,12 @@ export default function WiwScheduleMobile() {
           && timeMinuteFromIso(item.ends_at) === Number(form.endAbsolute) % 1440
           && String(item.notes || '').trim() === String(form.notes || '').trim()
           && Boolean(item.confirmation_required) === Boolean(form.confirmation_required)
-          && (form.publish_now ? ['published', 'confirmed'].includes(String(item.status)) : item.status === 'draft')
+          && ((form.workers.length > 0 || form.publish_now) ? ['published', 'confirmed'].includes(String(item.status)) : item.status === 'draft')
           && (item.color_hue == null ? null : Number(item.color_hue)) === (form.color_hue == null ? null : Number(form.color_hue))
           && JSON.stringify([...(item.schedule_groups || [])].sort()) === JSON.stringify([...(form.schedule_groups || [])].sort());
       } catch {
         return false;
       }
-    };
-    const assignWorkers = async (shiftId: string, workerIds: string[]) => {
-      // A response can be lost after the assignment commits; only a *fresh*
-      // matching server readback may complete this save without that response.
-      await confirmShiftWrite(
-        (signal) => api(`shifts/${shiftId}/assign/`, {
-          method: 'POST',
-          body: JSON.stringify({ workers: workerIds, publish_remaining: form.publish_now }),
-          signal,
-        }),
-        async (signal) => {
-          const saved: any = await api(`shifts/${shiftId}/`, { signal });
-          const actual = Array.isArray(saved?.assigned_workers) ? saved.assigned_workers.map((item: any) => String(item.id)) : [];
-          return actual.length === workerIds.length && workerIds.every((id) => actual.includes(id)) ? saved : undefined;
-        },
-      );
     };
     try {
       const payload: any = {
@@ -1252,12 +1236,21 @@ export default function WiwScheduleMobile() {
       if (editing) {
         payload.status = form.publish_now ? 'published' : 'draft';
         payload.apply_all = form.apply_all;
+        const nextWorkerId = String(form.workers[0] || '');
+        const workerChanged = String(editing.workerId || '') !== nextWorkerId;
+        if (workerChanged) {
+          payload.workers = nextWorkerId ? [nextWorkerId] : [];
+          payload.publish_remaining = form.publish_now;
+        }
         const edited: any = await confirmShiftWrite(
           (signal) => api(`shifts/${editing.shiftId}/cards/${editing.slotId}/`, {
             method: 'PATCH', body: JSON.stringify(payload), signal,
           }),
           async (signal) => {
-            const rows = (await persistedRows(signal)).filter(matchesForm);
+            const rows = (await persistedRows(signal)).filter((item: any) =>
+              matchesForm(item) && (!workerChanged
+                || (item.assigned_workers || []).length === (nextWorkerId ? 1 : 0)
+                && (!nextWorkerId || (item.assigned_workers || []).some((w: any) => String(w.id) === nextWorkerId))));
             // Editing a single card in a multi-person shift creates a new
             // shift ID; only accept an unambiguous newly created row.
             const split = editing.parentCount > 1 && !form.apply_all;
@@ -1269,12 +1262,6 @@ export default function WiwScheduleMobile() {
             return matches.length === 1 ? { shift: matches[0] } : undefined;
           },
         );
-        const targetShiftId = String(edited?.shift?.id || editing.shiftId);
-        const nextWorkerId = String(form.workers[0] || '');
-        const workerChanged = String(editing.workerId || '') !== nextWorkerId;
-        if (workerChanged) {
-          await assignWorkers(targetShiftId, nextWorkerId ? [nextWorkerId] : []);
-        }
         setToast(workerChanged
           ? (nextWorkerId ? 'Schicht gespeichert · Mitarbeiter geändert.' : 'Schicht gespeichert · als OpenShift freigegeben.')
           : (form.apply_all ? 'Änderungen auf alle Karten angewendet.' : 'Schicht gespeichert.'));
@@ -1283,6 +1270,10 @@ export default function WiwScheduleMobile() {
         const selectedWorkers = form.workers.slice(0, payload.required_count);
         // Direct assignment must not briefly advertise an OpenShift.
         payload.status = selectedWorkers.length ? 'draft' : (form.publish_now ? 'published' : 'draft');
+        if (selectedWorkers.length) {
+          payload.workers = selectedWorkers;
+          payload.publish_remaining = form.publish_now;
+        }
         const created: any = await confirmShiftWrite(
           (signal) => api('shifts/', { method: 'POST', body: JSON.stringify(payload), signal }),
           async (signal) => {
@@ -1290,14 +1281,14 @@ export default function WiwScheduleMobile() {
               !knownShiftIds.has(String(item.id))
               && Number(item.required_count) === payload.required_count
               && matchesForm(item)
-              && (!selectedWorkers.length || item.status === 'draft' || (item.assigned_workers || []).length > 0),
+              && (!selectedWorkers.length || (item.assigned_workers || []).length === selectedWorkers.length
+                  && selectedWorkers.every((id: string) => (item.assigned_workers || []).some((worker: any) => String(worker.id) === id))),
             );
             return rows.length === 1 ? rows[0] : undefined;
           },
         );
         createdShiftId = String(created?.id || '');
         if (!createdShiftId) throw new Error('Schicht-ID fehlt. Bitte Dienstplan prüfen, bevor du erneut sicherst.');
-        if (selectedWorkers.length) await assignWorkers(createdShiftId, selectedWorkers);
         setToast(`${payload.required_count} separate Schichtkarte${payload.required_count === 1 ? '' : 'n'} erstellt.`);
       }
       if (savingCopy) {
