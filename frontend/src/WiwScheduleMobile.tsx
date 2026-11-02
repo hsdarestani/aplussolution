@@ -1212,8 +1212,10 @@ export default function WiwScheduleMobile() {
           && timeMinuteFromIso(item.starts_at) === form.startMinute
           && dateKeyFromIso(item.ends_at) === addDays(form.date, Math.floor(Number(form.endAbsolute) / 1440))
           && timeMinuteFromIso(item.ends_at) === Number(form.endAbsolute) % 1440
-          && String(item.notes || '') === String(form.notes || '')
-          && Boolean(item.confirmation_required) === Boolean(form.confirmation_required);
+          && String(item.notes || '').trim() === String(form.notes || '').trim()
+          && Boolean(item.confirmation_required) === Boolean(form.confirmation_required)
+          && (item.color_hue == null ? null : Number(item.color_hue)) === (form.color_hue == null ? null : Number(form.color_hue))
+          && JSON.stringify([...(item.schedule_groups || [])].sort()) === JSON.stringify([...(form.schedule_groups || [])].sort());
       } catch {
         return false;
       }
