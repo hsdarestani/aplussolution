@@ -62,9 +62,13 @@ test('mobile filters stay multi-select and worker reassignment replaces the curr
   await expect(sheet.locator('div > button')).toHaveText(['Akeel Zafar', 'Musa Jamali', 'Other Worker', 'Tooba Amjad']);
   await sheet.getByRole('button', { name: 'Musa Jamali' }).click();
   await expect(form.locator('.wiw-choice-sheet')).toHaveCount(0);
-  const assignment = page.waitForRequest(request => request.url().endsWith('/shifts/shift-0/assign/') && request.method() === 'POST');
+  // The mobile save is now one atomic PATCH, not PATCH followed by a second POST.
+  const saving = page.waitForRequest(request => request.url().endsWith('/shifts/shift-0/cards/slot-0/') && request.method() === 'PATCH');
   await form.getByRole('button', { name: 'Sichern', exact: true }).click();
-  expect((await assignment).postDataJSON().workers).toEqual(['musa']);
+  const requestBody = (await saving).postDataJSON();
+  expect(requestBody.workers).toEqual(['musa']);
+  expect(requestBody.publish_remaining).toBe(true);
+  await expect(form).toHaveCount(0, { timeout: 2000 });
 });
 
 test('dense time wheel emits feedback and the persistent note editor stays usable', async ({ page }) => {

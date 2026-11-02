@@ -3,6 +3,7 @@
 // SEP14_PREVIEW_PARITY
 // MODERN_WEEK_CACHE_NAVIGATION
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { confirmShiftWrite } from './shiftSaveConfirmation';
 import { createPortal, flushSync } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
@@ -620,6 +621,8 @@ export default function WiwScheduleMobile() {
   const [query, setQuery] = useState('');
   const [groupFilter, setGroupFilter] = useState<string[]>(SCHEDULE_GROUPS.map((item) => item.value));
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [toast, setToast] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<EditingCard>();
@@ -750,7 +753,8 @@ export default function WiwScheduleMobile() {
 
   useEffect(() => {
     if (!toast) return;
-    const timer = window.setTimeout(() => setToast(''), 1300);
+    const isError = /nicht bestätigt|konnte nicht|fehlgeschlagen|fehler|nicht erreichbar|Berechtigung/i.test(toast);
+    const timer = window.setTimeout(() => setToast(''), isError ? 5000 : 2200);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
@@ -1176,6 +1180,9 @@ export default function WiwScheduleMobile() {
   }
 
   async function save() {
+    // The separate refresh request may also use busy; this guard prevents a
+    // second POST when mobile network latency delays the first response.
+    if (savingRef.current) return;
     const savingCopy = copying;
     if (!form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null) {
       setToast('Bitte Kunde, Zeit, Position und Jobstandort auswählen.');
@@ -1185,8 +1192,35 @@ export default function WiwScheduleMobile() {
       setToast('Das Ende muss nach dem Beginn liegen.');
       return;
     }
+    savingRef.current = true;
+    setSaving(true);
     setBusy(true);
     let createdShiftId = '';
+    const targetWeek = monday(form.date);
+    const schedulePath = `admin/mobile-schedule/?date_from=${encodeURIComponent(targetWeek)}&date_to=${encodeURIComponent(addDays(targetWeek, 6))}`;
+    const knownShiftIds = new Set([...localRowsRef.current, ...liveRowsRef.current].map((item: any) => String(item.id)));
+    const persistedRows = async (signal: AbortSignal): Promise<any[]> => {
+      const response: any = await api(schedulePath, { signal });
+      return Array.isArray(response?.shifts) ? response.shifts : [];
+    };
+    const matchesForm = (item: any) => {
+      try {
+        return String(item.client) === form.client
+          && String(item.location) === form.location
+          && String(item.position) === form.position
+          && dateKeyFromIso(item.starts_at) === form.date
+          && timeMinuteFromIso(item.starts_at) === form.startMinute
+          && dateKeyFromIso(item.ends_at) === addDays(form.date, Math.floor(Number(form.endAbsolute) / 1440))
+          && timeMinuteFromIso(item.ends_at) === Number(form.endAbsolute) % 1440
+          && String(item.notes || '').trim() === String(form.notes || '').trim()
+          && Boolean(item.confirmation_required) === Boolean(form.confirmation_required)
+          && ((form.workers.length > 0 || form.publish_now) ? ['published', 'confirmed'].includes(String(item.status)) : item.status === 'draft')
+          && (item.color_hue == null ? null : Number(item.color_hue)) === (form.color_hue == null ? null : Number(form.color_hue))
+          && JSON.stringify([...(item.schedule_groups || [])].sort()) === JSON.stringify([...(form.schedule_groups || [])].sort());
+      } catch {
+        return false;
+      }
+    };
     try {
       const payload: any = {
         client: form.client,
@@ -1202,49 +1236,76 @@ export default function WiwScheduleMobile() {
       if (editing) {
         payload.status = form.publish_now ? 'published' : 'draft';
         payload.apply_all = form.apply_all;
-        const edited: any = await api(`shifts/${editing.shiftId}/cards/${editing.slotId}/`, { method: 'PATCH', body: JSON.stringify(payload) });
-        const targetShiftId = String(edited?.shift?.id || editing.shiftId);
         const nextWorkerId = String(form.workers[0] || '');
         const workerChanged = String(editing.workerId || '') !== nextWorkerId;
         if (workerChanged) {
-          await api(`shifts/${targetShiftId}/assign/`, {
-            method: 'POST',
-            body: JSON.stringify({ workers: nextWorkerId ? [nextWorkerId] : [], publish_remaining: form.publish_now }),
-          });
+          payload.workers = nextWorkerId ? [nextWorkerId] : [];
+          payload.publish_remaining = form.publish_now;
         }
+        const edited: any = await confirmShiftWrite(
+          (signal) => api(`shifts/${editing.shiftId}/cards/${editing.slotId}/`, {
+            method: 'PATCH', body: JSON.stringify(payload), signal,
+          }),
+          async (signal) => {
+            const rows = (await persistedRows(signal)).filter((item: any) =>
+              matchesForm(item) && (!workerChanged
+                || (item.assigned_workers || []).length === (nextWorkerId ? 1 : 0)
+                && (!nextWorkerId || (item.assigned_workers || []).some((w: any) => String(w.id) === nextWorkerId))));
+            // Editing a single card in a multi-person shift creates a new
+            // shift ID; only accept an unambiguous newly created row.
+            const split = editing.parentCount > 1 && !form.apply_all;
+            const matches = rows.filter((item: any) => split
+              ? !knownShiftIds.has(String(item.id))
+                && Number(item.required_count) === 1
+                && (!nextWorkerId || (item.assigned_workers || []).some((w: any) => String(w.id) === nextWorkerId))
+              : String(item.id) === editing.shiftId);
+            return matches.length === 1 ? { shift: matches[0] } : undefined;
+          },
+        );
         setToast(workerChanged
           ? (nextWorkerId ? 'Schicht gespeichert · Mitarbeiter geändert.' : 'Schicht gespeichert · als OpenShift freigegeben.')
           : (form.apply_all ? 'Änderungen auf alle Karten angewendet.' : 'Schicht gespeichert.'));
       } else {
         payload.required_count = Math.max(1, Number(form.required_count || 1));
         const selectedWorkers = form.workers.slice(0, payload.required_count);
-        // With direct assignments, create as draft first so workers do not receive
-        // an OpenShift push before the assignment is applied. If OpenShift is off
-        // and nobody is assigned, the shift stays draft and is invisible to workers.
+        // Direct assignment must not briefly advertise an OpenShift.
         payload.status = selectedWorkers.length ? 'draft' : (form.publish_now ? 'published' : 'draft');
-        const created: any = await api('shifts/', { method: 'POST', body: JSON.stringify(payload) });
-        createdShiftId = String(created?.id || '');
         if (selectedWorkers.length) {
-          await api(`shifts/${created.id}/assign/`, {
-            method: 'POST',
-            body: JSON.stringify({ workers: selectedWorkers, publish_remaining: form.publish_now }),
-          });
+          payload.workers = selectedWorkers;
+          payload.publish_remaining = form.publish_now;
         }
+        const created: any = await confirmShiftWrite(
+          (signal) => api('shifts/', { method: 'POST', body: JSON.stringify(payload), signal }),
+          async (signal) => {
+            const rows = (await persistedRows(signal)).filter((item: any) =>
+              !knownShiftIds.has(String(item.id))
+              && Number(item.required_count) === payload.required_count
+              && matchesForm(item)
+              && (!selectedWorkers.length || (item.assigned_workers || []).length === selectedWorkers.length
+                  && selectedWorkers.every((id: string) => (item.assigned_workers || []).some((worker: any) => String(worker.id) === id))),
+            );
+            return rows.length === 1 ? rows[0] : undefined;
+          },
+        );
+        createdShiftId = String(created?.id || '');
+        if (!createdShiftId) throw new Error('Schicht-ID fehlt. Bitte Dienstplan prüfen, bevor du erneut sicherst.');
         setToast(`${payload.required_count} separate Schichtkarte${payload.required_count === 1 ? '' : 'n'} erstellt.`);
       }
       if (savingCopy) {
         setTab('all');
         if (createdShiftId) setRecentCopyShiftId(createdShiftId);
       }
-      const targetWeek = monday(form.date);
       setAnchor(form.date);
       setCopying(false);
       setFormOpen(false);
-        window.dispatchEvent(new Event('aplus:dashboard-invalidated'));
-      await loadScheduleWeek(targetWeek, false);
+      window.dispatchEvent(new Event('aplus:dashboard-invalidated'));
+      // Refresh after closing. A slow GET must not keep the save UI blocked.
+      void loadScheduleWeek(targetWeek, false);
     } catch (error: any) {
       setToast(error.message || 'Schicht konnte nicht gespeichert werden.');
     } finally {
+      savingRef.current = false;
+      setSaving(false);
       setBusy(false);
     }
   }
@@ -1465,7 +1526,7 @@ export default function WiwScheduleMobile() {
       <button type="button" className="wiw-create-fab" aria-label="Schicht anlegen" onClick={() => openCreate(anchor)}>+</button>
 
       {formOpen ? <div ref={formScreenRef} className="wiw-shift-form-screen" data-testid="wiw-shift-form">
-        <header className="wiw-form-topbar"><button type="button" onClick={() => { noteRef.current?.blur(); setTimeEditorDateOpen(false); setTimeEditor(undefined); setTimeLogOpen(false); setFormOpen(false); }}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null || (form.startMinute != null && form.endAbsolute != null && form.endAbsolute <= form.startMinute)} onClick={() => void save()}>Sichern</button></header>
+        <header className="wiw-form-topbar"><button type="button" onClick={() => { noteRef.current?.blur(); setTimeEditorDateOpen(false); setTimeEditor(undefined); setTimeLogOpen(false); setFormOpen(false); }}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || saving || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null || (form.startMinute != null && form.endAbsolute != null && form.endAbsolute <= form.startMinute)} onClick={() => void save()}>Sichern</button></header>
         {dateOpen ? <ScheduleDatePicker value={form.date} onSelect={(date) => { setForm((current) => ({ ...current, date })); setDateOpen(false); }} onClose={() => setDateOpen(false)} /> : null}
         <div ref={formScrollRef} className="wiw-form-scroll">
           <Row icon={calendarOutline} label={formatDateRow(form.date)} field="date" onClick={() => setDateOpen(true)} />

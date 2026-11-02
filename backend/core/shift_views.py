@@ -116,13 +116,20 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             obj = serializer.save(worker=None, is_open=False)
             ensure_slots(obj)
-            if obj.status == Shift.Status.PUBLISHED:
+            assigned_in_request = 'workers' in self.request.data
+            if assigned_in_request:
+                result = self.assign(self.request, pk=obj.pk, _internal=True)
+                if result.status_code >= 400:
+                    from rest_framework.exceptions import ValidationError
+                    raise ValidationError(result.data)
+                obj.refresh_from_db()
+            if obj.status == Shift.Status.PUBLISHED and not assigned_in_request:
                 ensure_shift_publish_allowed(obj)
                 obj.published_at = timezone.now()
                 obj.save(update_fields=['published_at', 'updated_at'])
                 refresh_shift_state(obj)
             audit(self.request, 'staffing_demand.created', obj, {'required_count': obj.required_count})
-        if obj.status == Shift.Status.PUBLISHED:
+        if obj.status == Shift.Status.PUBLISHED and not assigned_in_request:
             _notify_open_shift_available_async(obj, 'created')
 
     def perform_update(self, serializer):
@@ -305,7 +312,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(self.base_queryset().get(pk=shift.pk)).data)
 
     @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
-    def assign(self, request, pk=None):
+    def assign(self, request, pk=None, *, _internal=False):
         raw_workers = request.data.get('workers')
         if raw_workers is None:
             single = request.data.get('worker')
@@ -430,6 +437,8 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
             if not was_published and free_count > 0 and shift.status == Shift.Status.PUBLISHED:
                 _notify_open_shift_available_async(shift, 'assignment')
 
+        if _internal:
+            return Response({'id': str(shift.pk)})
         return Response(self.get_serializer(self.base_queryset().get(pk=shift.pk)).data)
 
     @action(detail=True, methods=['post'])

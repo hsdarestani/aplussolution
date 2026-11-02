@@ -3,12 +3,14 @@ from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError
 
 from .models import Shift
 from .permissions import IsAdminOrManager
 from .operational_notifications import notify_claimed_workers_shift_changed
 from .services import audit
 from .shift_api import ShiftApiSerializer
+from .shift_views import StaffingShiftViewSet
 from .shift_service import ensure_slots, open_slots, refresh_shift_state
 from .shift_slots import ShiftSlot
 
@@ -34,6 +36,17 @@ def _editable_payload(data):
         'confirmation_required', 'schedule_groups', 'color_hue', 'status',
     }
     return {key: value for key, value in data.items() if key in allowed}
+
+
+def _apply_mobile_assignment(request, shift_id):
+    # The mobile editor includes workers only when a reassignment is required.
+    # Run existing availability, staffing and notification rules inside the same
+    # transaction as the card PATCH; failed assignments roll back the edit.
+    if 'workers' not in request.data:
+        return
+    result = StaffingShiftViewSet().assign(request, pk=shift_id, _internal=True)
+    if result.status_code >= 400:
+        raise ValidationError(result.data)
 
 
 def _apply_payload(shift, data):
@@ -82,6 +95,7 @@ def edit_shift_slot(request, shift_id, slot_id):
         # the same safe update path.
         if apply_all or int(shift.required_count or 1) <= 1:
             edited = _apply_payload(shift, request.data)
+            _apply_mobile_assignment(request, edited.pk)
             audit(request, 'shift.card_bulk_updated' if apply_all else 'shift.card_updated', edited, {
                 'slot': str(slot.id),
                 'apply_all': apply_all,
@@ -166,6 +180,7 @@ def edit_shift_slot(request, shift_id, slot_id):
             'confirmation_decided_at', 'updated_at',
         ])
         refresh_shift_state(clone)
+        _apply_mobile_assignment(request, clone.pk)
 
         audit(request, 'shift.card_split_updated', clone, {
             'from_shift': str(shift.id),
