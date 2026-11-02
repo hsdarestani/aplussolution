@@ -82,6 +82,20 @@ rollback() {
 }
 trap rollback EXIT
 switched=1
+# Docker Compose's implicit 'recreate' can race with an old container that
+# disappears between inspect and stop (No such container). Reclaim exactly the
+# known backend container ID first, leaving ALL other services untouched.
+# The EXIT trap above restores the prior pinned backend if any operation fails.
+old_backend_cid="$(docker compose -f docker-compose.yml -f "$archive/old-production-override.yml" ps -q backend)"
+test -n "$old_backend_cid"
+test "$(docker inspect -f '{{.State.Running}}' "$old_backend_cid")" = true
+echo "BACKEND_ONLY_EXPLICIT_STOP_AND_REPLACE"
+timeout 40 docker stop -t 12 "$old_backend_cid"
+timeout 30 docker rm "$old_backend_cid"
+if docker inspect "$old_backend_cid" >/dev/null 2>&1; then
+  echo "ABORT_OLD_BACKEND_NOT_REMOVED"
+  exit 2
+fi
 timeout 200 docker compose -f docker-compose.yml -f "$archive/new-production-override.yml" up -d --no-deps --no-build --pull never backend
 ready=0
 for i in $(seq 1 35); do
