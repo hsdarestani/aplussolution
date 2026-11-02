@@ -116,18 +116,20 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             obj = serializer.save(worker=None, is_open=False)
             ensure_slots(obj)
-            if 'workers' in self.request.data:
+            assigned_in_request = 'workers' in self.request.data
+            if assigned_in_request:
                 result = self.assign(self.request, pk=obj.pk, _internal=True)
                 if result.status_code >= 400:
                     from rest_framework.exceptions import ValidationError
                     raise ValidationError(result.data)
-            if obj.status == Shift.Status.PUBLISHED:
+                obj.refresh_from_db()
+            if obj.status == Shift.Status.PUBLISHED and not assigned_in_request:
                 ensure_shift_publish_allowed(obj)
                 obj.published_at = timezone.now()
                 obj.save(update_fields=['published_at', 'updated_at'])
                 refresh_shift_state(obj)
             audit(self.request, 'staffing_demand.created', obj, {'required_count': obj.required_count})
-        if obj.status == Shift.Status.PUBLISHED:
+        if obj.status == Shift.Status.PUBLISHED and not assigned_in_request:
             _notify_open_shift_available_async(obj, 'created')
 
     def perform_update(self, serializer):
