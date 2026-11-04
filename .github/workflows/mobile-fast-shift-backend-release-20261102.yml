@@ -70,6 +70,34 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/shift_admin_release
           chmod 600 ~/.ssh/shift_admin_release
+      - name: Safely release temporary RAM from non-production staging Celery
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/shift_admin_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 root@"$PRIMARY_HOST" "RUN_ID=$GITHUB_RUN_ID bash -s" <<'REMOTE'
+          set -euo pipefail
+          staging='aplus_staging-staging_celery-1'
+          marker="/tmp/aplus-staging-celery-paused-${RUN_ID}.marker"
+          test ! -e "$marker"
+          test "$(docker inspect -f '{{.State.Running}}' "$staging")" = true
+          test "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$staging")" = 'aplus_staging'
+          test "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$staging")" = 'staging_celery'
+          # The staging web, DB and Redis remain running; only its background
+          # task worker is temporarily stopped. NEVER stop production workers.
+          printf '%s\n' "$staging" > "$marker"
+          # In case the CI runner dies, an independent safety timer restores
+          # the staging worker. Normal cleanup restores it immediately.
+          nohup sh -c "sleep 900; docker start '$staging' >/dev/null 2>&1 || true" </dev/null >/dev/null 2>&1 &
+          docker stop -t 20 "$staging"
+          mem="$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)"
+          echo "PRE_RELEASE_WITH_STAGING_WORKER_PAUSED_RAM_MB=$mem"
+          if test "$mem" -lt 750; then
+            docker start "$staging"
+            rm -f "$marker"
+            echo 'ABORT_RELEASE_STILL_TOO_LITTLE_RAM'
+            exit 2
+          fi
+          curl -fsS --max-time 12 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/api/status/ready/
+          REMOTE
       - name: Verify live services before changes
         run: |
           set -euo pipefail
@@ -117,6 +145,24 @@ jobs:
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/shift_admin_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$PRIMARY_HOST" "cd /opt/aplussolution && test -f /opt/aplus-release-$GITHUB_RUN_ID/old-production-override.yml && install -m 600 /opt/aplus-release-$GITHUB_RUN_ID/old-production-override.yml docker-compose.override.yml && timeout 200 docker compose -f docker-compose.yml -f /opt/aplus-release-$GITHUB_RUN_ID/old-production-override.yml -f /opt/aplus-release-$GITHUB_RUN_ID/rollback.yml up -d --no-deps --no-build --pull never backend"
+      - name: Restore staging Celery regardless of release outcome
+        if: always()
+        run: |
+          set -euo pipefail
+          if test -s ~/.ssh/shift_admin_release; then
+            ssh -i ~/.ssh/shift_admin_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 root@"$PRIMARY_HOST" "RUN_ID=$GITHUB_RUN_ID bash -s" <<'REMOTE'
+          set -euo pipefail
+          marker="/tmp/aplus-staging-celery-paused-${RUN_ID}.marker"
+          if test -f "$marker"; then
+            staging="$(cat "$marker")"
+            test "$staging" = 'aplus_staging-staging_celery-1'
+            docker start "$staging" >/dev/null
+            test "$(docker inspect -f '{{.State.Running}}' "$staging")" = true
+            rm -f "$marker"
+            echo STAGING_CELERY_RESTORED
+          fi
+          REMOTE
+          fi
       - name: Clean up temporary credentials
         if: always()
         run: |
