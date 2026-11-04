@@ -68,17 +68,17 @@ jobs:
           # it would create an invalid self-referencing signing definition.
           # Attach the signing config only to buildTypes.release.
           import re, os
-          pattern = r'(?m)^(\\s*)buildTypes\\s*\\{\\s*\\n(\\s*)release\\s*\\{'
+          pattern = r'(?m)^(\s*)buildTypes\s*\{\s*\n(\s*)release\s*\{'
           match = re.search(pattern, text)
           if not match:
               raise SystemExit('Android generated Gradle buildTypes.release not found')
           if 'signingConfig signingConfigs.release' not in text:
-              insertion = '\\n' + match.group(2) + '    signingConfig signingConfigs.release'
+              insertion = '\n' + match.group(2) + '    signingConfig signingConfigs.release'
               text = text[:match.end()] + insertion + text[match.end():]
           # Play updates require a monotonically increasing upload versionCode.
           # Stay below the 2,100,000,000 Android limit.
           code = 260000000 + int(os.environ['GITHUB_RUN_NUMBER'])
-          text, replaced = re.subn(r'(?m)^(\\s*versionCode\\s+)\\d+', lambda m: m.group(1) + str(code), text, count=1)
+          text, replaced = re.subn(r'(?m)^(\s*versionCode\s+)\d+', lambda m: m.group(1) + str(code), text, count=1)
           if replaced != 1:
               raise SystemExit('Android generated versionCode not found')
           path.write_text(text)
