@@ -168,3 +168,25 @@ test('PDF errors remain visible in the export dialog', async ({ page }) => {
   await expect(pdf.getByRole('alert')).toHaveText('Export vorübergehend fehlgeschlagen');
   await expect(pdf.getByRole('button', { name: 'Fertig', exact: true })).toBeEnabled();
 });
+
+
+test('manual shift date wheel cannot silently turn 08–13 into a 29-hour shift', async ({ page }) => {
+  await mobileAdmin(page);
+  await page.getByRole('button', { name: 'Schicht anlegen', exact: true }).click();
+  await page.getByRole('button', { name: /Manuell.*WIW-Formular öffnen/ }).click();
+  const form = page.getByTestId('wiw-shift-form');
+  await form.getByRole('button', { name: /Wähle Zeitrahmen/ }).click();
+  const wheel = page.getByTestId('wiw-time-wheel');
+  const start = wheel.locator('.wiw-wheel-column').first();
+  const end = wheel.locator('.wiw-wheel-column').last();
+
+  // This sequence previously left the date as tomorrow after changing the
+  // starting time from 20:00 to 08:00, saving an accidental 29h shift.
+  await start.getByRole('button', { name: '20:00', exact: true }).click();
+  await end.getByRole('button', { name: '13:00', exact: true }).click();
+  await expect(form.locator('.wiw-time-row-wrap .wiw-form-row')).toContainText('Folgetag');
+  await start.getByRole('button', { name: '08:00', exact: true }).click();
+  await expect(form.locator('.wiw-time-row-wrap .wiw-form-row')).toContainText('08:00 – 13:00');
+  await expect(form.locator('.wiw-time-row-wrap .wiw-form-row')).not.toContainText('Folgetag');
+  await form.getByRole('button', { name: 'Abbrechen', exact: true }).click();
+});
