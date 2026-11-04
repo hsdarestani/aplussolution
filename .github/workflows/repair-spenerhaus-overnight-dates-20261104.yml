@@ -44,7 +44,6 @@ jobs:
               candidate_shifts=list(Shift.objects.select_for_update().filter(
                   starts_at__gte=lower, starts_at__lt=upper,
                   status__in=['published','confirmed'],
-                  wiw_shift_id__isnull=True,
               ).order_by('starts_at','id'))
               matches=[]
               for shift in candidate_shifts:
@@ -61,7 +60,7 @@ jobs:
                       and end.date() == start.date() + timedelta(days=1)
                       and (shift.ends_at-shift.starts_at) in (timedelta(hours=29),timedelta(hours=30))
                   )
-                  if hotel and invalid_range:
+                  if hotel and invalid_range and not shift.wiw_shift_id:
                       matches.append(shift)
               print('REPAIR_CANDIDATES=',len(matches))
               if len(matches) != 11:
