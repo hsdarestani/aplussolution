@@ -417,3 +417,68 @@
   .wiw-card-entered-time.pending:before{background:#f3b51b}
   .wiw-card-location{max-width:120px}
 }
+
+
+/* Official client identities in admin mobile Dienstplan (2026-11-05) */
+@media (max-width: 900px) {
+  .wiw-shift-card .wiw-card-main {
+    grid-template-columns: 42px minmax(0,1fr) minmax(53px,78px) max-content !important;
+    column-gap: 7px !important;
+    align-items: center;
+  }
+  .wiw-shift-card .wiw-card-meta {
+    min-width: 0;
+    justify-self: end;
+  }
+  .wiw-client-logo {
+    min-width: 0;
+    width: 100%;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    text-align: center;
+    pointer-events: none;
+  }
+  .wiw-client-logo img {
+    display: block;
+    max-width: 72px;
+    max-height: 30px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+  }
+  .wiw-client-logo--marthas img {
+    max-width: 34px;
+    max-height: 34px;
+  }
+  .wiw-client-logo--stadthaus img {
+    max-width: 66px;
+    max-height: 28px;
+  }
+  .wiw-client-logo--spenerhaus img {
+    max-width: 72px;
+    max-height: 26px;
+  }
+  .wiw-client-logo-fallback {
+    display: none;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 9px;
+    line-height: 1.15;
+    font-weight: 700;
+    color: #284055;
+    overflow-wrap: anywhere;
+  }
+  .wiw-client-logo.is-fallback .wiw-client-logo-fallback {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+  .wiw-client-logo.is-fallback img,
+  .wiw-client-logo img[hidden] {
+    display: none;
+  }
+}
