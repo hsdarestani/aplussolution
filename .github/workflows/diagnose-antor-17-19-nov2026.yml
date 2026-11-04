@@ -62,6 +62,22 @@ jobs:
                         'status=',s.status,'legacy=',s.worker_id==w.id,
                         'claims=',[(st,src,wid==w.id) for st,src,wid in sl],
                         'hotel=',bool('spenerhaus' in (s.location.name if s.location else '').lower()))
+          print('SUSPICIOUS_LONG_SHIFTS_WEEK')
+          window_start=datetime(2026,11,15,tzinfo=berlin)
+          window_end=datetime(2026,11,22,tzinfo=berlin)
+          candidates=Shift.objects.filter(starts_at__gte=window_start,starts_at__lt=window_end).select_related('client','location','worker__user').order_by('starts_at')
+          for s in candidates:
+              duration_hours=(s.ends_at-s.starts_at).total_seconds()/3600
+              if duration_hours < 18:
+                  continue
+              spenerhaus=bool('spenerhaus' in ' '.join([s.client.name if s.client else '',s.location.name if s.location else '']).lower())
+              slots=list(ShiftSlot.objects.filter(shift=s).values_list('status','source','worker_id'))
+              print('LONG_SHIFT',
+                    'start=',s.starts_at.astimezone(berlin).strftime('%Y-%m-%d %H:%M'),
+                    'end=',s.ends_at.astimezone(berlin).strftime('%Y-%m-%d %H:%M'),
+                    'hours=',duration_hours,'hotel=',spenerhaus,'status=',s.status,'wiw=',bool(s.wiw_shift_id),
+                    'legacy_antor=',any(s.worker_id==w.id for w in workers),
+                    'slots=',[(status,src,'antor' if any(wid==w.id for w in workers) else ('other' if wid else 'none')) for status,src,wid in slots])
           PY
           REMOTE
       - name: Erase temporary SSH key
