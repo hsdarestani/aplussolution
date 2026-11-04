@@ -421,8 +421,13 @@
 
 /* Official client identities in admin mobile Dienstplan (2026-11-05) */
 @media (max-width: 900px) {
+  /* The logo is centered relative to the ENTIRE shift card, not to the
+     flexible space left between the worker's name and the time column. */
+  .wiw-shift-card {
+    position: relative;
+  }
   .wiw-shift-card .wiw-card-main {
-    grid-template-columns: 42px minmax(0,1fr) minmax(53px,78px) max-content !important;
+    grid-template-columns: 42px minmax(0,1fr) max-content !important;
     column-gap: 7px !important;
     align-items: center;
   }
@@ -430,9 +435,13 @@
     min-width: 0;
     justify-self: end;
   }
-  .wiw-client-logo {
+  .wiw-shift-card .wiw-client-logo {
+    position: absolute;
+    inset-inline-start: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
     min-width: 0;
-    width: 100%;
+    width: min(78px, 23%);
     height: 38px;
     display: flex;
     align-items: center;
