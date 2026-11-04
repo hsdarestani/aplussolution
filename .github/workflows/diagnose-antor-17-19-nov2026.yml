@@ -83,3 +83,4 @@ jobs:
       - name: Erase temporary SSH key
         if: always()
         run: rm -f "$HOME/.ssh/aplus_shift_diag"
+# Repeat live read-only snapshot after guarded repair count drift 2026-11-04.
