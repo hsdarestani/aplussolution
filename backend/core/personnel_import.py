@@ -99,6 +99,8 @@ def parse_personalfragebogen_fields(pdf_bytes):
     reader = PdfReader(BytesIO(pdf_bytes), strict=False)
     if reader.is_encrypted:
         raise ValueError('Verschlüsselte PDFs werden nicht unterstützt.')
+    if len(reader.pages) != 1:
+        raise ValueError('Nur einseitige Personalfragebogen werden unterstützt.')
     fields = reader.get_fields() or {}
     if not fields:
         raise ValueError('Das PDF enthält keine auslesbaren Formularfelder.')
@@ -129,6 +131,14 @@ def parse_personalfragebogen_fields(pdf_bytes):
         except ValueError:
             raise ValueError('Geburtsdatum hat ein ungültiges Format (TT.MM.JJJJ).')
 
+    # Free-text numerical entries in Konfession may be codes or misplaced
+    # values.  Never insert an unverified religion into a personnel record.
+    if master.get('religion', '').isdigit():
+        master.pop('religion')
+        religion_needs_review = True
+    else:
+        religion_needs_review = False
+
     if {'street', 'postal_code', 'city'} <= master.keys():
         master['full_address'] = f"{master['street']}, {master['postal_code']} {master['city']}"
 
@@ -141,8 +151,13 @@ def parse_personalfragebogen_fields(pdf_bytes):
         master['salutation'] = marks['salutation']
     if marks.get('insurance_type'):
         master['insurance_type'] = marks['insurance_type']
-    if marks.get('has_children'):
+    if marks.get('has_children') in ('ja', 'nein'):
         master['has_children'] = marks['has_children'] == 'ja'
+        if marks['has_children'] == 'nein':
+            master['children_under_25'] = 0
+    count_under_25 = values.get('Falls ja: Wie viele Kinder?', '').strip()
+    if count_under_25.isdecimal():
+        master['children_under_25'] = int(count_under_25)
 
     employers = []
     for i in (1, 2):
@@ -185,11 +200,11 @@ def parse_personalfragebogen_fields(pdf_bytes):
         # Never change a login identity as part of a personnel-document import.
         warnings.append('E-Mail im PDF erkannt. Die bestehende Login-E-Mail wird aus Sicherheitsgründen nicht geändert.')
 
-    if master.get('religion', '').isdigit():
-        warnings.append('Konfession enthält eine Zahl. Bitte die Angabe fachlich prüfen, nicht als bestätigte Konfession behandeln.')
+    if religion_needs_review:
+        warnings.append('Konfession enthält einen ungeklärten Zahlenwert und wurde vorsichtshalber nicht übernommen.')
 
-    if employers:
-        warnings.append('Beginn, Bruttoverdienst und Beschäftigungsart der weiteren Tätigkeiten bitte prüfen; leere Felder werden nicht erfunden.')
+    if employers and any(not item['start_date'] or not item['gross_monthly_salary'] or not item['employment_type'] for item in employers):
+        warnings.append('Bei weiteren Beschäftigungen fehlen einzelne Angaben (Beginn, Bruttoverdienst oder Beschäftigungsart). Leere Felder bleiben offen.')
 
     return {'first_name': first, 'last_name': last, 'profile': profile,
             'master_data': master, 'warnings': warnings}
