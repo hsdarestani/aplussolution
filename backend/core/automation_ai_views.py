@@ -441,16 +441,23 @@ def order_parse(request):
     if not raw_text:
         return Response({'detail': 'Kein Auftragstext übergeben.'}, status=400)
 
-    try:
-        result = normalize_order_request(raw_text, parse_order_text(raw_text))
-    except Exception as exc:
-        # Explicit German shift instructions do not need to fail just because the
-        # external AI provider is temporarily unavailable or interpreted fields
-        # inconsistently. Deterministic parsing covers the common create-shift flow.
-        result = deterministic_order_request(raw_text)
-        if not result:
-            return Response({'detail': str(exc)}, status=400)
-        result = normalize_order_request(raw_text, result)
+    # Compact dated rosters are fully deterministic: do not make admins wait
+    # for OpenAI just to expand "2x 07:00-13:00" into staffing slots.
+    # Free-form prose still uses the semantic model, with an offline fallback.
+    quick = deterministic_order_request(raw_text)
+    compact_roster = bool(re.search(
+        r'\b\d+\s*[x×]\s*\d{1,2}:\d{2}', raw_text, flags=re.I,
+    ))
+    if quick and compact_roster:
+        result = normalize_order_request(raw_text, quick)
+    else:
+        try:
+            result = normalize_order_request(raw_text, parse_order_text(raw_text))
+        except Exception as exc:
+            result = quick
+            if not result:
+                return Response({'detail': str(exc)}, status=400)
+            result = normalize_order_request(raw_text, result)
 
     if not result.get('shifts'):
         return Response({'detail': 'Im Text wurde keine vollständige Schicht erkannt.'}, status=400)
