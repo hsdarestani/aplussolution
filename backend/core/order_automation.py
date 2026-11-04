@@ -165,7 +165,8 @@ def parse_order_text(text: str, session=None) -> dict:
             'messages': [{'role': 'system', 'content': prompt}, {'role': 'user', 'content': text}],
             'temperature': 0.1,
         },
-        timeout=settings.WIW_HTTP_TIMEOUT,
+        # A failed upstream must not keep the mobile shift form loading indefinitely.
+        timeout=(4, min(settings.WIW_HTTP_TIMEOUT, 15)),
     )
     if not response.ok:
         raise ValueError(f'OpenAI-Auftragsanalyse fehlgeschlagen ({response.status_code}).')

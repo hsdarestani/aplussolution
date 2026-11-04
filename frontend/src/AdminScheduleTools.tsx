@@ -287,14 +287,21 @@ export default function AdminScheduleTools() {
       return;
     }
     setBusy(true);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 22000);
     try {
-      const result: any = await api('automation/orders/parse/', { method: 'POST', body: JSON.stringify({ text: orderText }) });
+      const result: any = await api('automation/orders/parse/', {
+        method: 'POST', body: JSON.stringify({ text: orderText }), signal: controller.signal,
+      });
       setParsed(result);
       setEditingAiIndex(null);
       setMessage(`${result.shifts?.length || 0} Schicht(en) erkannt. Bitte kurz prüfen.`);
     } catch (error: any) {
-      setMessage(error.message || 'AI-Analyse fehlgeschlagen.');
+      setMessage(error?.name === 'AbortError'
+        ? 'Die Analyse dauert zu lange. Bitte erneut versuchen oder Schichten manuell erstellen.'
+        : error.message || 'AI-Analyse fehlgeschlagen.');
     } finally {
+      window.clearTimeout(timeout);
       setBusy(false);
     }
   }
@@ -401,7 +408,7 @@ export default function AdminScheduleTools() {
             })}
             {!parsed.shifts?.length ? <div className="admin-ai-empty">Alle erkannten Schichten wurden entfernt.</div> : null}
           </div> : null}
-          <div className="admin-schedule-sheet-actions"><button type="button" onClick={() => setAiOpen(false)}>Abbrechen</button><button type="button" className="primary" disabled={busy || aiDirectoryBusy || Boolean(parsed && !parsed.shifts?.length)} onClick={() => void (parsed ? approveOrder() : parseOrder())}>{busy ? '…' : parsed ? 'Geprüfte Schichten erstellen' : 'Mit AI analysieren'}</button></div>
+          <div className="admin-schedule-sheet-actions"><button type="button" onClick={() => setAiOpen(false)}>Abbrechen</button><button type="button" className="primary" disabled={busy || Boolean(parsed && (aiDirectoryBusy || !parsed.shifts?.length))} onClick={() => void (parsed ? approveOrder() : parseOrder())}>{busy ? '…' : parsed ? 'Geprüfte Schichten erstellen' : 'Mit AI analysieren'}</button></div>
           {message ? <button type="button" className="admin-schedule-message" onClick={() => setMessage('')}>{message}</button> : null}
         </section>
       </div>, document.body) : null}

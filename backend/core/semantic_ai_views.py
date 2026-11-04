@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import re
 from typing import Any
 
 import requests
@@ -11,6 +12,7 @@ from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
+from .ai_shift_normalizer import deterministic_order_request, normalize_order_request
 from .models import ClientCompany, Location, Position, Shift, ShiftImportPackage, WorkerProfile
 from .native_cutover import approve_order
 from .operational_notifications import notify_worker_shift_event
@@ -141,7 +143,7 @@ def _call_ai(text: str, directory: dict[str, list[dict[str, str]]], session=None
             ],
             'temperature': 0,
         },
-        timeout=settings.WIW_HTTP_TIMEOUT,
+        timeout=(4, min(settings.WIW_HTTP_TIMEOUT, 15)),
     )
     if not response.ok:
         raise ValueError(f'AI-Auftragsanalyse fehlgeschlagen ({response.status_code}).')
@@ -385,7 +387,39 @@ def order_parse(request):
         return Response({'detail': 'Kein Auftragstext übergeben.'}, status=400)
     try:
         directory = _directory()
-        parsed = _clean_ai_payload(_call_ai(raw_text, directory))
+        offline = deterministic_order_request(raw_text)
+        compact_roster = bool(re.search(
+            r'\b\d+\s*[x×]\s*\d{1,2}:\d{2}', raw_text, flags=re.I,
+        ))
+        if compact_roster and offline:
+            # Exact dated hotel rosters are faster and safer without an LLM call.
+            parsed = _clean_ai_payload(normalize_order_request(raw_text, offline))
+        else:
+            try:
+                parsed = _clean_ai_payload(_call_ai(raw_text, directory))
+            except Exception:
+                if not offline:
+                    raise
+                parsed = _clean_ai_payload(normalize_order_request(raw_text, offline))
+
+        # Resolve explicit directory names without inventing a client/location.
+        # The review UI still requires the admin to choose unresolved entities.
+        for row in parsed['shifts']:
+            hint = str(row.get('site_text') or '').strip().casefold()
+            client = next((entry for entry in directory['clients'] if entry['name'].casefold() == hint), None)
+            if client and not row.get('client_id'):
+                row['client_id'] = client['id']
+                location_hint = str(row.get('location_text') or '').strip().casefold()
+                location = next((
+                    entry for entry in directory['locations']
+                    if entry['client_id'] == client['id'] and entry['name'].casefold() == location_hint
+                ), None)
+                if location:
+                    row['location_id'] = location['id']
+            role_hint = str(row.get('role') or '').strip().casefold()
+            position = next((entry for entry in directory['positions'] if entry['name'].casefold() == role_hint), None)
+            if position and not row.get('position_id'):
+                row['position_id'] = position['id']
         parsed = _canonicalize_ids(parsed, strict=False)
     except Exception as exc:
         return Response({'detail': str(exc)}, status=400)

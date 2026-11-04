@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.db import transaction
+from django.db.models import Exists, OuterRef
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -72,17 +73,35 @@ def ensure_worker_can_claim(worker: WorkerProfile, shift: Shift) -> None:
     # live on Shift.worker without a CLAIMED ShiftSlot. Keep those records in
     # conflict detection until the migration/audit path has fully normalized
     # historical data.
-    legacy_overlap = Shift.objects.filter(
-        worker=worker,
-        starts_at__lt=shift.ends_at,
-        ends_at__gt=shift.starts_at,
-    ).exclude(pk=shift.pk).exclude(status=Shift.Status.CANCELLED).exists()
+    # Native-managed cards (admin_assignment, admin_release, worker_claim...)
+    # are authoritative over the old Shift.worker mirror. However historical
+    # legacy shifts may still have only system/WIW cards and must remain protected.
+    native_card = (
+        ShiftSlot.objects.filter(shift_id=OuterRef('pk'))
+        .exclude(status=ShiftSlot.Status.CANCELLED)
+        .exclude(source__in=['system', 'wiw', 'migration'])
+    )
+    legacy_overlap = (
+        Shift.objects.filter(
+            worker=worker,
+            starts_at__lt=shift.ends_at,
+            ends_at__gt=shift.starts_at,
+            status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
+        )
+        .exclude(pk=shift.pk)
+        .annotate(_has_native_card=Exists(native_card))
+        .filter(_has_native_card=False)
+        .exists()
+    )
     if legacy_overlap:
         raise ValidationError('Du hast in diesem Zeitraum bereits eine Schicht.')
 
     # Explicit product decision: do not block manual OpenShift pickup or
     # admin-approved transfers based on the daily-hours cap.
     issues = [issue for issue in violations(worker, shift) if issue != 'max_hours_per_day']
+    if 'overlap' in issues:
+        # Show the actual collision before generic same-day policy errors.
+        issues = ['overlap', *[issue for issue in issues if issue != 'overlap']]
     if not issues:
         return
     messages = {

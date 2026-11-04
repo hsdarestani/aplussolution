@@ -45,6 +45,13 @@ def _times(text: str) -> tuple[str, str]:
         text,
     )
     if not match:
+        # Customer rosters also use compact "2x 07:00-13:00" rows without
+        # the "von" keyword. Only accept explicit HH:MM clock ranges.
+        match = _first(
+            r'(?<!\d)(\d{1,2}):(\d{2})\s*(?:-|–|—|~|bis)\s*(\d{1,2}):(\d{2})(?!\d)',
+            text,
+        )
+    if not match:
         return '', ''
     start_h, start_m, end_h, end_m = match
     return f'{int(start_h):02d}:{int(start_m or 0):02d}', f'{int(end_h):02d}:{int(end_m or 0):02d}'
@@ -69,6 +76,11 @@ def _count(text: str) -> int | None:
     return max(1, int(match.group(1)))
 
 
+def _roster_line_count(text: str) -> int | None:
+    match = re.search(r'(?<!\w)(\d{1,2})\s*[x×]\s*(?=\d{1,2}:\d{2})', text or '', flags=re.I)
+    return max(1, int(match.group(1))) if match else None
+
+
 def _role(text: str) -> str:
     for pattern, role in ROLE_PATTERNS:
         if re.search(pattern, text or '', flags=re.I):
@@ -89,7 +101,19 @@ def _site_and_location(text: str) -> tuple[str, str]:
 
     location = _first(r'\bstandort\s*:?[ \t]*([^\n.,;]+)', text)
     client = _first(r'\b(?:kunde|auftraggeber)\s*:?[ \t]*([^\n.,;]+)', text)
-    return (client[0].strip() if client else ''), (location[0].strip() if location else '')
+    client_name = client[0].strip() if client else ''
+    location_name = location[0].strip() if location else ''
+    # Common hotel roster footer: "Alle Schichten Housekeeping Hotel Spenerhaus".
+    # Use an explicit hotel name as a hint; never invent a directory identifier.
+    if not client_name or not location_name:
+        hotel = re.search(
+            r'\b(Hotel\s+[A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß0-9-]*(?:\s+[A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß0-9-]*){0,3})\s*$',
+            (text or '').strip(), flags=re.I,
+        )
+        if hotel:
+            client_name = client_name or hotel.group(1)
+            location_name = location_name or hotel.group(1)
+    return client_name, location_name
 
 
 def _note(text: str) -> str:
@@ -163,11 +187,11 @@ def _dated_shift_rows(text: str) -> list[dict[str, Any]]:
         if not (date_value and start_time and end_time):
             continue
         rows.append({
-            'role': _role(line) or 'Servicekraft',
+            'role': _role(line) or _role(text) or 'Servicekraft',
             'date': date_value,
             'start_time': start_time,
             'end_time': end_time,
-            'count': 1,
+            'count': _roster_line_count(line) or _count(line) or 1,
             'location_text': location_value,
             'site_text': site_value,
             'site_address': '',
