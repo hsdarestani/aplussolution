@@ -35,7 +35,10 @@ def test_admin_can_assign_worker_on_november_19_despite_stale_legacy_mirror(
     # and the worker has not been assigned to this historical record.
     old_id = old.data['id']
     assert ShiftSlot.objects.filter(shift_id=old_id, status=ShiftSlot.Status.OPEN).exists()
-    Shift.objects.filter(pk=old_id).update(worker=worker_user.worker_profile)
+    ShiftSlot.objects.filter(shift_id=old_id).update(source='admin_release')
+    Shift.objects.filter(pk=old_id).update(
+        worker=worker_user.worker_profile, status=Shift.Status.PUBLISHED,
+    )
     assert not ShiftSlot.objects.filter(
         shift_id=old_id, worker=worker_user.worker_profile, status=ShiftSlot.Status.CLAIMED,
     ).exists()
