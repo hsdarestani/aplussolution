@@ -51,7 +51,7 @@ def violations(worker, shift, policy=None):
     if TimeOffRequest.objects.filter(worker=worker, status=TimeOffRequest.Status.APPROVED, starts_on__lte=shift.ends_at.date(), ends_on__gte=shift.starts_at.date()).exists():
         out.append('approved_time_off')
 
-    slots = list(ShiftSlot.objects.select_related('shift').filter(worker=worker, status=ShiftSlot.Status.CLAIMED).exclude(shift=shift))
+    slots = list(ShiftSlot.objects.select_related('shift').filter(worker=worker, status=ShiftSlot.Status.CLAIMED).exclude(shift=shift).exclude(shift__status__in=[Shift.Status.CANCELLED, Shift.Status.COMPLETED]))
     if any(s.shift.starts_at < shift.ends_at and s.shift.ends_at > shift.starts_at for s in slots):
         out.append('overlap')
 
