@@ -1,0 +1,43 @@
+name: One-time secure employee enrichment key (2026-11-05)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/enrich-employee-bootstrap-20261105.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      STRATO_HOST: ${{ secrets.STRATO_HOST }}
+      STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Provision temporary public certificate and check existing employee
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STRATO_HOST" && test -n "$STRATO_SSH_PRIVATE_KEY"
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" > "$HOME/.ssh/worker_enrich"
+          chmod 600 "$HOME/.ssh/worker_enrich"
+          ssh -i "$HOME/.ssh/worker_enrich" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 root@"$STRATO_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          KEY=/root/.aplus_employee_enrichment_20261105.key
+          CERT=/root/.aplus_employee_enrichment_20261105.crt
+          test ! -e "$KEY" && test ! -e "$CERT"
+          openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days 2 -subj '/CN=aplus-one-time-worker-enrichment-20261105' -keyout "$KEY" -out "$CERT" >/dev/null 2>&1
+          chmod 600 "$KEY" "$CERT"
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell -c "from core.models import WorkerProfile; q=WorkerProfile.objects.filter(user__first_name__iexact='Mariatou', user__last_name__iexact='Camara'); print('EXISTING_WORKER_MATCH_COUNT=' + str(q.count())); print('EXISTING_MASTER_EXISTS=' + str(q.count()==1 and hasattr(q.first(),'master_data')))" </dev/null
+          echo "EMPLOYEE_ENRICHMENT_PUBLIC_CERT_B64=$(base64 -w0 "$CERT")"
+          echo "TEMPORARY_PUBLIC_CERT_ONLY__NO_PERSONAL_DATA"
+          REMOTE
+      - name: Remove runner SSH key
+        if: always()
+        shell: bash
+        run: rm -f "$HOME/.ssh/worker_enrich"
