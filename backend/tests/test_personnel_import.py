@@ -47,6 +47,9 @@ def test_preview_refuses_different_employee_without_writing():
                                            first_name='Example', last_name='Worker',
                                            role=User.Role.WORKER)
     worker = WorkerProfile.objects.create(user=worker_user, employee_number='TEST-001')
+    master, _ = EmployeeMasterData.objects.get_or_create(worker=worker)
+    master.data = {'street': 'Existing address'}
+    master.save()
     client = APIClient()
     client.force_authenticate(user=admin)
     pdf = SimpleUploadedFile('Personalfragebogen.pdf', b'%PDF-mocked', content_type='application/pdf')
@@ -59,4 +62,5 @@ def test_preview_refuses_different_employee_without_writing():
             {'file': pdf}, format='multipart',
         )
     assert response.status_code == 409
-    assert not EmployeeMasterData.objects.filter(worker=worker).exists()
+    master.refresh_from_db()
+    assert master.data == {'street': 'Existing address'}
