@@ -15,6 +15,9 @@ describe('official client logos in mobile Dienstplan', () => {
 
   it('recognises the Evangelische Akademie venue only when the customer is missing', () => {
     expect(resolveShiftClientBrand({ location_name: 'Evangelische Akademie' })).toBe('marthas');
+    expect(resolveShiftClientBrand({ client_name: 'Lectron GmbH', location_name: 'Stadthaus am Markt' })).toBe('stadthaus');
+    expect(resolveShiftClientBrand({ client_name: 'Stadthaus Frankfurt', location_name: 'Markt 1' })).toBe('stadthaus');
+
     expect(resolveShiftClientBrand({ client_name: 'Anderer Kunde', location_name: 'Evangelische Akademie' })).toBe(null);
   });
 });
