@@ -491,3 +491,13 @@
   .wiw-client-logo--spenerhaus img { max-width: 64px; max-height: 24px; }
   .wiw-shift-card .wiw-card-meta b { font-size: 12px; }
 }
+
+/* Stadthaus publishes a light/white wordmark intended for dark headers.
+   Preserve the source asset's exact geometry but render it in navy on white cards. */
+@media (max-width: 900px) {
+  .wiw-shift-card .wiw-client-logo--stadthaus img {
+    filter: brightness(0) saturate(100%) invert(18%) sepia(20%) saturate(1350%) hue-rotate(165deg) brightness(92%) contrast(95%);
+    max-width: 74px;
+    max-height: 31px;
+  }
+}
