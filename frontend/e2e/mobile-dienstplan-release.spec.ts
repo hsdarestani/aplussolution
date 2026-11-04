@@ -236,4 +236,5 @@ test('client logo is centered relative to the entire shift card, not the gaps be
   });
   expect(alignment.deltaX).toBeLessThan(2);
   expect(alignment.deltaY).toBeLessThan(2);
+  await expect(logo).toHaveCSS('position', 'absolute');
 });
