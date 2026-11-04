@@ -149,8 +149,8 @@ export default function AktePage({ user }: { user: User }) {
     if (preview.profile.phone && profile.phone && String(profile.phone).trim() !== String(preview.profile.phone).trim()) {
       conflicts.push('phone');
     }
-    setProfile(current => ({ ...current, phone: current.phone || preview.profile.phone || '' }));
-    setMaster(current => {
+    setProfile((current: any) => ({ ...current, phone: current.phone || preview.profile.phone || '' }));
+    setMaster((current: any) => {
       const next = { ...current };
       for (const [key, value] of Object.entries(preview.master_data || {})) {
         if (next[key] == null || next[key] === '' || (Array.isArray(next[key]) && next[key].length === 0)) next[key] = value;
