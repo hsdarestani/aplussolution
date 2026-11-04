@@ -48,6 +48,36 @@ function fileLink(href?: string, label = 'Öffnen') {
 }
 
 const text = (value: any) => value == null || value === '' ? '–' : String(value);
+const masterFieldLabels: Record<string, string> = {
+  salutation: 'Anrede', street: 'Straße / Hausnummer', postal_code: 'PLZ', city: 'Ort',
+  full_address: 'Vollständige Anschrift', birth_date: 'Geburtsdatum', birth_name: 'Geburtsname',
+  birth_place: 'Geburtsort', birth_country: 'Geburtsland', nationality: 'Staatsangehörigkeit',
+  social_insurance_number: 'Sozialversicherungsnummer', health_insurance_name: 'Krankenkasse',
+  insurance_type: 'Versicherungsart', has_children: 'Kinder vorhanden', children_under_25: 'Kinder unter 25',
+  tax_identification_number: 'Steuer-ID', tax_class: 'Steuerklasse', tax_allowance: 'Steuerfreibetrag',
+  child_allowance: 'Kinderfreibetrag', religion: 'Konfession', spouse_religion: 'Konfession Ehepartner',
+  iban: 'IBAN', bank_account_holder: 'Kontoinhaber', bank_name: 'Bank',
+  other_employments: 'Weitere Beschäftigungen', signature_place: 'Ort',
+  signature_place_and_date_as_written: 'Ort und Datum laut Personalfragebogen',
+};
+const employmentTypeLabel: Record<string, string> = {
+  minijob: 'Minijob', sozialversicherungspflichtig: 'Sozialversicherungspflichtig',
+};
+function displayMasterValue(value: any): string {
+  if (value == null || value === '') return '–';
+  if (typeof value === 'boolean') return value ? 'Ja' : 'Nein';
+  if (Array.isArray(value)) return value.length
+    ? value.map((entry: any) => typeof entry === 'object' && entry !== null
+      ? [entry.employer_name, employmentTypeLabel[entry.employment_type] || entry.employment_type,
+         entry.start_date && `Beginn: ${entry.start_date}`,
+         entry.gross_monthly_salary && `Brutto/Monat: ${entry.gross_monthly_salary} €`]
+        .filter(Boolean).join(' · ')
+      : String(entry)).join(' | ')
+    : '–';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
 const unpack = (value:any):any[] => value?.results || value || [];
 const scheduleGroupOptions:[string,string][]=[['service','Service'],['front_office','Front Office'],['housekeeping','Housekeeping']];
 const manager = (user: User) => user.role === 'admin' || user.role === 'manager';
@@ -197,10 +227,44 @@ export default function AktePage({ user }: { user: User }) {
           </div>
           <h3 className="akte-subtitle">Personalstammdaten</h3>
           <div className="akte-form-grid">
+            <IonSelect fill="outline" label="Anrede" labelPlacement="floating" value={master.salutation ?? ''} onIonChange={e=>setMaster({...master,salutation:e.detail.value})}>
+              <IonSelectOption value="Herr">Herr</IonSelectOption><IonSelectOption value="Frau">Frau</IonSelectOption>
+              <IonSelectOption value="Divers">Divers</IonSelectOption><IonSelectOption value="Unbestimmt">Unbestimmt</IonSelectOption>
+            </IonSelect>
+            <IonSelect fill="outline" label="Versicherungsart" labelPlacement="floating" value={master.insurance_type ?? ''} onIonChange={e=>setMaster({...master,insurance_type:e.detail.value})}>
+              <IonSelectOption value="gesetzlich">Gesetzlich</IonSelectOption><IonSelectOption value="privat">Privat</IonSelectOption>
+            </IonSelect>
+            <IonSelect fill="outline" label="Kinder vorhanden" labelPlacement="floating" value={master.has_children == null ? '' : String(master.has_children)} onIonChange={e=>setMaster({...master,has_children:e.detail.value === 'true'})}>
+              <IonSelectOption value="true">Ja</IonSelectOption><IonSelectOption value="false">Nein</IonSelectOption>
+            </IonSelect>
             {[
-              ['salutation','Anrede'],['street','Straße / Hausnummer'],['postal_code','PLZ'],['city','Ort'],['birth_date','Geburtsdatum'],['birth_name','Geburtsname'],['birth_place','Geburtsort'],['birth_country','Geburtsland'],['nationality','Staatsangehörigkeit'],['social_insurance_number','Sozialversicherungsnummer'],['health_insurance_name','Krankenkasse'],['insurance_type','Versicherungsart'],['tax_identification_number','Steuer-ID'],['tax_class','Steuerklasse'],['iban','IBAN'],['bank_account_holder','Kontoinhaber'],['bank_name','Bank'],['signature_place','Unterschriftsort'],
-            ].map(([key,label]) => <IonInput key={key} fill="outline" type={key==='birth_date'?'date':'text'} label={label} labelPlacement="floating" value={master[key] || ''} onIonInput={e=>setMaster({...master,[key]:e.detail.value})}/>) }
+              ['street','Straße / Hausnummer'],['postal_code','PLZ'],['city','Ort'],['birth_date','Geburtsdatum'],
+              ['birth_name','Geburtsname'],['birth_place','Geburtsort'],['birth_country','Geburtsland'],
+              ['nationality','Staatsangehörigkeit'],['children_under_25','Kinder unter 25'],
+              ['social_insurance_number','Sozialversicherungsnummer'],['health_insurance_name','Krankenkasse'],
+              ['tax_identification_number','Steuer-ID'],['tax_class','Steuerklasse'],
+              ['child_allowance','Kinderfreibetrag'],['tax_allowance','Steuerfreibetrag'],
+              ['religion','Konfession'],['spouse_religion','Konfession Ehepartner'],
+              ['iban','IBAN'],['bank_account_holder','Kontoinhaber'],['bank_name','Bank'],
+              ['signature_place','Ort der Unterschrift'],
+            ].map(([key,label]) => <IonInput key={key} fill="outline" type={key==='birth_date'?'date':key==='children_under_25'?'number':'text'} label={label} labelPlacement="floating" value={master[key] ?? ''} onIonInput={e=>setMaster({...master,[key]:e.detail.value})}/>) }
           </div>
+          <h3 className="akte-subtitle">Weitere Beschäftigungsverhältnisse</h3>
+          {(Array.isArray(master.other_employments) ? master.other_employments : []).map((entry: any, i: number) => {
+            const change = (field: string, value: unknown) => setMaster((current: any) => ({
+              ...current, other_employments: (current.other_employments || []).map((row: any, j: number) =>
+                i === j ? {...row, [field]: value} : row),
+            }));
+            return <div className="akte-form-grid" key={i}>
+              <IonInput fill="outline" label={`Arbeitgeber ${i+1}`} labelPlacement="floating" value={entry.employer_name ?? ''} onIonInput={e=>change('employer_name',e.detail.value)}/>
+              <IonSelect fill="outline" label="Art der Beschäftigung" labelPlacement="floating" value={entry.employment_type ?? ''} onIonChange={e=>change('employment_type',e.detail.value)}>
+                <IonSelectOption value="minijob">Minijob</IonSelectOption>
+                <IonSelectOption value="sozialversicherungspflichtig">Sozialversicherungspflichtig</IonSelectOption>
+              </IonSelect>
+              <IonInput fill="outline" label="Beginn der Beschäftigung" labelPlacement="floating" value={entry.start_date ?? ''} onIonInput={e=>change('start_date',e.detail.value)}/>
+              <IonInput type="number" fill="outline" label="Bruttoverdienst monatlich (€)" labelPlacement="floating" value={entry.gross_monthly_salary ?? ''} onIonInput={e=>change('gross_monthly_salary',e.detail.value)}/>
+            </div>;
+          })}
         </> : <div className="akte-form-grid">
           <IonInput fill="outline" label="Firmenname" labelPlacement="floating" value={profile.name} onIonInput={e=>setProfile({...profile,name:e.detail.value})}/>
           <IonInput fill="outline" label="Kundennummer" labelPlacement="floating" value={profile.customer_number} onIonInput={e=>setProfile({...profile,customer_number:e.detail.value})}/>
@@ -218,7 +282,7 @@ export default function AktePage({ user }: { user: User }) {
         data.kind === 'worker' ? <div className="akte-detail-grid">
           <div><span>Name</span><b>{text(data.profile?.user_detail?.name)}</b></div><div><span>E-Mail</span><b>{text(data.profile?.user_detail?.email)}</b></div><div><span>Telefon</span><b>{text(data.profile?.user_detail?.phone)}</b></div><div><span>Personalnummer</span><b>{text(data.profile?.employee_number)}</b></div>
           <div><span>Beschäftigung</span><b>{text(data.profile?.employment_type)}</b></div><div><span>OpenShift-Kunden</span><b>{(data.profile?.open_shift_client_ids||[]).length?`${(data.profile.open_shift_client_ids||[]).length} ausgewählt`:'Alle'}</b></div><div><span>Zeitplan</span><b>{(data.profile?.schedule_groups||[]).map((key:string)=>scheduleGroupOptions.find(([id])=>id===key)?.[1]||key).join(', ')||'Alle'}</b></div><div><span>Sollstunden / Monat</span><b>{text(data.profile?.monthly_hours)}</b></div><div><span>Stundenlohn</span><b>{text(data.profile?.tariff_hourly_rate)} €</b></div><div><span>Zulage</span><b>{text(data.profile?.extra_allowance)} €</b></div>
-          {Object.entries(data.master_data?.data || {}).map(([key,val]) => <div key={key}><span>{key.replaceAll('_',' ')}</span><b>{text(val)}</b></div>)}
+          {Object.entries(data.master_data?.data || {}).map(([key,val]) => <div key={key}><span>{masterFieldLabels[key] || key.replaceAll('_',' ')}</span><b>{displayMasterValue(val)}</b></div>)}
         </div> : <div className="akte-detail-grid">
           <div><span>Firma</span><b>{text(data.profile?.name)}</b></div><div><span>Kundennummer</span><b>{text(data.profile?.customer_number)}</b></div><div><span>USt-IdNr.</span><b>{text(data.profile?.vat_id)}</b></div><div><span>Anschrift</span><b>{text(data.profile?.address)}</b></div>
           <div><span>Kontakt</span><b>{text(data.profile?.contacts_detail?.[0]?.name)}</b></div><div><span>E-Mail</span><b>{text(data.profile?.contacts_detail?.[0]?.email)}</b></div><div><span>Telefon</span><b>{text(data.profile?.contacts_detail?.[0]?.phone)}</b></div><div><span>Verträge sichtbar</span><b>{data.profile?.contract_visibility_enabled === false ? 'Nein' : 'Ja'}</b></div>
