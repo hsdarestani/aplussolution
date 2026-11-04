@@ -38,8 +38,10 @@ export function resolveShiftClientBrand(shift: { client_name?: string; location_
   // The Evangelische Akademie shift group in WIW is serviced by Martha's finest.
   // Only apply the venue alias where no other recognised customer was supplied.
   if (!name && location.includes('evangelischeakademie')) return 'marthas';
-  if (!name && location.includes('stadthausammarkt')) return 'stadthaus';
-  if (!name && location.includes('spenerhaus')) return 'spenerhaus';
+  // Stadthaus can be an Einsatzort under the operating company's legal name.
+  // Prefer a recognised customer identity above, then match this exact venue.
+  if (location.includes('stadthausammarkt') || location.includes('stadthausfrankfurt')) return 'stadthaus';
+  if (location.includes('hotelspenerhaus') || location.includes('spenerhaus')) return 'spenerhaus';
   return null;
 }
 
