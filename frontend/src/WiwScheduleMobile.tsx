@@ -4,6 +4,7 @@
 // MODERN_WEEK_CACHE_NAVIGATION
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { confirmShiftWrite } from './shiftSaveConfirmation';
+import { endAfterChangingStart, shiftDurationIsValid } from './shiftTimeValidation';
 import { createPortal, flushSync } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
@@ -531,7 +532,7 @@ function TimeFrameWheel({ start, end, onChange }: { start: number; end: number; 
   return (
     <div className="wiw-time-wheel" data-testid="wiw-time-wheel">
       <div className="wiw-wheel-highlight" />
-      <WheelColumn items={times} value={start} onChange={(next) => onChange(next, end)} />
+      <WheelColumn items={times} value={start} onChange={(next) => onChange(next, endAfterChangingStart(next, end))} />
       <WheelColumn items={times} value={endMinute} onChange={selectEnd} />
     </div>
   );
@@ -1004,14 +1005,8 @@ export default function WiwScheduleMobile() {
   }
 
   function openEdit(card: CardRow) {
-    // Never send synthetic legacy/display-only card IDs to the slot PATCH API.
-    // Refresh first so a concurrent assignment/cancellation can't yield a
-    // misleading 404 after the admin presses Sichern.
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(card.slot.id || ''))) {
-      setToast('Schichtkarte wird aktualisiert. Bitte Karte erneut öffnen.');
-      void loadScheduleWeek(monday(dateKeyFromIso(card.shift.starts_at)), false);
-      return;
-    }
+    // Keep editing available even when a cached/list card has a temporary ID.
+    // The write path handles a stale card response and refreshes the schedule.
     setCopying(false);
     const startDate = dateKeyFromIso(card.shift.starts_at);
     const endDate = dateKeyFromIso(card.shift.ends_at);
@@ -1198,6 +1193,10 @@ export default function WiwScheduleMobile() {
     }
     if (Number(form.endAbsolute) <= Number(form.startMinute)) {
       setToast('Das Ende muss nach dem Beginn liegen.');
+      return;
+    }
+    if (!shiftDurationIsValid(Number(form.startMinute), Number(form.endAbsolute))) {
+      setToast('Die Schicht dauert mehr als 24 Stunden. Bitte Enddatum und Zeit prüfen.');
       return;
     }
     savingRef.current = true;
@@ -1549,7 +1548,7 @@ export default function WiwScheduleMobile() {
           <div className="wiw-time-row-wrap">
             <Row
               icon={timeOutline}
-              label={form.startMinute == null || form.endAbsolute == null ? 'Wähle Zeitrahmen' : `${formatMinute(form.startMinute)} ${form.endAbsolute >= 1440 ? '~ ' : '– '}${formatMinute(form.endAbsolute)}`}
+              label={form.startMinute == null || form.endAbsolute == null ? 'Wähle Zeitrahmen' : `${formatMinute(form.startMinute)} – ${formatMinute(form.endAbsolute)}${form.endAbsolute >= 1440 ? ' (Folgetag)' : ''}`}
               muted={form.startMinute == null}
               onClick={() => { ensureTime(); setTimeOpen((value) => !value); }}
               trailing={<span className="wiw-time-pause-tail"><small>Pause: {automaticBreak(form.startMinute, form.endAbsolute)} Min</small><IonIcon className="wiw-row-chevron" icon={chevronForwardOutline} /></span>}
