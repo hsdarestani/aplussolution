@@ -3,6 +3,7 @@ import { IonAlert, IonBadge, IonButton, IonIcon, IonInput, IonSelect, IonSelectO
 import { briefcaseOutline, calendarOutline, documentTextOutline, folderOpenOutline, peopleOutline, receiptOutline } from 'ionicons/icons';
 import { api, User } from './api';
 import { BUSINESS_TIME_ZONE } from './berlinLocale';
+import PersonnelPdfImport from './PersonnelPdfImport';
 import './akte-page.css';
 
 type AkteKind = 'worker' | 'client';
@@ -110,6 +111,30 @@ export default function AktePage({ user }: { user: User }) {
     finally { setSaving(false); }
   }
 
+  function acceptPersonalfragebogen(preview: { profile: Record<string, unknown>; master_data: Record<string, unknown>; warnings: string[] }) {
+    const existingData = data?.master_data?.data || {};
+    const conflicts = Object.entries(preview.master_data || {})
+      .filter(([key, value]) => existingData[key] != null && existingData[key] !== '' && JSON.stringify(existingData[key]) !== JSON.stringify(value))
+      .map(([key]) => key);
+    if (preview.profile.phone && profile.phone && String(profile.phone).trim() !== String(preview.profile.phone).trim()) {
+      conflicts.push('phone');
+    }
+    setProfile(current => ({ ...current, phone: current.phone || preview.profile.phone || '' }));
+    setMaster(current => {
+      const next = { ...current };
+      for (const [key, value] of Object.entries(preview.master_data || {})) {
+        if (next[key] == null || next[key] === '' || (Array.isArray(next[key]) && next[key].length === 0)) next[key] = value;
+      }
+      return next;
+    });
+    setEditing(true);
+    setMessage([
+      'PDF-Daten wurden nur in den Bearbeitungsentwurf übernommen. Bitte prüfen und anschließend Änderungen speichern.',
+      ...preview.warnings,
+      ...(conflicts.length ? [`Bereits ausgefüllte Angaben bleiben unverändert und weichen vom PDF ab: ${conflicts.join(', ')}.`] : []),
+    ].join(' '));
+  }
+
   async function resetPortalPassword() {
     if (!manager(user) || !id) return;
     setResettingPassword(true);
@@ -141,6 +166,7 @@ export default function AktePage({ user }: { user: User }) {
 
   return <div className="akte-page" data-testid="akte-page">
     <div className="akte-toolbar"><button className="akte-back" onClick={back}>← Personal & Kunden</button><div className="akte-actions">{manager(user) && (editing ? <><IonButton fill="outline" onClick={() => { setEditing(false); void load(); }}>Abbrechen</IonButton><IonButton disabled={saving} onClick={() => void save()}>{saving ? 'Speichert …' : 'Änderungen speichern'}</IonButton></> : <>{manager(user) && <IonButton fill="outline" color="warning" disabled={resettingPassword} onClick={() => setConfirmPasswordReset(true)}>{resettingPassword ? 'Wird zurückgesetzt …' : 'Passwort zurücksetzen'}</IonButton>}<IonButton onClick={() => setEditing(true)}>Profil bearbeiten</IonButton></>)}</div></div>
+    {data.kind === 'worker' && manager(user) && <PersonnelPdfImport workerId={id} onImported={acceptPersonalfragebogen} />}
     <header className="akte-hero">
       <div className={`akte-avatar ${data.kind}`}><IonIcon icon={data.kind === 'worker' ? peopleOutline : briefcaseOutline} /></div>
       <div className="akte-hero-copy"><small>DIGITALE AKTE · {data.kind === 'worker' ? 'MITARBEITER' : 'KUNDE'}</small><h1>{data.title}</h1><p>{data.number || 'Ohne Nummer'}{data.kind === 'worker' && data.profile?.user_detail?.email ? ` · ${data.profile.user_detail.email}` : ''}</p></div>
