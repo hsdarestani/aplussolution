@@ -76,7 +76,7 @@ test('dense time wheel emits feedback and the persistent note editor stays usabl
   await page.getByRole('button', { name: 'Schicht anlegen', exact: true }).click();
   await page.getByRole('button', { name: /Manuell.*WIW-Formular öffnen/ }).click();
   const form = page.getByTestId('wiw-shift-form');
-  await form.getByRole('button', { name: /Wähle Zeitrahmen/ }).click();
+  await form.locator('.wiw-time-row-wrap .wiw-form-row').click();
   const wheel = page.getByTestId('wiw-time-wheel');
   const firstColumn = wheel.locator('.wiw-wheel-column').first();
   const next = firstColumn.locator('button.active + button');
@@ -175,7 +175,7 @@ test('manual shift date wheel cannot silently turn 08–13 into a 29-hour shift'
   await page.getByRole('button', { name: 'Schicht anlegen', exact: true }).click();
   await page.getByRole('button', { name: /Manuell.*WIW-Formular öffnen/ }).click();
   const form = page.getByTestId('wiw-shift-form');
-  await form.getByRole('button', { name: /Wähle Zeitrahmen/ }).click();
+  await form.locator('.wiw-time-row-wrap .wiw-form-row').click();
   const wheel = page.getByTestId('wiw-time-wheel');
   const start = wheel.locator('.wiw-wheel-column').first();
   const end = wheel.locator('.wiw-wheel-column').last();
@@ -188,5 +188,33 @@ test('manual shift date wheel cannot silently turn 08–13 into a 29-hour shift'
   await start.getByRole('button', { name: '08:00', exact: true }).click();
   await expect(form.locator('.wiw-time-row-wrap .wiw-form-row')).toContainText('08:00 – 13:00');
   await expect(form.locator('.wiw-time-row-wrap .wiw-form-row')).not.toContainText('Folgetag');
+  await form.getByRole('button', { name: 'Abbrechen', exact: true }).click();
+});
+
+test('new manual shifts start with editable 12:00 to 18:00, without changing existing shift times', async ({ page }) => {
+  await mobileAdmin(page);
+  const cards = page.getByTestId('wiw-native-schedule').locator('.wiw-shift-card');
+  await cards.first().click();
+  const form = page.getByTestId('wiw-shift-form');
+  await expect(form.locator('.wiw-time-row-wrap .wiw-form-row')).toContainText('10:00 – 16:00');
+  await form.getByRole('button', { name: 'Abbrechen', exact: true }).click();
+
+  await page.getByRole('button', { name: 'Schicht anlegen', exact: true }).click();
+  await page.getByRole('button', { name: /Manuell.*WIW-Formular öffnen/ }).click();
+  await expect(form.locator('.wiw-time-row-wrap .wiw-form-row')).toContainText('12:00 – 18:00');
+  await form.locator('.wiw-time-row-wrap .wiw-form-row').click();
+  const wheel = page.getByTestId('wiw-time-wheel');
+  const start = wheel.locator('.wiw-wheel-column').first();
+  const end = wheel.locator('.wiw-wheel-column').last();
+  await expect(start.getByRole('button', { name: '12:00', exact: true })).toHaveClass(/active/);
+  await expect(end.getByRole('button', { name: '18:00', exact: true })).toHaveClass(/active/);
+  await start.getByRole('button', { name: '11:00', exact: true }).click();
+  await end.getByRole('button', { name: '17:00', exact: true }).click();
+  await expect(form.locator('.wiw-time-row-wrap .wiw-form-row')).toContainText('11:00 – 17:00');
+  await form.getByRole('button', { name: 'Abbrechen', exact: true }).click();
+
+  await page.getByRole('button', { name: 'Schicht anlegen', exact: true }).click();
+  await page.getByRole('button', { name: /Manuell.*WIW-Formular öffnen/ }).click();
+  await expect(form.locator('.wiw-time-row-wrap .wiw-form-row')).toContainText('12:00 – 18:00');
   await form.getByRole('button', { name: 'Abbrechen', exact: true }).click();
 });
