@@ -108,6 +108,9 @@ const WORKER_PICKER_NAMES = [
   'Max Najmudinov',
 ];
 const CLIENT_ORDER = ['marthasfinest','stadthausammarkt','hotelspenerhaus','hofelcatering','restauranthirschgarten','messe','ommia','citybeach','hofgut'];
+const DEFAULT_NEW_SHIFT_START_MINUTE = 12 * 60;
+const DEFAULT_NEW_SHIFT_END_MINUTE = 18 * 60;
+
 const HOTEL_TIME_PRESETS = [
   { key: 'early', label: 'Frühdienst', start: 6 * 60 + 30, end: 15 * 60 },
   { key: 'late', label: 'Spätdienst', start: 14 * 60 + 45, end: 22 * 60 + 45 },
@@ -380,12 +383,6 @@ function localDateTime(key: string, absoluteMinute: number) {
   const dayOffset = Math.floor(absoluteMinute / 1440);
   const time = ((absoluteMinute % 1440) + 1440) % 1440;
   return `${addDays(key, dayOffset)}T${formatMinute(time)}`;
-}
-function initialTime() {
-  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: BERLIN, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date());
-  const hour = Number(parts.find((part) => part.type === 'hour')?.value || 9);
-  const minute = Number(parts.find((part) => part.type === 'minute')?.value || 0);
-  return Math.min(1425, Math.ceil((hour * 60 + minute) / QUARTER) * QUARTER);
 }
 function positionGroup(name?: string) {
   const key = normalize(String(name || ''));
@@ -1046,9 +1043,9 @@ export default function WiwScheduleMobile() {
   }
 
   function ensureTime() {
-    if (form.startMinute != null && form.endAbsolute != null) return;
-    const start = initialTime();
-    setForm((current) => ({ ...current, startMinute: start, endAbsolute: start + 360 }));
+    setForm((current) => current.startMinute != null && current.endAbsolute != null
+      ? current
+      : { ...current, startMinute: current.startMinute ?? DEFAULT_NEW_SHIFT_START_MINUTE, endAbsolute: current.endAbsolute ?? DEFAULT_NEW_SHIFT_END_MINUTE });
   }
 
   function openAdminTimeEditor() {
@@ -1710,8 +1707,8 @@ function emptyForm(date: string): FormState {
   return {
     client: '',
     date,
-    startMinute: null,
-    endAbsolute: null,
+    startMinute: DEFAULT_NEW_SHIFT_START_MINUTE,
+    endAbsolute: DEFAULT_NEW_SHIFT_END_MINUTE,
     position: '',
     location: '',
     required_count: 1,
