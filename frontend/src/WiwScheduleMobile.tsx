@@ -29,6 +29,7 @@ import {
 } from 'ionicons/icons';
 import { api, apiBlob } from './api';
 import ScheduleDatePicker from './ScheduleDatePicker';
+import ShiftClientLogo from './ShiftClientLogo';
 import { saveSchedulePdf } from './saveSchedulePdf';
 import { openPdfDocument } from './openPdfDocument';
 import { ShiftPlanAttachments, ShiftPlanBulkUpload } from './ShiftPlanAttachments';
@@ -218,7 +219,6 @@ function CardTimeMeta({ card, showRecordedTime = false }: { card: CardRow; showR
   return <span className="wiw-card-meta">
     <b>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</b>
     {entry?.clock_in ? <small className={`wiw-card-entered-time ${entry.approved ? 'approved' : 'pending'}`} aria-label={entry.approved ? 'Erfasste Arbeitszeit freigegeben' : 'Erfasste Arbeitszeit offen'}>{formatTimeIso(entry.clock_in)}–{entry.clock_out ? formatTimeIso(entry.clock_out) : 'offen'}</small> : null}
-    <small className="wiw-card-location">{card.shift.location_name || 'Einsatzort'}</small>
   </span>;
 }
 
@@ -313,6 +313,7 @@ function AdjacentWeekPreview({ weekStart, groupFilter, query, side, showRecorded
           <div className="wiw-card-main">
             <CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} />
             <span className="wiw-card-copy"><b>{cardWorkerShortName(card.worker?.name) || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}</b><small>{cardPositionShortLabel(card.shift.position_name)}</small></span>
+            <ShiftClientLogo shift={card.shift} />
             <CardTimeMeta card={card} showRecordedTime={showRecordedTime} />
           </div>
         </button></React.Fragment>)}
@@ -1510,6 +1511,7 @@ export default function WiwScheduleMobile() {
                   <div className="wiw-card-main">
                     <CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} />
                     <span className="wiw-card-copy"><b>{cardWorkerShortName(card.worker?.name) || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}{card.isOpen && card.shift.status !== 'draft' ? <span className="wiw-open-alert">!</span> : null}</b><small>{cardPositionShortLabel(card.shift.position_name)}</small></span>
+                    <ShiftClientLogo shift={card.shift} />
                     <CardTimeMeta card={card} showRecordedTime={isAdmin} />
                   </div>
                 </button></React.Fragment>)}
@@ -1526,7 +1528,7 @@ export default function WiwScheduleMobile() {
           return <section className="wiw-day-section wiw-day-visual" id={`wiw-day-${day}`} key={day}>
             <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}<small> · {dayCards.reduce((sum, card) => { const gross = Math.max(0, (new Date(card.shift.ends_at).getTime() - new Date(card.shift.starts_at).getTime()) / 3600000); return sum + Math.max(0, gross - Number(card.shift.break_minutes || 0) / 60); }, 0).toFixed(1)} Std.</small></em></header>
             {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'}`} style={shiftCardStyle(card.shift)} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
-              <div className="wiw-card-main"><CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} /><span className="wiw-card-copy"><b>{cardWorkerShortName(card.worker?.name) || 'OpenShift'}</b><small>{cardPositionShortLabel(card.shift.position_name)}</small></span><span className="wiw-card-meta"><b>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</b><small>{card.shift.location_name || 'Einsatzort'}</small></span></div>
+              <div className="wiw-card-main"><CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} /><span className="wiw-card-copy"><b>{cardWorkerShortName(card.worker?.name) || 'OpenShift'}</b><small>{cardPositionShortLabel(card.shift.position_name)}</small></span><ShiftClientLogo shift={card.shift} /><span className="wiw-card-meta"><b>{formatTimeIso(card.shift.starts_at)}–{formatTimeIso(card.shift.ends_at)}</b></span></div>
             </button></React.Fragment>)}
           </section>;
         })}
