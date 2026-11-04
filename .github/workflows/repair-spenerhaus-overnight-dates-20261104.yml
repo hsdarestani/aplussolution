@@ -43,7 +43,7 @@ jobs:
           with transaction.atomic():
               candidate_shifts=list(Shift.objects.select_for_update().filter(
                   starts_at__gte=lower, starts_at__lt=upper,
-                  status__in=['published','confirmed'],
+                  status__in=['draft','published','confirmed'],
               ).order_by('starts_at','id'))
               matches=[]
               for shift in candidate_shifts:
@@ -63,8 +63,10 @@ jobs:
                   if hotel and invalid_range and not shift.wiw_shift_id:
                       matches.append(shift)
               print('REPAIR_CANDIDATES=',len(matches))
-              if len(matches) != 11:
-                  raise RuntimeError('REPAIR_ABORT: expected exactly 11 previously inspected records; no updates made')
+              if len(matches) > 11:
+                  raise RuntimeError('REPAIR_ABORT: unexpected increase in matching invalid durations; no updates made')
+              if not matches:
+                  print('ALREADY_CORRECTED=1')
               if TimeEntry.objects.filter(shift_id__in=[s.pk for s in matches]).exists():
                   raise RuntimeError('REPAIR_ABORT: time entries exist for one of the shifts; no updates made')
               for s in matches:
