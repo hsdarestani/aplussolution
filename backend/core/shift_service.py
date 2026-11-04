@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.db import transaction
+from django.db.models import Exists, OuterRef
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -72,11 +73,24 @@ def ensure_worker_can_claim(worker: WorkerProfile, shift: Shift) -> None:
     # live on Shift.worker without a CLAIMED ShiftSlot. Keep those records in
     # conflict detection until the migration/audit path has fully normalized
     # historical data.
-    legacy_overlap = Shift.objects.filter(
-        worker=worker,
-        starts_at__lt=shift.ends_at,
-        ends_at__gt=shift.starts_at,
-    ).exclude(pk=shift.pk).exclude(status=Shift.Status.CANCELLED).exists()
+    # Shift.worker is only a legacy mirror. Modern assignments are held in
+    # ShiftSlot, and a stale mirror must never invent a conflicting shift.
+    # Keep legacy protection only for historical shifts without active cards.
+    active_card = ShiftSlot.objects.filter(
+        shift_id=OuterRef('pk'),
+    ).exclude(status=ShiftSlot.Status.CANCELLED)
+    legacy_overlap = (
+        Shift.objects.filter(
+            worker=worker,
+            starts_at__lt=shift.ends_at,
+            ends_at__gt=shift.starts_at,
+        )
+        .exclude(pk=shift.pk)
+        .exclude(status__in=[Shift.Status.CANCELLED, Shift.Status.COMPLETED])
+        .annotate(_has_active_card=Exists(active_card))
+        .filter(_has_active_card=False)
+        .exists()
+    )
     if legacy_overlap:
         raise ValidationError('Du hast in diesem Zeitraum bereits eine Schicht.')
 
