@@ -73,22 +73,24 @@ def ensure_worker_can_claim(worker: WorkerProfile, shift: Shift) -> None:
     # live on Shift.worker without a CLAIMED ShiftSlot. Keep those records in
     # conflict detection until the migration/audit path has fully normalized
     # historical data.
-    # Shift.worker is only a legacy mirror. Modern assignments are held in
-    # ShiftSlot, and a stale mirror must never invent a conflicting shift.
-    # Keep legacy protection only for historical shifts without active cards.
-    active_card = ShiftSlot.objects.filter(
-        shift_id=OuterRef('pk'),
-    ).exclude(status=ShiftSlot.Status.CANCELLED)
+    # Native-managed cards (admin_assignment, admin_release, worker_claim...)
+    # are authoritative over the old Shift.worker mirror. However historical
+    # legacy shifts may still have only system/WIW cards and must remain protected.
+    native_card = (
+        ShiftSlot.objects.filter(shift_id=OuterRef('pk'))
+        .exclude(status=ShiftSlot.Status.CANCELLED)
+        .exclude(source__in=['system', 'wiw', 'migration'])
+    )
     legacy_overlap = (
         Shift.objects.filter(
             worker=worker,
             starts_at__lt=shift.ends_at,
             ends_at__gt=shift.starts_at,
+            status__in=[Shift.Status.PUBLISHED, Shift.Status.CONFIRMED],
         )
         .exclude(pk=shift.pk)
-        .exclude(status__in=[Shift.Status.CANCELLED, Shift.Status.COMPLETED])
-        .annotate(_has_active_card=Exists(active_card))
-        .filter(_has_active_card=False)
+        .annotate(_has_native_card=Exists(native_card))
+        .filter(_has_native_card=False)
         .exists()
     )
     if legacy_overlap:
@@ -97,6 +99,9 @@ def ensure_worker_can_claim(worker: WorkerProfile, shift: Shift) -> None:
     # Explicit product decision: do not block manual OpenShift pickup or
     # admin-approved transfers based on the daily-hours cap.
     issues = [issue for issue in violations(worker, shift) if issue != 'max_hours_per_day']
+    if 'overlap' in issues:
+        # Show the actual collision before generic same-day policy errors.
+        issues = ['overlap', *[issue for issue in issues if issue != 'overlap']]
     if not issues:
         return
     messages = {
