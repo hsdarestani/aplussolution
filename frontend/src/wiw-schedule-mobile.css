@@ -482,3 +482,12 @@
     display: none;
   }
 }
+
+
+@media (max-width: 360px) {
+  .wiw-shift-card .wiw-card-main { column-gap: 5px !important; }
+  .wiw-client-logo--marthas img { max-width: 30px; max-height: 30px; }
+  .wiw-client-logo--stadthaus img { max-width: 60px; max-height: 25px; }
+  .wiw-client-logo--spenerhaus img { max-width: 64px; max-height: 24px; }
+  .wiw-shift-card .wiw-card-meta b { font-size: 12px; }
+}
