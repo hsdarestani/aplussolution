@@ -78,6 +78,23 @@ jobs:
                     'hours=',duration_hours,'hotel=',spenerhaus,'status=',s.status,'wiw=',bool(s.wiw_shift_id),
                     'legacy_antor=',any(s.worker_id==w.id for w in workers),
                     'slots=',[(status,src,'antor' if any(wid==w.id for w in workers) else ('other' if wid else 'none')) for status,src,wid in slots])
+          print('REPAIRED_SHIFT_ORIGINS')
+          from core.models import AuditLog
+          repaired_logs=list(AuditLog.objects.filter(
+              action='shift.invalid_next_day_end_corrected'
+          ).order_by('-created_at')[:30])
+          for entry in repaired_logs:
+              shift=Shift.objects.filter(pk=entry.object_id).select_related('order').first()
+              if not shift: continue
+              recent=list(AuditLog.objects.filter(object_id=str(shift.pk)).order_by('created_at').values_list('action',flat=True)[:12])
+              print('REPAIRED_SHIFT',
+                    'start=',shift.starts_at.astimezone(berlin).strftime('%m-%d %H:%M'),
+                    'duration_hours=',round((shift.ends_at-shift.starts_at).total_seconds()/3600,1),
+                    'order_linked=',bool(shift.order_id),
+                    'order_category=',str(getattr(shift.order,'status','none')) if shift.order_id else 'none',
+                    'wiw=',bool(shift.wiw_shift_id),
+                    'creation_actions=',recent,
+                    'created_at=',shift.created_at.isoformat())
           PY
           REMOTE
       - name: Erase temporary SSH key
