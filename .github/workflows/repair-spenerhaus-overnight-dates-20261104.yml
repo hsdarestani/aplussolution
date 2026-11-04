@@ -1,0 +1,99 @@
+name: Repair verified Spenerhaus accidental next-day shift ends (11 rows)
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/repair-spenerhaus-overnight-dates-20261104.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: aplus-safe-spenerhaus-date-repair
+  cancel-in-progress: false
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Atomic correction with strict bounds, individual audit entries and no reassignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$PRIVATE_KEY"
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/aplus_date_repair
+          chmod 600 ~/.ssh/aplus_date_repair
+          ssh -i ~/.ssh/aplus_date_repair -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from datetime import datetime, timedelta
+          from zoneinfo import ZoneInfo
+          from django.db import transaction
+          from django.utils import timezone
+          from core.models import Shift, AuditLog, TimeEntry
+          from core.shift_rules import automatic_break_minutes
+
+          berlin=ZoneInfo('Europe/Berlin')
+          lower=datetime(2026,11,16,tzinfo=berlin)
+          upper=datetime(2026,11,22,tzinfo=berlin)
+          with transaction.atomic():
+              candidate_shifts=list(Shift.objects.select_for_update().filter(
+                  starts_at__gte=lower, starts_at__lt=upper,
+                  status__in=['published','confirmed'],
+                  wiw_shift_id__isnull=True,
+              ).order_by('starts_at','id'))
+              matches=[]
+              for shift in candidate_shifts:
+                  start=shift.starts_at.astimezone(berlin)
+                  end=shift.ends_at.astimezone(berlin)
+                  hotel='spenerhaus' in ' '.join([
+                      shift.client.name if shift.client_id else '',
+                      shift.location.name if shift.location_id else '',
+                  ]).casefold()
+                  invalid_range=(
+                      start.date() in {datetime(2026,11,day).date() for day in range(16,22)}
+                      and start.hour in (7,8) and start.minute == 0
+                      and end.hour == 13 and end.minute == 0
+                      and end.date() == start.date() + timedelta(days=1)
+                      and (shift.ends_at-shift.starts_at) in (timedelta(hours=29),timedelta(hours=30))
+                  )
+                  if hotel and invalid_range:
+                      matches.append(shift)
+              print('REPAIR_CANDIDATES=',len(matches))
+              if len(matches) != 11:
+                  raise RuntimeError('REPAIR_ABORT: expected exactly 11 previously inspected records; no updates made')
+              if TimeEntry.objects.filter(shift_id__in=[s.pk for s in matches]).exists():
+                  raise RuntimeError('REPAIR_ABORT: time entries exist for one of the shifts; no updates made')
+              for s in matches:
+                  old_end=s.ends_at
+                  corrected_end=old_end-timedelta(days=1)
+                  assert timedelta(hours=4)<=corrected_end-s.starts_at<=timedelta(hours=8)
+                  corrected_break=automatic_break_minutes(s.starts_at,corrected_end)
+                  affected=Shift.objects.filter(pk=s.pk,ends_at=old_end).update(
+                      ends_at=corrected_end,break_minutes=corrected_break,updated_at=timezone.now(),
+                  )
+                  if affected != 1:
+                      raise RuntimeError('REPAIR_ABORT: concurrent mutation; entire transaction rolled back')
+                  AuditLog.objects.create(
+                      actor=None,action='shift.invalid_next_day_end_corrected',
+                      object_type='Shift',object_id=str(s.pk),
+                      metadata={
+                          'reason':'Spenerhaus future roster 29h/30h invalid day offset; corrected without changing workers or capacity',
+                          'old_ends_at':old_end.isoformat(),
+                          'new_ends_at':corrected_end.isoformat(),
+                          'old_break_minutes':s.break_minutes,
+                          'new_break_minutes':corrected_break,
+                          'source':'guarded one-time 2026-11-04 recovery',
+                      },
+                  )
+              print('CORRECTED=',len(matches))
+          print('REPAIR_TRANSACTION_COMMITTED')
+          PY
+          REMOTE
+      - name: Remove temporary SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/aplus_date_repair"
