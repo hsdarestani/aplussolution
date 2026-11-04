@@ -124,3 +124,4 @@ jobs:
             ssh -i ~/.ssh/shift_admin_release -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 root@"$PRIMARY_HOST" "rm -f /tmp/aplus-admin-one-release.sh '/tmp/aplus-admin-one-$GITHUB_RUN_ID/config.json'; rmdir '/tmp/aplus-admin-one-$GITHUB_RUN_ID' 2>/dev/null || true" || true
           fi
           rm -f ~/.ssh/shift_admin_release
+# 2026-11-04: guarded backend release for PR #229 (AI intake and worker overlap fixes).
