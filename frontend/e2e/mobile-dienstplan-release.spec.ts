@@ -107,7 +107,8 @@ test('shift date opens immediately in create and edit, and copied form slides in
   await mobileAdmin(page);
   const cards = page.getByTestId('wiw-native-schedule').locator('.wiw-shift-card');
   await expect(cards.first()).not.toContainText('Hotel Spenerhaus');
-  await expect(cards.first()).toContainText('Frankfurt');
+  await expect(cards.first()).not.toContainText('Frankfurt');
+  await expect(cards.first().getByTestId('shift-client-logo').locator('img')).toHaveAttribute('alt', 'Hotel Spenerhaus');
   await cards.first().click();
   const form = page.getByTestId('wiw-shift-form');
   await form.locator('[data-field="date"]').click();
