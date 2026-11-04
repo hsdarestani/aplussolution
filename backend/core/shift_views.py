@@ -359,7 +359,15 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
             except Exception as exc:
                 detail = getattr(exc, 'detail', str(exc))
                 detail = detail[0] if isinstance(detail, list) else detail
-                return Response({'detail': str(detail)}, status=400)
+                # The admin is not the worker being assigned. Give the selected
+                # employee's name rather than telling the admin "Du hast".
+                worker_name = worker.user.get_full_name() or worker.user.email or worker.employee_number
+                error_message = str(detail)
+                if error_message == 'Du hast in diesem Zeitraum bereits eine Schicht.':
+                    error_message = f'{worker_name} hat in diesem Zeitraum bereits eine andere Schicht.'
+                elif error_message.startswith('Du ') or error_message.startswith('Dir '):
+                    error_message = f'Zuweisung für {worker_name} nicht möglich: {error_message}'
+                return Response({'detail': error_message}, status=400)
 
             desired_ids = {str(worker.pk) for worker in desired_workers}
             now = timezone.now()
