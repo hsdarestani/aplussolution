@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from rest_framework import serializers
 from .models import AuditLog, Shift, TimeEntry, User
 from .premium_approval_models import ShiftReleaseRequest
@@ -384,6 +386,8 @@ class ShiftApiSerializer(serializers.ModelSerializer):
         if starts_at and ends_at:
             if ends_at <= starts_at:
                 raise serializers.ValidationError({'ends_at': 'Das Ende muss nach dem Beginn liegen.'})
+            if ends_at - starts_at > timedelta(hours=24):
+                raise serializers.ValidationError({'ends_at': 'Die Schicht dauert mehr als 24 Stunden. Bitte Enddatum und Zeit prüfen.'})
             attrs['break_minutes'] = automatic_break_minutes(starts_at, ends_at)
         if 'schedule_groups' in attrs:
             attrs['schedule_groups'] = normalized_groups(attrs.get('schedule_groups'))
