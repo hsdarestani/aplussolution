@@ -1,0 +1,69 @@
+name: Read-only Antor 17 and 19 November shift diagnosis
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/diagnose-antor-17-19-nov2026.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Inspect read-only production employee and shift consistency
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$PRIVATE_KEY"
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/aplus_shift_diag
+          chmod 600 ~/.ssh/aplus_shift_diag
+          ssh -i ~/.ssh/aplus_shift_diag -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from datetime import datetime, time, timedelta
+          from zoneinfo import ZoneInfo
+          from django.db.models import Q
+          from core.models import WorkerProfile, Shift
+          from core.shift_slots import ShiftSlot
+          berlin=ZoneInfo('Europe/Berlin')
+          workers=list(WorkerProfile.objects.select_related('user').filter(
+              Q(user__first_name__icontains='Antor') | Q(user__last_name__icontains='Shaha')
+          ))
+          print('ANTOR_PROFILES=',len(workers))
+          for idx,w in enumerate(workers,1):
+              print('PROFILE',idx,'name=',w.user.get_full_name(),'worker_active=',w.active,'user_active=',w.user.is_active,
+                    'legacy_active_count=',Shift.objects.filter(worker=w).exclude(status__in=['cancelled','completed']).count(),
+                    'claimed_active_count=',ShiftSlot.objects.filter(worker=w,status=ShiftSlot.Status.CLAIMED).exclude(shift__status__in=['cancelled','completed']).count())
+          for day in (17,19):
+              start=datetime(2026,11,day,tzinfo=berlin)
+              end=start+timedelta(days=1)
+              rows=list(Shift.objects.filter(starts_at__lt=end,ends_at__gt=start).select_related('client','location','position','worker__user').order_by('starts_at'))
+              hotel=[s for s in rows if 'spenerhaus' in ' '.join([s.client.name if s.client else '',s.location.name if s.location else '']).lower()]
+              print('DAY',day,'all_shifts=',len(rows),'spenerhaus_shifts=',len(hotel))
+              for s in hotel:
+                  slots=list(ShiftSlot.objects.filter(shift=s).select_related('worker__user'))
+                  print('HOTEL_SHIFT','date=',s.starts_at.astimezone(berlin).strftime('%m-%d %H:%M'),'to=',s.ends_at.astimezone(berlin).strftime('%H:%M'),
+                      'status=',s.status,'capacity=',s.required_count,'wiw=',bool(s.wiw_shift_id),
+                      'legacy_worker_is_antor=',any(s.worker_id==w.id for w in workers),
+                      'slots=',[(x.status,x.source,'antor' if any(x.worker_id==w.id for w in workers) else ('other' if x.worker_id else 'none')) for x in slots])
+              for w in workers:
+                  overlapping=[s for s in rows if s.worker_id==w.id or ShiftSlot.objects.filter(shift=s,worker=w,status=ShiftSlot.Status.CLAIMED).exists()]
+                  for s in overlapping:
+                      sl=list(ShiftSlot.objects.filter(shift=s).values_list('status','source','worker_id'))
+                      print('ANTOR_MATCH','day=',day,'start=',s.starts_at.astimezone(berlin).strftime('%m-%d %H:%M'),
+                        'end=',s.ends_at.astimezone(berlin).strftime('%m-%d %H:%M'),
+                        'status=',s.status,'legacy=',s.worker_id==w.id,
+                        'claims=',[(st,src,wid==w.id) for st,src,wid in sl],
+                        'hotel=',bool('spenerhaus' in (s.location.name if s.location else '').lower()))
+          PY
+          REMOTE
+      - name: Erase temporary SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/aplus_shift_diag"
