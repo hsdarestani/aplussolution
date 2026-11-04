@@ -1004,14 +1004,8 @@ export default function WiwScheduleMobile() {
   }
 
   function openEdit(card: CardRow) {
-    // Never send synthetic legacy/display-only card IDs to the slot PATCH API.
-    // Refresh first so a concurrent assignment/cancellation can't yield a
-    // misleading 404 after the admin presses Sichern.
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(card.slot.id || ''))) {
-      setToast('Schichtkarte wird aktualisiert. Bitte Karte erneut öffnen.');
-      void loadScheduleWeek(monday(dateKeyFromIso(card.shift.starts_at)), false);
-      return;
-    }
+    // Keep editing available even when a cached/list card has a temporary ID.
+    // The write path handles a stale card response and refreshes the schedule.
     setCopying(false);
     const startDate = dateKeyFromIso(card.shift.starts_at);
     const endDate = dateKeyFromIso(card.shift.ends_at);
