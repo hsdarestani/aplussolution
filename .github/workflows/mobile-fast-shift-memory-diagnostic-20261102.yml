@@ -42,3 +42,4 @@ jobs:
           curl -fsS --connect-timeout 5 --max-time 12 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/api/status/ready/ || true
           REMOTE
           rm -f /tmp/aplus-diagnostic.key
+# 2026-11-04: read-only production headroom check before guarded shift backend release.
