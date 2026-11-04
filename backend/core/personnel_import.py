@@ -172,9 +172,15 @@ def parse_personalfragebogen_fields(pdf_bytes):
     if employers:
         master['other_employments'] = employers
 
-    signature = values.get('Ort, Datum 1. Seite', '')
+    signature = values.get('Ort, Datum 1. Seite', '').strip()
     if signature:
         master['signature_place_and_date_as_written'] = signature
+        # This is a typed place/date, NOT an electronic signature.
+        import re
+        match = re.fullmatch(r'(.+?)\\s+(?:der,?\\s*|,\\s*)(\\d{2}\\.\\d{2}\\.\\d{2,4})', signature, flags=re.IGNORECASE)
+        if match:
+            master['signature_place'] = match.group(1).strip(' ,')
+
 
     phone = values.get('Telefonnummer', '').strip()
     profile = {'phone': phone} if phone else {}
