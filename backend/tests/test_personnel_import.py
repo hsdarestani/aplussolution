@@ -26,6 +26,7 @@ def test_parser_normalizes_fields_without_changing_login_email():
         'core.personnel_import._marked_options', return_value=marks
     ):
         reader.return_value.is_encrypted = False
+        reader.return_value.pages = [object()]
         reader.return_value.get_fields.return_value = pdf_fields
         result = parse_personalfragebogen_fields(b'%PDF-mocked')
 
@@ -33,6 +34,8 @@ def test_parser_normalizes_fields_without_changing_login_email():
     assert result['master_data']['birth_date'] == '2000-06-02'
     assert result['master_data']['salutation'] == 'Frau'
     assert result['master_data']['has_children'] is False
+    assert result['master_data']['children_under_25'] == 0
+    assert 'religion' not in result['master_data']
     assert result['master_data']['other_employments'][0]['employment_type'] == 'minijob'
     assert 'email' not in result['profile']
     assert any('E-Mail' in warning for warning in result['warnings'])
