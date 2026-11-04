@@ -44,6 +44,7 @@ jobs:
           npm run build
           npx cap add android
           npx cap sync android
+          python3 -m pip install --quiet --disable-pip-version-check pillow
           node scripts/prepare-native.mjs android
           cp /tmp/aplus-release.jks android/app/aplus-release.jks
       - name: Configure Gradle release signing
@@ -63,9 +64,23 @@ jobs:
                   }
               }
           ''', 1)
+          # The first 'release {' occurs inside signingConfigs, so replacing
+          # it would create an invalid self-referencing signing definition.
+          # Attach the signing config only to buildTypes.release.
+          import re, os
+          pattern = r'(?m)^(\\s*)buildTypes\\s*\\{\\s*\\n(\\s*)release\\s*\\{'
+          match = re.search(pattern, text)
+          if not match:
+              raise SystemExit('Android generated Gradle buildTypes.release not found')
           if 'signingConfig signingConfigs.release' not in text:
-              text = text.replace('release {', '''release {
-                      signingConfig signingConfigs.release''', 1)
+              insertion = '\\n' + match.group(2) + '    signingConfig signingConfigs.release'
+              text = text[:match.end()] + insertion + text[match.end():]
+          # Play updates require a monotonically increasing upload versionCode.
+          # Stay below the 2,100,000,000 Android limit.
+          code = 260000000 + int(os.environ['GITHUB_RUN_NUMBER'])
+          text, replaced = re.subn(r'(?m)^(\\s*versionCode\\s+)\\d+', lambda m: m.group(1) + str(code), text, count=1)
+          if replaced != 1:
+              raise SystemExit('Android generated versionCode not found')
           path.write_text(text)
           PY
       - name: Build signed Android App Bundle
@@ -129,7 +144,9 @@ jobs:
         env:
           PROFILE_NAME: ${{ steps.signing.outputs.profile_name }}
         run: |
-          xcodebuild -workspace App/App.xcworkspace -scheme App -configuration Release -destination 'generic/platform=iOS' -archivePath build/APlusWorkforce.xcarchive DEVELOPMENT_TEAM="$IOS_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER=de.aplussolution.workforce CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" archive
+          # Distinct store build number for this release (same app bundle ID).
+          IOS_BUILD_NUMBER="$(date -u +'%y%m%d%H%M')"
+          xcodebuild -workspace App/App.xcworkspace -scheme App -configuration Release -destination 'generic/platform=iOS' -archivePath build/APlusWorkforce.xcarchive DEVELOPMENT_TEAM="$IOS_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER=de.aplussolution.workforce CURRENT_PROJECT_VERSION="$IOS_BUILD_NUMBER" CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" archive
           cat > ExportOptions.plist <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
