@@ -219,3 +219,21 @@ test('new manual shifts start with editable 12:00 to 18:00, without changing exi
   await expect(form.locator('.wiw-time-row-wrap .wiw-form-row')).toContainText('12:00 – 18:00');
   await form.getByRole('button', { name: 'Abbrechen', exact: true }).click();
 });
+
+
+test('client logo is centered relative to the entire shift card, not the gaps between text columns', async ({ page }) => {
+  await mobileAdmin(page);
+  const card = page.getByTestId('wiw-native-schedule').locator('.wiw-shift-card').first();
+  const logo = card.getByTestId('shift-client-logo');
+  await expect(logo).toBeVisible();
+  const alignment = await card.evaluate((element) => {
+    const cardRect = element.getBoundingClientRect();
+    const logoRect = element.querySelector('.wiw-client-logo')!.getBoundingClientRect();
+    return {
+      deltaX: Math.abs((cardRect.left + cardRect.width / 2) - (logoRect.left + logoRect.width / 2)),
+      deltaY: Math.abs((cardRect.top + cardRect.height / 2) - (logoRect.top + logoRect.height / 2)),
+    };
+  });
+  expect(alignment.deltaX).toBeLessThan(2);
+  expect(alignment.deltaY).toBeLessThan(2);
+});
