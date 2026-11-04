@@ -38,6 +38,63 @@ _FIELD_MAP = {
 }
 
 
+def _marked_options(pdf_bytes):
+    """Read handwritten X marks only when one choice is unambiguous.
+
+    Rectangles are anchored to Lexware's printed option labels, not to
+    absolute screenshot pixels.  Unclear or changed layouts return None.
+    """
+    import fitz
+
+    selected = {'salutation': None, 'insurance_type': None, 'has_children': None,
+                'employment_types': [None, None]}
+    with fitz.open(stream=pdf_bytes, filetype='pdf') as doc:
+        if not doc.page_count:
+            return selected
+        page = doc[0]
+
+        def candidate(label, low=None, high=None, index=0):
+            found = page.search_for(label)
+            found = [rect for rect in found if (low is None or rect.y0 >= low)
+                     and (high is None or rect.y0 <= high)]
+            return found[index] if index < len(found) else None
+
+        def ink(rect):
+            if rect is None:
+                return 0
+            area = fitz.Rect(rect.x0 - 19, rect.y0 - 6, rect.x0 - 0.7, rect.y1 + 3)
+            image = page.get_pixmap(matrix=fitz.Matrix(3, 3), clip=area,
+                                    colorspace=fitz.csGRAY, alpha=False)
+            return sum(pixel < 110 for pixel in image.samples)
+
+        def choose(options):
+            if any(rect is None for _, rect in options):
+                return None
+            ranks = sorted(((label, ink(rect)) for label, rect in options),
+                           key=lambda item: item[1], reverse=True)
+            if len(ranks) < 2 or ranks[0][1] < 150 or ranks[0][1] < 2 * max(1, ranks[1][1]):
+                return None
+            return ranks[0][0]
+
+        selected['salutation'] = choose([
+            (name, candidate(name, 50, 150))
+            for name in ('Herr', 'Frau', 'Divers', 'Unbestimmt')
+        ])
+        selected['insurance_type'] = choose([
+            (name, candidate(name, 350, 500)) for name in ('gesetzlich', 'privat')
+        ])
+        selected['has_children'] = choose([
+            (name, candidate(name, 490, 580)) for name in ('ja', 'nein')
+        ])
+        for i in (0, 1):
+            selected['employment_types'][i] = choose([
+                ('minijob', candidate('geringfügig (Minijob)', index=i)),
+                ('sozialversicherungspflichtig',
+                 candidate('sozialversicherungspflichtig', index=i)),
+            ])
+    return selected
+
+
 def parse_personalfragebogen_fields(pdf_bytes):
     reader = PdfReader(BytesIO(pdf_bytes), strict=False)
     if reader.is_encrypted:
@@ -75,6 +132,18 @@ def parse_personalfragebogen_fields(pdf_bytes):
     if {'street', 'postal_code', 'city'} <= master.keys():
         master['full_address'] = f"{master['street']}, {master['postal_code']} {master['city']}"
 
+    try:
+        marks = _marked_options(pdf_bytes)
+    except Exception:
+        marks = {'salutation': None, 'insurance_type': None,
+                 'has_children': None, 'employment_types': [None, None]}
+    if marks.get('salutation'):
+        master['salutation'] = marks['salutation']
+    if marks.get('insurance_type'):
+        master['insurance_type'] = marks['insurance_type']
+    if marks.get('has_children'):
+        master['has_children'] = marks['has_children'] == 'ja'
+
     employers = []
     for i in (1, 2):
         name = values.get(f'Name des Unternehmens/Arbeitgebers der weiteren Tätigkeit {i}', '').strip()
@@ -83,7 +152,7 @@ def parse_personalfragebogen_fields(pdf_bytes):
                 'employer_name': name,
                 'start_date': values.get(f'Beginn der Beschäftigung {i}') or None,
                 'gross_monthly_salary': values.get(f'Verdienst in Euro pro Monat {i}') or None,
-                'employment_type': None,  # Handwritten checkbox, not a PDF form value.
+                'employment_type': marks.get('employment_types', [None, None])[i - 1],
             })
     if employers:
         master['other_employments'] = employers
@@ -94,9 +163,20 @@ def parse_personalfragebogen_fields(pdf_bytes):
 
     phone = values.get('Telefonnummer', '').strip()
     profile = {'phone': phone} if phone else {}
-    warnings = [
-        'Handschriftlich markierte Kästchen (Anrede, gesetzlich/privat, Kinder, Minijob) können nicht zuverlässig automatisch gelesen werden. Bitte anhand des Originals prüfen.',
+    unresolved = [
+        label for label, value in (
+            ('Anrede', marks.get('salutation')),
+            ('Versicherungsart', marks.get('insurance_type')),
+            ('Kinder', marks.get('has_children')),
+        ) if value is None
     ]
+    if any(entry['employment_type'] is None for entry in employers):
+        unresolved.append('weitere Beschäftigungsart')
+    warnings = [
+        'Markierungen im PDF automatisch erkannt. Bitte Kästchen im Original prüfen.'
+    ]
+    if unresolved:
+        warnings.append('Nicht eindeutig lesbare Kästchen: ' + ', '.join(unresolved) + '.')
 
     email = values.get('E-Mail-Adresse', '').strip()
     if email and '@' not in email:
