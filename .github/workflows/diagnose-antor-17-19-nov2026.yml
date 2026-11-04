@@ -78,6 +78,11 @@ jobs:
                     'hours=',duration_hours,'hotel=',spenerhaus,'status=',s.status,'wiw=',bool(s.wiw_shift_id),
                     'legacy_antor=',any(s.worker_id==w.id for w in workers),
                     'slots=',[(status,src,'antor' if any(wid==w.id for w in workers) else ('other' if wid else 'none')) for status,src,wid in slots])
+          from django.conf import settings
+          import os
+          print('AI_PROVIDER_CONFIGURATION','wiw_key_set=',bool(getattr(settings,'WIW_OPENAI_KEY','')),
+                'openai_key_env_set=',bool(os.environ.get('OPENAI_API_KEY')),
+                'wiw_timeout=',getattr(settings,'WIW_HTTP_TIMEOUT',None))
           print('REPAIRED_SHIFT_ORIGINS')
           from core.models import AuditLog
           repaired_logs=list(AuditLog.objects.filter(
