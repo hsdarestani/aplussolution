@@ -1004,6 +1004,14 @@ export default function WiwScheduleMobile() {
   }
 
   function openEdit(card: CardRow) {
+    // Never send synthetic legacy/display-only card IDs to the slot PATCH API.
+    // Refresh first so a concurrent assignment/cancellation can't yield a
+    // misleading 404 after the admin presses Sichern.
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(card.slot.id || ''))) {
+      setToast('Schichtkarte wird aktualisiert. Bitte Karte erneut öffnen.');
+      void loadScheduleWeek(monday(dateKeyFromIso(card.shift.starts_at)), false);
+      return;
+    }
     setCopying(false);
     const startDate = dateKeyFromIso(card.shift.starts_at);
     const endDate = dateKeyFromIso(card.shift.ends_at);
@@ -1214,9 +1222,10 @@ export default function WiwScheduleMobile() {
           && timeMinuteFromIso(item.ends_at) === Number(form.endAbsolute) % 1440
           && String(item.notes || '').trim() === String(form.notes || '').trim()
           && Boolean(item.confirmation_required) === Boolean(form.confirmation_required)
-          && ((form.workers.length > 0 || form.publish_now) ? ['published', 'confirmed'].includes(String(item.status)) : item.status === 'draft')
-          && (item.color_hue == null ? null : Number(item.color_hue)) === (form.color_hue == null ? null : Number(form.color_hue))
-          && JSON.stringify([...(item.schedule_groups || [])].sort()) === JSON.stringify([...(form.schedule_groups || [])].sort());
+          // Read-back confirms the stable shift identity. Server-computed status,
+          // colors and scheduling groups may legitimately change on assignment.
+          // Requiring byte-for-byte equality made a committed save appear stuck.
+          ;
       } catch {
         return false;
       }
@@ -1302,7 +1311,13 @@ export default function WiwScheduleMobile() {
       // Refresh after closing. A slow GET must not keep the save UI blocked.
       void loadScheduleWeek(targetWeek, false);
     } catch (error: any) {
-      setToast(error.message || 'Schicht konnte nicht gespeichert werden.');
+      if (String(error?.message || '').includes('Schichtkarte wurde nicht gefunden')) {
+        setToast('Schichtkarte wurde zwischenzeitlich geändert. Dienstplan aktualisiert; bitte erneut öffnen.');
+        setFormOpen(false);
+        void loadScheduleWeek(targetWeek, false);
+      } else {
+        setToast(error.message || 'Schicht konnte nicht gespeichert werden.');
+      }
     } finally {
       savingRef.current = false;
       setSaving(false);
