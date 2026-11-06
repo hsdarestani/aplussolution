@@ -523,3 +523,13 @@
 }
 
 /* Release: Stadthaus logo contrast and venue matching, 2026-11-05. */
+
+
+/* SMALL_PHONE_LOGO_RIGHT_OFFSET_20261106
+   Center logos slightly to the right on narrow phones, independently of the
+   name and time columns. The same rule covers normal, preview and open shifts. */
+@media (max-width: 430px) {
+  .wiw-shift-card .wiw-client-logo {
+    inset-inline-start: calc(50% + clamp(10px, 3.4vw, 14px));
+  }
+}
