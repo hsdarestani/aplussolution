@@ -97,6 +97,9 @@ if docker inspect "$old_backend_cid" >/dev/null 2>&1; then
   exit 2
 fi
 timeout 200 docker compose -f docker-compose.yml -f "$archive/new-production-override.yml" up -d --no-deps --no-build --pull never backend
+# Apply the new backend's backward-compatible schema updates before readiness.
+# If a migration fails, the existing EXIT trap restores the prior backend.
+timeout 100 docker compose -f docker-compose.yml -f "$archive/new-production-override.yml" exec -T backend python manage.py migrate --noinput </dev/null
 ready=0
 for i in $(seq 1 35); do
   if curl -fsS --connect-timeout 3 --max-time 10 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/api/status/ready/ -o "$archive/readiness.json" 2>/dev/null &&
