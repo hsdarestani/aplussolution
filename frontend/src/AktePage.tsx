@@ -108,7 +108,7 @@ export default function AktePage({ user }: { user: User }) {
       setData(result);
       if (kind === 'worker') {
         setProfile({
-          first_name: result.profile?.user_detail?.first_name || '', last_name: result.profile?.user_detail?.last_name || '',
+          first_name: result.profile?.user_detail?.first_name || '', last_name: result.profile?.user_detail?.last_name || '', display_name: result.profile?.display_name || '',
           email: result.profile?.user_detail?.email || '', phone: result.profile?.user_detail?.phone || '', employee_number: result.profile?.employee_number || '',
           employment_type: result.profile?.employment_type || 'minijob', monthly_hours: result.profile?.monthly_hours || '', tariff_hourly_rate: result.profile?.tariff_hourly_rate || '',
           extra_allowance: result.profile?.extra_allowance || 0, ranking_points: result.profile?.ranking_points || 0, active: result.profile?.active !== false, open_shift_client_ids: result.profile?.open_shift_client_ids || [], schedule_groups: result.profile?.schedule_groups || [],
@@ -214,6 +214,7 @@ export default function AktePage({ user }: { user: User }) {
           <div className="akte-form-grid">
             <IonInput fill="outline" label="Vorname" labelPlacement="floating" value={profile.first_name} onIonInput={e=>setProfile({...profile,first_name:e.detail.value})}/>
             <IonInput fill="outline" label="Nachname" labelPlacement="floating" value={profile.last_name} onIonInput={e=>setProfile({...profile,last_name:e.detail.value})}/>
+            <IonInput fill="outline" label="Anzeigename (nur App)" labelPlacement="floating" maxlength={120} value={profile.display_name || ""} onIonInput={e=>setProfile({...profile,display_name:e.detail.value})}/>
             <IonInput fill="outline" label="E-Mail" labelPlacement="floating" value={profile.email} onIonInput={e=>setProfile({...profile,email:e.detail.value})}/>
             <IonInput fill="outline" label="Telefon" labelPlacement="floating" value={profile.phone} onIonInput={e=>setProfile({...profile,phone:e.detail.value})}/>
             <IonInput fill="outline" label="Personalnummer" labelPlacement="floating" value={profile.employee_number} onIonInput={e=>setProfile({...profile,employee_number:e.detail.value})}/>
@@ -280,7 +281,7 @@ export default function AktePage({ user }: { user: User }) {
         </div>
       ) : (
         data.kind === 'worker' ? <div className="akte-detail-grid">
-          <div><span>Name</span><b>{text(data.profile?.user_detail?.name)}</b></div><div><span>E-Mail</span><b>{text(data.profile?.user_detail?.email)}</b></div><div><span>Telefon</span><b>{text(data.profile?.user_detail?.phone)}</b></div><div><span>Personalnummer</span><b>{text(data.profile?.employee_number)}</b></div>
+          <div><span>Rechtlicher Name</span><b>{text(data.profile?.user_detail?.legal_name)}</b></div><div><span>Anzeigename</span><b>{text(data.profile?.display_name || data.profile?.user_detail?.legal_name)}</b></div><div><span>E-Mail</span><b>{text(data.profile?.user_detail?.email)}</b></div><div><span>Telefon</span><b>{text(data.profile?.user_detail?.phone)}</b></div><div><span>Personalnummer</span><b>{text(data.profile?.employee_number)}</b></div>
           <div><span>Beschäftigung</span><b>{text(data.profile?.employment_type)}</b></div><div><span>OpenShift-Kunden</span><b>{(data.profile?.open_shift_client_ids||[]).length?`${(data.profile.open_shift_client_ids||[]).length} ausgewählt`:'Alle'}</b></div><div><span>Zeitplan</span><b>{(data.profile?.schedule_groups||[]).map((key:string)=>scheduleGroupOptions.find(([id])=>id===key)?.[1]||key).join(', ')||'Alle'}</b></div><div><span>Sollstunden / Monat</span><b>{text(data.profile?.monthly_hours)}</b></div><div><span>Stundenlohn</span><b>{text(data.profile?.tariff_hourly_rate)} €</b></div><div><span>Zulage</span><b>{text(data.profile?.extra_allowance)} €</b></div>
           {Object.entries(data.master_data?.data || {}).map(([key,val]) => <div key={key}><span>{masterFieldLabels[key] || key.replaceAll('_',' ')}</span><b>{displayMasterValue(val)}</b></div>)}
         </div> : <div className="akte-detail-grid">

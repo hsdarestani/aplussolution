@@ -34,7 +34,7 @@ class ShiftApiSerializer(serializers.ModelSerializer):
         payload = {
             'id': str(worker.id),
             'slot_id': str(slot.id),
-            'name': worker.user.get_full_name() or worker.user.email,
+            'name': worker.display_name.strip() or worker.user.get_full_name() or worker.user.email,
             'employee_number': worker.employee_number,
             'confirmation_status': slot.confirmation_status,
             'confirmation_label': slot.get_confirmation_status_display(),

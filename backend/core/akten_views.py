@@ -101,7 +101,7 @@ def worker_akte(request, pk):
         master_payload = request.data.get('master_data') if isinstance(request.data.get('master_data'), dict) else {}
         with transaction.atomic():
             user_fields = {'first_name', 'last_name', 'email', 'phone'}
-            worker_fields = {'employee_number', 'employment_type', 'monthly_hours', 'tariff_hourly_rate', 'extra_allowance', 'ranking_points', 'active', 'skills', 'open_shift_client_ids', 'schedule_groups'}
+            worker_fields = {'employee_number', 'employment_type', 'monthly_hours', 'tariff_hourly_rate', 'extra_allowance', 'ranking_points', 'active', 'skills', 'open_shift_client_ids', 'schedule_groups', 'display_name'}
             for key in user_fields:
                 if key in payload:
                     setattr(worker.user, key, payload[key])
@@ -114,7 +114,12 @@ def worker_akte(request, pk):
                 worker.user.email = email
                 worker.user.username = email
             worker.user.save()
-            for key in worker_fields:
+            if 'display_name' in payload:
+                alias = str(payload.get('display_name') or '').strip()
+                if len(alias) > 120:
+                    return Response({'detail':'Der Anzeigename darf höchstens 120 Zeichen haben.'}, status=400)
+                worker.display_name = alias
+            for key in worker_fields - {'display_name'}:
                 if key in payload:
                     setattr(worker, key, payload[key] if payload[key] != '' else None)
             worker.save()

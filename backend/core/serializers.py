@@ -38,7 +38,15 @@ class ClientCompanySerializer(serializers.ModelSerializer):
 
 
 class WorkerProfileSerializer(serializers.ModelSerializer):
-    user_detail = UserSerializer(source='user', read_only=True)
+    user_detail = serializers.SerializerMethodField()
+
+    def get_user_detail(self, obj):
+        result = UserSerializer(obj.user, context=self.context).data
+        legal_name = obj.user.get_full_name() or obj.user.email
+        result['legal_name'] = legal_name
+        result['display_name'] = obj.display_name
+        result['name'] = obj.display_name.strip() or legal_name
+        return result
 
     class Meta:
         model = WorkerProfile

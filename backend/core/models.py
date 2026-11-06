@@ -114,6 +114,7 @@ class WorkerProfile(TimestampedModel):
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='worker_profile')
     employee_number = models.CharField(max_length=50, unique=True)
+    display_name = models.CharField(max_length=120, blank=True, default="")
     employment_type = models.CharField(max_length=20, choices=EmploymentType.choices, default=EmploymentType.MINI)
     monthly_hours = models.DecimalField(max_digits=7, decimal_places=2, blank=True, null=True)
     tariff_hourly_rate = models.DecimalField(max_digits=8, decimal_places=2, blank=True, null=True)
