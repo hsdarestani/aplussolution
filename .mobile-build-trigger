@@ -1,3 +1,5 @@
 2026-11-06 native build request for iOS and Android from source commit b785791f4e05f4257c63e947ce290d97b82f1cc7. A+ Solution de.aplussolution.workforce. Include the small-screen logo right-offset and prior location text restoration. Build artifacts for the existing A+ Publisher release pipeline; do not change signing identities.
 
 2026-11-06 verified shift-save fix native build: source 0542a65439b3bde755e03cb020e2e3b3a69dda53. Include faster committed-save confirmation, no duplicated writes, worker reassignment and small-phone customer logos. Mobile regression run 42211170218 passed. Produce unsigned Android AAB and iOS Xcode project for Publisher signing; do NOT use a replacement upload key.
+
+2026-11-06 UI fix after uploaded iPhone video. Build BOTH native projects from e1fe0ac398ef2f7b0459aeeda6feaa5cd377d38c, including fast saved-shift confirmation and top-of-editor visible error toast (portal to body, clear of bottom tab bar). Do not use previous 7f5b7e8 artifacts for this release. Existing signing identity required for store distribution.
