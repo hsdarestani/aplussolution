@@ -1,0 +1,42 @@
+name: Mobile shift save regression
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/shift-save-regression.yml'
+      - 'frontend/src/shiftSaveConfirmation.ts'
+      - 'frontend/src/WiwScheduleMobile.tsx'
+      - 'frontend/src/api.ts'
+      - 'frontend/e2e/mobile-dienstplan-release.spec.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shift-save-chromium:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install frontend
+        working-directory: frontend
+        run: npm install --no-audit --no-fund --package-lock=false
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Check lost-response and fast-close shift save on a small phone
+        working-directory: frontend
+        run: npx playwright test e2e/mobile-dienstplan-release.spec.ts -g "mobile shift save closes within two seconds" --workers=1
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shift-save-playwright-diagnostics
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+          retention-days: 7
