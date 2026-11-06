@@ -1,0 +1,60 @@
+name: Add worker display alias without changing legal names
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/implement-worker-display-name.yml']
+permissions:
+  contents: write
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Apply scoped worker alias patches
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def edit(name,old,new):
+              file=Path(name)
+              content=file.read_text()
+              if content.count(old)!=1:
+                  raise SystemExit('Expected patch location missing or ambiguous: '+name)
+              file.write_text(content.replace(old,new))
+
+          edit('backend/core/models.py',
+               '    employee_number = models.CharField(max_length=50, unique=True)\n    employment_type =',
+               '    employee_number = models.CharField(max_length=50, unique=True)\n    display_name = models.CharField(max_length=120, blank=True, default="")\n    employment_type =')
+          edit('backend/core/serializers.py',
+               "    user_detail = UserSerializer(source='user', read_only=True)\n\n    class Meta:\n        model = WorkerProfile",
+               "    user_detail = serializers.SerializerMethodField()\n\n    def get_user_detail(self, obj):\n        result = UserSerializer(obj.user, context=self.context).data\n        legal_name = obj.user.get_full_name() or obj.user.email\n        result['legal_name'] = legal_name\n        result['display_name'] = obj.display_name\n        result['name'] = obj.display_name.strip() or legal_name\n        return result\n\n    class Meta:\n        model = WorkerProfile")
+          edit('backend/core/shift_api.py',
+               "'name': worker.user.get_full_name() or worker.user.email,\n            'employee_number': worker.employee_number,",
+               "'name': worker.display_name.strip() or worker.user.get_full_name() or worker.user.email,\n            'employee_number': worker.employee_number,")
+          edit('backend/core/akten_views.py',
+               "'schedule_groups'}",
+               "'schedule_groups', 'display_name'}")
+          edit('backend/core/akten_views.py',
+               "            for key in worker_fields:\n                if key in payload:\n                    setattr(worker, key, payload[key] if payload[key] != '' else None)\n            worker.save()",
+               "            if 'display_name' in payload:\n                alias = str(payload.get('display_name') or '').strip()\n                if len(alias) > 120:\n                    return Response({'detail':'Der Anzeigename darf höchstens 120 Zeichen haben.'}, status=400)\n                worker.display_name = alias\n            for key in worker_fields - {'display_name'}:\n                if key in payload:\n                    setattr(worker, key, payload[key] if payload[key] != '' else None)\n            worker.save()")
+          edit('frontend/src/AktePage.tsx',
+               "          first_name: result.profile?.user_detail?.first_name || '', last_name: result.profile?.user_detail?.last_name || '',",
+               "          first_name: result.profile?.user_detail?.first_name || '', last_name: result.profile?.user_detail?.last_name || '', display_name: result.profile?.display_name || '',")
+          edit('frontend/src/AktePage.tsx',
+               '<IonInput fill="outline" label="Nachname" labelPlacement="floating" value={profile.last_name} onIonInput={e=>setProfile({...profile,last_name:e.detail.value})}/>',
+               '<IonInput fill="outline" label="Nachname" labelPlacement="floating" value={profile.last_name} onIonInput={e=>setProfile({...profile,last_name:e.detail.value})}/>'+'\n            <IonInput fill="outline" label="Anzeigename (nur App)" labelPlacement="floating" maxlength={120} value={profile.display_name || ""} onIonInput={e=>setProfile({...profile,display_name:e.detail.value})}/>')
+          edit('frontend/src/AktePage.tsx',
+               '<div><span>Name</span><b>{text(data.profile?.user_detail?.name)}</b></div>',
+               '<div><span>Rechtlicher Name</span><b>{text(data.profile?.user_detail?.legal_name)}</b></div><div><span>Anzeigename</span><b>{text(data.profile?.display_name || data.profile?.user_detail?.legal_name)}</b></div>')
+          Path('backend/core/migrations/0061_worker_display_name.py').write_text(
+              "from django.db import migrations, models\n\nclass Migration(migrations.Migration):\n    dependencies = [('core', '0060_auev_provider_signature')]\n    operations = [migrations.AddField(model_name='workerprofile', name='display_name', field=models.CharField(max_length=120, blank=True, default=''))]\n")
+          PY
+      - name: Commit approved scoped code changes
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add backend/core/models.py backend/core/serializers.py backend/core/shift_api.py backend/core/akten_views.py frontend/src/AktePage.tsx backend/core/migrations/0061_worker_display_name.py
+          git commit -m "Add display-only worker aliases; preserve legal name in ANÜ and payroll"
+          git push
