@@ -28,7 +28,7 @@ jobs:
         run: npm install --no-audit --no-fund --package-lock=false
       - name: Install Chromium
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium --only-shell
       - name: Check lost-response and fast-close shift save on a small phone
         working-directory: frontend
         run: npx playwright test e2e/mobile-dienstplan-release.spec.ts -g "mobile shift save closes within two seconds|save errors appear above the native editor" --workers=1
