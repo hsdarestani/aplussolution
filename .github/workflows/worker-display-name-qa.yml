@@ -1,0 +1,36 @@
+name: Worker display name QA
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/worker-display-name-qa.yml']
+permissions: { contents: read }
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Install backend
+        working-directory: backend
+        run: pip install -r requirements.txt
+      - name: Check migration and legal-name regression
+        working-directory: backend
+        env:
+          DJANGO_SECRET_KEY: qa-display-name-only
+          DATABASE_URL: sqlite:///test.sqlite3
+          ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+          CORS_ALLOWED_ORIGINS: http://localhost:8080
+          CSRF_TRUSTED_ORIGINS: http://localhost:8080
+        run: |
+          python manage.py check
+          python manage.py makemigrations --check --dry-run
+          pytest --nomigrations -q tests/test_worker_display_name.py tests/test_worker_picker_pagination.py
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Check native compatible frontend
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
