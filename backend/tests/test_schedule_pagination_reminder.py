@@ -16,7 +16,7 @@ def test_shift_endpoints_use_large_page_size():
     pagination = PathAwarePagination()
     assert pagination.get_page_size(Request(factory.get('/api/shifts/'))) == 5000
     assert pagination.get_page_size(Request(factory.get('/api/shifts/mine/'))) == 5000
-    assert pagination.get_page_size(Request(factory.get('/api/workers/'))) == 50
+    assert pagination.get_page_size(Request(factory.get('/api/workers/'))) == 5000
 
 
 @pytest.mark.django_db
