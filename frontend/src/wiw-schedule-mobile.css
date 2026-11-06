@@ -441,8 +441,8 @@
     top: 50%;
     transform: translate(-50%, -50%);
     min-width: 0;
-    width: min(78px, 23%);
-    height: 38px;
+    width: min(92px, 26%);
+    height: 46px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -452,23 +452,34 @@
   }
   .wiw-client-logo img {
     display: block;
-    max-width: 72px;
-    max-height: 30px;
+    max-width: 84px;
+    max-height: 36px;
     width: auto;
     height: auto;
     object-fit: contain;
   }
   .wiw-client-logo--marthas img {
-    max-width: 34px;
-    max-height: 34px;
+    max-width: 40px;
+    max-height: 40px;
   }
   .wiw-client-logo--stadthaus img {
-    max-width: 66px;
-    max-height: 28px;
+    max-width: 78px;
+    max-height: 32px;
   }
   .wiw-client-logo--spenerhaus img {
-    max-width: 72px;
-    max-height: 26px;
+    max-width: 84px;
+    max-height: 31px;
+  }
+  .wiw-shift-card .wiw-card-location {
+    display: block;
+    max-width: clamp(70px, 24vw, 118px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.15;
+    color: #536776;
   }
   .wiw-client-logo-fallback {
     display: none;
@@ -495,9 +506,9 @@
 
 @media (max-width: 360px) {
   .wiw-shift-card .wiw-card-main { column-gap: 5px !important; }
-  .wiw-client-logo--marthas img { max-width: 30px; max-height: 30px; }
-  .wiw-client-logo--stadthaus img { max-width: 60px; max-height: 25px; }
-  .wiw-client-logo--spenerhaus img { max-width: 64px; max-height: 24px; }
+  .wiw-client-logo--marthas img { max-width: 35px; max-height: 35px; }
+  .wiw-client-logo--stadthaus img { max-width: 69px; max-height: 29px; }
+  .wiw-client-logo--spenerhaus img { max-width: 73px; max-height: 28px; }
   .wiw-shift-card .wiw-card-meta b { font-size: 12px; }
 }
 
@@ -506,8 +517,8 @@
 @media (max-width: 900px) {
   .wiw-shift-card .wiw-client-logo--stadthaus img {
     filter: brightness(0) saturate(100%) invert(18%) sepia(20%) saturate(1350%) hue-rotate(165deg) brightness(92%) contrast(95%);
-    max-width: 74px;
-    max-height: 31px;
+    max-width: 84px;
+    max-height: 35px;
   }
 }
 
