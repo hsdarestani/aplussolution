@@ -754,7 +754,7 @@ export default function WiwScheduleMobile() {
 
   useEffect(() => {
     if (!toast) return;
-    const isError = /nicht bestätigt|konnte nicht|fehlgeschlagen|fehler|nicht erreichbar|Berechtigung/i.test(toast);
+    const isError = /nicht bestätigt|konnte nicht|fehlgeschlagen|fehler|nicht erreichbar|Berechtigung|unklar/i.test(toast);
     const timer = window.setTimeout(() => setToast(''), isError ? 5000 : 2200);
     return () => window.clearTimeout(timer);
   }, [toast]);
@@ -1260,11 +1260,27 @@ export default function WiwScheduleMobile() {
             // A normal card has a stable shift ID. Verify that one record
             // instead of serializing an entire busy Dienstplan week.
             const split = editing.parentCount > 1 && !form.apply_all;
+            const original = editing.shift;
+            const normalizeGroups = (groups: any) =>
+              (Array.isArray(groups) ? groups : []).map(String).sort().join('|');
+            const groupsChanged = normalizeGroups(original?.schedule_groups) !== normalizeGroups(form.schedule_groups);
+            const colorChanged = (original?.color_hue == null ? null : Number(original.color_hue)) !== form.color_hue;
+            const publishChanged = Boolean(original?.status !== 'draft') !== form.publish_now;
+            // When a PATCH only changes color, groups or publication, a stale
+            // GET can match all ordinary form fields. Require proof of that
+            // specific change; never interpret unchanged pre-write data as success.
+            if (!split && !workerChanged && matchesForm(original) && !groupsChanged && !colorChanged && !publishChanged) {
+              return undefined;
+            }
             const persisted = split
               ? await persistedRows(signal)
               : [await api(`shifts/${editing.shiftId}/`, { signal })];
             const rows = persisted.filter((item: any) =>
-              matchesForm(item) && (!workerChanged
+              matchesForm(item)
+              && (!groupsChanged || normalizeGroups(item.schedule_groups) === normalizeGroups(form.schedule_groups))
+              && (!colorChanged || (item.color_hue == null ? null : Number(item.color_hue)) === form.color_hue)
+              && (!publishChanged || (form.publish_now ? ['published', 'confirmed'].includes(String(item.status)) : item.status === 'draft'))
+              && (!workerChanged
                 || (item.assigned_workers || []).length === (nextWorkerId ? 1 : 0)
                 && (!nextWorkerId || (item.assigned_workers || []).some((w: any) => String(w.id) === nextWorkerId))));
             // Editing a single card in a multi-person shift creates a new

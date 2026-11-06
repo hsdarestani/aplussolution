@@ -33,6 +33,7 @@ async function mobileAdmin(page: Page) {
   });
   await page.goto('/?view=schedule');
   await expect(page.getByTestId('wiw-native-schedule').locator('.wiw-shift-card')).toHaveCount(3);
+  return shifts;
 }
 
 test('mobile filters stay multi-select and worker reassignment replaces the current choice', async ({ page }) => {
@@ -237,4 +238,32 @@ test('client logo is centered relative to the entire shift card, not the gaps be
   expect(alignment.deltaX).toBeLessThan(2);
   expect(alignment.deltaY).toBeLessThan(2);
   await expect(logo).toHaveCSS('position', 'absolute');
+});
+
+
+test('mobile shift save closes within two seconds even when PATCH response is delayed after DB commit', async ({ page }) => {
+  const shifts = await mobileAdmin(page);
+  let patchCount = 0;
+  await page.route('**/api/shifts/shift-0/', async route => {
+    await route.fulfill({ json: shifts[0] });
+  });
+  await page.route('**/api/shifts/shift-0/cards/slot-0/', async route => {
+    patchCount += 1;
+    const payload = route.request().postDataJSON();
+    expect(payload.workers).toEqual(['musa']);
+    shifts[0].slot_cards[0].worker = { id: 'musa', name: 'Musa Jamali' };
+    shifts[0].assigned_workers = [{ id: 'musa', name: 'Musa Jamali' }];
+    // Simulate a committed database write whose PATCH response is still in flight.
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    await route.fulfill({ json: { shift: shifts[0] } }).catch(() => undefined);
+  });
+  const schedule = page.getByTestId('wiw-native-schedule');
+  await schedule.locator('.wiw-shift-card').filter({ hasText: 'SK' }).click();
+  const form = page.getByTestId('wiw-shift-form');
+  await form.getByRole('button', { name: /Mitarbeiter ändern/ }).click();
+  await form.locator('.wiw-choice-sheet').getByRole('button', { name: 'Musa Jamali' }).click();
+  await expect(form.locator('.wiw-choice-sheet')).toHaveCount(0);
+  await form.getByRole('button', { name: 'Sichern', exact: true }).click();
+  await expect(form).toHaveCount(0, { timeout: 1900 });
+  expect(patchCount).toBe(1);
 });
