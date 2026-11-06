@@ -7,6 +7,7 @@ on:
       - 'frontend/src/shiftSaveConfirmation.ts'
       - 'frontend/src/WiwScheduleMobile.tsx'
       - 'frontend/src/api.ts'
+      - 'frontend/src/wiw-shift-save-hotfix.css'
       - 'frontend/e2e/mobile-dienstplan-release.spec.ts'
   workflow_dispatch:
 
@@ -30,7 +31,7 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Check lost-response and fast-close shift save on a small phone
         working-directory: frontend
-        run: npx playwright test e2e/mobile-dienstplan-release.spec.ts -g "mobile shift save closes within two seconds" --workers=1
+        run: npx playwright test e2e/mobile-dienstplan-release.spec.ts -g "mobile shift save closes within two seconds|save errors appear above the native editor" --workers=1
       - name: Upload failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4

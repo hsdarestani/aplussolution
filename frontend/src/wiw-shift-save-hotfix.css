@@ -1,12 +1,39 @@
 @media (max-width: 900px) {
-  /* The WIW editor is promoted to a very high full-screen layer by the mobile
-     compatibility shell. Save errors/success feedback must live above that
-     layer too; otherwise a failed PATCH looks exactly like a dead Sichern
-     button because the toast is rendered behind the editor. */
-  body.wiw-shift-form-active .wiw-toast {
+  /*
+   * The notice is portaled to document.body instead of living inside the
+   * scrollable/stacking schedule root. The native app editor and tab bar must
+   * never cover a save error; show it immediately below the topbar while the
+   * form is open, not behind the bottom navigation or the keyboard.
+   */
+  body > .wiw-toast {
+    position: fixed !important;
     z-index: 2147483600 !important;
-    bottom: calc(18px + env(safe-area-inset-bottom)) !important;
+    left: 16px !important;
+    right: 16px !important;
+    width: auto !important;
+    max-width: 520px !important;
+    margin-inline: auto !important;
+    min-height: 48px !important;
+    padding: 12px 16px !important;
+    border-radius: 10px !important;
+    line-height: 1.4 !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    color: #fff !important;
+    background: #273849 !important;
+    box-shadow: 0 8px 28px rgba(0,0,0,.3) !important;
+    opacity: 1 !important;
+    visibility: visible !important;
     pointer-events: auto !important;
+    touch-action: manipulation !important;
+  }
+  body > .wiw-toast.wiw-toast-over-form {
+    top: calc(82px + env(safe-area-inset-top)) !important;
+    bottom: auto !important;
+  }
+  body > .wiw-toast.wiw-toast-over-schedule {
+    top: auto !important;
+    bottom: calc(142px + env(safe-area-inset-bottom)) !important;
   }
 
   body.wiw-shift-form-active .wiw-form-topbar {

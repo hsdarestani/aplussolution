@@ -267,3 +267,30 @@ test('mobile shift save closes within two seconds even when PATCH response is de
   await expect(form).toHaveCount(0, { timeout: 1900 });
   expect(patchCount).toBe(1);
 });
+
+test('save errors appear above the native editor rather than under the bottom bar', async ({ page }) => {
+  await mobileAdmin(page);
+  await page.route('**/api/shifts/shift-0/cards/slot-0/', route => route.fulfill({
+    status: 400,
+    json: { detail: 'Mitarbeiter hat in diesem Zeitraum bereits eine andere Schicht.' },
+  }));
+  const schedule = page.getByTestId('wiw-native-schedule');
+  await schedule.locator('.wiw-shift-card').filter({ hasText: 'SK' }).click();
+  const form = page.getByTestId('wiw-shift-form');
+  await form.getByRole('button', { name: 'Sichern', exact: true }).click();
+  const notice = page.getByTestId('wiw-shift-notice');
+  await expect(form).toBeVisible();
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText('andere Schicht');
+  await expect(notice).toHaveClass(/wiw-toast-over-form/);
+  const visibleAndOnTop = await notice.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    const foreground = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return rect.top > 50 && rect.top < window.innerHeight / 3
+      && rect.bottom < window.innerHeight
+      && (foreground === element || element.contains(foreground));
+  });
+  expect(visibleAndOnTop).toBe(true);
+  await notice.click();
+  await expect(notice).toHaveCount(0);
+});

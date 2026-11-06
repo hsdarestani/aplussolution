@@ -1725,7 +1725,15 @@ export default function WiwScheduleMobile() {
         </section>
       </div> : null}
 
-      {toast ? <button type="button" className="wiw-toast" onClick={() => setToast('')}>{toast}</button> : null}
+      {toast ? createPortal(
+        <button type="button"
+          className={`wiw-toast ${formOpen ? 'wiw-toast-over-form' : 'wiw-toast-over-schedule'}`}
+          data-testid="wiw-shift-notice"
+          role="alert"
+          aria-live="assertive"
+          onClick={() => setToast('')}>{toast}</button>,
+        document.body,
+      ) : null}
     </div>,
     host,
   );
