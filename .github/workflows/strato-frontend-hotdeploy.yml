@@ -115,3 +115,5 @@ jobs:
       - name: Cleanup
         if: always()
         run: rm -f /tmp/aplus-frontend-dist.tgz /tmp/home.html /tmp/headers /tmp/primary-headers "$HOME/.ssh/strato_ed25519"
+
+# 2026-11-06: deploy admin Akte Anzeigename form; API continues serving statutory names in legal documents.
