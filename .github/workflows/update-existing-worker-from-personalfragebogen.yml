@@ -1,0 +1,85 @@
+name: Update existing worker from Personalfragebogen
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Apply updates (or preview without writing to the database)'
+        required: true
+        type: choice
+        default: apply
+        options:
+          - apply
+          - dry_run
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personalfragebogen-existing-worker-maintenance
+  cancel-in-progress: false
+
+jobs:
+  update-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository scripts
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets and payload structure (no sensitive logging)
+        shell: bash
+        env:
+          EMPLOYEE_PROFILE_JSON: ${{ secrets.APLUS_PERSONALFRAGEBOGEN_WORKER_JSON }}
+          STRATO_HOST: ${{ secrets.STRATO_HOST }}
+          STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$EMPLOYEE_PROFILE_JSON" || -z "$STRATO_HOST" || -z "$STRATO_SSH_PRIVATE_KEY" ]]; then
+            echo 'Required Actions secrets missing: APLUS_PERSONALFRAGEBOGEN_WORKER_JSON and/or STRATO_HOST and/or STRATO_SSH_PRIVATE_KEY.' >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json, os
+          doc = json.loads(os.environ['EMPLOYEE_PROFILE_JSON'])
+          assert isinstance(doc, dict) and isinstance(doc.get('target'), dict)
+          assert isinstance(doc.get('master_data'), dict) and doc['master_data']
+          assert isinstance(doc.get('profile', {}), dict)
+          assert {'first_name', 'last_name', 'email'} <= set(doc['target'])
+          print('PAYLOAD_VALIDATED (contents not logged)')
+          PY
+
+      - name: Update only the matching existing worker through Django on production
+        shell: bash
+        env:
+          EMPLOYEE_PROFILE_JSON: ${{ secrets.APLUS_PERSONALFRAGEBOGEN_WORKER_JSON }}
+          STRATO_HOST: ${{ secrets.STRATO_HOST }}
+          STRATO_SSH_PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+          RUN_MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$STRATO_SSH_PRIVATE_KEY" | tr -d '\r' > "$HOME/.ssh/aplus_strato_key"
+          chmod 600 "$HOME/.ssh/aplus_strato_key"
+          # Trust-on-first-use check for this Actions runner, not StrictHostKeyChecking=no.
+          ssh-keyscan -T 12 -t ed25519 "$STRATO_HOST" > "$HOME/.ssh/known_hosts" 2>/dev/null
+          test -s "$HOME/.ssh/known_hosts" || { echo 'Cannot verify an SSH host key.' >&2; exit 1; }
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+          # The payload stays off Git and out of logs; SSH encrypts stdin.
+          python3 - <<'PY' | ssh -T \
+            -i "$HOME/.ssh/aplus_strato_key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            -o ServerAliveInterval=10 -o ServerAliveCountMax=3 \
+            "root@$STRATO_HOST" \
+            'cd /opt/aplussolution && docker compose exec -T backend python manage.py shell'
+          import json, os
+          from pathlib import Path
+          payload = json.loads(os.environ['EMPLOYEE_PROFILE_JSON'])
+          dry_run = os.environ['RUN_MODE'] == 'dry_run'
+          print('payload = ' + repr(payload))
+          print('dry_run = ' + repr(dry_run))
+          print(Path('.github/scripts/apply_existing_worker_master_data.py').read_text(encoding='utf-8'))
+          PY
