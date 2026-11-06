@@ -1,60 +1,62 @@
-import { describe, expect, it } from 'vitest';
-import { confirmShiftWrite } from '../shiftSaveConfirmation';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { confirmShiftWrite, ShiftWriteUnconfirmedError } from '../shiftSaveConfirmation';
 
-describe('mobile shift save confirmation', () => {
-  it('returns the normal write response without requiring a second write', async () => {
-    let writes = 0;
-    let reads = 0;
-    const result = await confirmShiftWrite(
-      async () => { writes += 1; return { id: 'created-shift' }; },
-      async () => { reads += 1; return undefined; },
-      { verifyDelayMs: 30, timeoutMs: 100 },
-    );
-    expect(result.id).toBe('created-shift');
-    expect(writes).toBe(1);
-    expect(reads).toBe(0);
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe('atomic mobile shift save confirmation', () => {
+  it('closes on the first successful write without waiting for a separate GET', async () => {
+    const verify = vi.fn().mockResolvedValue(undefined);
+    const write = vi.fn().mockResolvedValue({ id: 'saved' });
+    await expect(confirmShiftWrite(write, verify)).resolves.toEqual({ id: 'saved' });
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(verify).not.toHaveBeenCalled();
   });
 
-  it('closes a hanging write only after a fresh readback confirms it', async () => {
-    let writes = 0;
-    let reads = 0;
-    let writeSignal: AbortSignal | undefined;
-    const result = await confirmShiftWrite(
-      async (signal) => {
-        writes += 1;
-        writeSignal = signal;
-        return new Promise<{ id: string }>(() => {});
-      },
-      async () => {
-        reads += 1;
-        return reads >= 2 ? { id: 'committed-shift' } : undefined;
-      },
-      { verifyDelayMs: 1, pollIntervalMs: 1, timeoutMs: 100 },
-    );
-    expect(result.id).toBe('committed-shift');
-    expect(writes).toBe(1);
-    expect(reads).toBeGreaterThanOrEqual(2);
-    expect(writeSignal?.aborted).toBe(true);
+  it('uses persisted readback when the write response is lost after commit', async () => {
+    vi.useFakeTimers();
+    const write = vi.fn().mockRejectedValue(new TypeError('Load failed'));
+    const verify = vi.fn().mockResolvedValue({ id: 'saved-on-server' });
+    const result = confirmShiftWrite(write, verify, { verifyDelayMs: 100, pollIntervalMs: 50, timeoutMs: 1000 });
+    await vi.advanceTimersByTimeAsync(105);
+    await expect(result).resolves.toEqual({ id: 'saved-on-server' });
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(verify).toHaveBeenCalledTimes(1);
   });
 
-  it('does not retry an unconfirmed mutation or claim success', async () => {
-    let writes = 0;
-    await expect(confirmShiftWrite(
-      async () => {
-        writes += 1;
-        return new Promise<{ id: string }>(() => {});
-      },
-      async () => undefined,
-      { verifyDelayMs: 1, pollIntervalMs: 1, timeoutMs: 12 },
-    )).rejects.toThrow('Speichern noch nicht bestätigt');
-    expect(writes).toBe(1);
+  it('keeps checking if a readback fails transiently before confirming', async () => {
+    vi.useFakeTimers();
+    const write = vi.fn().mockRejectedValue(new Error('Network unreachable'));
+    const verify = vi.fn()
+      .mockRejectedValueOnce(new Error('GET interrupted'))
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ id: 'committed' });
+    const result = confirmShiftWrite(write, verify, { verifyDelayMs: 50, pollIntervalMs: 50, timeoutMs: 1000 });
+    await vi.advanceTimersByTimeAsync(165);
+    await expect(result).resolves.toEqual({ id: 'committed' });
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(verify).toHaveBeenCalledTimes(3);
   });
 
-  it('propagates a real API error instead of treating it as success', async () => {
-    await expect(confirmShiftWrite(
-      async () => { throw new Error('Keine Berechtigung'); },
-      async () => undefined,
-      { verifyDelayMs: 1, timeoutMs: 50 },
-    )).rejects.toThrow('Keine Berechtigung');
+  it('returns a definitive validation error promptly and never retries the mutation', async () => {
+    const error = Object.assign(new Error('Doppelte Schicht'), { status: 400 });
+    const write = vi.fn().mockRejectedValue(error);
+    const verify = vi.fn().mockResolvedValue(undefined);
+    await expect(confirmShiftWrite(write, verify)).rejects.toBe(error);
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it('blocks uncertain re-submission after a bounded readback deadline', async () => {
+    vi.useFakeTimers();
+    const write = vi.fn().mockImplementation(() => new Promise(() => {}));
+    const verify = vi.fn().mockResolvedValue(undefined);
+    const result = confirmShiftWrite(write, verify, { verifyDelayMs: 50, pollIntervalMs: 50, timeoutMs: 250 });
+    const expectation = expect(result).rejects.toBeInstanceOf(ShiftWriteUnconfirmedError);
+    await vi.advanceTimersByTimeAsync(260);
+    await expectation;
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(verify).toHaveBeenCalled();
   });
 });

@@ -134,6 +134,12 @@ function headers(options: RequestInit, tokenOverride?: string) {
   };
 }
 
+async function httpResponseError(response: Response): Promise<Error> {
+  const error = new Error(await parseError(response)) as Error & { status: number };
+  error.status = response.status;
+  return error;
+}
+
 async function parseError(response: Response) {
   let message = `Anfrage fehlgeschlagen (${response.status}).`;
   try {
@@ -234,7 +240,7 @@ export async function api<T = any>(path: string, options: RequestInit = {}, retr
     localStorage.removeItem('refresh');
     window.dispatchEvent(new Event('auth-lost'));
   }
-  if (!response.ok) throw new Error(await parseError(response));
+  if (!response.ok) throw await httpResponseError(response);
   return response.status === 204 ? ({} as T) : response.json();
 }
 
@@ -275,7 +281,7 @@ export async function apiBlob(path: string, options: RequestInit = {}, retry = t
     const token = await refreshAccessToken();
     if (token) {
       const retried = await request(`${API}/${normalizedPath}`, { ...options, headers: headers(options, token) });
-      if (!retried.ok) throw new Error(await parseError(retried));
+      if (!retried.ok) throw await httpResponseError(retried);
       const disposition = retried.headers.get('content-disposition') || '';
       const filename = filenameFromDisposition(disposition, fallbackFilename);
       return { blob: await retried.blob(), filename };

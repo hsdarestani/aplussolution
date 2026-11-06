@@ -3,7 +3,7 @@
 // SEP14_PREVIEW_PARITY
 // MODERN_WEEK_CACHE_NAVIGATION
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { confirmShiftWrite } from './shiftSaveConfirmation';
+import { confirmShiftWrite, ShiftWriteUnconfirmedError } from './shiftSaveConfirmation';
 import { endAfterChangingStart, shiftDurationIsValid } from './shiftTimeValidation';
 import { createPortal, flushSync } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
@@ -622,6 +622,7 @@ export default function WiwScheduleMobile() {
   const [groupFilter, setGroupFilter] = useState<string[]>(SCHEDULE_GROUPS.map((item) => item.value));
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveUncertain, setSaveUncertain] = useState(false);
   const savingRef = useRef(false);
   const [toast, setToast] = useState('');
   const [formOpen, setFormOpen] = useState(false);
@@ -992,6 +993,7 @@ export default function WiwScheduleMobile() {
   const editingTimeEntry = editingTimeEntries.find((entry: any) => !entry.wiw_time_id) || editingTimeEntries[0];
 
   function openCreate(date = anchor) {
+    setSaveUncertain(false);
     setEditing(undefined);
     setTimeEditor(undefined);
     setTimeLogOpen(false);
@@ -1004,6 +1006,7 @@ export default function WiwScheduleMobile() {
   }
 
   function openEdit(card: CardRow) {
+    setSaveUncertain(false);
     // Keep editing available even when a cached/list card has a temporary ID.
     // The write path handles a stale card response and refreshes the schedule.
     setCopying(false);
@@ -1184,7 +1187,7 @@ export default function WiwScheduleMobile() {
   async function save() {
     // The separate refresh request may also use busy; this guard prevents a
     // second POST when mobile network latency delays the first response.
-    if (savingRef.current) return;
+    if (savingRef.current || saveUncertain) return;
     const savingCopy = copying;
     if (!form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null) {
       setToast('Bitte Kunde, Zeit, Position und Jobstandort auswählen.');
@@ -1254,13 +1257,18 @@ export default function WiwScheduleMobile() {
             method: 'PATCH', body: JSON.stringify(payload), signal,
           }),
           async (signal) => {
-            const rows = (await persistedRows(signal)).filter((item: any) =>
+            // A normal card has a stable shift ID. Verify that one record
+            // instead of serializing an entire busy Dienstplan week.
+            const split = editing.parentCount > 1 && !form.apply_all;
+            const persisted = split
+              ? await persistedRows(signal)
+              : [await api(`shifts/${editing.shiftId}/`, { signal })];
+            const rows = persisted.filter((item: any) =>
               matchesForm(item) && (!workerChanged
                 || (item.assigned_workers || []).length === (nextWorkerId ? 1 : 0)
                 && (!nextWorkerId || (item.assigned_workers || []).some((w: any) => String(w.id) === nextWorkerId))));
             // Editing a single card in a multi-person shift creates a new
             // shift ID; only accept an unambiguous newly created row.
-            const split = editing.parentCount > 1 && !form.apply_all;
             const matches = rows.filter((item: any) => split
               ? !knownShiftIds.has(String(item.id))
                 && Number(item.required_count) === 1
@@ -1314,6 +1322,7 @@ export default function WiwScheduleMobile() {
         setFormOpen(false);
         void loadScheduleWeek(targetWeek, false);
       } else {
+        if (error instanceof ShiftWriteUnconfirmedError) setSaveUncertain(true);
         setToast(error.message || 'Schicht konnte nicht gespeichert werden.');
       }
     } finally {
@@ -1540,7 +1549,7 @@ export default function WiwScheduleMobile() {
       <button type="button" className="wiw-create-fab" aria-label="Schicht anlegen" onClick={() => openCreate(anchor)}>+</button>
 
       {formOpen ? <div ref={formScreenRef} className="wiw-shift-form-screen" data-testid="wiw-shift-form">
-        <header className="wiw-form-topbar"><button type="button" onClick={() => { noteRef.current?.blur(); setTimeEditorDateOpen(false); setTimeEditor(undefined); setTimeLogOpen(false); setFormOpen(false); }}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || saving || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null || (form.startMinute != null && form.endAbsolute != null && form.endAbsolute <= form.startMinute)} onClick={() => void save()}>Sichern</button></header>
+        <header className="wiw-form-topbar"><button type="button" onClick={() => { noteRef.current?.blur(); setTimeEditorDateOpen(false); setTimeEditor(undefined); setTimeLogOpen(false); setFormOpen(false); }}>Abbrechen</button><strong>{copying ? 'Kopie bearbeiten' : editing ? 'Bearbeite Schicht' : 'Erstelle Schicht'}</strong><button type="button" disabled={busy || saving || saveUncertain || !form.client || !form.location || !form.position || form.startMinute == null || form.endAbsolute == null || (form.startMinute != null && form.endAbsolute != null && form.endAbsolute <= form.startMinute)} onClick={() => void save()}>{saving ? 'Speichert …' : saveUncertain ? 'Status unklar' : 'Sichern'}</button></header>
         {dateOpen ? <ScheduleDatePicker value={form.date} onSelect={(date) => { setForm((current) => ({ ...current, date })); setDateOpen(false); }} onClose={() => setDateOpen(false)} /> : null}
         <div ref={formScrollRef} className="wiw-form-scroll">
           <Row icon={calendarOutline} label={formatDateRow(form.date)} field="date" onClick={() => setDateOpen(true)} />
