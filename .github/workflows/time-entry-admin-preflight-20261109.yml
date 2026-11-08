@@ -1,0 +1,46 @@
+name: Read-only prerequisites for Time Entry Admin release
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/time-entry-admin-preflight-20261109.yml']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      PRIMARY_HOST: ${{ secrets.STRATO_HOST }}
+      PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Check current origin release prerequisites without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRIMARY_HOST" && test -n "$PRIVATE_KEY"
+          umask 077
+          key="$RUNNER_TEMP/time-entry-diag.key"
+          printf '%s\n' "$PRIVATE_KEY" > "$key"
+          chmod 600 "$key"
+          trap 'rm -f "$key"' EXIT
+          ssh -i "$key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 root@"$PRIMARY_HOST" 'bash -s' <<'REMOTE'
+          set -u
+          cd /opt/aplussolution || { echo 'FAIL=workdir'; exit 1; }
+          test -s .env; echo "ENV_EXISTS=$?"
+          test -s docker-compose.override.yml; echo "OVERRIDE_EXISTS=$?"
+          test ! -e /var/lock/aplus-maintenance-block; echo "NO_MAINTENANCE_BLOCK=$?"
+          mem="$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)"
+          disk="$(df -Pm /var/lib/docker | awk 'END{print $4}')"
+          echo "MEM_AVAILABLE_MB=$mem"
+          echo "DISK_FREE_MB=$disk"
+          for service in db redis backend frontend caddy celery celery-beat; do
+            cid="$(timeout 12 docker compose ps -q "$service" 2>/dev/null || true)"
+            if test -n "$cid" && test "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null)" = true; then
+              echo "SERVICE_$service=running"
+            else
+              echo "SERVICE_$service=not_running"
+            fi
+          done
+          if timeout 20 docker compose exec -T backend python manage.py migrate --check </dev/null >/dev/null 2>&1; then echo MIGRATE_CHECK=ok; else echo MIGRATE_CHECK=fail; fi
+          if curl -fsS --max-time 15 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/api/status/ready/ | grep -q '"ok"'; then echo READY=ok; else echo READY=fail; fi
+          REMOTE
