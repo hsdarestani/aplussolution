@@ -2,7 +2,7 @@
 // SEP14_WEEK_SWIPE_HANDOFF
 // SEP14_PREVIEW_PARITY
 // MODERN_WEEK_CACHE_NAVIGATION
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { confirmShiftWrite, ShiftWriteUnconfirmedError } from './shiftSaveConfirmation';
 import { endAfterChangingStart, shiftDurationIsValid } from './shiftTimeValidation';
 import { createPortal, flushSync } from 'react-dom';
@@ -223,7 +223,7 @@ function CardTimeMeta({ card, showRecordedTime = false }: { card: CardRow; showR
   </span>;
 }
 
-function previewShiftCardStyle(shift: any) {
+function shiftCardStyle(shift: any) {
   const palette = schedulePalette(shift?.client_name, shift?.position_name, shift?.color_hue);
   return {
     '--wiw-client-hue': String(palette.hue),
@@ -237,7 +237,7 @@ function previewShiftCardStyle(shift: any) {
   } as React.CSSProperties;
 }
 
-function sortPreviewCards(left: CardRow, right: CardRow) {
+function sortScheduleCards(left: CardRow, right: CardRow) {
   let order = clientRank(left.shift.client_name) - clientRank(right.shift.client_name);
   if (order) return order;
   order = String(left.shift.client_name || '').localeCompare(String(right.shift.client_name || ''), 'de');
@@ -245,75 +245,84 @@ function sortPreviewCards(left: CardRow, right: CardRow) {
   return new Date(left.shift.starts_at).getTime() - new Date(right.shift.starts_at).getTime();
 }
 
-function AdjacentWeekPreview({ weekStart, groupFilter, query, side, showRecordedTime = false }: { weekStart: string; groupFilter: string[]; query: string; side: 'prev' | 'next'; showRecordedTime?: boolean }) {
-  const [shifts, setShifts] = useState<any[]>(() => {
-    const cached = safeSessionGet(`${WEEK_CACHE_PREFIX}${weekStart}`);
-    if (!cached) return [];
-    try {
-      const parsed = JSON.parse(cached);
-      return Array.isArray(parsed) ? parsed : Array.isArray(parsed?.shifts) ? parsed.shifts : [];
-    } catch {
-      return [];
-    }
-  });
+type WeekPaneProps = {
+  weekStart: string;
+  side: 'prev' | 'center' | 'next';
+  groupFilter: string[];
+  query: string;
+  tab: TabKey;
+  readWeek: (week: string) => any[] | undefined;
+  fetchWeek: (week: string) => Promise<any[]>;
+  activeDays: Record<string, CardRow[]>;
+  showRecordedTime: boolean;
+  recentCopyShiftId: string;
+  onEdit: (card: CardRow) => void;
+};
 
+function ScheduleWeekPane({
+  weekStart, side, groupFilter, query, tab, readWeek, fetchWeek, activeDays,
+  showRecordedTime, recentCopyShiftId, onEdit,
+}: WeekPaneProps) {
+  const isCenter = side === 'center';
+  const [shifts, setShifts] = useState(() => readWeek(weekStart));
   useEffect(() => {
+    if (isCenter) return;
     let alive = true;
-    const cached = safeSessionGet(`${WEEK_CACHE_PREFIX}${weekStart}`);
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        const next = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.shifts) ? parsed.shifts : [];
-        if (next.length) setShifts(next);
-      } catch { /* optional cache */ }
-    }
-    void api(`admin/mobile-schedule/?date_from=${encodeURIComponent(weekStart)}&date_to=${encodeURIComponent(addDays(weekStart, 6))}`)
-      .then((result: any) => {
-        if (!alive) return;
-        const next = Array.isArray(result?.shifts) ? result.shifts : [];
-        setShifts(next);
-        safeSessionSet(`${WEEK_CACHE_PREFIX}${weekStart}`, JSON.stringify(next));
-      })
-      .catch(() => undefined);
+    setShifts(readWeek(weekStart));
+    void fetchWeek(weekStart).then((result) => {
+      if (alive) setShifts(result);
+    }).catch(() => undefined);
     return () => { alive = false; };
-  }, [weekStart]);
+  }, [isCenter, weekStart, readWeek, fetchWeek]);
 
   const previewDays = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
   const previewByDay = useMemo(() => {
     const map: Record<string, CardRow[]> = Object.fromEntries(previewDays.map((day) => [day, []]));
     const q = query.trim().toLocaleLowerCase('de-DE');
-    shifts.forEach((shift: any) => {
+    shifts?.forEach((shift: any) => {
       if (shift?.source === 'wiw-live') return;
       if (groupFilter.length && !shiftGroups(shift).some((group: string) => groupFilter.includes(group))) return;
       if (!groupFilter.length) return;
       activeSlots(shift).forEach((slot: any, index: number) => {
         const card: CardRow = {
-          key: `${shift.id}:${slot.id || index}`,
+          key: `${shift.id}:${slot.id ?? index}`,
           shift,
           slot,
           worker: slot.worker || undefined,
           isOpen: Boolean(slot.is_open || (slot.status === 'open' && !slot.worker)),
         };
+        if (tab === 'filled' && (!card.worker || shift.status === 'draft')) return;
+        if (tab === 'draft' && shift.status !== 'draft') return;
         const haystack = `${shift.position_name || ''} ${shift.client_name || ''} ${shift.location_name || ''} ${card.worker?.name || ''}`.toLocaleLowerCase('de-DE');
         if (q && !haystack.includes(q)) return;
         const day = dateKeyFromIso(shift.starts_at);
         if (map[day]) map[day].push(card);
       });
     });
-    Object.values(map).forEach((cards) => cards.sort(sortPreviewCards));
+    Object.values(map).forEach((cards) => cards.sort(sortScheduleCards));
     return map;
-  }, [previewDays, shifts, groupFilter, query]);
+  }, [previewDays, shifts, groupFilter, query, tab]);
 
-  return <div className={`wiw-week-pane wiw-week-preview wiw-week-pane-${side}`} aria-hidden="true">
+  return <div
+    className={`wiw-week-pane wiw-week-pane-${side} ${isCenter ? 'wiw-week-scroll' : 'wiw-week-preview'}`}
+    aria-hidden={!isCenter || undefined}
+    data-week-ready={isCenter || shifts !== undefined}
+  >
     {previewDays.map((day) => {
       const header = formatDayHeader(day);
-      const dayCards = previewByDay[day] || [];
-      return <section className="wiw-day-section wiw-day-visual" key={day}>
+      const dayCards = (isCenter ? activeDays : previewByDay)[day] || [];
+      return <section className="wiw-day-section wiw-day-visual" id={isCenter ? `wiw-day-${day}` : undefined} key={day}>
         <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}<small> · {dayCards.reduce((sum, card) => { const gross = Math.max(0, (new Date(card.shift.ends_at).getTime() - new Date(card.shift.starts_at).getTime()) / 3600000); return sum + Math.max(0, gross - Number(card.shift.break_minutes || 0) / 60); }, 0).toFixed(1)} Std.</small></em></header>
-        {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" tabIndex={-1} className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'}`} style={previewShiftCardStyle(card.shift)}>
+        {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button
+          type="button"
+          tabIndex={isCenter ? undefined : -1}
+          className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'} ${isCenter && recentCopyShiftId && String(card.shift.id) === recentCopyShiftId ? 'is-copy-entering' : ''}`}
+          style={shiftCardStyle(card.shift)}
+          onClick={isCenter ? () => onEdit(card) : undefined}
+        >
           <div className="wiw-card-main">
             <CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} />
-            <span className="wiw-card-copy"><b>{cardWorkerShortName(card.worker?.name) || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}</b><small>{cardPositionShortLabel(card.shift.position_name)}</small></span>
+            <span className="wiw-card-copy"><b>{cardWorkerShortName(card.worker?.name) || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}{card.isOpen && card.shift.status !== 'draft' ? <span className="wiw-open-alert">!</span> : null}</b><small>{cardPositionShortLabel(card.shift.position_name)}</small></span>
             <ShiftClientLogo shift={card.shift} />
             <CardTimeMeta card={card} showRecordedTime={showRecordedTime} />
           </div>
@@ -644,7 +653,13 @@ export default function WiwScheduleMobile() {
   const swipeTravel = useRef(0);
   const swipeAxis = useRef<'horizontal' | 'vertical' | null>(null);
   const swipeScrollElement = useRef<HTMLElement | null>(null);
-  const swipeScrollTop = useRef(0);
+  const swipeSettle = useRef<number | undefined>(undefined);
+  const weekTrackRef = useRef<HTMLDivElement>(null);
+  const navigationPending = useRef(false);
+  const navigationSequence = useRef(0);
+  const [loadingWeek, setLoadingWeek] = useState(false);
+  const weekCache = useRef(new Map<string, any[]>());
+  const weekRequests = useRef(new Map<string, Promise<any[]>>());
   const localRowsRef = useRef<any[]>([]);
   const liveRowsRef = useRef<any[]>([]);
   const loadSequence = useRef(0);
@@ -696,44 +711,60 @@ export default function WiwScheduleMobile() {
     }
   };
 
-  const prefetchScheduleWeek = async (targetWeek: string) => {
-    if (!manager) return;
-    const cacheKey = `${WEEK_CACHE_PREFIX}${targetWeek}`;
-    if (safeSessionGet(cacheKey)) return;
+  const readWeek = useCallback((targetWeek: string) => {
+    const inMemory = weekCache.current.get(targetWeek);
+    if (inMemory !== undefined) return inMemory;
+    const cached = safeSessionGet(`${WEEK_CACHE_PREFIX}${targetWeek}`);
+    if (!cached) return undefined;
     try {
-      const scheduleData: any = await api(`admin/mobile-schedule/?date_from=${encodeURIComponent(targetWeek)}&date_to=${encodeURIComponent(addDays(targetWeek, 6))}`);
-      const nextRows = Array.isArray(scheduleData?.shifts) ? scheduleData.shifts : [];
-      safeSessionSet(cacheKey, JSON.stringify(nextRows));
-    } catch (error) {
-      console.warn('Dienstplan background prefetch failed', error);
-    }
-  };
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed?.shifts)) return parsed.shifts;
+    } catch { /* optional cache */ }
+    return undefined;
+  }, []);
 
-  const loadScheduleWeek = async (targetWeek: string, showBusy = true) => {
+  const fetchWeek = useCallback((targetWeek: string, fresh = false): Promise<any[]> => {
+    const pending = weekRequests.current.get(targetWeek);
+    if (pending && !fresh) return pending;
+    const cacheKey = `${WEEK_CACHE_PREFIX}${targetWeek}`;
+    const request: Promise<any[]> = api(`admin/mobile-schedule/?date_from=${encodeURIComponent(targetWeek)}&date_to=${encodeURIComponent(addDays(targetWeek, 6))}`)
+      .then((scheduleData: any) => {
+        const nextRows = Array.isArray(scheduleData?.shifts) ? scheduleData.shifts : [];
+        if (weekRequests.current.get(targetWeek) !== request) return nextRows;
+        // Keep recent weeks available even when the WebView disallows session storage.
+        const cache = weekCache.current;
+        cache.delete(targetWeek);
+        cache.set(targetWeek, nextRows);
+        if (cache.size > 5) {
+          const oldest = cache.keys().next().value;
+          if (oldest !== undefined) cache.delete(oldest);
+        }
+        safeSessionSet(cacheKey, JSON.stringify(nextRows));
+        return nextRows;
+      })
+      .finally(() => {
+        if (weekRequests.current.get(targetWeek) === request) weekRequests.current.delete(targetWeek);
+      });
+    weekRequests.current.set(targetWeek, request);
+    return request;
+  }, []);
+
+  const loadScheduleWeek = async (targetWeek: string, showBusy = true, fresh = false) => {
     if (!manager) return;
     const sequence = ++loadSequence.current;
-    const cacheKey = `${WEEK_CACHE_PREFIX}${targetWeek}`;
-    const cached = safeSessionGet(cacheKey);
+    const cached = readWeek(targetWeek);
     if (cached) {
-      try {
-        const cachedRows = JSON.parse(cached);
-        if (Array.isArray(cachedRows)) {
-          localRowsRef.current = cachedRows;
-          publishRows();
-        }
-      } catch { /* optional cache */ }
+      localRowsRef.current = cached;
+      publishRows();
     }
     if (showBusy && !cached) setBusy(true);
     try {
-      const scheduleData: any = await api(`admin/mobile-schedule/?date_from=${encodeURIComponent(targetWeek)}&date_to=${encodeURIComponent(addDays(targetWeek, 6))}`);
+      const nextLocal = await fetchWeek(targetWeek, fresh);
       if (sequence !== loadSequence.current) return;
-      const nextLocal = Array.isArray(scheduleData?.shifts) ? scheduleData.shifts : [];
       localRowsRef.current = nextLocal;
-      safeSessionSet(cacheKey, JSON.stringify(nextLocal));
       publishRows();
       setBusy(false);
-      void prefetchScheduleWeek(addDays(targetWeek, -7));
-      void prefetchScheduleWeek(addDays(targetWeek, 7));
 
       void api('admin/mobile-dashboard/').then((dashboardData: any) => {
         if (sequence !== loadSequence.current) return;
@@ -897,26 +928,13 @@ export default function WiwScheduleMobile() {
     };
   }, [formOpen]);
 
-  const cards = useMemo<CardRow[]>(() => rows.flatMap((shift: any) => activeSlots(shift).map((slot: any) => ({
-    key: `${shift.id}:${slot.id}`,
+  const cards = useMemo<CardRow[]>(() => rows.flatMap((shift: any) => activeSlots(shift).map((slot: any, index: number) => ({
+    key: `${shift.id}:${slot.id ?? index}`,
     shift,
     slot,
     worker: slot.worker || undefined,
     isOpen: Boolean(slot.is_open || (slot.status === 'open' && !slot.worker)),
   }))), [rows]);
-  const shiftCardStyle = (shift: any) => {
-    const palette = schedulePalette(shift?.client_name, shift?.position_name, shift?.color_hue);
-    return {
-      '--wiw-client-hue': String(palette.hue),
-      '--wiw-card-accent': palette.accent,
-      '--wiw-card-open-bg': palette.openBackground,
-      '--wiw-card-filled-bg': palette.filledBackground,
-      '--wiw-card-open-text': palette.openText,
-      '--wiw-card-filled-text': palette.filledText,
-      '--wiw-card-open-muted': palette.openMuted,
-      '--wiw-card-filled-muted': palette.filledMuted,
-    } as React.CSSProperties;
-  };
   const selectedClientName = clients.find((item: any) => String(item.id) === form.client)?.name || '';
   const selectedPositionName = positions.find((item: any) => String(item.id) === form.position)?.name || '';
   const formPalette = schedulePalette(selectedClientName, selectedPositionName, form.color_hue);
@@ -952,15 +970,7 @@ export default function WiwScheduleMobile() {
     const map: Record<string, CardRow[]> = {};
     visibleDays.forEach((day) => { map[day] = []; });
     visibleCards.forEach((card) => { (map[dateKeyFromIso(card.shift.starts_at)] ||= []).push(card); });
-    Object.values(map).forEach((dayCards) => {
-      dayCards.sort((left, right) => {
-        const groupOrder = clientRank(left.shift.client_name) - clientRank(right.shift.client_name);
-        if (groupOrder) return groupOrder;
-        const nameOrder = String(left.shift.client_name || '').localeCompare(String(right.shift.client_name || ''), 'de');
-        if (nameOrder) return nameOrder;
-        return new Date(left.shift.starts_at).getTime() - new Date(right.shift.starts_at).getTime();
-      });
-    });
+    Object.values(map).forEach((dayCards) => dayCards.sort(sortScheduleCards));
     return map;
   }, [visibleDays, visibleCards]);
   const weekHours = useMemo(() => visibleCards.reduce((sum, card) => {
@@ -1331,12 +1341,12 @@ export default function WiwScheduleMobile() {
       setFormOpen(false);
       window.dispatchEvent(new Event('aplus:dashboard-invalidated'));
       // Refresh after closing. A slow GET must not keep the save UI blocked.
-      void loadScheduleWeek(targetWeek, false);
+      void loadScheduleWeek(targetWeek, false, true);
     } catch (error: any) {
       if (String(error?.message || '').includes('Schichtkarte wurde nicht gefunden')) {
         setToast('Schichtkarte wurde zwischenzeitlich geändert. Dienstplan aktualisiert; bitte erneut öffnen.');
         setFormOpen(false);
-        void loadScheduleWeek(targetWeek, false);
+        void loadScheduleWeek(targetWeek, false, true);
       } else {
         if (error instanceof ShiftWriteUnconfirmedError) setSaveUncertain(true);
         setToast(error.message || 'Schicht konnte nicht gespeichert werden.');
@@ -1348,43 +1358,81 @@ export default function WiwScheduleMobile() {
     }
   }
 
-  function changeWeek(delta: number, swipeTrack?: HTMLElement) {
+  function resetSwipe(track: HTMLElement) {
+    track.classList.remove('is-dragging', 'is-settling');
+    track.style.removeProperty('--wiw-swipe-x');
+  }
+
+  function canSlideToWeek(track: HTMLElement, delta: number) {
+    const side = delta < 0 ? 'prev' : 'next';
+    const preview = track.querySelector<HTMLElement>(`.wiw-week-pane-${side}[data-week-ready="true"]`);
+    const viewportBottom = swipeScrollElement.current?.getBoundingClientRect().bottom || window.innerHeight;
+    const footerTop = track.closest('.wiw-schedule-mobile')?.querySelector('.wiw-week-total')?.getBoundingClientRect().top ?? viewportBottom;
+    // Only slide when the destination covers the visible list at this scroll
+    // position. A shorter week may end above it.
+    return Boolean(preview && preview.getBoundingClientRect().bottom >= Math.min(viewportBottom, footerTop));
+  }
+
+  useLayoutEffect(() => {
+    setLoadingWeek(false);
+    const track = weekTrackRef.current;
+    if (!active || !mobile || !manager || tab === 'open' || !track) return;
+    const ionContent = track.closest('ion-content') as HTMLIonContentElement | null;
+    let alive = true;
+    void ionContent?.getScrollElement().then((element) => {
+      if (alive) swipeScrollElement.current = element;
+    }).catch(() => undefined);
+    return () => {
+      alive = false;
+      swipeScrollElement.current = null;
+      swipe.current = undefined;
+      swipeAxis.current = null;
+      window.cancelAnimationFrame(swipeFrame.current ?? 0);
+      window.clearTimeout(swipeSettle.current);
+      swipeFrame.current = swipeSettle.current = undefined;
+      navigationPending.current = false;
+      navigationSequence.current += 1;
+      resetSwipe(track);
+    };
+  }, [active, mobile, manager, tab, weekStart]);
+
+  async function changeWeek(delta: number, track = weekTrackRef.current) {
+    if (navigationPending.current || swipeSettle.current !== undefined || !track) return;
+    navigationPending.current = true;
+    const sequence = ++navigationSequence.current;
     const nextAnchor = addDays(anchor, delta);
     const nextWeek = monday(nextAnchor);
-    let cachedRows: any[] | undefined;
-    const cached = safeSessionGet(`${WEEK_CACHE_PREFIX}${nextWeek}`);
-    if (cached) {
+    let nextRows = readWeek(nextWeek);
+    if (nextRows === undefined) {
+      resetSwipe(track);
+      setLoadingWeek(true);
       try {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) cachedRows = parsed;
-      } catch { /* optional cache */ }
-    }
-
-    const apply = () => {
-      if (cachedRows) {
-        localRowsRef.current = cachedRows;
-        setRows([...cachedRows, ...liveRowsRef.current]);
+        nextRows = await fetchWeek(nextWeek);
+      } catch (error: any) {
+        if (sequence === navigationSequence.current) {
+          navigationPending.current = false;
+          setLoadingWeek(false);
+          setToast(error.message || 'Dienstplan konnte nicht geladen werden.');
+        }
+        return;
       }
-      setAnchor(nextAnchor);
-    };
-
-    if (swipeTrack) {
-      const savedTop = swipeScrollElement.current?.scrollTop ?? swipeScrollTop.current;
-      swipeTrack.style.transition = 'none';
-      flushSync(apply);
-      swipeTrack.style.setProperty('--wiw-swipe-x', '0px');
-      swipeTrack.classList.remove('is-dragging', 'is-settling');
-      void swipeTrack.offsetWidth;
-      swipeTrack.style.transition = '';
-      const restore = () => {
-        if (swipeScrollElement.current) swipeScrollElement.current.scrollTop = savedTop;
-        else window.scrollTo({ top: savedTop, left: window.scrollX, behavior: 'auto' });
-      };
-      restore();
-      window.requestAnimationFrame(() => window.requestAnimationFrame(restore));
-    } else {
-      apply();
     }
+    if (sequence !== navigationSequence.current || !track.isConnected) return;
+
+    const scroll = swipeScrollElement.current;
+    const savedTop = scroll?.scrollTop ?? window.scrollY;
+    // Invalidate any response still in flight for the previous active week.
+    loadSequence.current += 1;
+    localRowsRef.current = nextRows;
+    flushSync(() => {
+      publishRows();
+      setBusy(false);
+      setLoadingWeek(false);
+      setAnchor(nextAnchor);
+    });
+    resetSwipe(track);
+    // Clamp against the destination's final layout before the next paint.
+    if (scroll) scroll.scrollTop = Math.min(savedTop, Math.max(0, scroll.scrollHeight - scroll.clientHeight));
   }
 
   function toggleGroupFilter(value: string) {
@@ -1454,27 +1502,17 @@ export default function WiwScheduleMobile() {
 
       {tab !== 'open' ? <div className="wiw-week-swipe-viewport">
         <div
+          ref={weekTrackRef}
           className="wiw-week-swipe-track"
+          aria-busy={loadingWeek}
           onTouchStart={(event) => {
+            if (navigationPending.current || swipeSettle.current !== undefined || event.touches.length !== 1) return;
             const touch = event.touches[0];
             swipe.current = { x: touch.clientX, y: touch.clientY };
-            swipeTravel.current = 0;
             swipeAxis.current = null;
-            swipeScrollElement.current = null;
-            swipeScrollTop.current = window.scrollY;
-            event.currentTarget.classList.remove('is-dragging', 'is-settling');
-            event.currentTarget.style.setProperty('--wiw-swipe-x', '0px');
-            const ionContent = document.querySelector('ion-content.app-content') as any;
-            void ionContent?.getScrollElement?.().then((element: HTMLElement) => {
-              swipeScrollElement.current = element;
-              swipeScrollTop.current = element.scrollTop;
-            }).catch(() => {
-              swipeScrollElement.current = null;
-              swipeScrollTop.current = window.scrollY;
-            });
           }}
           onTouchMove={(event) => {
-            if (!swipe.current || !event.touches.length) return;
+            if (!swipe.current || event.touches.length !== 1) return;
             const touch = event.touches[0];
             const dx = touch.clientX - swipe.current.x;
             const dy = touch.clientY - swipe.current.y;
@@ -1482,70 +1520,71 @@ export default function WiwScheduleMobile() {
               swipeAxis.current = Math.abs(dx) > Math.abs(dy) * 1.12 ? 'horizontal' : 'vertical';
             }
             if (swipeAxis.current !== 'horizontal') return;
-            if (event.cancelable) event.preventDefault();
-            const width = event.currentTarget.parentElement?.clientWidth || window.innerWidth;
-            swipeTravel.current = Math.max(-width, Math.min(width, dx));
-            event.currentTarget.classList.add('is-dragging');
-            if (swipeFrame.current) return;
-            const target = event.currentTarget;
+            const track = event.currentTarget;
+            const width = track.parentElement?.clientWidth || window.innerWidth;
+            swipeTravel.current = canSlideToWeek(track, dx < 0 ? 7 : -7) ? Math.max(-width, Math.min(width, dx)) : 0;
+            track.classList.add('is-dragging');
+            if (swipeFrame.current !== undefined) return;
             swipeFrame.current = window.requestAnimationFrame(() => {
               swipeFrame.current = undefined;
-              target.style.setProperty('--wiw-swipe-x', `${swipeTravel.current}px`);
+              track.style.setProperty('--wiw-swipe-x', `${swipeTravel.current}px`);
             });
           }}
           onTouchEnd={(event) => {
-            if (swipeFrame.current) window.cancelAnimationFrame(swipeFrame.current);
-            swipeFrame.current = undefined;
             if (!swipe.current || !event.changedTouches.length) return;
+            window.cancelAnimationFrame(swipeFrame.current ?? 0);
+            swipeFrame.current = undefined;
             const touch = event.changedTouches[0];
             const dx = touch.clientX - swipe.current.x;
             const dy = touch.clientY - swipe.current.y;
             const axis = swipeAxis.current;
             swipe.current = undefined;
             swipeAxis.current = null;
-            const target = event.currentTarget;
-            target.classList.remove('is-dragging');
-            target.classList.add('is-settling');
-            if (axis === 'horizontal' && Math.abs(dx) > 44 && Math.abs(dx) > Math.abs(dy) * 1.12) {
-              const width = target.parentElement?.clientWidth || window.innerWidth;
-              target.style.setProperty('--wiw-swipe-x', `${dx < 0 ? -width : width}px`);
-              window.setTimeout(() => changeWeek(dx < 0 ? 7 : -7, target), 180);
+            if (axis !== 'horizontal') return;
+            const track = event.currentTarget;
+            const delta = dx < 0 ? 7 : -7;
+            const commit = Math.abs(dx) > 44 && Math.abs(dx) > Math.abs(dy) * 1.12;
+            if (commit && !canSlideToWeek(track, delta)) {
+              resetSwipe(track);
+              void changeWeek(delta, track);
               return;
             }
-            target.style.setProperty('--wiw-swipe-x', '0px');
-            window.setTimeout(() => target.classList.remove('is-settling'), 180);
+            const width = track.parentElement?.clientWidth || window.innerWidth;
+            track.classList.remove('is-dragging');
+            track.classList.add('is-settling');
+            track.style.setProperty('--wiw-swipe-x', `${commit ? -Math.sign(delta) * width : 0}px`);
+            swipeSettle.current = window.setTimeout(() => {
+              swipeSettle.current = undefined;
+              if (commit) void changeWeek(delta, track);
+              else resetSwipe(track);
+            }, 180);
           }}
           onTouchCancel={(event) => {
-            if (swipeFrame.current) window.cancelAnimationFrame(swipeFrame.current);
+            if (!swipe.current) return;
+            window.cancelAnimationFrame(swipeFrame.current ?? 0);
             swipeFrame.current = undefined;
             swipe.current = undefined;
             swipeAxis.current = null;
-            event.currentTarget.classList.remove('is-dragging');
-            event.currentTarget.classList.add('is-settling');
-            event.currentTarget.style.setProperty('--wiw-swipe-x', '0px');
-            window.setTimeout(() => event.currentTarget.classList.remove('is-settling'), 180);
+            resetSwipe(event.currentTarget);
           }}
         >
-          <AdjacentWeekPreview weekStart={addDays(weekStart, -7)} groupFilter={groupFilter} query={query} side="prev" showRecordedTime={isAdmin} />
-          <div key={weekStart} className="wiw-week-scroll wiw-week-pane wiw-week-pane-center">
-            {visibleDays.map((day) => {
-              const header = formatDayHeader(day);
-              const dayCards = byDay[day] || [];
-              return <section className="wiw-day-section wiw-day-visual" id={`wiw-day-${day}`} key={day}>
-                <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}<small> · {dayCards.reduce((sum, card) => { const gross = Math.max(0, (new Date(card.shift.ends_at).getTime() - new Date(card.shift.starts_at).getTime()) / 3600000); return sum + Math.max(0, gross - Number(card.shift.break_minutes || 0) / 60); }, 0).toFixed(1)} Std.</small></em></header>
-                {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'} ${recentCopyShiftId && String(card.shift.id) === recentCopyShiftId ? 'is-copy-entering' : ''}`} style={shiftCardStyle(card.shift)} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
-                  <div className="wiw-card-main">
-                    <CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} />
-                    <span className="wiw-card-copy"><b>{cardWorkerShortName(card.worker?.name) || (card.shift.status === 'draft' ? 'Entwurf' : 'OpenShift')}{card.isOpen && card.shift.status !== 'draft' ? <span className="wiw-open-alert">!</span> : null}</b><small>{cardPositionShortLabel(card.shift.position_name)}</small></span>
-                    <ShiftClientLogo shift={card.shift} />
-                    <CardTimeMeta card={card} showRecordedTime={isAdmin} />
-                  </div>
-                </button></React.Fragment>)}
-                {!dayCards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
-              </section>;
-            })}
-          </div>
-          <AdjacentWeekPreview weekStart={addDays(weekStart, 7)} groupFilter={groupFilter} query={query} side="next" showRecordedTime={isAdmin} />
+          {([-7, 0, 7] as const).map((offset) => {
+            const paneWeek = addDays(weekStart, offset);
+            return <ScheduleWeekPane
+              key={paneWeek}
+              weekStart={paneWeek}
+              side={offset === 0 ? 'center' : offset < 0 ? 'prev' : 'next'}
+              activeDays={byDay}
+              groupFilter={groupFilter}
+              query={query}
+              tab={tab}
+              readWeek={readWeek}
+              fetchWeek={fetchWeek}
+              showRecordedTime={isAdmin}
+              recentCopyShiftId={recentCopyShiftId}
+              onEdit={(card) => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}
+            />;
+          })}
         </div>
       </div> : <div className="wiw-week-scroll">
         {visibleDays.map((day) => {
@@ -1561,7 +1600,7 @@ export default function WiwScheduleMobile() {
         {!visibleDays.length ? <div className="wiw-day-empty">Keine verfügbaren OpenShifts</div> : null}
       </div>}
 
-      {tab !== 'open' ? <div className="wiw-week-total"><span>Gesamtstunden</span><strong>{weekHours.toFixed(1)}</strong></div> : null}
+      {tab !== 'open' ? <div className="wiw-week-total"><span aria-live="polite">{loadingWeek ? 'Woche wird geladen …' : 'Gesamtstunden'}</span><strong>{weekHours.toFixed(1)}</strong></div> : null}
       <button type="button" className="wiw-create-fab" aria-label="Schicht anlegen" onClick={() => openCreate(anchor)}>+</button>
 
       {formOpen ? <div ref={formScreenRef} className="wiw-shift-form-screen" data-testid="wiw-shift-form">

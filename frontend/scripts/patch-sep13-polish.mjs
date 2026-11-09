@@ -20,7 +20,7 @@ patchFile('WiwScheduleMobile.tsx', (source) => {
   let next = source;
   const modernContiguousSwipe = source.includes('MODERN_WEEK_CACHE_NAVIGATION')
     && source.includes('wiw-week-swipe-track')
-    && source.includes('function AdjacentWeekPreview(');
+    && (source.includes('function AdjacentWeekPreview(') || source.includes('function ScheduleWeekPane('));
 
   next = replaceRequired(
     next,

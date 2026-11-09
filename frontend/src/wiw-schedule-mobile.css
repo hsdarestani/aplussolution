@@ -271,12 +271,14 @@
     margin-left:0;
     display:block;
     align-items:initial;
-    transform:translate3d(var(--wiw-swipe-x),0,0);
+    transform:none;
     touch-action:pan-y;
     overscroll-behavior-x:contain;
-    will-change:transform;
+    will-change:auto;
     overflow-anchor:none;
   }
+  .wiw-week-swipe-track.is-dragging,
+  .wiw-week-swipe-track.is-settling{transform:translateX(var(--wiw-swipe-x));will-change:auto}
   .wiw-week-swipe-track.is-dragging{transition:none!important}
   .wiw-week-swipe-track.is-settling{transition:transform .18s cubic-bezier(.2,.8,.2,1)!important}
   .wiw-week-pane{

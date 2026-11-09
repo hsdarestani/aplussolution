@@ -60,8 +60,8 @@ export default function ShiftClientLogo({ shift }: { shift: { client_name?: stri
           key={key}
           src={brand.local}
           alt={brand.name}
-          decoding="async"
-          loading="lazy"
+          decoding="sync"
+          loading="eager"
           onError={(event) => {
             const image = event.currentTarget;
             if (!image.dataset.triedOriginal) {

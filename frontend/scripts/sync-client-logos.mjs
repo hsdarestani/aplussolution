@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
@@ -11,9 +11,15 @@ const originals = [
   ['hotel-spenerhaus.png', 'https://spenerhaus.de/wp-content/uploads/2026/02/Spener_Wortmarke_rgb-2.png'],
 ];
 
+const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+const isPng = (buffer) => buffer.length >= 300 && buffer.subarray(0, 8).equals(pngSignature);
+
 await mkdir(destination, { recursive: true });
 
 await Promise.all(originals.map(async ([filename, url]) => {
+  const file = join(destination, filename);
+  const bundled = await readFile(file).catch(() => null);
+  if (bundled && isPng(bundled)) return;
   try {
     const response = await fetch(url, {
       signal: AbortSignal.timeout(9000),
@@ -21,11 +27,10 @@ await Promise.all(originals.map(async ([filename, url]) => {
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const buffer = Buffer.from(await response.arrayBuffer());
-    const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-    if (!buffer.subarray(0, 8).equals(pngSignature) || buffer.length < 300) {
+    if (!isPng(buffer)) {
       throw new Error('Official resource did not return a valid PNG');
     }
-    await writeFile(join(destination, filename), buffer);
+    await writeFile(file, buffer);
     console.log(`Bundled official customer logo: ${filename} (${buffer.length} bytes)`);
   } catch (error) {
     // An outage on a customer's website must not block an app build.
