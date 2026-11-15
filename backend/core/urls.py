@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import lexware_chunk_archive
+from . import lexware_chunk_archive, stundenzettel
 from . import personnel_import, client_portal_user_admin, admin_center_views, advanced_views, akten_views, announcement_api, attendance_actions, attendance_views, automation_ai_views, automation_views, availability_admin, avatar_views, calendar_sync, client_admin_views, client_order_planning, client_portal_auth, client_portal_views, contract_views, document_catalog_views, document_center_views, employee_schedule, global_search_views, integration_views, live_admin_center, live_operations, mobile_schedule, native_operations, oauth_views, one_time_ops, payroll_views, portal_views, push_views, schedule_reports, searchable_views, semantic_ai_views, shift_card_admin, shift_plan_views, shift_slot_actions, shift_views, store_review_views, time_views, views, wiw_dashboard, worker_portal_views
 
 router = DefaultRouter()
@@ -158,6 +158,7 @@ urlpatterns = [
     path('working-time/backup/', automation_views.worktime_backup),
     path('reports/timesheets.csv', advanced_views.export_timesheets),
     path('reports/schedule.csv', native_operations.export_schedule),
+    path('reports/stundenzettel.pdf', stundenzettel.export_stundenzettel),
     path('reports/schedule.pdf', schedule_reports.export_schedule_pdf),
     path('reports/attendance.pdf', schedule_reports.export_attendance_pdf),
     path('reports/attendance-details.pdf', schedule_reports.export_attendance_details_pdf),
