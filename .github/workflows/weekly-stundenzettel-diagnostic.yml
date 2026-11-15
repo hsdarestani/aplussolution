@@ -1,4 +1,4 @@
-name: Read-only weekly Stundenzettel deployment diagnostic
+name: Verify weekly Stundenzettel production persistence
 on:
   push:
     branches: [main]
@@ -6,14 +6,15 @@ on:
 permissions:
   contents: read
 jobs:
-  diagnose:
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
       PRIMARY_HOST: ${{ secrets.STRATO_HOST }}
       PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
     steps:
-      - name: Inspect live source mounts and immutable image contents
+      - uses: actions/checkout@v4
+      - name: Verify image survives primary recovery and both PDF exports work
         run: |
           set -euo pipefail
           umask 077
@@ -23,33 +24,20 @@ jobs:
           ssh -i "$key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$PRIMARY_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/aplussolution
-          curl -fsS --max-time 15 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/api/status/ready/
+          systemctl is-active --quiet aplus-primary-ensure.timer
           live="$(docker compose ps -q backend)"
-          docker inspect -f '{{json .Mounts}}' "$live"
-          docker inspect -f 'LIVE_IMAGE={{.Config.Image}} WORKDIR={{.Config.WorkingDir}}' "$live"
-          docker compose exec -T backend python -c "import core,sys; from pathlib import Path; print('CORE_PATH',core.__file__); print('MODULE_EXISTS',Path('/app/core/stundenzettel.py').exists()); print('SYS_PATH',sys.path)" </dev/null
-          docker inspect -f 'COMPOSE_PROJECT={{index .Config.Labels "com.docker.compose.project"}} FILES={{index .Config.Labels "com.docker.compose.project.config_files"}}' "$live"
-          python3 - <<'PY'
-          import subprocess,json
-          from pathlib import Path
-          for p in sorted(Path('.').glob('*compose*')):
-              print('COMPOSE_PATH',str(p))
-          for args in [[],['-f','docker-compose.yml','-f','docker-compose.override.yml']]:
-              j=json.loads(subprocess.check_output(['docker','compose',*args,'config','--format','json']))
-              print('EFFECTIVE_IMAGE',args,j['services']['backend'].get('image'),'NAME',j.get('name'))
-          for line in Path('.env').read_text().splitlines():
-              if line.startswith(('COMPOSE_FILE=','COMPOSE_PROJECT_NAME=')):
-                  print(line)
-          PY
-          docker events --since '2026-11-15T18:38:35Z' --until '2026-11-15T18:38:50Z' --filter type=container --format '{{json .}}' | python3 -c 'import sys,json; events=[json.loads(l) for l in sys.stdin]; [print("BACKEND_EVENT",e.get("time"),e.get("Action"),e.get("Actor",{}).get("ID","")[:12],e.get("Actor",{}).get("Attributes",{}).get("image")) for e in events if e.get("Actor",{}).get("Attributes",{}).get("com.docker.compose.service")=="backend"]'
-          systemctl list-units --type=service --all --no-pager | grep -Ei 'aplus|watch|guard|recover' || true
-          systemctl list-timers --all --no-pager | grep -Ei 'aplus|watch|guard|recover' || true
-          systemctl cat aplus-primary-ensure.service aplus-primary-ensure.timer
-          journalctl -u aplus-primary-ensure.service --since '2026-11-15 18:38:30' --until '2026-11-15 18:39:00' --no-pager | tail -n 50
           pin='ghcr.io/hsdarestani/aplus-bluegreen-backend@sha256:d6b43013062ffc85b729e55279265d22004b459367c712e0477d70bdf9ce206a'
-          probe="$(docker create --network none --entrypoint /bin/true "$pin")"
-          trap 'docker rm "$probe" >/dev/null 2>&1 || true' EXIT
-          docker cp "$probe":/app/core/stundenzettel.py /tmp/stundenzettel-image-probe.py && echo IMAGE_MODULE_EXISTS
-          sha256sum /tmp/stundenzettel-image-probe.py
-          rm -f /tmp/stundenzettel-image-probe.py
+          test "$(docker inspect -f '{{.Config.Image}}' "$live")" = "$pin"
+          sleep 30
+          live="$(docker compose ps -q backend)"
+          test "$(docker inspect -f '{{.Config.Image}}' "$live")" = "$pin"
+          systemctl is-active --quiet aplus-primary-ensure.timer
+          curl -fsS --max-time 15 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/api/status/ready/
+          front="$(docker compose ps -q frontend)"
+          docker exec "$front" sh -c 'grep -Rq "reports/stundenzettel.pdf" /usr/share/nginx/html/assets'
+          echo RECOVERY_TIMER_AND_NEW_WEB_BUNDLE_VERIFIED
           REMOTE
+          ssh -i "$key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$PRIMARY_HOST" 'cd /opt/aplussolution && docker compose exec -T backend python manage.py shell' < scripts/verify-weekly-stundenzettel.py
+          status="$(curl -sS --max-time 20 -o /tmp/stundenzettel-anonymous.json -w '%{http_code}' 'https://app.aplus-solution.de/api/reports/stundenzettel.pdf?week=2026-W45&group=housekeeping')"
+          test "$status" = 401
+          echo PUBLIC_EXPORT_AUTH_REQUIRED_AND_PRODUCTION_PERSISTENCE_OK
