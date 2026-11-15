@@ -44,6 +44,8 @@ jobs:
           docker events --since '2026-11-15T18:38:35Z' --until '2026-11-15T18:38:50Z' --filter type=container --format '{{json .}}' | python3 -c 'import sys,json; events=[json.loads(l) for l in sys.stdin]; [print("BACKEND_EVENT",e.get("time"),e.get("Action"),e.get("Actor",{}).get("ID","")[:12],e.get("Actor",{}).get("Attributes",{}).get("image")) for e in events if e.get("Actor",{}).get("Attributes",{}).get("com.docker.compose.service")=="backend"]'
           systemctl list-units --type=service --all --no-pager | grep -Ei 'aplus|watch|guard|recover' || true
           systemctl list-timers --all --no-pager | grep -Ei 'aplus|watch|guard|recover' || true
+          systemctl cat aplus-primary-ensure.service aplus-primary-ensure.timer
+          journalctl -u aplus-primary-ensure.service --since '2026-11-15 18:38:30' --until '2026-11-15 18:39:00' --no-pager | tail -n 50
           pin='ghcr.io/hsdarestani/aplus-bluegreen-backend@sha256:d6b43013062ffc85b729e55279265d22004b459367c712e0477d70bdf9ce206a'
           probe="$(docker create --network none --entrypoint /bin/true "$pin")"
           trap 'docker rm "$probe" >/dev/null 2>&1 || true' EXIT
