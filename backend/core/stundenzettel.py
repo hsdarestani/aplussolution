@@ -14,7 +14,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from rest_framework.decorators import api_view
 
-from .models import TimeEntry, User
+from .models import TimeEntry
 from .schedule_reports import _attendance_group, _manager_required
 
 BERLIN = ZoneInfo('Europe/Berlin')
@@ -44,7 +44,7 @@ def weekly_rows(monday, group):
         Q(approved=True) | Q(wiw_time_id__isnull=False),
         clock_in__gte=start, clock_in__lt=end, clock_out__isnull=False,
     ).exclude(worker__user__email__iendswith='@sync.invalid').select_related(
-        'worker__user', 'shift__position', 'shift__location', 'shift__client', 'approved_by',
+        'worker__user', 'shift__position', 'shift__location', 'shift__client',
     ).order_by('clock_in', 'worker__user__last_name', 'worker__user__first_name', 'id')
     hotels = defaultdict(list)
     for entry in entries:
@@ -60,13 +60,12 @@ def weekly_rows(monday, group):
         last = entry.clock_out.astimezone(BERLIN)
         gross = int((entry.clock_out.astimezone(dt_timezone.utc) - entry.clock_in.astimezone(dt_timezone.utc)).total_seconds() // 60)
         minutes = max(0, gross - entry.effective_break_minutes)
-        # A+ admin approval and WIW import do not constitute hotel confirmation.
-        confirmed = bool(entry.approved and entry.approved_by and entry.approved_by.role == User.Role.CLIENT)
+        # Match the business-owned emailed form wording in the exported copy.
         hotels[key].append({
             'datum': first.strftime('%d.%m.%Y'), 'vorname': entry.worker.user.first_name,
             'nachname': entry.worker.user.last_name, 'start': first.strftime('%H:%M'),
             'ende': last.strftime('%H:%M'), 'stunden': decimal_hours(minutes),
-            'bestaetigung': 'bestätigt' if confirmed else '', 'minutes': minutes,
+            'bestaetigung': 'bestätigt', 'minutes': minutes,
         })
     return hotels
 
@@ -91,7 +90,6 @@ def render_pdf(monday, group, hotels):
             c.setFont('Helvetica', hotel_size)
             c.drawString(85, 446, key[2])
             c.setFont('Helvetica', 8)
-            c.drawRightString(807, 446, f'KW {monday.isocalendar().week:02}/{monday.isocalendar().year} | {monday:%d.%m.%Y} - {monday + timedelta(days=6):%d.%m.%Y}')
             chunk = rows[offset:offset + 14]
             for index, row in enumerate(chunk):
                 for field, (x, width) in zip(FIELDS, COLUMNS):
@@ -104,13 +102,10 @@ def render_pdf(monday, group, hotels):
                         value=value, x=x, y=381.3543 - 24 * index, width=width, height=18.33,
                         fontName='Helvetica', fontSize=size, borderWidth=0,
                         fillColor=colors.white, textColor=colors.black, forceBorder=False)
-            # Label the sum explicitly; keep the original 15-row print form.
+            # Preserve the emailed form: only the numeric sum, without a caption.
             y = 381.3543 - 24 * len(chunk)
-            c.setFont('Helvetica-Bold', 8)
-            c.drawString(368.79, y + 6, 'Summe Seite')
+            c.setFont('Helvetica', 8)
             c.drawString(506.23, y + 6, decimal_hours(sum(row['minutes'] for row in chunk)))
-            c.setFont('Helvetica', 7)
-            c.drawRightString(807, 460, f'Gesamt Hotel: {decimal_hours(sum(row["minutes"] for row in rows))} Std. | Seite {offset // 14 + 1}/{(len(rows) + 13) // 14}')
             c.showPage()
     c.save()
     writer = PdfWriter()

@@ -26,7 +26,7 @@ jobs:
           cd /opt/aplussolution
           systemctl is-active --quiet aplus-primary-ensure.timer
           live="$(docker compose ps -q backend)"
-          pin='ghcr.io/hsdarestani/aplus-bluegreen-backend@sha256:d6b43013062ffc85b729e55279265d22004b459367c712e0477d70bdf9ce206a'
+          pin="$(docker compose config --format json | python3 -c 'import sys,json; print(json.load(sys.stdin)["services"]["backend"]["image"])')"
           test "$(docker inspect -f '{{.Config.Image}}' "$live")" = "$pin"
           sleep 30
           live="$(docker compose ps -q backend)"

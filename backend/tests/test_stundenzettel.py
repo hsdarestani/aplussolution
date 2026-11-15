@@ -23,7 +23,7 @@ def test_export_roles_and_validation(auth_admin, auth_worker, auth_client, api_c
     assert auth_admin.get(path).status_code == 404
 
 @pytest.mark.django_db
-def test_actual_hours_week_boundary_names_and_no_fake_hotel_confirmation(auth_admin, worker_user, shift, admin_user):
+def test_actual_hours_week_boundary_and_exact_emailed_form_wording(auth_admin, worker_user, shift, admin_user):
     shift.schedule_groups = ['front_office']; shift.save()
     entry(worker_user, shift, '2026-11-08T22:30', '2026-11-09T06:30', approved=True, approved_by=admin_user, break_minutes=30)
     entry(worker_user, shift, '2026-11-09T08:00', '2026-11-09T12:00', approved=True)
@@ -34,9 +34,14 @@ def test_actual_hours_week_boundary_names_and_no_fake_hotel_confirmation(auth_ad
     assert 'KW45 - 2026' in response['Content-Disposition']
     assert response['Cache-Control'] == 'private, no-store'
     reader = PdfReader(BytesIO(response.content)); fields = reader.get_fields()
-    for field, value in [('vorname','Anna'),('nachname','Becker'),('datum','08.11.2026'),('start','22:30'),('ende','06:30'),('stunden','7.5'),('bestaetigung','')]:
+    for field, value in [('vorname','Anna'),('nachname','Becker'),('datum','08.11.2026'),('start','22:30'),('ende','06:30'),('stunden','7.5'),('bestaetigung','bestätigt')]:
         assert fields[f'p1_{field}_02']['/V'] == value
     assert len(fields) == 14
+    assert fields['p1_bestaetigung_01']['/V'] == 'bestätigt'
+    text = reader.pages[0].extract_text()
+    assert all(value not in text for value in ['Summe Seite', 'Gesamt Hotel', 'KW ', 'Seite 1/'])
+    assert 'Bestätigung Hotel' in text
+    assert '(Unterschrift)' in text
     assert '11.5' in reader.pages[0].extract_text()
     assert 'Hotel Spenerhaus' not in reader.pages[0].extract_text()
     for widget in reader.pages[0]['/Annots']:

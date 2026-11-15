@@ -25,6 +25,12 @@ for entry in TimeEntry.objects.filter(clock_out__isnull=False).select_related('s
     assert response.status_code == 200
     pdf = PdfReader(BytesIO(response.content))
     assert pdf.pages and pdf.get_fields()
+    for page in pdf.pages:
+        text = page.extract_text()
+        assert all(value not in text for value in ['Summe Seite', 'Gesamt Hotel', 'KW ', 'Seite 1/'])
+        assert 'Bestätigung Hotel' in text and '(Unterschrift)' in text
+    confirmations = [field['/V'] for name, field in pdf.get_fields().items() if '_bestaetigung_' in name]
+    assert confirmations and set(confirmations) == {'bestätigt'}
     print('LIVE_STUNDENZETTEL_OK', group, 'pages', len(pdf.pages), 'fields', len(pdf.get_fields()))
     checked.add(group)
     if len(checked) == 2:
