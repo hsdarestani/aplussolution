@@ -1,0 +1,242 @@
+name: Guarded weekly Stundenzettel web release
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/weekly-stundenzettel-release.yml'
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: aplus-strato-safe-release-anu-20261021
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      PRODUCTION_DOMAIN: app.aplus-solution.de
+      PRIMARY_HOST: ${{ secrets.STRATO_HOST }}
+      PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+      REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REGISTRY_USER: ${{ github.actor }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Validate Django and regression tests
+        working-directory: backend
+        env:
+          DJANGO_SECRET_KEY: django-admin-release-test-only
+          DATABASE_URL: sqlite:///test.sqlite3
+          ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+          CORS_ALLOWED_ORIGINS: http://localhost:8080
+          CSRF_TRUSTED_ORIGINS: http://localhost:8080
+        shell: bash
+        run: |
+          set -euo pipefail
+          pip install -r requirements.txt
+          python manage.py check
+          python manage.py makemigrations --check --dry-run
+          pytest --nomigrations -q tests/test_stundenzettel.py tests/test_operations_reports.py tests/test_schedule_pdf_notes.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate and build web admin
+        working-directory: frontend
+        env:
+          VITE_API_URL: https://app.aplus-solution.de/api
+        run: |
+          npm install --no-audit --no-fund --package-lock=false
+          npm test -- --run src/test/WeeklyStundenzettel.test.tsx
+          npm run build
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build immutable backend on runner
+        id: backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/hsdarestani/aplus-bluegreen-backend:${{ github.sha }}
+          cache-from: type=gha,scope=aplus-bluegreen-backend
+          cache-to: type=gha,mode=max,scope=aplus-bluegreen-backend
+      - name: Prepare isolated SSH credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRIMARY_HOST" && test -n "$PRIVATE_KEY"
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$PRIVATE_KEY" > "$HOME/.ssh/aplus_time_entry_release"
+          chmod 600 "$HOME/.ssh/aplus_time_entry_release"
+      - name: Free safe release headroom by pausing only staging Celery
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/aplus_time_entry_release" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 root@"$PRIMARY_HOST" "RUN_ID='$GITHUB_RUN_ID' bash -s" <<'REMOTE'
+          set -euo pipefail
+          staging='aplus_staging-staging_celery-1'
+          marker="/tmp/aplus-staging-celery-paused-${RUN_ID}.marker"
+          test ! -e "$marker"
+          mem="$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)"
+          echo "RELEASE_AVAILABLE_RAM_BEFORE_MB=$mem"
+          if (( mem >= 850 )); then
+            echo STAGING_WORKER_LEFT_RUNNING_SUFFICIENT_RAM
+            exit 0
+          fi
+          test "$(docker inspect -f '{{.State.Running}}' "$staging")" = true
+          test "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$staging")" = 'aplus_staging'
+          test "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$staging")" = 'staging_celery'
+          echo "$staging" > "$marker"
+          nohup sh -c "sleep 900; docker start '$staging' >/dev/null 2>&1 || true" </dev/null >/dev/null 2>&1 &
+          docker stop -t 20 "$staging"
+          mem="$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)"
+          echo "RELEASE_AVAILABLE_RAM_AFTER_MB=$mem"
+          if (( mem < 750 )); then
+            docker start "$staging"
+            rm -f "$marker"
+            echo ABORT_INSUFFICIENT_RAM_AFTER_SAFE_STAGING_PAUSE
+            exit 2
+          fi
+          REMOTE
+      - name: Read-only production safety and resource gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/aplus_time_entry_release" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 root@"$PRIMARY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          test -s .env && test -s docker-compose.override.yml
+          test ! -e /var/lock/aplus-maintenance-block
+          test "$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)" -ge 650
+          test "$(df -Pm /var/lib/docker | awk 'END{print $4}')" -ge 3000
+          for service in db redis backend frontend caddy celery celery-beat; do
+            cid="$(docker compose ps -q "$service")"
+            test -n "$cid" && test "$(docker inspect -f '{{.State.Running}}' "$cid")" = true
+          done
+          docker compose exec -T backend python manage.py migrate --check </dev/null
+          curl -fsS --max-time 15 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/api/status/ready/ -o /tmp/aplus-time-entry-before.json
+          grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/aplus-time-entry-before.json
+          echo TIME_ENTRY_RELEASE_PREFLIGHT_OK
+          REMOTE
+      - name: Prepull backend and switch with automatic rollback
+        id: cutover
+        shell: bash
+        env:
+          BACKEND_IMAGE: ghcr.io/hsdarestani/aplus-bluegreen-backend@${{ steps.backend.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$BACKEND_IMAGE" == *@sha256:* ]]
+          authdir="/tmp/aplus-time-entry-$GITHUB_RUN_ID"
+          ssh -i "$HOME/.ssh/aplus_time_entry_release" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$PRIMARY_HOST" "install -d -m 700 '$authdir'"
+          printf '%s' "$REGISTRY_TOKEN" | ssh -i "$HOME/.ssh/aplus_time_entry_release" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$PRIMARY_HOST" "DOCKER_CONFIG='$authdir' docker login ghcr.io -u '$REGISTRY_USER' --password-stdin" >/dev/null
+          ssh -i "$HOME/.ssh/aplus_time_entry_release" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=10 -o ServerAliveCountMax=8 root@"$PRIMARY_HOST" "DOCKER_CONFIG='$authdir' timeout 300 docker pull '$BACKEND_IMAGE'"
+          scp -q -i "$HOME/.ssh/aplus_time_entry_release" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null deploy/singlehost/shift-admin-only-release.sh root@"$PRIMARY_HOST":/tmp/aplus-time-entry-release.sh
+          ssh -i "$HOME/.ssh/aplus_time_entry_release" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=10 -o ServerAliveCountMax=10 root@"$PRIMARY_HOST" "RELEASE_ID='$GITHUB_RUN_ID' BACKEND_IMAGE='$BACKEND_IMAGE' timeout 500 bash /tmp/aplus-time-entry-release.sh release"
+      - name: Verify real weekly exports on production without changing data
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/aplus_time_entry_release" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@"$PRIMARY_HOST" 'cd /opt/aplussolution && docker compose exec -T backend python manage.py shell' < scripts/verify-weekly-stundenzettel.py
+      - name: Restore previous backend on postcheck failure
+        if: failure() && steps.cutover.outcome == 'success'
+        shell: bash
+        run: |
+          ssh -i "$HOME/.ssh/aplus_time_entry_release" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 root@"$PRIMARY_HOST" "cd /opt/aplussolution && test -f /opt/aplus-release-$GITHUB_RUN_ID/old-production-override.yml && install -m 600 /opt/aplus-release-$GITHUB_RUN_ID/old-production-override.yml docker-compose.override.yml && timeout 200 docker compose -f docker-compose.yml -f /opt/aplus-release-$GITHUB_RUN_ID/old-production-override.yml -f /opt/aplus-release-$GITHUB_RUN_ID/rollback.yml up -d --no-deps --no-build --pull never backend"
+      - name: Package frontend dist
+        run: |
+          set -euo pipefail
+          tar -C frontend/dist -czf /tmp/aplus-frontend-dist.tgz .
+
+      - name: Upload frontend bundle to current STRATO primary
+        run: |
+          set -euo pipefail
+          scp -q -i "$HOME/.ssh/aplus_time_entry_release" -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ConnectTimeout=20             /tmp/aplus-frontend-dist.tgz root@"$PRIMARY_HOST":/tmp/aplus-frontend-dist.tgz
+          scp -q -i "$HOME/.ssh/aplus_time_entry_release" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 frontend/nginx.conf root@"$PRIMARY_HOST":/tmp/aplus-frontend-nginx.conf
+
+      - name: Replace live frontend files on current STRATO primary
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/aplus_time_entry_release" -o IdentitiesOnly=yes             -o StrictHostKeyChecking=no             -o UserKnownHostsFile=/dev/null             -o ConnectTimeout=20             -o ServerAliveInterval=10             -o ServerAliveCountMax=6             root@"$PRIMARY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+
+          cid=$(docker compose ps -q frontend)
+          test -n "$cid"
+          test "$(docker inspect -f '{{.State.Running}}' "$cid")" = "true"
+
+          rm -rf /tmp/aplus-frontend-dist
+          mkdir -p /tmp/aplus-frontend-dist
+          tar -xzf /tmp/aplus-frontend-dist.tgz -C /tmp/aplus-frontend-dist
+          rm -f /tmp/aplus-frontend-dist.tgz
+
+          # Preserve hashed assets still referenced by open browser sessions.
+          # Deploy the checked-in nginx MIME mapping alongside static assets.
+          # Keep a rollback copy in case the updated server config is invalid.
+          docker cp "$cid":/etc/nginx/conf.d/default.conf /tmp/aplus-frontend-nginx-backup.conf
+          docker cp /tmp/aplus-frontend-nginx.conf "$cid":/etc/nginx/conf.d/default.conf
+          if ! docker exec "$cid" nginx -t; then
+            docker cp /tmp/aplus-frontend-nginx-backup.conf "$cid":/etc/nginx/conf.d/default.conf
+            echo 'Restored previous nginx config after failed validation' >&2
+            exit 1
+          fi
+          docker cp /tmp/aplus-frontend-dist/. "$cid":/usr/share/nginx/html/
+          docker exec "$cid" nginx -s reload
+
+          rm -rf /tmp/aplus-frontend-dist
+          rm -f /tmp/aplus-frontend-nginx.conf /tmp/aplus-frontend-nginx-backup.conf
+          REMOTE
+
+      - name: Verify public production
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 18); do
+            rm -f /tmp/headers /tmp/home.html
+            if curl -fsS --max-time 12 -D /tmp/headers -o /tmp/home.html               "https://$PRODUCTION_DOMAIN/?primary_check=${GITHUB_RUN_ID}-$i"               && grep -q '<div id="root"' /tmp/home.html               && grep -qi '^x-aplus-origin: strato-primary' /tmp/headers               && cmp -s frontend/dist/index.html /tmp/home.html; then
+              ok=1
+              break
+            fi
+            sleep 8
+          done
+          test "$ok" -eq 1
+
+      - name: Restore staging Celery regardless of release outcome
+        if: always()
+        shell: bash
+        run: |
+          if test -s "$HOME/.ssh/aplus_time_entry_release"; then
+            ssh -i "$HOME/.ssh/aplus_time_entry_release" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 root@"$PRIMARY_HOST" "RUN_ID='$GITHUB_RUN_ID' bash -s" <<'REMOTE'
+          set -euo pipefail
+          marker="/tmp/aplus-staging-celery-paused-${RUN_ID}.marker"
+          if test -f "$marker"; then
+            name="$(cat "$marker")"
+            test "$name" = 'aplus_staging-staging_celery-1'
+            docker start "$name" >/dev/null
+            test "$(docker inspect -f '{{.State.Running}}' "$name")" = true
+            rm -f "$marker"
+            echo STAGING_CELERY_RESTORED
+          else
+            echo STAGING_CELERY_NEVER_PAUSED
+          fi
+          REMOTE
+          fi
+      - name: Remove temporary credentials and release script
+        if: always()
+        shell: bash
+        run: |
+          if test -s "$HOME/.ssh/aplus_time_entry_release"; then
+            ssh -i "$HOME/.ssh/aplus_time_entry_release" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 root@"$PRIMARY_HOST" "rm -f /tmp/aplus-time-entry-release.sh '/tmp/aplus-time-entry-$GITHUB_RUN_ID/config.json'; rmdir '/tmp/aplus-time-entry-$GITHUB_RUN_ID' 2>/dev/null || true" || true
+          fi
+          rm -f "$HOME/.ssh/aplus_time_entry_release"

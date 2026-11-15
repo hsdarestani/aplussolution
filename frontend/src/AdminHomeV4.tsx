@@ -15,6 +15,7 @@ import {
 } from 'ionicons/icons';
 import { api } from './api';
 import './admin-home-v4.css';
+import WeeklyStundenzettel from './WeeklyStundenzettel';
 
 type Navigate = (view: any) => void;
 
@@ -315,6 +316,8 @@ export default function AdminHomeV4({ navigate, desktopBrand = false }: { naviga
           ))}
         </div>
       </section>
+
+      <WeeklyStundenzettel />
 
       <div className="attention-summary">
         <SummaryCard label="Kritisch" value={summary.critical || 0} tone="critical" />
