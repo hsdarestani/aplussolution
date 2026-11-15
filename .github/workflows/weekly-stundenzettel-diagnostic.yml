@@ -28,6 +28,19 @@ jobs:
           docker inspect -f '{{json .Mounts}}' "$live"
           docker inspect -f 'LIVE_IMAGE={{.Config.Image}} WORKDIR={{.Config.WorkingDir}}' "$live"
           docker compose exec -T backend python -c "import core,sys; from pathlib import Path; print('CORE_PATH',core.__file__); print('MODULE_EXISTS',Path('/app/core/stundenzettel.py').exists()); print('SYS_PATH',sys.path)" </dev/null
+          docker inspect -f 'COMPOSE_PROJECT={{index .Config.Labels "com.docker.compose.project"}} FILES={{index .Config.Labels "com.docker.compose.project.config_files"}}' "$live"
+          python3 - <<'PY'
+          import subprocess,json
+          from pathlib import Path
+          for p in sorted(Path('.').glob('*compose*')):
+              print('COMPOSE_PATH',str(p))
+          for args in [[],['-f','docker-compose.yml','-f','docker-compose.override.yml']]:
+              j=json.loads(subprocess.check_output(['docker','compose',*args,'config','--format','json']))
+              print('EFFECTIVE_IMAGE',args,j['services']['backend'].get('image'),'NAME',j.get('name'))
+          for line in Path('.env').read_text().splitlines():
+              if line.startswith(('COMPOSE_FILE=','COMPOSE_PROJECT_NAME=')):
+                  print(line)
+          PY
           pin='ghcr.io/hsdarestani/aplus-bluegreen-backend@sha256:d6b43013062ffc85b729e55279265d22004b459367c712e0477d70bdf9ce206a'
           probe="$(docker create --network none --entrypoint /bin/true "$pin")"
           trap 'docker rm "$probe" >/dev/null 2>&1 || true' EXIT
