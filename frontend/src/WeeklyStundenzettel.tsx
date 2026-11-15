@@ -31,7 +31,7 @@ export default function WeeklyStundenzettel() {
     finally { setBusy(''); }
   }
   return <section className="weekly-stundenzettel" aria-label="Stundenzettel exportieren">
-    <div><small>WOCHENEXPORT</small><h2>Stundenzettel</h2><p>Housekeeping und Front Office im gewohnten Formular. Tatsächliche, freigegebene oder importierte Zeiten, je Hotel getrennt. Montag bis Sonntag; Nachtschichten zählen zum Starttag. Stunden nach Pausenabzug.</p></div>
+    <div><small>WOCHENEXPORT</small><h2>Stundenzettel</h2><p>Housekeeping und Front Office im gewohnten Formular. Alle Schichten aus dem Dienstplan mit den geplanten Anfangs- und Endzeiten, unabhängig von Zeiterfassung und Freigabe, je Hotel getrennt. Montag bis Sonntag; Nachtschichten zählen zum Starttag. Stunden nach Abzug der geplanten Pause.</p></div>
     <div className="weekly-stundenzettel-actions">
       <label>Kalenderwoche<input type="week" required value={week} disabled={Boolean(busy)} onChange={(event) => { setWeek(event.target.value); setMessage(''); }} /></label>
       <button type="button" disabled={Boolean(busy) || !week} onClick={() => void download('housekeeping')}>{busy === 'housekeeping' ? 'PDF wird erstellt …' : 'Housekeeping · PDF'}</button>

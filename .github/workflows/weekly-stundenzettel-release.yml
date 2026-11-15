@@ -61,7 +61,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build immutable backend with corrected emailed form
+      - name: Build immutable backend with complete planned-shift exports
         id: backend
         uses: docker/build-push-action@v6
         with:

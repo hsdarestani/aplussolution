@@ -1,4 +1,4 @@
-"""Weekly actual-hours export using the original emailed A+ Stundenzettel form."""
+"""Weekly planned-shift export using the original emailed A+ Stundenzettel form."""
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone as dt_timezone
 from decimal import Decimal
@@ -7,15 +7,15 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 import re
 
-from django.db.models import Q
 from django.http import HttpResponse, JsonResponse
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from rest_framework.decorators import api_view
 
-from .models import TimeEntry
-from .schedule_reports import _attendance_group, _manager_required
+from .models import Shift
+from .schedule_reports import _shift_groups, _manager_required
+from .shift_slots import ShiftSlot
 
 BERLIN = ZoneInfo('Europe/Berlin')
 GROUPS = {'housekeeping': ('HK', 'HOUSEKEEPING'), 'front_office': ('FO', 'FRONT OFFICE')}
@@ -39,34 +39,42 @@ def decimal_hours(minutes):
 def weekly_rows(monday, group):
     start = datetime.combine(monday, time.min, BERLIN)
     end = datetime.combine(monday + timedelta(days=7), time.min, BERLIN)
-    # Assign an entire overnight entry to its Berlin start date, as in the email.
-    entries = TimeEntry.objects.filter(
-        Q(approved=True) | Q(wiw_time_id__isnull=False),
-        clock_in__gte=start, clock_in__lt=end, clock_out__isnull=False,
-    ).exclude(worker__user__email__iendswith='@sync.invalid').select_related(
-        'worker__user', 'shift__position', 'shift__location', 'shift__client',
-    ).order_by('clock_in', 'worker__user__last_name', 'worker__user__first_name', 'id')
+    # The Dienstplan is authoritative: attendance/approval must never filter,
+    # override, or duplicate scheduled rows in this export.
+    shifts = Shift.objects.filter(starts_at__gte=start, starts_at__lt=end).exclude(
+        status=Shift.Status.CANCELLED,
+    ).select_related('worker__user', 'position', 'location', 'client').prefetch_related(
+        'slots__worker__user',
+    ).order_by('starts_at', 'client__name', 'location__name', 'id')
     hotels = defaultdict(list)
-    for entry in entries:
-        if _attendance_group(entry) != group or entry.clock_out <= entry.clock_in:
+    for shift in shifts:
+        if group not in _shift_groups(shift) or shift.ends_at <= shift.starts_at:
             continue
-        shift = entry.shift
-        location = shift.location if shift else None
-        client = shift.client if shift else None
-        # Group by IDs too: equal display names must not mix distinct hotels/clients.
-        key = (str(client.pk) if client else '', str(location.pk) if location else '',
-               location.name if location else (client.name if client else 'Ohne Hotelzuordnung'))
-        first = entry.clock_in.astimezone(BERLIN)
-        last = entry.clock_out.astimezone(BERLIN)
-        gross = int((entry.clock_out.astimezone(dt_timezone.utc) - entry.clock_in.astimezone(dt_timezone.utc)).total_seconds() // 60)
-        minutes = max(0, gross - entry.effective_break_minutes)
-        # Match the business-owned emailed form wording in the exported copy.
-        hotels[key].append({
-            'datum': first.strftime('%d.%m.%Y'), 'vorname': entry.worker.user.first_name,
-            'nachname': entry.worker.user.last_name, 'start': first.strftime('%H:%M'),
-            'ende': last.strftime('%H:%M'), 'stunden': decimal_hours(minutes),
-            'bestaetigung': 'bestätigt', 'minutes': minutes,
-        })
+        all_slots = list(shift.slots.all())
+        active_slots = [slot for slot in all_slots if slot.status != ShiftSlot.Status.CANCELLED]
+        if all_slots:
+            # Slot cards are the same authoritative assignments used by Dienstplan.
+            # Do not resurrect a released/cancelled worker from the legacy mirror.
+            assignments = [(slot.worker, str(slot.pk)) for slot in active_slots]
+        else:
+            # Historical direct assignment without slot rows.
+            assignments = [(shift.worker, '')]
+            assignments += [(None, '')] * max(0, int(shift.required_count or 1) - 1)
+        first = shift.starts_at.astimezone(BERLIN)
+        last = shift.ends_at.astimezone(BERLIN)
+        gross = int((shift.ends_at.astimezone(dt_timezone.utc) - shift.starts_at.astimezone(dt_timezone.utc)).total_seconds() // 60)
+        minutes = max(0, gross - max(0, int(shift.break_minutes or 0)))
+        key = (str(shift.client_id), str(shift.location_id), shift.location.name)
+        for worker, slot_id in assignments:
+            hotels[key].append({
+                'datum': first.strftime('%d.%m.%Y'),
+                'vorname': worker.user.first_name if worker else 'OpenShift',
+                'nachname': worker.user.last_name if worker else '',
+                'start': first.strftime('%H:%M'), 'ende': last.strftime('%H:%M'),
+                'stunden': decimal_hours(minutes), 'bestaetigung': 'bestätigt',
+                'minutes': minutes, 'shift_id': str(shift.pk), 'slot_id': slot_id,
+                'worker_id': str(worker.pk) if worker else '',
+            })
     return hotels
 
 
@@ -131,7 +139,7 @@ def export_stundenzettel(request):
         return JsonResponse({'detail': 'Bitte Housekeeping oder Front Office wählen.'}, status=400)
     hotels = weekly_rows(monday, group)
     if not hotels:
-        return JsonResponse({'detail': 'Keine freigegebenen oder importierten Arbeitszeiten für diesen Bereich in dieser Woche vorhanden.'}, status=404)
+        return JsonResponse({'detail': 'Keine geplanten Schichten für diesen Bereich in dieser Woche vorhanden.'}, status=404)
     response = HttpResponse(render_pdf(monday, group, hotels), content_type='application/pdf')
     iso = monday.isocalendar()
     response['Content-Disposition'] = f'attachment; filename="Stundenzettel - {GROUPS[group][0]} - KW{iso.week:02} - {iso.year}.pdf"'
