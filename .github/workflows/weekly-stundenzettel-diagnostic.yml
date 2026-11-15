@@ -41,3 +41,5 @@ jobs:
           status="$(curl -sS --max-time 20 -o /tmp/stundenzettel-anonymous.json -w '%{http_code}' 'https://app.aplus-solution.de/api/reports/stundenzettel.pdf?week=2026-W45&group=housekeeping')"
           test "$status" = 401
           echo PUBLIC_EXPORT_AUTH_REQUIRED_AND_PRODUCTION_PERSISTENCE_OK
+
+# Recheck corrected emailed layout after completed production rollout.
