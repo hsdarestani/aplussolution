@@ -140,7 +140,7 @@ def parse_personalfragebogen_fields(pdf_bytes):
     # and insurance values instead of silently storing them as incorrect data.
     postal = master.get('postal_code', '').strip()
     city = master.get('city', '').strip()
-    if re.fullmatch(r'\\d{5}', city) and postal and not re.fullmatch(r'\\d{5}', postal):
+    if re.fullmatch(r'\d{5}', city) and postal and not re.fullmatch(r'\d{5}', postal):
         master['postal_code'], master['city'] = city, postal
         warnings.append('Postleitzahl und Ort standen in vertauschten Feldern und wurden für die Vorschau korrigiert.')
     if master.get('street') and master.get('postal_code') and master.get('city'):
@@ -150,7 +150,7 @@ def parse_personalfragebogen_fields(pdf_bytes):
             warnings.append('Doppelte PLZ und Ort wurden aus der Straßenzeile entfernt.')
 
     child_allowance = master.get('child_allowance', '').replace(' ', '')
-    if re.fullmatch(r'\\d{11}', child_allowance) and not master.get('tax_identification_number'):
+    if re.fullmatch(r'\d{11}', child_allowance) and not master.get('tax_identification_number'):
         master.pop('child_allowance', None)
         warnings.append('Kinderfreibetrag enthält vermutlich eine Steuer-ID (11 Ziffern). Keine automatische Zuordnung; bitte Steuer-ID separat prüfen und eingeben.')
     tax_allowance = master.get('tax_allowance', '').strip()
@@ -159,21 +159,21 @@ def parse_personalfragebogen_fields(pdf_bytes):
         warnings.append('Freibeträge enthält möglicherweise die Steuerklasse. Bitte Steuerklasse separat prüfen und eintragen.')
 
     birth_place = master.get('birth_place', '').strip()
-    if re.fullmatch(r'\\d{1,2}\\.\\d{1,2}\\.\\d{2,4}', birth_place):
+    if re.fullmatch(r'\d{1,2}\.\d{1,2}\.\d{2,4}', birth_place):
         master.pop('birth_place', None)
         warnings.append('Geburtsort enthält offenbar ein Datum; Geburtsort wurde nicht übernommen.')
 
-    social_number = re.sub(r'\\s+', '', master.get('social_insurance_number', '')).upper()
-    if social_number and not re.fullmatch(r'\\d{8}[A-Z]\\d{3}', social_number):
+    social_number = re.sub(r'\s+', '', master.get('social_insurance_number', '')).upper()
+    if social_number and not re.fullmatch(r'\d{8}[A-Z]\d{3}', social_number):
         master.pop('social_insurance_number', None)
         warnings.append('Sozialversicherungsnummer ist nicht im üblichen deutschen Format und wurde nicht übernommen.')
 
     holder = master.get('bank_account_holder', '').replace(' ', '')
-    if re.fullmatch(r'\\d{12,19}', holder):
+    if re.fullmatch(r'\d{12,19}', holder):
         master.pop('bank_account_holder', None)
         warnings.append('Kontoinhaber enthält eine lange Kartennummer statt eines Namens. Diese wurde nicht als Kontoinhaber übernommen.')
     bank = master.get('bank_name', '').strip()
-    bank_match = re.fullmatch(r'(.+?)\\s*\\(([^()]+)\\)', bank)
+    bank_match = re.fullmatch(r'(.+?)\s*\(([^()]+)\)', bank)
     if bank_match:
         name_hint, institution = bank_match.group(1).strip(), bank_match.group(2).strip()
         master['bank_name'] = institution
