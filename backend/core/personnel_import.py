@@ -115,8 +115,11 @@ def parse_personalfragebogen_fields(pdf_bytes):
 
     first = values.get('Vorname', '').strip()
     last = values.get('Nachname', '').strip()
-    if not first or not last:
-        raise ValueError('Vorname und Nachname fehlen im PDF.')
+    source_email = values.get('E-Mail-Adresse', '').strip()
+    if not first:
+        raise ValueError('Vorname fehlt im PDF.')
+    if not last and not source_email:
+        raise ValueError('Nachname fehlt im PDF. Für den sicheren Abgleich ist eine E-Mail-Adresse erforderlich.')
 
     master = {}
     for source, target in _FIELD_MAP.items():
@@ -139,8 +142,51 @@ def parse_personalfragebogen_fields(pdf_bytes):
     else:
         religion_needs_review = False
 
+    # Lexware PDFs can contain mistakenly transposed or misplaced text fields.
+    # Never treat a suspicious tax, bank or insurance identifier as verified.
+    quality_warnings = []
+    if (master.get('city', '').isdigit() and len(master['city']) == 5
+            and master.get('postal_code', '').isalpha()):
+        master['postal_code'], master['city'] = master['city'], master['postal_code']
+        quality_warnings.append('PLZ und Ort waren im Formular vertauscht und wurden anhand des eindeutigen Formats korrigiert.')
+
     if {'street', 'postal_code', 'city'} <= master.keys():
+        suffix = f" {master['postal_code']} {master['city']}"
+        if master['street'].casefold().endswith(suffix.casefold()):
+            master['street'] = master['street'][:-len(suffix)].strip()
+            quality_warnings.append('Die doppelte PLZ-/Ortsangabe wurde aus dem Straßenfeld entfernt.')
         master['full_address'] = f"{master['street']}, {master['postal_code']} {master['city']}"
+
+    place = master.get('birth_place', '')
+    if place and len(place.split('.')) == 3 and all(part.isdigit() for part in place.split('.')):
+        master.pop('birth_place')
+        quality_warnings.append('Geburtsort enthält ein Datum statt eines Ortes und wurde nicht übernommen.')
+
+    rv = master.get('social_insurance_number', '')
+    normalized_rv = rv.replace(' ', '').replace('-', '')
+    if rv and not (len(normalized_rv) == 12 and normalized_rv[:8].isdigit()
+                   and normalized_rv[8].isalpha() and normalized_rv[9:].isdigit()):
+        master.pop('social_insurance_number')
+        quality_warnings.append('Sozialversicherungsnummer hat kein plausibles deutsches Format und muss geprüft werden.')
+
+    child_allowance = master.get('child_allowance', '')
+    if child_allowance.isdecimal() and len(child_allowance) == 11:
+        master.pop('child_allowance')
+        quality_warnings.append('Im Feld Kinderfreibetrag steht eine 11-stellige Zahl (möglicherweise Steuer-ID); bitte manuell zuordnen.')
+    if not master.get('tax_class') and master.get('tax_allowance') == '1':
+        master.pop('tax_allowance')
+        quality_warnings.append('Die 1 steht im Feld Freibeträge, die Steuerklasse ist leer; Zuordnung bitte manuell prüfen.')
+
+    holder = master.get('bank_account_holder', '')
+    if holder.isdecimal() and len(holder) >= 12:
+        master.pop('bank_account_holder')
+        quality_warnings.append('Kontoinhaber enthält eine lange Zahl statt eines Namens und wurde nicht übernommen.')
+    bank = master.get('bank_name', '')
+    if '(' in bank and bank.endswith(')'):
+        bank_part = bank.rsplit('(', 1)[1][:-1].strip()
+        if bank_part:
+            master['bank_name'] = bank_part
+            quality_warnings.append('Bankname wurde aus dem Klammerzusatz extrahiert; Kontoinhaber bitte prüfen.')
 
     try:
         marks = _marked_options(pdf_bytes)
@@ -194,8 +240,11 @@ def parse_personalfragebogen_fields(pdf_bytes):
     if any(entry['employment_type'] is None for entry in employers):
         unresolved.append('weitere Beschäftigungsart')
     warnings = [
-        'Markierungen im PDF automatisch erkannt. Bitte Kästchen im Original prüfen.'
+        'Markierungen im PDF automatisch erkannt. Bitte Kästchen im Original prüfen.',
+        *quality_warnings,
     ]
+    if not last:
+        warnings.append('Nachname fehlt im PDF; Abgleich erfolgt nur mit der bestehenden Akte über Vorname und Login-E-Mail. Der Nachname wird nicht geändert.')
     if unresolved:
         warnings.append('Nicht eindeutig lesbare Kästchen: ' + ', '.join(unresolved) + '.')
 
@@ -212,8 +261,8 @@ def parse_personalfragebogen_fields(pdf_bytes):
     if employers and any(not item['start_date'] or not item['gross_monthly_salary'] or not item['employment_type'] for item in employers):
         warnings.append('Bei weiteren Beschäftigungen fehlen einzelne Angaben (Beginn, Bruttoverdienst oder Beschäftigungsart). Leere Felder bleiben offen.')
 
-    return {'first_name': first, 'last_name': last, 'profile': profile,
-            'master_data': master, 'warnings': warnings}
+    return {'first_name': first, 'last_name': last, 'source_email': source_email,
+            'profile': profile, 'master_data': master, 'warnings': warnings}
 
 
 @api_view(['POST'])
@@ -231,16 +280,36 @@ def preview_personalfragebogen(request, pk):
 
     try:
         incoming = parse_personalfragebogen_fields(uploaded.read())
+    except ValueError as exc:
+        # Only explicitly authored, nonsensitive validation messages may reach users.
+        message = str(exc)
+        allowed = (
+            'Vorname fehlt im PDF.',
+            'Nachname fehlt im PDF. Für den sicheren Abgleich ist eine E-Mail-Adresse erforderlich.',
+            'Das PDF enthält keine auslesbaren Formularfelder.',
+            'Nur einseitige Personalfragebogen werden unterstützt.',
+            'Verschlüsselte PDFs werden nicht unterstützt.',
+            'Geburtsdatum hat ein ungültiges Format (TT.MM.JJJJ).',
+        )
+        return Response({'detail': message if message in allowed else
+                         'PDF konnte nicht als ausfüllbarer Personalfragebogen gelesen werden.'}, status=400)
     except Exception:
-        # Avoid including parser internals or sensitive PDF contents in errors.
+        # Never echo private field contents or parser internals in errors.
         return Response({'detail': 'PDF konnte nicht als ausfüllbarer Personalfragebogen gelesen werden.'}, status=400)
 
     def norm(text):
         return ' '.join(str(text or '').split()).casefold()
 
-    if (norm(worker.user.first_name) != norm(incoming['first_name'])
-            or norm(worker.user.last_name) != norm(incoming['last_name'])):
-        return Response({'detail': 'Der Name im PDF stimmt nicht mit dieser bestehenden Mitarbeiterakte überein. Es wurde nichts geändert.'}, status=409)
+    first_matches = norm(worker.user.first_name) == norm(incoming['first_name'])
+    pdf_last = norm(incoming['last_name'])
+    if pdf_last:
+        identity_matches = first_matches and norm(worker.user.last_name) == pdf_last
+    else:
+        # A missing surname must NEVER authorize a match by given name alone.
+        identity_matches = (first_matches and bool(norm(incoming.get('source_email')))
+                            and norm(worker.user.email) == norm(incoming['source_email']))
+    if not identity_matches:
+        return Response({'detail': 'Name bzw. E-Mail im PDF stimmen nicht mit dieser bestehenden Mitarbeiterakte überein. Es wurde nichts geändert.'}, status=409)
 
     response = Response({
         'matched_worker': str(worker.pk),
