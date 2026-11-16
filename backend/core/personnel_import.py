@@ -6,6 +6,7 @@ Akte PATCH, never a side effect of opening/importing a document.
 """
 from datetime import datetime
 from io import BytesIO
+import re
 
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, parser_classes
@@ -115,14 +116,70 @@ def parse_personalfragebogen_fields(pdf_bytes):
 
     first = values.get('Vorname', '').strip()
     last = values.get('Nachname', '').strip()
-    if not first or not last:
-        raise ValueError('Vorname und Nachname fehlen im PDF.')
+    identity_name_hint = values.get('Geburtsname', '').strip()
+    source_email = values.get('E-Mail-Adresse', '').strip()
+    warnings = []
+    if not first:
+        raise ValueError('Vorname fehlt im PDF.')
+    if not last:
+        # Do not invent a surname from a bank field or a birth name.
+        # The endpoint checks both the PDF email and the complete birth-name
+        # hint against this exact existing employee before allowing a preview.
+        if len(identity_name_hint.split()) < 2 or identity_name_hint.split()[0].casefold() != first.casefold():
+            raise ValueError('Nachname fehlt; Identität kann nicht geprüft werden.')
+        warnings.append('Nachname im PDF ist leer. Die Zuordnung zur bestehenden Akte muss anhand von E-Mail und Geburtsname bestätigt werden.')
 
     master = {}
     for source, target in _FIELD_MAP.items():
         value = values.get(source, '').strip()
         if value:
             master[target] = value
+
+    # Some filled-in Lexware PDFs have values typed into an adjacent field.
+    # Recover only unambiguous address formatting; exclude dubious tax, bank
+    # and insurance values instead of silently storing them as incorrect data.
+    postal = master.get('postal_code', '').strip()
+    city = master.get('city', '').strip()
+    if re.fullmatch(r'\\d{5}', city) and postal and not re.fullmatch(r'\\d{5}', postal):
+        master['postal_code'], master['city'] = city, postal
+        warnings.append('Postleitzahl und Ort standen in vertauschten Feldern und wurden für die Vorschau korrigiert.')
+    if master.get('street') and master.get('postal_code') and master.get('city'):
+        suffix = f" {master['postal_code']} {master['city']}"
+        if master['street'].casefold().endswith(suffix.casefold()):
+            master['street'] = master['street'][:-len(suffix)].rstrip(' ,')
+            warnings.append('Doppelte PLZ und Ort wurden aus der Straßenzeile entfernt.')
+
+    child_allowance = master.get('child_allowance', '').replace(' ', '')
+    if re.fullmatch(r'\\d{11}', child_allowance) and not master.get('tax_identification_number'):
+        master.pop('child_allowance', None)
+        warnings.append('Kinderfreibetrag enthält vermutlich eine Steuer-ID (11 Ziffern). Keine automatische Zuordnung; bitte Steuer-ID separat prüfen und eingeben.')
+    tax_allowance = master.get('tax_allowance', '').strip()
+    if not master.get('tax_class') and tax_allowance in {'1', '2', '3', '4', '5', '6'}:
+        master.pop('tax_allowance', None)
+        warnings.append('Freibeträge enthält möglicherweise die Steuerklasse. Bitte Steuerklasse separat prüfen und eintragen.')
+
+    birth_place = master.get('birth_place', '').strip()
+    if re.fullmatch(r'\\d{1,2}\\.\\d{1,2}\\.\\d{2,4}', birth_place):
+        master.pop('birth_place', None)
+        warnings.append('Geburtsort enthält offenbar ein Datum; Geburtsort wurde nicht übernommen.')
+
+    social_number = re.sub(r'\\s+', '', master.get('social_insurance_number', '')).upper()
+    if social_number and not re.fullmatch(r'\\d{8}[A-Z]\\d{3}', social_number):
+        master.pop('social_insurance_number', None)
+        warnings.append('Sozialversicherungsnummer ist nicht im üblichen deutschen Format und wurde nicht übernommen.')
+
+    holder = master.get('bank_account_holder', '').replace(' ', '')
+    if re.fullmatch(r'\\d{12,19}', holder):
+        master.pop('bank_account_holder', None)
+        warnings.append('Kontoinhaber enthält eine lange Kartennummer statt eines Namens. Diese wurde nicht als Kontoinhaber übernommen.')
+    bank = master.get('bank_name', '').strip()
+    bank_match = re.fullmatch(r'(.+?)\\s*\\(([^()]+)\\)', bank)
+    if bank_match:
+        name_hint, institution = bank_match.group(1).strip(), bank_match.group(2).strip()
+        master['bank_name'] = institution
+        if not master.get('bank_account_holder') and name_hint.casefold() == identity_name_hint.casefold():
+            master['bank_account_holder'] = name_hint
+        warnings.append('Bankname und Kontoinhaber standen gemeinsam in einem Feld; bitte beide Angaben vor dem Speichern prüfen.')
 
     birth = values.get('Geburtsdatum', '').strip()
     if birth:
@@ -158,6 +215,10 @@ def parse_personalfragebogen_fields(pdf_bytes):
     count_under_25 = values.get('Falls ja: Wie viele Kinder?', '').strip()
     if count_under_25.isdecimal():
         master['children_under_25'] = int(count_under_25)
+    elif count_under_25.casefold() in {'nein', 'no'} and marks.get('has_children') is None:
+        master['has_children'] = False
+        master['children_under_25'] = 0
+        warnings.append('Kinder: Nein stand im Feld für die Anzahl; bitte Angabe prüfen.')
 
     employers = []
     for i in (1, 2):
@@ -193,9 +254,7 @@ def parse_personalfragebogen_fields(pdf_bytes):
     ]
     if any(entry['employment_type'] is None for entry in employers):
         unresolved.append('weitere Beschäftigungsart')
-    warnings = [
-        'Markierungen im PDF automatisch erkannt. Bitte Kästchen im Original prüfen.'
-    ]
+    warnings.append('Markierungen im PDF automatisch erkannt. Bitte Kästchen im Original prüfen.')
     if unresolved:
         warnings.append('Nicht eindeutig lesbare Kästchen: ' + ', '.join(unresolved) + '.')
 
@@ -212,8 +271,9 @@ def parse_personalfragebogen_fields(pdf_bytes):
     if employers and any(not item['start_date'] or not item['gross_monthly_salary'] or not item['employment_type'] for item in employers):
         warnings.append('Bei weiteren Beschäftigungen fehlen einzelne Angaben (Beginn, Bruttoverdienst oder Beschäftigungsart). Leere Felder bleiben offen.')
 
-    return {'first_name': first, 'last_name': last, 'profile': profile,
-            'master_data': master, 'warnings': warnings}
+    return {'first_name': first, 'last_name': last,
+            'identity_name_hint': identity_name_hint, 'source_email': source_email,
+            'profile': profile, 'master_data': master, 'warnings': warnings}
 
 
 @api_view(['POST'])
@@ -239,8 +299,14 @@ def preview_personalfragebogen(request, pk):
         return ' '.join(str(text or '').split()).casefold()
 
     if (norm(worker.user.first_name) != norm(incoming['first_name'])
-            or norm(worker.user.last_name) != norm(incoming['last_name'])):
+            or (incoming['last_name'] and norm(worker.user.last_name) != norm(incoming['last_name']))):
         return Response({'detail': 'Der Name im PDF stimmt nicht mit dieser bestehenden Mitarbeiterakte überein. Es wurde nichts geändert.'}, status=409)
+    if not incoming['last_name']:
+        # For an empty surname in the PDF, two independent identity details
+        # must match the opened existing worker. No account is created/renamed.
+        if (norm(worker.user.email) != norm(incoming.get('source_email'))
+                or norm(worker.user.get_full_name()) != norm(incoming.get('identity_name_hint'))):
+            return Response({'detail': 'Nachname fehlt: E-Mail und Geburtsname stimmen nicht eindeutig mit dieser Mitarbeiterakte überein. Es wurde nichts geändert.'}, status=409)
 
     response = Response({
         'matched_worker': str(worker.pk),
