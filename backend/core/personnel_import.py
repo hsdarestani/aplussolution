@@ -6,6 +6,7 @@ Akte PATCH, never a side effect of opening/importing a document.
 """
 from datetime import datetime
 from io import BytesIO
+import re
 
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, parser_classes
@@ -115,14 +116,67 @@ def parse_personalfragebogen_fields(pdf_bytes):
 
     first = values.get('Vorname', '').strip()
     last = values.get('Nachname', '').strip()
-    if not first or not last:
-        raise ValueError('Vorname und Nachname fehlen im PDF.')
+    email = values.get('E-Mail-Adresse', '').strip()
+    if not first:
+        raise ValueError('Vorname fehlt im PDF.')
+    # Missing surname is common in otherwise fillable Lexware forms. Allow it
+    # ONLY when the preview endpoint can match the existing worker by email.
+    if not last and ('@' not in email or not email.split('@', 1)[1]):
+        raise ValueError('Nachname fehlt: Eine gültige E-Mail ist zum Abgleich erforderlich.')
+
+    warnings = []
+    if not last:
+        warnings.append('Nachname ist im PDF leer. Die Zuordnung erfolgt nur bei identischer E-Mail und identischem Vornamen.')
 
     master = {}
     for source, target in _FIELD_MAP.items():
         value = values.get(source, '').strip()
         if value:
             master[target] = value
+
+    # This is a preview, not a reconciliation of legally relevant payroll data.
+    # Only repair an unmistakable PLZ/Ort transposition, with a visible warning.
+    postal, city = master.get('postal_code', ''), master.get('city', '')
+    if re.fullmatch(r'\d{5}', city) and postal and not re.fullmatch(r'\d{5}', postal):
+        master['postal_code'], master['city'] = city, postal
+        warnings.append('PLZ und Ort waren im PDF vertauscht und wurden für die Vorschau umgestellt. Bitte Anschrift prüfen.')
+    postal, city = master.get('postal_code', ''), master.get('city', '')
+    if postal and not re.fullmatch(r'\d{5}', postal):
+        master.pop('postal_code', None)
+        warnings.append('Ungültige Postleitzahl wurde nicht übernommen.')
+    if postal and city and master.get('street'):
+        suffix = f'{postal} {city}'
+        if master['street'].endswith(suffix):
+            master['street'] = master['street'][:-len(suffix)].rstrip(' ,')
+            warnings.append('Doppelte PLZ/Ort-Angabe am Ende der Straße entfernt. Bitte Straße prüfen.')
+
+    holder = master.get('bank_account_holder', '')
+    if holder and re.fullmatch(r'\d[\d \-]{7,}', holder):
+        master.pop('bank_account_holder', None)
+        warnings.append('Kontoinhaber enthält eine Kontonummer statt eines Namens und wurde nicht übernommen.')
+    bank = master.get('bank_name', '')
+    bank_parts = re.fullmatch(r'.+?\s*\(([^()]+)\)', bank)
+    if bank_parts:
+        master['bank_name'] = bank_parts.group(1).strip()
+        warnings.append('Bankbezeichnung aus Klammern erkannt; Kontoinhaber bitte manuell prüfen.')
+
+    if re.fullmatch(r'\d{2}\.\d{2}\.\d{2,4}', master.get('birth_place', '')):
+        master.pop('birth_place', None)
+        warnings.append('Geburtsort enthält ein Datum und wurde nicht übernommen.')
+
+    # In this template Steuer-ID and Steuerklasse are sometimes typed into
+    # Kinderfreibetrag/Freibeträge. Never silently copy these as tax facts.
+    if re.fullmatch(r'\d{11}', master.get('child_allowance', '')):
+        master.pop('child_allowance', None)
+        warnings.append('11-stellige Zahl in Kinderfreibetrag (mögliche Steuer-ID): bitte manuell prüfen.')
+        if not master.get('tax_class') and re.fullmatch(r'\d', master.get('tax_allowance', '')):
+            master.pop('tax_allowance', None)
+            warnings.append('Einzelziffer in Freibeträge (mögliche Steuerklasse): bitte manuell prüfen.')
+
+    social = master.get('social_insurance_number', '').replace(' ', '')
+    if social and not re.fullmatch(r'\d{2}[A-Za-z]\d{9}', social):
+        master.pop('social_insurance_number', None)
+        warnings.append('Sozialversicherungsnummer ist unvollständig oder ungültig und wurde nicht übernommen.')
 
     birth = values.get('Geburtsdatum', '').strip()
     if birth:
@@ -193,13 +247,10 @@ def parse_personalfragebogen_fields(pdf_bytes):
     ]
     if any(entry['employment_type'] is None for entry in employers):
         unresolved.append('weitere Beschäftigungsart')
-    warnings = [
-        'Markierungen im PDF automatisch erkannt. Bitte Kästchen im Original prüfen.'
-    ]
+    warnings.insert(0, 'Markierungen im PDF automatisch erkannt. Bitte Kästchen im Original prüfen.')
     if unresolved:
         warnings.append('Nicht eindeutig lesbare Kästchen: ' + ', '.join(unresolved) + '.')
 
-    email = values.get('E-Mail-Adresse', '').strip()
     if email and '@' not in email:
         warnings.append('Das E-Mail-Feld enthält keine gültige E-Mail-Adresse. Bestehende E-Mail bleibt unverändert.')
     elif email:
@@ -212,8 +263,8 @@ def parse_personalfragebogen_fields(pdf_bytes):
     if employers and any(not item['start_date'] or not item['gross_monthly_salary'] or not item['employment_type'] for item in employers):
         warnings.append('Bei weiteren Beschäftigungen fehlen einzelne Angaben (Beginn, Bruttoverdienst oder Beschäftigungsart). Leere Felder bleiben offen.')
 
-    return {'first_name': first, 'last_name': last, 'profile': profile,
-            'master_data': master, 'warnings': warnings}
+    return {'first_name': first, 'last_name': last, 'identity_email': email,
+            'profile': profile, 'master_data': master, 'warnings': warnings}
 
 
 @api_view(['POST'])
@@ -238,9 +289,16 @@ def preview_personalfragebogen(request, pk):
     def norm(text):
         return ' '.join(str(text or '').split()).casefold()
 
+    pdf_last = norm(incoming.get('last_name'))
+    pdf_email = norm(incoming.get('identity_email'))
+    existing_email = norm(worker.user.email)
+    # If Nachname is blank, matching first name AND the login email is
+    # mandatory; the selected profile ID alone is not proof of identity.
     if (norm(worker.user.first_name) != norm(incoming['first_name'])
-            or norm(worker.user.last_name) != norm(incoming['last_name'])):
-        return Response({'detail': 'Der Name im PDF stimmt nicht mit dieser bestehenden Mitarbeiterakte überein. Es wurde nichts geändert.'}, status=409)
+            or (pdf_last and norm(worker.user.last_name) != pdf_last)
+            or (not pdf_last and pdf_email != existing_email)
+            or (pdf_email and '@' in pdf_email and pdf_email != existing_email)):
+        return Response({'detail': 'Name oder E-Mail im PDF stimmt nicht mit dieser bestehenden Mitarbeiterakte überein. Es wurde nichts geändert.'}, status=409)
 
     response = Response({
         'matched_worker': str(worker.pk),
