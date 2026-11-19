@@ -1,0 +1,62 @@
+name: Read-only A+ incident logs 2026-11-19
+on:
+  push:
+    branches: [diagnostic/aplus-availability-20261119]
+    paths: ['.github/workflows/aplus-incident-log-readonly-20261119.yml']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Inspect STRATO historical errors without modifying services
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$PRIVATE_KEY"
+          umask 077
+          key="$RUNNER_TEMP/aplus-incident-readonly.key"
+          printf '%s\n' "$PRIVATE_KEY" > "$key"
+          chmod 600 "$key"
+          trap 'rm -f "$key"' EXIT
+          ssh -i "$key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 -o ServerAliveInterval=8 -o ServerAliveCountMax=2 root@"$HOST" 'bash -s' <<'REMOTE'
+          set -u
+          cd /opt/aplussolution || exit 2
+          echo "DIAGNOSTIC_WINDOW_UTC=2026-11-19T11:50:00Z..2026-11-19T12:25:00Z"
+          echo "HOST_UTC_NOW=$(date -u -Is)"
+          echo "=== UPTIME_AND_MEMORY ==="
+          uptime
+          free -m
+          echo "=== CONTAINER_STATUS ==="
+          for svc in caddy frontend backend db redis celery celery-beat; do
+            id="$(docker compose ps -q "$svc" 2>/dev/null)"
+            if [ -n "$id" ]; then
+              echo "SERVICE=$svc"
+              docker inspect --format 'running={{.State.Running}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarts={{.RestartCount}} oom={{.State.OOMKilled}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' "$id" 2>/dev/null || true
+            else
+              echo "SERVICE=$svc no_current_container"
+            fi
+          done
+          echo "=== KERNEL_OOM_EVENTS ==="
+          journalctl -k --utc --since '2026-11-19 11:30:00' --until '2026-11-19 12:35:00' --no-pager 2>/dev/null | grep -Ei 'out of memory|oom-kill|killed process|segfault|memory cgroup' | tail -25 || true
+          echo "=== DOCKER_DAEMON_ISSUES ==="
+          journalctl -u docker --utc --since '2026-11-19 11:50:00' --until '2026-11-19 12:25:00' --no-pager 2>/dev/null | grep -Ei 'error|timeout|restart|dead|oom|failed' | tail -30 || true
+          echo "=== HISTORICAL_SERVICE_ERRORS (sanitized) ==="
+          for svc in caddy backend db frontend; do
+            echo "SERVICE_LOG=$svc"
+            docker compose logs --no-color --timestamps --since '2026-11-19T11:50:00Z' --until '2026-11-19T12:25:00Z' "$svc" 2>&1               | grep -Ei 'error|timeout|temporarily unavailable|connection refused|could not connect|database.*(fail|connect)|restart|oom|5[0-9][0-9]|worker timeout|traceback|killed|too many connections|fatal|upstream'               | sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/[email]/g; s/([0-9]{1,3}\.){3}[0-9]{1,3}/[ip]/g; s/(Bearer|Token) [A-Za-z0-9._=+\/-]+/\1 [redacted]/Ig; s/(token|password|secret|api_key)=([^ &]+)/\1=[redacted]/Ig'               | cut -c 1-380 | tail -65 || true
+          done
+          echo "=== LOG_VOLUME_COUNTS ==="
+          for svc in caddy backend db; do
+            num="$(docker compose logs --no-color --since '2026-11-19T11:50:00Z' --until '2026-11-19T12:25:00Z' "$svc" 2>/dev/null | wc -l)"
+            echo "$svc lines=$num"
+          done
+          echo "=== LOCAL_DB_READINESS ==="
+          curl -ksS --max-time 8 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/api/status/ready/ || true
+          echo
+          echo "DIAGNOSTIC_COMPLETE_READ_ONLY=true"
+          REMOTE
