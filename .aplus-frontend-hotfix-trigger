@@ -1,0 +1,4 @@
+2026-11-22 approval for one-shot low-RAM static frontend production hotfix.
+Contains weekly Gesamtstunden correction from weeklyScheduledHours.ts and WiwScheduleMobile.tsx.
+Required: test+build on GitHub runner, backup existing live static assets, stage assets, swap index atomically, verify origin checksum and health, rollback on failure.
+No backend, database, Docker Compose stop/recreate or app-store submission.
