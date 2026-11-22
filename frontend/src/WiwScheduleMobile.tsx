@@ -35,6 +35,7 @@ import { openPdfDocument } from './openPdfDocument';
 import { ShiftPlanAttachments, ShiftPlanBulkUpload } from './ShiftPlanAttachments';
 import { isHotelClientName, schedulePalette } from './scheduleClientPalette';
 import { groupDayScheduleCards, type DayEventGroup } from './scheduleEventGrouping';
+import { sumAllWeeklyScheduledHours, sumScheduledCardHours } from './weeklyScheduledHours';
 import './wiw-schedule-mobile.css';
 
 type TabKey = 'all' | 'open' | 'filled' | 'draft';
@@ -322,7 +323,7 @@ function ScheduleWeekPane({
       const dayCards = (isCenter ? activeDays : previewByDay)[day] || [];
       const dayGroups = groupDayScheduleCards(dayCards, clientRank);
       return <section className="wiw-day-section wiw-day-visual" id={isCenter ? `wiw-day-${day}` : undefined} key={day}>
-        <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}<small> · {dayCards.reduce((sum, card) => { const gross = Math.max(0, (new Date(card.shift.ends_at).getTime() - new Date(card.shift.starts_at).getTime()) / 3600000); return sum + Math.max(0, gross - Number(card.shift.break_minutes || 0) / 60); }, 0).toFixed(1)} Std.</small></em></header>
+        <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}<small> · {sumScheduledCardHours(dayCards).toFixed(1)} Std.</small></em></header>
         {dayGroups.map((group, groupIndex) => <React.Fragment key={group.key}>
           {groupIndex > 0 && dayGroups[groupIndex - 1].clientKey !== group.clientKey ? <div className="wiw-client-divider" aria-hidden="true" /> : null}
           <EventGroupHeading group={group} />
@@ -987,10 +988,12 @@ export default function WiwScheduleMobile() {
     Object.values(map).forEach((dayCards) => dayCards.sort(sortScheduleCards));
     return map;
   }, [visibleDays, visibleCards]);
-  const weekHours = useMemo(() => visibleCards.reduce((sum, card) => {
-    const gross = Math.max(0, (new Date(card.shift.ends_at).getTime() - new Date(card.shift.starts_at).getTime()) / 3600000);
-    return sum + Math.max(0, gross - Number(card.shift.break_minutes || 0) / 60);
-  }, 0), [visibleCards]);
+  // The bottom total is for ALL slots/shifts in the selected week, not only
+  // cards still visible after search, status or service filters.
+  const weekHours = useMemo(
+    () => sumAllWeeklyScheduledHours(rows, days, dateKeyFromIso, (shift) => activeSlots(shift).length),
+    [rows, days],
+  );
 
   const positionChoices = useMemo<Choice[]>(() => {
     const selectedGroups = form.schedule_groups || [];
@@ -1606,7 +1609,7 @@ export default function WiwScheduleMobile() {
           const dayCards = byDay[day] || [];
           const dayGroups = groupDayScheduleCards(dayCards, clientRank);
           return <section className="wiw-day-section wiw-day-visual" id={`wiw-day-${day}`} key={day}>
-            <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}<small> · {dayCards.reduce((sum, card) => { const gross = Math.max(0, (new Date(card.shift.ends_at).getTime() - new Date(card.shift.starts_at).getTime()) / 3600000); return sum + Math.max(0, gross - Number(card.shift.break_minutes || 0) / 60); }, 0).toFixed(1)} Std.</small></em></header>
+            <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}<small> · {sumScheduledCardHours(dayCards).toFixed(1)} Std.</small></em></header>
             {dayGroups.map((group, groupIndex) => <React.Fragment key={group.key}>
               {groupIndex > 0 && dayGroups[groupIndex - 1].clientKey !== group.clientKey ? <div className="wiw-client-divider" aria-hidden="true" /> : null}
               <EventGroupHeading group={group} />
