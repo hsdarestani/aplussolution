@@ -1,1 +1,1 @@
-2026-11-22 approved retry of low-RAM frontend-only release after correcting legacy build guard. Includes 84 passing frontend tests in preceding run and latest schedule hours fix. CI must rerun tests and build; only publish on full success. Never stop/recreate Docker containers.
+2026-11-22 third safe web hotfix attempt after TypeScript test fixture correction. Same weekly scheduled-hours change, full CI, atomic UI asset switch and health rollback; no backend restart or database write.
