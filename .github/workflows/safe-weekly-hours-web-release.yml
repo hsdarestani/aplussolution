@@ -1,0 +1,160 @@
+name: Guarded one-shot A+ Solution web release
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.aplus-safe-web-release-trigger]
+
+permissions:
+  contents: read
+  packages: write
+  statuses: write
+
+concurrency:
+  group: aplus-guarded-web-release
+  cancel-in-progress: false
+
+jobs:
+  blue-green:
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish pending release status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -f state=pending -f context=aplus/blue-green-weekly-hours \
+            -f description="Validating tests, server preflight and guarded release"
+      - name: Set up SSH and verify server
+        env:
+          SSH_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$SSH_KEY"
+          install -d -m 700 "$RUNNER_TEMP/aplus-ssh"
+          printf '%s\n' "$SSH_KEY" > "$RUNNER_TEMP/aplus-ssh/id_ed25519"
+          chmod 600 "$RUNNER_TEMP/aplus-ssh/id_ed25519"
+          ssh -i "$RUNNER_TEMP/aplus-ssh/id_ed25519" \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$RUNNER_TEMP/aplus-ssh/known_hosts" \
+            -o ConnectTimeout=15 root@"$HOST" \
+            'test -f /opt/aplussolution/.env && docker info >/dev/null && echo PRIMARY_ACCESS_OK'
+      - name: STRATO health/resource preflight (no production mutation)
+        run: |
+          set -euo pipefail
+          scp -q -i "$RUNNER_TEMP/aplus-ssh/id_ed25519" \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$RUNNER_TEMP/aplus-ssh/known_hosts" \
+            deploy/bluegreen/release.sh root@"$HOST":/tmp/aplus-ci-preflight.sh
+          ssh -i "$RUNNER_TEMP/aplus-ssh/id_ed25519" \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$RUNNER_TEMP/aplus-ssh/known_hosts" \
+            root@"$HOST" 'bash /tmp/aplus-ci-preflight.sh preflight'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test and build actual frontend
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --package-lock=false
+          npm test
+          VITE_API_URL=https://app.aplus-solution.de/api npm run build
+      - name: Check backend Python syntax without touching production DB
+        run: python3 -m compileall -q backend
+      - uses: docker/setup-buildx-action@v3
+      - name: Authenticate to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build and push immutable backend (GitHub runner only)
+        id: backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/aplus-bluegreen-backend:${{ github.sha }}
+      - name: Build and push immutable frontend (GitHub runner only)
+        id: frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            VITE_API_URL=https://app.aplus-solution.de/api
+          tags: ghcr.io/${{ github.repository_owner }}/aplus-bluegreen-frontend:${{ github.sha }}
+      - name: Stage and cut over only after green and DB checks pass
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_USER: ${{ github.actor }}
+          BACKEND_DIGEST: ${{ steps.backend.outputs.digest }}
+          FRONTEND_DIGEST: ${{ steps.frontend.outputs.digest }}
+          IMAGE_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          test -n "$BACKEND_DIGEST" && test -n "$FRONTEND_DIGEST"
+          scp -q -i "$RUNNER_TEMP/aplus-ssh/id_ed25519" \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$RUNNER_TEMP/aplus-ssh/known_hosts" \
+            deploy/bluegreen/release.sh root@"$HOST":/tmp/aplus-ci-release.sh
+          scp -q -i "$RUNNER_TEMP/aplus-ssh/id_ed25519" \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$RUNNER_TEMP/aplus-ssh/known_hosts" \
+            deploy/bluegreen/compose.green.yml root@"$HOST":/tmp/aplus-ci-compose.green.yml
+          scp -q -i "$RUNNER_TEMP/aplus-ssh/id_ed25519" \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$RUNNER_TEMP/aplus-ssh/known_hosts" \
+            deploy/bluegreen/ci-release.sh root@"$HOST":/tmp/aplus-ci-run-release.sh
+          printf '%s\n' "$GHCR_TOKEN" | ssh -i "$RUNNER_TEMP/aplus-ssh/id_ed25519" \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$RUNNER_TEMP/aplus-ssh/known_hosts" \
+            root@"$HOST" \
+            "BACKEND_DIGEST='$BACKEND_DIGEST' FRONTEND_DIGEST='$FRONTEND_DIGEST' IMAGE_OWNER='$IMAGE_OWNER' GHCR_USER='$GHCR_USER' bash /tmp/aplus-ci-run-release.sh"
+      - name: Verify public origin health; revert to blue if unhealthy
+        run: |
+          set -euo pipefail
+          healthy=0
+          for i in 1 2 3 4 5; do
+            if curl -fsS --max-time 12 \
+              "https://app.aplus-solution.de/health/?weekly_hours=$GITHUB_SHA-$i" \
+              | grep -q '"ok"'; then healthy=1; break; fi
+            sleep 5
+          done
+          if [ "$healthy" != 1 ]; then
+            echo "::error::Public health check failed; reverting to blue"
+            ssh -i "$RUNNER_TEMP/aplus-ssh/id_ed25519" \
+              -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+              -o UserKnownHostsFile="$RUNNER_TEMP/aplus-ssh/known_hosts" \
+              root@"$HOST" '/opt/aplussolution-green/release.sh rollback I_APPROVE_ROLLBACK' || true
+            exit 1
+          fi
+          echo "BLUE_GREEN_WEB_RELEASE_VERIFIED"
+      - name: Publish final result visible via GitHub commit status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          if [ "$RELEASE_RESULT" = success ]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+              -f state=success -f context=aplus/blue-green-weekly-hours \
+              -f description="Green cutover and public health verification passed"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+              -f state=failure -f context=aplus/blue-green-weekly-hours \
+              -f description="Release blocked or failed; check Actions before retry"
+          fi
+      - name: Clear temporary SSH material
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/aplus-ssh"
