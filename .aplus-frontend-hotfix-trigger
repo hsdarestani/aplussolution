@@ -1,4 +1,1 @@
-2026-11-22 approval for one-shot low-RAM static frontend production hotfix.
-Contains weekly Gesamtstunden correction from weeklyScheduledHours.ts and WiwScheduleMobile.tsx.
-Required: test+build on GitHub runner, backup existing live static assets, stage assets, swap index atomically, verify origin checksum and health, rollback on failure.
-No backend, database, Docker Compose stop/recreate or app-store submission.
+2026-11-22 approved retry of low-RAM frontend-only release after correcting legacy build guard. Includes 84 passing frontend tests in preceding run and latest schedule hours fix. CI must rerun tests and build; only publish on full success. Never stop/recreate Docker containers.
