@@ -3,7 +3,7 @@ import { scheduledShiftHours, sumAllWeeklyScheduledHours, sumScheduledCardHours 
 
 const weekDays = ['2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19', '2026-11-20', '2026-11-21', '2026-11-22'];
 const day = (iso: string) => iso.slice(0, 10);
-const slotCount = (shift: { slot_cards?: unknown[]; assigned_workers?: unknown[]; open_count?: number }) =>
+const slotCount = (shift: any) =>
   shift.slot_cards?.length || ((shift.assigned_workers?.length || 0) + (shift.open_count || 0)) || 1;
 
 describe('scheduled hours in manager Dienstplan', () => {
