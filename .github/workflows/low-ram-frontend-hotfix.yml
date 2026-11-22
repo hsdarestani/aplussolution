@@ -1,0 +1,90 @@
+name: A+ Solution safe low-RAM frontend-only release
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.aplus-frontend-hotfix-trigger]
+permissions:
+  contents: read
+  statuses: write
+concurrency:
+  group: aplus-low-ram-static-release
+  cancel-in-progress: false
+jobs:
+  frontend-static-hotfix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mark release pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -f state=pending -f context=aplus/low-ram-web-hotfix \
+            -f description="Preparing frontend-only hotfix; backend will not be restarted"
+      - name: Verify running frontend and configure SSH
+        env:
+          SSH_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$SSH_KEY"
+          install -d -m 700 "$RUNNER_TEMP/aplus-ssh"
+          printf '%s\n' "$SSH_KEY" > "$RUNNER_TEMP/aplus-ssh/id_ed25519"
+          chmod 600 "$RUNNER_TEMP/aplus-ssh/id_ed25519"
+          ssh -i "$RUNNER_TEMP/aplus-ssh/id_ed25519" \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$RUNNER_TEMP/aplus-ssh/known_hosts" \
+            -o ConnectTimeout=15 root@"$HOST" \
+            'cd /opt/aplussolution && cid=$(docker compose ps -q frontend) && test -n "$cid" && docker exec "$cid" test -w /usr/share/nginx/html && docker exec "$cid" test -f /usr/share/nginx/html/index.html'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run frontend regression tests and build new static release
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --package-lock=false
+          npm test
+          VITE_API_URL=https://app.aplus-solution.de/api npm run build
+          test -f dist/index.html && test -d dist/assets
+          tar -czf "$RUNNER_TEMP/aplus-frontend-$GITHUB_SHA.tar.gz" -C dist .
+          sha256sum dist/index.html | awk '{print $1}' > "$RUNNER_TEMP/index.sha256"
+      - name: Upload static assets and perform atomic frontend-only update
+        run: |
+          set -euo pipefail
+          hash="$(cat "$RUNNER_TEMP/index.sha256")"
+          scp -q -i "$RUNNER_TEMP/aplus-ssh/id_ed25519" \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$RUNNER_TEMP/aplus-ssh/known_hosts" \
+            "$RUNNER_TEMP/aplus-frontend-$GITHUB_SHA.tar.gz" \
+            root@"$HOST":"/tmp/aplus-frontend-$GITHUB_SHA.tar.gz"
+          scp -q -i "$RUNNER_TEMP/aplus-ssh/id_ed25519" \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$RUNNER_TEMP/aplus-ssh/known_hosts" \
+            deploy/bluegreen/frontend-hotfix.sh root@"$HOST":/tmp/aplus-frontend-hotfix.sh
+          ssh -i "$RUNNER_TEMP/aplus-ssh/id_ed25519" \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$RUNNER_TEMP/aplus-ssh/known_hosts" \
+            root@"$HOST" \
+            "RELEASE_SHA='$GITHUB_SHA' INDEX_SHA256='$hash' bash /tmp/aplus-frontend-hotfix.sh"
+      - name: Record observable release result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ job.status }}
+        run: |
+          if [ "$RESULT" = success ]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+              -f state=success -f context=aplus/low-ram-web-hotfix \
+              -f description="New frontend served from origin and health passed"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+              -f state=failure -f context=aplus/low-ram-web-hotfix \
+              -f description="Hotfix failed; server should retain or restore original frontend"
+          fi
+      - name: Remove temporary SSH key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/aplus-ssh"
