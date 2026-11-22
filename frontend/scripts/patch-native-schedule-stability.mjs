@@ -38,7 +38,7 @@ const newDayHeader = '<header><span className="wiw-day-header-spacer"/><div clas
 if (source.includes(oldDayHeader)) {
   source = source.replace(oldDayHeader, newDayHeader);
   changed = true;
-} else if (!source.includes('dayCards.reduce((sum, card)')) {
+} else if (!source.includes('dayCards.reduce((sum, card)') && !source.includes('sumScheduledCardHours(dayCards)')) {
   throw new Error('Native schedule day header marker not found');
 }
 
