@@ -1,0 +1,4 @@
+2026-11-22 approved production web release attempt for weekly Gesamtstunden fix.
+Deploy source: main after commit 70db65b3c6b7be986c4dcce7135ee3ca3a7d1611.
+Run full frontend tests, then safe STRATO blue-green preflight/stage/cutover only when checks pass. Preserve blue containers and automatic rollback on failed health verification.
+Do not use legacy stop/remove/recreate deployment.
