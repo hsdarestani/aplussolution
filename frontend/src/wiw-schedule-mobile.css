@@ -535,3 +535,51 @@
     inset-inline-start: calc(50% + clamp(10px, 3.4vw, 14px));
   }
 }
+
+
+/* Admin Dienstplan: distinguish separate events of the same customer.
+   Only the slim left stripe is changed; official customer palette and logo
+   stay intact. Applies to week previews, regular and OpenShift cards. */
+@media (max-width: 900px) {
+  .wiw-event-group-heading {
+    min-height: 27px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px 4px 14px;
+    background: #f3f6f8;
+    border-bottom: 1px solid #d9e1e7;
+    color: #344054;
+    font-size: 11px;
+    font-weight: 750;
+    line-height: 1.3;
+  }
+  .wiw-event-group-heading::before {
+    content: '';
+    display: block;
+    width: 9px;
+    height: 9px;
+    flex: 0 0 9px;
+    border-radius: 50%;
+    background: var(--wiw-event-stripe, #667085);
+  }
+  .wiw-event-group-heading > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .wiw-event-group-heading > small {
+    margin-left: auto;
+    flex: 0 0 auto;
+    font-size: 10px;
+    color: #667085;
+    font-weight: 650;
+  }
+  .wiw-shift-card[data-event-grouped="true"],
+  .wiw-shift-card.is-open[data-event-grouped="true"],
+  .wiw-shift-card.is-filled[data-event-grouped="true"],
+  .wiw-shift-card.is-draft[data-event-grouped="true"] {
+    border-left-color: var(--wiw-event-stripe) !important;
+  }
+}
