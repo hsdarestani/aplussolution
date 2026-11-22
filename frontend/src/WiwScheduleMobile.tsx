@@ -34,6 +34,7 @@ import { saveSchedulePdf } from './saveSchedulePdf';
 import { openPdfDocument } from './openPdfDocument';
 import { ShiftPlanAttachments, ShiftPlanBulkUpload } from './ShiftPlanAttachments';
 import { isHotelClientName, schedulePalette } from './scheduleClientPalette';
+import { groupDayScheduleCards, type DayEventGroup } from './scheduleEventGrouping';
 import './wiw-schedule-mobile.css';
 
 type TabKey = 'all' | 'open' | 'filled' | 'draft';
@@ -134,7 +135,6 @@ const COLOR_CHOICES: ColorChoice[] = [
 const unpack = (value: any): any[] => value?.results || value || [];
 const pad = (value: number) => String(value).padStart(2, '0');
 const normalize = (value: string) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
-const clientKey = (item: any) => String(item?.client || item?.client_name || 'ohne-kunde');
 const allowedWorkerNames = new Set(WORKER_PICKER_NAMES.map(normalize));
 
 function cardWorkerInitials(worker?: any) {
@@ -223,7 +223,7 @@ function CardTimeMeta({ card, showRecordedTime = false }: { card: CardRow; showR
   </span>;
 }
 
-function shiftCardStyle(shift: any) {
+function shiftCardStyle(shift: any, eventStripe?: string | null) {
   const palette = schedulePalette(shift?.client_name, shift?.position_name, shift?.color_hue);
   return {
     '--wiw-client-hue': String(palette.hue),
@@ -234,7 +234,16 @@ function shiftCardStyle(shift: any) {
     '--wiw-card-filled-text': palette.filledText,
     '--wiw-card-open-muted': palette.openMuted,
     '--wiw-card-filled-muted': palette.filledMuted,
+    ...(eventStripe ? { '--wiw-event-stripe': eventStripe } : {}),
   } as React.CSSProperties;
+}
+
+function EventGroupHeading({ group }: { group: DayEventGroup<CardRow> }) {
+  if (!group.hasSiblingGroups) return null;
+  return <div className="wiw-event-group-heading" style={{ '--wiw-event-stripe': group.stripe } as React.CSSProperties}>
+    <span>{group.eventNumber ? `Event-Nr. ${group.eventNumber}` : `Standort · ${group.title}`}</span>
+    <small>{group.cards.length} {group.cards.length === 1 ? 'Schicht' : 'Schichten'}</small>
+  </div>;
 }
 
 function sortScheduleCards(left: CardRow, right: CardRow) {
@@ -311,13 +320,17 @@ function ScheduleWeekPane({
     {previewDays.map((day) => {
       const header = formatDayHeader(day);
       const dayCards = (isCenter ? activeDays : previewByDay)[day] || [];
+      const dayGroups = groupDayScheduleCards(dayCards, clientRank);
       return <section className="wiw-day-section wiw-day-visual" id={isCenter ? `wiw-day-${day}` : undefined} key={day}>
         <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}<small> · {dayCards.reduce((sum, card) => { const gross = Math.max(0, (new Date(card.shift.ends_at).getTime() - new Date(card.shift.starts_at).getTime()) / 3600000); return sum + Math.max(0, gross - Number(card.shift.break_minutes || 0) / 60); }, 0).toFixed(1)} Std.</small></em></header>
-        {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button
+        {dayGroups.map((group, groupIndex) => <React.Fragment key={group.key}>
+          {groupIndex > 0 && dayGroups[groupIndex - 1].clientKey !== group.clientKey ? <div className="wiw-client-divider" aria-hidden="true" /> : null}
+          <EventGroupHeading group={group} />
+          {group.cards.map((card) => <button
           type="button"
           tabIndex={isCenter ? undefined : -1}
           className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'} ${isCenter && recentCopyShiftId && String(card.shift.id) === recentCopyShiftId ? 'is-copy-entering' : ''}`}
-          style={shiftCardStyle(card.shift)}
+          data-event-grouped={group.stripe ? 'true' : undefined} style={shiftCardStyle(card.shift, group.stripe)}
           onClick={isCenter ? () => onEdit(card) : undefined}
         >
           <div className="wiw-card-main">
@@ -326,7 +339,8 @@ function ScheduleWeekPane({
             <ShiftClientLogo shift={card.shift} />
             <CardTimeMeta card={card} showRecordedTime={showRecordedTime} />
           </div>
-        </button></React.Fragment>)}
+        </button>)}
+        </React.Fragment>)}
         {!dayCards.length ? <div className="wiw-day-empty">Keine Schichten</div> : null}
       </section>;
     })}
@@ -1590,11 +1604,16 @@ export default function WiwScheduleMobile() {
         {visibleDays.map((day) => {
           const header = formatDayHeader(day);
           const dayCards = byDay[day] || [];
+          const dayGroups = groupDayScheduleCards(dayCards, clientRank);
           return <section className="wiw-day-section wiw-day-visual" id={`wiw-day-${day}`} key={day}>
             <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}<small> · {dayCards.reduce((sum, card) => { const gross = Math.max(0, (new Date(card.shift.ends_at).getTime() - new Date(card.shift.starts_at).getTime()) / 3600000); return sum + Math.max(0, gross - Number(card.shift.break_minutes || 0) / 60); }, 0).toFixed(1)} Std.</small></em></header>
-            {dayCards.map((card, index) => <React.Fragment key={card.key}>{index > 0 && clientKey(dayCards[index - 1].shift) !== clientKey(card.shift) ? <div className="wiw-client-divider" aria-hidden="true" /> : null}<button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'}`} style={shiftCardStyle(card.shift)} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
+            {dayGroups.map((group, groupIndex) => <React.Fragment key={group.key}>
+              {groupIndex > 0 && dayGroups[groupIndex - 1].clientKey !== group.clientKey ? <div className="wiw-client-divider" aria-hidden="true" /> : null}
+              <EventGroupHeading group={group} />
+              {group.cards.map((card) => <button type="button" className={`wiw-shift-card ${card.shift.status === 'draft' ? 'is-draft' : card.isOpen ? 'is-open' : 'is-filled'}`} data-event-grouped={group.stripe ? 'true' : undefined} style={shiftCardStyle(card.shift, group.stripe)} onClick={() => card.shift.read_only ? setToast('WIW OpenShift · schreibgeschützt') : openEdit(card)}>
               <div className="wiw-card-main"><CardWorkerAvatar worker={card.worker} open={card.isOpen} draft={card.shift.status === 'draft'} /><span className="wiw-card-copy"><b>{cardWorkerShortName(card.worker?.name) || 'OpenShift'}</b><small>{cardPositionShortLabel(card.shift.position_name)}</small></span><ShiftClientLogo shift={card.shift} /><CardTimeMeta card={card} /></div>
-            </button></React.Fragment>)}
+            </button>)}
+            </React.Fragment>)}
           </section>;
         })}
         {!visibleDays.length ? <div className="wiw-day-empty">Keine verfügbaren OpenShifts</div> : null}
