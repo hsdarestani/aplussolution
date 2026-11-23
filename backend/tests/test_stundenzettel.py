@@ -101,7 +101,7 @@ def test_pagination_hotel_isolation_and_planned_dst(shift):
     reader = PdfReader(BytesIO(render_pdf(monday, 'housekeeping', hotels)))
     assert len(reader.pages) == 3
     assert len(reader.get_fields()) == 16 * 7 + 3 * 3
-    assert 'HOUSEKEEPING' in reader.pages[0].extract_text()
+    assert reader.get_fields()['p1_bereich']['/V'] == 'HOUSEKEEPING'
     assert 'FRONT OFFICE' not in reader.pages[0].extract_text()
 
 
