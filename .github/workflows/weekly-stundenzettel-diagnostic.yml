@@ -42,4 +42,4 @@ jobs:
           test "$status" = 401
           echo PUBLIC_EXPORT_AUTH_REQUIRED_AND_PRODUCTION_PERSISTENCE_OK
 
-# Verify recorded IST hours Stundenzettel persistence after guarded rollout 2026-11-23.
+# Verify outward quarter-hour IST rounding persistence after guarded rollout 2026-11-23.
