@@ -80,7 +80,7 @@ for group in GROUPS:
                  shift.starts_at.astimezone(utc_timezone.utc)).total_seconds() // 60
             ))
             assert row['source'] == 'PLAN'
-            assert row['bestaetigung'] == 'PLAN (nicht erfasst)'
+            assert row['bestaetigung'] == 'bestätigt'
         else:
             first, last, minutes = recorded
             assert row['source'] == 'IST'
