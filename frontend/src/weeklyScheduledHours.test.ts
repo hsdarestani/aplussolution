@@ -7,7 +7,7 @@ const slotCount = (shift: any) =>
   shift.slot_cards?.length || ((shift.assigned_workers?.length || 0) + (shift.open_count || 0)) || 1;
 
 describe('scheduled hours in manager Dienstplan', () => {
-  it('adds the net scheduled duration once for EACH person/slot, even if unapproved', () => {
+  it('adds the gross scheduled duration once for EACH person/slot, even if unapproved', () => {
     const shifts = [
       {
         starts_at: '2026-11-16T08:00:00+01:00', ends_at: '2026-11-16T13:00:00+01:00',
@@ -18,7 +18,7 @@ describe('scheduled hours in manager Dienstplan', () => {
         break_minutes: 30, slot_cards: [{ id: 3, status: 'pending' }],
       },
     ];
-    expect(sumAllWeeklyScheduledHours(shifts, weekDays, day, slotCount)).toBe(18.5);
+    expect(sumAllWeeklyScheduledHours(shifts, weekDays, day, slotCount)).toBe(19);
   });
 
   it('includes open and draft shifts but never adds the supplementary live WIW preview twice', () => {
@@ -30,7 +30,7 @@ describe('scheduled hours in manager Dienstplan', () => {
       { ...base, id: 'local', status: 'draft' },
       { ...base, id: 'live', source: 'wiw-live', status: 'published' },
     ];
-    expect(sumAllWeeklyScheduledHours(shifts, weekDays, day, slotCount)).toBe(5.5);
+    expect(sumAllWeeklyScheduledHours(shifts, weekDays, day, slotCount)).toBe(6);
   });
 
   it('only counts shifts in the selected Monday–Sunday week, not neighboring weeks', () => {
@@ -39,7 +39,7 @@ describe('scheduled hours in manager Dienstplan', () => {
       { starts_at: '2026-11-22T22:30:00+01:00', ends_at: '2026-11-23T06:30:00+01:00', break_minutes: 30 },
       { starts_at: '2026-11-23T10:00:00+01:00', ends_at: '2026-11-23T14:00:00+01:00' },
     ];
-    expect(sumAllWeeklyScheduledHours(shifts, weekDays, day, slotCount)).toBe(7.5);
+    expect(sumAllWeeklyScheduledHours(shifts, weekDays, day, slotCount)).toBe(8);
   });
 
   it('uses exactly the same shift-hour math for day headings and the week footer', () => {
@@ -49,13 +49,14 @@ describe('scheduled hours in manager Dienstplan', () => {
       { starts_at: '2026-11-17T09:00:00+01:00', ends_at: '2026-11-17T17:15:00+01:00', break_minutes: 30 },
     ];
     const cards = shifts.map((shift) => ({ shift }));
-    expect(sumScheduledCardHours(cards)).toBe(17.75);
+    expect(sumScheduledCardHours(cards)).toBe(18.25);
     expect(sumAllWeeklyScheduledHours(shifts, weekDays, day, () => 1)).toBe(sumScheduledCardHours(cards));
   });
 
   it('guards invalid or reversed times and never produces negative hours', () => {
     expect(scheduledShiftHours({ starts_at: 'bad', ends_at: 'bad' })).toBe(0);
     expect(scheduledShiftHours({ starts_at: '2026-11-16T13:00:00+01:00', ends_at: '2026-11-16T08:00:00+01:00' })).toBe(0);
-    expect(scheduledShiftHours({ starts_at: '2026-11-16T08:00:00+01:00', ends_at: '2026-11-16T09:00:00+01:00', break_minutes: 120 })).toBe(0);
+
+    expect(scheduledShiftHours({ starts_at: '2026-11-16T08:00:00+01:00', ends_at: '2026-11-16T09:00:00+01:00', break_minutes: 120 })).toBe(1);
   });
 });
