@@ -90,7 +90,7 @@ class StaffingShiftViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filterset_fields = ['status', 'client', 'location', 'position', 'order']
     ordering_fields = ['starts_at', 'ends_at', 'created_at']
-    search_fields = ['client__name', 'location__name', 'location__address', 'position__name', 'order__title', 'notes']
+    search_fields = ['client__name', 'location__name', 'location__address', 'position__name', 'order__title', 'notes', 'event_number']
 
     def base_queryset(self):
         return Shift.objects.select_related('order', 'client', 'location', 'position').annotate(
