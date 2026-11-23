@@ -1,4 +1,5 @@
 import { extractShiftEventNumber } from './scheduleEventGrouping';
+import { formatScheduledHours } from './weeklyScheduledHours';
 import React, { useEffect, useMemo, useState } from 'react';
 import { IonAlert, IonBadge, IonButton, IonIcon, IonInput, IonLabel, IonModal, IonSearchbar, IonSegment, IonSegmentButton, IonSelect, IonSelectOption, IonTextarea, IonToast, IonToggle } from '@ionic/react';
 import { addOutline, briefcaseOutline, businessOutline, checkmarkCircleOutline, locationOutline, peopleOutline, personCircleOutline, refreshOutline, timeOutline } from 'ionicons/icons';
@@ -381,7 +382,7 @@ export default function ScheduleV2({user}:{user:User}) {
 
     {view==='timeline'&&<div className="sv2-timeline-wrap" data-testid="schedule-timeline-view"><div className="sv2-timeline-grid"><div className="sv2-timeline-corner">Einsatzort</div>{weekDays.map(key=><div className={`sv2-timeline-head ${key===berlinDate()?'is-today':''}`} key={key}><b>{keyLabel(key,{weekday:'short'})}</b><span>{keyLabel(key,{day:'2-digit',month:'2-digit'})}</span></div>)}{timelineLocations.map(location=><React.Fragment key={location}><div className="sv2-location-label"><IonIcon icon={locationOutline}/><b>{location}</b></div>{weekDays.map(key=><div className="sv2-timeline-cell" key={`${location}-${key}`}>{visible.filter(item=>(item.location_name||'Ohne Einsatzort')===location&&shiftDateKey(item.starts_at)===key).map(item=>renderMini(item,true))}</div>)}</React.Fragment>)}</div>{!timelineLocations.length&&<div className="sv2-empty"><h3>Keine Einsätze in dieser Woche</h3><p>Zeitraum wechseln oder Filter ändern.</p></div>}</div>}
 
-    <div className="sv2-wiw-total" data-testid="phase8-week-total"><span>Gesamtstunden</span><strong>{weekTotalHours.toFixed(1)}</strong></div>
+    <div className="sv2-wiw-total" data-testid="phase8-week-total"><span>Gesamtstunden</span><strong>{formatScheduledHours(weekTotalHours)}</strong></div>
     {isManager(user)&&<button type="button" className="sv2-wiw-fab" aria-label="Schicht anlegen" onClick={create}>+</button>}
 
     <IonModal isOpen={modal} onDidDismiss={()=>setModal(false)}><div className="sv2-modal"><div className="sv2-modal-head"><h2>{editing?'Personalbedarf bearbeiten':'Personalbedarf anlegen'}</h2><IonButton fill="clear" onClick={()=>setModal(false)}>Schließen</IonButton></div><div className="sv2-form">
