@@ -35,6 +35,7 @@ import { ShiftPlanAttachments, ShiftPlanBulkUpload } from './ShiftPlanAttachment
 import { isHotelClientName, schedulePalette } from './scheduleClientPalette';
 import { extractShiftEventNumber, groupDayScheduleCards, type DayEventGroup } from './scheduleEventGrouping';
 import { formatScheduledHours, sumAllWeeklyScheduledHours, sumScheduledCardHours } from './weeklyScheduledHours';
+import { canViewAdminShiftExtraRows } from './adminScheduleVisibility';
 import './wiw-schedule-mobile.css';
 
 type TabKey = 'all' | 'open' | 'filled' | 'draft';
@@ -604,7 +605,7 @@ export default function WiwScheduleMobile() {
   const [manager, setManager] = useState(() => ['admin', 'manager'].includes(initialRole));
   const [isAdmin, setIsAdmin] = useState(() => initialRole === 'admin');
   const [accountEmail, setAccountEmail] = useState('');
-  const showRestrictedAdminRows = isAdmin && Boolean(accountEmail) && accountEmail !== 'info@aplus-solution.de';
+  const showRestrictedAdminRows = isAdmin && canViewAdminShiftExtraRows(accountEmail);
   const [rows, setRows] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
