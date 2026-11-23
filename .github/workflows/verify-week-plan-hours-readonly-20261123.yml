@@ -90,4 +90,17 @@ jobs:
           print(f"AUDIT_WEEK_TOTAL cards={count_all} shifts={num_shifts} planned_gross_hours={gross/60:.4f} planned_net_hours={net/60:.4f} excluded_pause_hours={(gross-net)/60:.4f}")
           assert count_all > 0
           PY
+          cid="$(docker compose ps -q frontend)"
+          if test -n "$cid"; then
+            origin_index_hash="$(docker exec "$cid" sha256sum /usr/share/nginx/html/index.html | awk '{print $1}')"
+            public_index_hash="$(curl -fsSL --connect-timeout 7 --max-time 20 "https://app.aplus-solution.de/?weekly_plan_audit=$RANDOM" | sha256sum | awk '{print $1}')"
+            echo "AUDIT_FRONTEND_ORIGIN_INDEX_HASH=$origin_index_hash"
+            echo "AUDIT_FRONTEND_PUBLIC_INDEX_HASH=$public_index_hash"
+            if test "$origin_index_hash" = "$public_index_hash"; then
+              echo "AUDIT_PUBLIC_INDEX_EQUALS_ORIGIN=yes"
+            else
+              echo "AUDIT_PUBLIC_INDEX_EQUALS_ORIGIN=no"
+            fi
+            curl -fsSI --connect-timeout 7 --max-time 12 "https://app.aplus-solution.de/?weekly_plan_headers=$RANDOM" | grep -i -E '^(cache-control|cf-cache-status|age|etag|last-modified):' || true
+          fi
           REMOTE
