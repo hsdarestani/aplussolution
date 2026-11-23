@@ -221,6 +221,7 @@ class Shift(TimestampedModel):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
     is_open = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
+    event_number = models.CharField(max_length=64, blank=True, default='')
     required_count = models.PositiveIntegerField(default=1)
     confirmation_required = models.BooleanField(default=False)
     schedule_groups = models.JSONField(default=list, blank=True)
