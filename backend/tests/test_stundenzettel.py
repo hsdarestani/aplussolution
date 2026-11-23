@@ -360,7 +360,7 @@ def test_mixed_ist_and_plan_rows_only_round_ist_and_total_both(shift, second_wor
             by_name['Anna']['stunden'], by_name['Anna']['source']) == (
         '08:00', '17:15', '9.25', 'IST')
     assert (by_name['Lukas']['start'], by_name['Lukas']['ende'],
-            by_name['Lukas']['stunden'], by_name['Anna']['source']) == (
+            by_name['Lukas']['stunden'], by_name['Lukas']['source']) == (
         '08:07', '17:11', '9.07', 'PLAN')
     assert displayed_total(rows) == '18.32'
     reader = PdfReader(BytesIO(render_pdf(monday, 'front_office', hotels)))
