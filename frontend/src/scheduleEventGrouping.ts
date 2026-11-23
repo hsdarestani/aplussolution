@@ -9,6 +9,7 @@ export type EventShift = {
   location?: string | number | null;
   location_name?: string | null;
   notes?: string | null;
+  event_number?: string | null;
   starts_at?: string | null;
 };
 
@@ -71,7 +72,8 @@ function clientIdentity(shift: EventShift): string {
 }
 
 function eventIdentity(shift: EventShift): { key: string; number: string | null; title: string } {
-  const number = extractShiftEventNumber(shift.notes);
+  const number = String(shift.event_number || '').trim().toUpperCase()
+    || extractShiftEventNumber(shift.notes);
   if (number) return { key: 'event:' + number, number, title: 'Event ' + number };
   // Notes without an identifiable event number must not be interpreted as
   // another event number. Keep different locations visibly separate instead.
