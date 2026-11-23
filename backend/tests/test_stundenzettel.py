@@ -84,7 +84,7 @@ def test_uses_employee_entered_time_not_plan_even_if_pending(auth_admin, worker_
     assert [fields[f'p1_{field}_01']['/V'] for field in ('start', 'ende', 'stunden')] == [
         '14:30', '22:45', '8.25',
     ]
-    assert fields['p1_bestaetigung_01']['/V'] == 'PLAN (nicht erfasst)'
+    assert fields['p1_bestaetigung_01']['/V'] == 'bestätigt'
 
     for field, value in (
         ('vorname', 'Anna'), ('nachname', 'Becker'),
@@ -127,7 +127,7 @@ def test_slots_only_actual_workers_no_openshift_but_keep_recorded_released_worke
     assert rows[0]['start'] == '08:00'
     assert rows[0]['ende'] == '13:00'
     assert rows[0]['source'] == 'PLAN'
-    assert rows[0]['bestaetigung'] == 'PLAN (nicht erfasst)'
+    assert rows[0]['bestaetigung'] == 'bestätigt'
     assert all(row['vorname'] != 'OpenShift' for row in rows)
 
     # A completed submitted time is evidence, even after the assignment was
@@ -311,7 +311,7 @@ def test_no_submitted_ist_uses_exact_plan_for_each_department_and_sums(shift):
     assert [rows[0][key] for key in ('start', 'ende', 'stunden', 'source', 'minutes')] == [
         '08:07', '17:11', '9.07', 'PLAN', 544,
     ]
-    assert rows[0]['bestaetigung'] == 'PLAN (nicht erfasst)'
+    assert rows[0]['bestaetigung'] == 'bestätigt'
     fields = PdfReader(BytesIO(
         render_pdf(monday, 'housekeeping', weekly_rows(monday, 'housekeeping'))
     )).get_fields()
@@ -319,7 +319,7 @@ def test_no_submitted_ist_uses_exact_plan_for_each_department_and_sums(shift):
     assert fields['p1_ende_01']['/V'] == '17:11'
     assert fields['p1_stunden_01']['/V'] == '9.07'
     assert fields['p1_gesamt']['/V'] == '9.07'
-    assert fields['p1_bestaetigung_01']['/V'] == 'PLAN (nicht erfasst)'
+    assert fields['p1_bestaetigung_01']['/V'] == 'bestätigt'
     original_shift_id = planned.pk
 
     # The second department uses the same fallback rule; the original
@@ -367,5 +367,5 @@ def test_mixed_ist_and_plan_rows_only_round_ist_and_total_both(shift, second_wor
     fields = reader.get_fields()
     assert fields['p1_gesamt']['/V'] == '18.32'
     assert sorted(fields[f'p1_bestaetigung_{i:02}']['/V'] for i in (1, 2)) == [
-        'PLAN (nicht erfasst)', 'bestätigt',
+        'bestätigt', 'bestätigt',
     ]

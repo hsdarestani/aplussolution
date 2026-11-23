@@ -146,7 +146,7 @@ def weekly_rows(monday, group):
                 'start': first.strftime('%H:%M'),
                 'ende': last.strftime('%H:%M'),
                 'stunden': decimal_hours(minutes),
-                'bestaetigung': 'bestätigt' if source == 'IST' else 'PLAN (nicht erfasst)',
+                'bestaetigung': 'bestätigt',
                 'minutes': minutes, 'source': source,
                 'shift_id': str(shift.pk), 'slot_id': slot_id,
                 'worker_id': str(worker.pk),
