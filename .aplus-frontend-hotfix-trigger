@@ -1,1 +1,1 @@
-2026-11-22 third safe web hotfix attempt after TypeScript test fixture correction. Same weekly scheduled-hours change, full CI, atomic UI asset switch and health rollback; no backend restart or database write.
+2026-11-23: verified Info account direct-assignment row is gated in both source and build patch; admin PLAN day/week gross without Pause. Frontend-only guarded hotfix with npm tests, atomic static release and production origin verification. Backend and database unchanged.
