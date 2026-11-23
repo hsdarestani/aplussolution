@@ -34,7 +34,7 @@ import { openPdfDocument } from './openPdfDocument';
 import { ShiftPlanAttachments, ShiftPlanBulkUpload } from './ShiftPlanAttachments';
 import { isHotelClientName, schedulePalette } from './scheduleClientPalette';
 import { extractShiftEventNumber, groupDayScheduleCards, type DayEventGroup } from './scheduleEventGrouping';
-import { sumAllWeeklyScheduledHours, sumScheduledCardHours } from './weeklyScheduledHours';
+import { formatScheduledHours, sumAllWeeklyScheduledHours, sumScheduledCardHours } from './weeklyScheduledHours';
 import './wiw-schedule-mobile.css';
 
 type TabKey = 'all' | 'open' | 'filled' | 'draft';
@@ -226,7 +226,7 @@ function shiftCardStyle(shift: any, eventStripe?: string | null) {
 }
 
 function EventGroupHeading({ group }: { group: DayEventGroup<CardRow> }) {
-  if (!group.hasSiblingGroups) return null;
+  if (!group.hasSiblingGroups && !group.eventNumber) return null;
   return <div className="wiw-event-group-heading" style={{ '--wiw-event-stripe': group.stripe } as React.CSSProperties}>
     <span>{group.eventNumber ? `Event-Nr. ${group.eventNumber}` : `Standort · ${group.title}`}</span>
     <small>{group.cards.length} {group.cards.length === 1 ? 'Schicht' : 'Schichten'}</small>
@@ -309,7 +309,7 @@ function ScheduleWeekPane({
       const dayCards = (isCenter ? activeDays : previewByDay)[day] || [];
       const dayGroups = groupDayScheduleCards(dayCards, clientRank);
       return <section className="wiw-day-section wiw-day-visual" id={isCenter ? `wiw-day-${day}` : undefined} key={day}>
-        <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}<small> · {sumScheduledCardHours(dayCards).toFixed(1)} Std.</small></em></header>
+        <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}<small> · {formatScheduledHours(sumScheduledCardHours(dayCards))} Std.</small></em></header>
         {dayGroups.map((group, groupIndex) => <React.Fragment key={group.key}>
           {groupIndex > 0 && dayGroups[groupIndex - 1].clientKey !== group.clientKey ? <div className="wiw-client-divider" aria-hidden="true" /> : null}
           <EventGroupHeading group={group} />
@@ -1576,7 +1576,7 @@ export default function WiwScheduleMobile() {
           const dayCards = byDay[day] || [];
           const dayGroups = groupDayScheduleCards(dayCards, clientRank);
           return <section className="wiw-day-section wiw-day-visual" id={`wiw-day-${day}`} key={day}>
-            <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}<small> · {sumScheduledCardHours(dayCards).toFixed(1)} Std.</small></em></header>
+            <header><span className="wiw-day-header-spacer"/><div className="wiw-day-heading"><strong>{header.weekday}</strong><span>{header.date}</span></div><em>{dayCards.length}<small> · {formatScheduledHours(sumScheduledCardHours(dayCards))} Std.</small></em></header>
             {dayGroups.map((group, groupIndex) => <React.Fragment key={group.key}>
               {groupIndex > 0 && dayGroups[groupIndex - 1].clientKey !== group.clientKey ? <div className="wiw-client-divider" aria-hidden="true" /> : null}
               <EventGroupHeading group={group} />
@@ -1589,7 +1589,7 @@ export default function WiwScheduleMobile() {
         {!visibleDays.length ? <div className="wiw-day-empty">Keine verfügbaren OpenShifts</div> : null}
       </div>}
 
-      {tab !== 'open' ? <div className="wiw-week-total"><span aria-live="polite">{loadingWeek ? 'Woche wird geladen …' : 'Gesamtstunden'}</span><strong>{weekHours.toFixed(1)}</strong></div> : null}
+      {tab !== 'open' ? <div className="wiw-week-total"><span aria-live="polite">{loadingWeek ? 'Woche wird geladen …' : 'Gesamtstunden'}</span><strong>{formatScheduledHours(weekHours)}</strong></div> : null}
       <button type="button" className="wiw-create-fab" aria-label="Schicht anlegen" onClick={() => openCreate(anchor)}>+</button>
 
       {formOpen ? <div ref={formScreenRef} className="wiw-shift-form-screen" data-testid="wiw-shift-form">
