@@ -4,6 +4,7 @@ from rest_framework import serializers
 from .models import *
 from .workforce_scope import canonical_position_name
 from .shift_rules import automatic_break_minutes, normalized_groups
+from .event_numbers import extract_event_number, normalize_event_number
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -117,6 +118,10 @@ class ShiftSerializer(serializers.ModelSerializer):
             attrs['break_minutes'] = automatic_break_minutes(starts_at, ends_at)
         if 'schedule_groups' in attrs:
             attrs['schedule_groups'] = normalized_groups(attrs.get('schedule_groups'))
+        if 'event_number' in attrs:
+            attrs['event_number'] = normalize_event_number(attrs['event_number'])
+        elif not (self.instance and self.instance.event_number):
+            attrs['event_number'] = extract_event_number(attrs.get('notes', getattr(self.instance, 'notes', '')))
         return attrs
 
     worker_name = serializers.CharField(source='worker.user.get_full_name', read_only=True)
