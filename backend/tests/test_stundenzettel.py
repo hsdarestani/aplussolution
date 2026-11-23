@@ -320,6 +320,7 @@ def test_no_submitted_ist_uses_exact_plan_for_each_department_and_sums(shift):
     assert fields['p1_stunden_01']['/V'] == '9.07'
     assert fields['p1_gesamt']['/V'] == '9.07'
     assert fields['p1_bestaetigung_01']['/V'] == 'PLAN (nicht erfasst)'
+    original_shift_id = planned.pk
 
     # The second department uses the same fallback rule; the original
     # employee time and shift schedule are never modified.
@@ -332,7 +333,7 @@ def test_no_submitted_ist_uses_exact_plan_for_each_department_and_sums(shift):
     assert front[0]['source'] == 'PLAN'
     assert (front[0]['start'], front[0]['ende'], front[0]['stunden']) == ('09:05', '15:05', '6')
     assert TimeEntry.objects.filter(shift=another).count() == 0
-    assert TimeEntry.objects.filter(shift=planned, clock_out__isnull=True).count() == 1
+    assert TimeEntry.objects.filter(shift_id=original_shift_id, clock_out__isnull=True).count() == 1
 
 
 @pytest.mark.django_db
@@ -356,10 +357,10 @@ def test_mixed_ist_and_plan_rows_only_round_ist_and_total_both(shift, second_wor
     assert len(rows) == 2
     by_name = {row['vorname']: row for row in rows}
     assert (by_name['Anna']['start'], by_name['Anna']['ende'],
-            by_name['Anna']['stunden'], by_name['source']) == (
+            by_name['Anna']['stunden'], by_name['Anna']['source']) == (
         '08:00', '17:15', '9.25', 'IST')
     assert (by_name['Lukas']['start'], by_name['Lukas']['ende'],
-            by_name['Lukas']['stunden'], by_name['source']) == (
+            by_name['Lukas']['stunden'], by_name['Anna']['source']) == (
         '08:07', '17:11', '9.07', 'PLAN')
     assert displayed_total(rows) == '18.32'
     reader = PdfReader(BytesIO(render_pdf(monday, 'front_office', hotels)))
