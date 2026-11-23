@@ -35,6 +35,7 @@ import { ShiftPlanAttachments, ShiftPlanBulkUpload } from './ShiftPlanAttachment
 import { isHotelClientName, schedulePalette } from './scheduleClientPalette';
 import { extractShiftEventNumber, groupDayScheduleCards, type DayEventGroup } from './scheduleEventGrouping';
 import { formatScheduledHours, sumAllWeeklyScheduledHours, sumScheduledCardHours } from './weeklyScheduledHours';
+import { canViewAdminShiftExtraRows } from './adminScheduleVisibility';
 import './wiw-schedule-mobile.css';
 
 type TabKey = 'all' | 'open' | 'filled' | 'draft';
@@ -604,7 +605,7 @@ export default function WiwScheduleMobile() {
   const [manager, setManager] = useState(() => ['admin', 'manager'].includes(initialRole));
   const [isAdmin, setIsAdmin] = useState(() => initialRole === 'admin');
   const [accountEmail, setAccountEmail] = useState('');
-  const showRestrictedAdminRows = isAdmin && Boolean(accountEmail) && accountEmail !== 'info@aplus-solution.de';
+  const showRestrictedAdminRows = isAdmin && canViewAdminShiftExtraRows(accountEmail);
   const [rows, setRows] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
@@ -1616,7 +1617,11 @@ export default function WiwScheduleMobile() {
           <Row field="location" icon={locationOutline} label={locationChoices.find((item) => item.value === form.location)?.label || 'Jobstandort'} muted={!form.location} onClick={() => form.client ? setSheet('location') : setSheet('client')} />
 
           <div className="wiw-form-separator" />
-          <Row icon={personOutline} label="OpenShift" value={form.publish_now ? 'Für passende Mitarbeiter sichtbar' : 'Aus · ohne Zuweisung nur als Entwurf'} trailing={<Switch checked={form.publish_now} onChange={(value) => setForm((current) => ({ ...current, publish_now: value }))} />} />
+          {editing && form.workers.length
+            ? ((!isAdmin || showRestrictedAdminRows)
+              ? <Row icon={personOutline} label="Direkt zugewiesen" value={selectedWorkerNames || editing.workerName} emphasizeValue />
+              : null)
+            : <Row icon={personOutline} label="OpenShift" value={form.publish_now ? 'Für passende Mitarbeiter sichtbar' : 'Aus · ohne Zuweisung nur als Entwurf'} trailing={<Switch checked={form.publish_now} onChange={(value) => setForm((current) => ({ ...current, publish_now: value }))} />} />}
           {!editing ? <Row icon={layersOutline} label={`${form.required_count} Schicht${form.required_count === 1 ? '' : 'en'}`} trailing={<div className="wiw-count-stepper"><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: Math.max(current.workers.length || 1, current.required_count - 1) }))}>−</button><b>{form.required_count}</b><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: current.required_count + 1 }))}>+</button></div>} /> : (showRestrictedAdminRows ? <Row icon={layersOutline} label="1 Schichtkarte" value={editing.workerName || 'OpenShift'} emphasizeValue={Boolean(editing.workerName)} /> : null)}
           <Row icon={checkmarkOutline} label="Erfordere Übernahme-Bestätigung" trailing={<Switch checked={form.confirmation_required} onChange={(value) => setForm((current) => ({ ...current, confirmation_required: value }))} />} />
           <Row icon={peopleOutline} label={editing ? (form.workers.length ? 'Mitarbeiter ändern' : 'Mitarbeiter zuweisen') : (form.workers.length ? `${form.workers.length} Benutzer direkt zugewiesen` : 'Geeignete Benutzer anzeigen')} value={selectedWorkerNames || undefined} emphasizeValue={Boolean(selectedWorkerNames)} muted={!form.workers.length} onClick={() => setSheet('workers')} />
