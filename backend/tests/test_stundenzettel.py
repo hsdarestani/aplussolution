@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from io import BytesIO
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -8,7 +9,7 @@ from pypdf import PdfReader
 from core.models import Shift, TimeEntry
 from core.shift_slots import ShiftSlot
 from core.stundenzettel import (
-    displayed_total, parse_week, render_pdf, weekly_rows,
+    _rounded_recorded_interval, displayed_total, parse_week, render_pdf, weekly_rows,
 )
 
 BERLIN = ZoneInfo('Europe/Berlin')
@@ -215,3 +216,69 @@ def test_editable_total_matches_visible_rounded_rows():
     assert displayed_total(entries) == '3.99'
     assert displayed_total(entries + [{'stunden': ''}]) == '3.99'
     assert displayed_total([{'stunden': ''}]) == '0'
+
+
+@pytest.mark.parametrize(
+    'started,ended,start_label,end_label,expected_minutes',
+    [
+        ('2026-11-10T11:10', '2026-11-10T12:10', '11:00', '12:15', 75),
+        ('2026-11-10T11:00', '2026-11-10T11:15', '11:00', '11:15', 15),
+        ('2026-11-10T11:20', '2026-11-10T11:40', '11:15', '11:45', 30),
+        ('2026-11-10T11:59', '2026-11-10T12:01', '11:45', '12:15', 30),
+        ('2026-11-10T23:58', '2026-11-11T00:02', '23:45', '00:15', 30),
+        ('2026-03-29T01:50', '2026-03-29T03:10', '01:45', '03:15', 30),
+    ],
+)
+def test_outward_quarter_rounding_preserves_full_interval(
+    started, ended, start_label, end_label, expected_minutes,
+):
+    entry = SimpleNamespace(clock_in=stamp(started), clock_out=stamp(ended))
+    start, end, minutes = _rounded_recorded_interval(entry)
+    assert (start.strftime('%H:%M'), end.strftime('%H:%M'), minutes) == (
+        start_label, end_label, expected_minutes,
+    )
+    assert start.astimezone(ZoneInfo('UTC')) <= entry.clock_in.astimezone(ZoneInfo('UTC'))
+    assert end.astimezone(ZoneInfo('UTC')) >= entry.clock_out.astimezone(ZoneInfo('UTC'))
+
+
+def test_quarter_rounding_dst_fold_uses_real_elapsed_time():
+    entry = SimpleNamespace(
+        clock_in=stamp('2026-10-25T02:10', fold=0),
+        clock_out=stamp('2026-10-25T02:10', fold=1),
+    )
+    first, last, minutes = _rounded_recorded_interval(entry)
+    assert (first.strftime('%H:%M'), last.strftime('%H:%M')) == ('02:00', '02:15')
+    assert minutes == 75
+
+
+@pytest.mark.django_db
+def test_report_rounds_submitted_hhmm_outwards_without_changing_timeentry(shift):
+    monday = parse_week('2026-W46')
+    planned = plan(shift, '2026-11-10T08:00', '2026-11-10T17:00', group='housekeeping')
+    entry = TimeEntry.objects.create(
+        worker=planned.worker, shift=planned,
+        clock_in=stamp('2026-11-10T08:10'), clock_out=stamp('2026-11-10T17:10'),
+        break_minutes=60, approved=False,
+    )
+    hotels = weekly_rows(monday, 'housekeeping')
+    row = next(iter(hotels.values()))[0]
+    assert [row[key] for key in ('start', 'ende', 'stunden', 'minutes')] == [
+        '08:00', '17:15', '9.25', 555,
+    ]
+    fields = PdfReader(BytesIO(render_pdf(monday, 'housekeeping', hotels))).get_fields()
+    assert fields['p1_start_01']['/V'] == '08:00'
+    assert fields['p1_ende_01']['/V'] == '17:15'
+    assert fields['p1_stunden_01']['/V'] == '9.25'
+    assert fields['p1_gesamt']['/V'] == '9.25'
+    entry.refresh_from_db()
+    assert entry.clock_in.astimezone(BERLIN).strftime('%H:%M') == '08:10'
+    assert entry.clock_out.astimezone(BERLIN).strftime('%H:%M') == '17:10'
+    pdf = PdfReader(BytesIO(render_pdf(monday, 'housekeeping', hotels)))
+    widget = next(
+        item.get_object() for item in pdf.pages[0]['/Annots']
+        if item.get_object().get('/T') == 'p1_start_01'
+    )
+    script = str(widget['/AA']['/Bl']['/JS'])
+    assert 'Math.floor(a/15)' in script
+    assert 'Math.ceil(b/15)' in script
+    assert r'\d{1,2}' in script

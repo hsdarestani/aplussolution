@@ -52,14 +52,17 @@ for group in GROUPS:
         shift_id__in=[s.pk for s in shifts.values()],
         clock_out__isnull=False,
     ).order_by('updated_at', 'pk'):
-        if entry.clock_out <= entry.clock_in:
+        actual_first_utc = entry.clock_in.astimezone(utc_timezone.utc)
+        actual_last_utc = entry.clock_out.astimezone(utc_timezone.utc)
+        if actual_last_utc <= actual_first_utc:
             continue
-        first = entry.clock_in.astimezone(BERLIN).replace(second=0, microsecond=0)
-        last = entry.clock_out.astimezone(BERLIN).replace(second=0, microsecond=0)
-        minutes = int(
-            (last.astimezone(utc_timezone.utc) -
-             first.astimezone(utc_timezone.utc)).total_seconds() // 60
-        )
+        start_utc = actual_first_utc.replace(second=0, microsecond=0)
+        end_utc = actual_last_utc.replace(second=0, microsecond=0)
+        rounded_start = start_utc - timedelta(minutes=start_utc.minute % 15)
+        rounded_end = end_utc + timedelta(minutes=(-end_utc.minute) % 15)
+        first = rounded_start.astimezone(BERLIN)
+        last = rounded_end.astimezone(BERLIN)
+        minutes = int((rounded_end - rounded_start).total_seconds() // 60)
         if minutes > 0:
             time_entries[(str(entry.shift_id), str(entry.worker_id))] = (first, last, minutes)
 
