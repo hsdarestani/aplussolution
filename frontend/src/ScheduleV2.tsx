@@ -179,7 +179,7 @@ export default function ScheduleV2({user}:{user:User}) {
   const monthDays=useMemo(()=>Array.from({length:42},(_,index)=>addKeyDays(monthGridStart,index)),[monthGridStart]);
   const rowsByDay=useMemo(()=>{const map:Record<string,any[]>={}; for(const item of visible){const key=shiftDateKey(item.starts_at);(map[key] ||= []).push(item);} Object.values(map).forEach(items=>items.sort((a,b)=>clientRank(a.client_name)-clientRank(b.client_name)||new Date(a.starts_at).getTime()-new Date(b.starts_at).getTime())); return map;},[visible]);
   const timelineLocations=useMemo(()=>Array.from(new Set(visible.filter(x=>weekDays.includes(shiftDateKey(x.starts_at))).map(x=>x.location_name||'Ohne Einsatzort'))).sort(),[visible,weekDays]);
-  const weekTotalHours=useMemo(()=>visible.filter(x=>weekDays.includes(shiftDateKey(x.starts_at))).reduce((sum:number,x:any)=>{const gross=Math.max(0,(new Date(x.ends_at).getTime()-new Date(x.starts_at).getTime())/3600000);return sum+gross;},0),[visible,weekDays]);
+  const weekTotalHours=useMemo(()=>visible.filter(x=>weekDays.includes(shiftDateKey(x.starts_at))).reduce((sum:number,x:any)=>{const gross=Math.max(0,(new Date(x.ends_at).getTime()-new Date(x.starts_at).getTime())/3600000);return sum+Math.max(0,gross-Math.max(0,Number(x.break_minutes||0))/60);},0),[visible,weekDays]);
 
   async function act(path:string,msg:string){setBusy(true);try{await api(path,{method:'POST',body:'{}'});setToast(msg);await load();}catch(e:any){setToast(e.message);}finally{setBusy(false);}}
   function create(){setEditing(undefined);setForm({required_count:1,break_minutes:0,publish_now:true,confirmation_required:false,workers:[],schedule_groups:['service']});setModal(true);}
