@@ -5,7 +5,7 @@ import pytest
 from pypdf import PdfReader
 from core.models import Shift, TimeEntry
 from core.shift_slots import ShiftSlot
-from core.stundenzettel import parse_week, weekly_rows, render_pdf
+from core.stundenzettel import parse_week, weekly_rows, render_pdf, displayed_total
 BERLIN = ZoneInfo('Europe/Berlin')
 
 def stamp(value):
@@ -54,14 +54,22 @@ def test_all_planned_shifts_even_without_or_with_pending_conflicting_time(auth_a
     assert 'KW45 - 2026' in response['Content-Disposition']
     assert response['Cache-Control'] == 'private, no-store'
     reader = PdfReader(BytesIO(response.content)); fields = reader.get_fields()
-    for field, value in [('vorname','Anna'),('nachname','Becker'),('datum','08.11.2026'),('start','22:30'),('ende','06:45'),('stunden','7.75'),('bestaetigung','bestätigt')]:
+    for field, value in [('vorname','Anna'),('nachname','Becker'),('datum','08.11.2026'),('start','22:30'),('ende','06:45'),('stunden','8.25'),('bestaetigung','bestätigt')]:
         assert fields[f'p1_{field}_02']['/V'] == value
-    assert len(fields) == 14
+    assert len(fields) == 17
+    assert fields['p1_hotel']['/V']
+    assert fields['p1_bereich']['/V'] == 'FRONT OFFICE'
+    assert fields['p1_gesamt']['/V'] == '16.5'
+    # Editing a start/end or hours field triggers recalculation in Acrobat.
+    annot = next(ref.get_object() for ref in reader.pages[0]['/Annots'] if ref.get_object().get('/T') == 'p1_start_02')
+    assert '/Bl' in annot['/AA']
+    assert 'getField' in annot['/AA']['/Bl']['/JS']
+    assert not (fields['p1_gesamt'].get('/Ff', 0) & 1)
     assert fields['p1_bestaetigung_01']['/V'] == 'bestätigt'
     text = reader.pages[0].extract_text()
     assert all(value not in text for value in ['Summe Seite', 'Gesamt Hotel', 'KW ', 'Seite 1/'])
     assert 'Bestätigung Hotel' in text and '(Unterschrift)' in text
-    assert '15.5' in text
+    assert fields['p1_gesamt']['/V'] == '16.5'
     for widget in reader.pages[0]['/Annots']:
         assert widget.get_object()['/AP']['/N']
 
@@ -92,6 +100,25 @@ def test_pagination_hotel_isolation_and_planned_dst(shift):
     hotels[('another-client', 'another-location', key[2])] = [next(iter(hotels.values()))[0]]
     reader = PdfReader(BytesIO(render_pdf(monday, 'housekeeping', hotels)))
     assert len(reader.pages) == 3
-    assert len(reader.get_fields()) == 16 * 7
+    assert len(reader.get_fields()) == 16 * 7 + 3 * 3
     assert 'HOUSEKEEPING' in reader.pages[0].extract_text()
     assert 'FRONT OFFICE' not in reader.pages[0].extract_text()
+
+
+@pytest.mark.django_db
+def test_gross_hours_include_entire_interval_without_break_deduction(shift):
+    monday = parse_week('2026-W46')
+    plan(shift, '2026-11-10T08:00', '2026-11-10T17:00',
+         group='housekeeping', break_minutes=60)
+    rows = [row for group in weekly_rows(monday, 'housekeeping').values() for row in group]
+    assert [row['stunden'] for row in rows] == ['9']
+    assert rows[0]['minutes'] == 540
+    pdf = PdfReader(BytesIO(render_pdf(monday, 'housekeeping', weekly_rows(monday, 'housekeeping'))))
+    fields = pdf.get_fields()
+    assert fields['p1_stunden_01']['/V'] == '9'
+    assert fields['p1_gesamt']['/V'] == '9'
+
+
+def test_editable_total_matches_visible_rounded_rows():
+    entries = [{'stunden': '1.33'}, {'stunden': '1.33'}, {'stunden': '1.33'}]
+    assert displayed_total(entries) == '3.99'
