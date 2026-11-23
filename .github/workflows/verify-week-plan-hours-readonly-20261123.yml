@@ -1,0 +1,93 @@
+name: Read-only audit of 23-29 Nov planned schedule totals
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-week-plan-hours-readonly-20261123.yml'
+permissions:
+  contents: read
+jobs:
+  read-only-week-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      PRIMARY_HOST: ${{ secrets.STRATO_HOST }}
+      PRIVATE_KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Read aggregate daily and weekly PLAN hours from current primary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRIMARY_HOST" && test -n "$PRIVATE_KEY"
+          umask 077
+          key="$RUNNER_TEMP/audit.key"
+          printf '%s\n' "$PRIVATE_KEY" > "$key"
+          chmod 600 "$key"
+          trap 'rm -f "$key"' EXIT
+          ssh -i "$key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$RUNNER_TEMP/known-hosts" -o ConnectTimeout=15 \
+            -o ServerAliveInterval=10 -o ServerAliveCountMax=3 root@"$PRIMARY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/aplussolution
+          docker compose exec -T backend python manage.py shell <<'PY'
+          from datetime import datetime, date, timedelta
+          from zoneinfo import ZoneInfo
+          from collections import defaultdict
+          from rest_framework.test import APIRequestFactory, force_authenticate
+          from core.mobile_schedule import mobile_schedule
+          from core.models import User
+
+          berlin = ZoneInfo('Europe/Berlin')
+          monday = date(2026, 11, 23)
+          days = [(monday + timedelta(days=i)).isoformat() for i in range(7)]
+          user = User.objects.filter(email__iexact='info@aplus-solution.de', is_active=True).first()
+          if user is None:
+              user = User.objects.filter(role=User.Role.ADMIN, is_active=True).first()
+          assert user is not None, 'No active admin'
+          request = APIRequestFactory().get('/api/admin/mobile-schedule/', {'date_from': days[0], 'date_to': days[-1]})
+          force_authenticate(request, user=user)
+          response = mobile_schedule(request)
+          assert response.status_code == 200, f'API status {response.status_code}'
+          shifts = response.data['shifts']
+          totals = defaultdict(lambda: {'gross_minutes': 0, 'net_minutes': 0, 'cards': 0, 'pause_minutes': 0})
+          num_shifts = 0
+          for shift in shifts:
+              if shift.get('source') == 'wiw-live':
+                  continue
+              start = shift.get('starts_at')
+              end = shift.get('ends_at')
+              if not start or not end:
+                  continue
+              start = datetime.fromisoformat(start.replace('Z', '+00:00'))
+              end = datetime.fromisoformat(end.replace('Z', '+00:00'))
+              key = start.astimezone(berlin).date().isoformat()
+              if key not in days:
+                  continue
+              slots = shift.get('slot_cards')
+              if isinstance(slots, list) and slots:
+                  count = len(slots)
+              else:
+                  assigned = shift.get('assigned_workers') or []
+                  count = len(assigned) + int(shift.get('open_count') or 0)
+                  if count <= 0:
+                      count = 1
+              minutes = max(0, round((end - start).total_seconds() / 60))
+              pause = max(0, int(shift.get('break_minutes') or 0))
+              t = totals[key]
+              t['cards'] += count
+              t['gross_minutes'] += count * minutes
+              t['net_minutes'] += count * max(0, minutes - pause)
+              t['pause_minutes'] += count * min(minutes, pause)
+              num_shifts += 1
+          gross = net = count_all = 0
+          print('AUDIT_WEEK 2026-11-23 2026-11-29; source=admin/mobile-schedule; no writes')
+          for day in days:
+              t = totals[day]
+              gross += t['gross_minutes']
+              net += t['net_minutes']
+              count_all += t['cards']
+              print(f"AUDIT_DAY {day} cards={t['cards']} planned_gross_hours={t['gross_minutes']/60:.4f} planned_net_hours={t['net_minutes']/60:.4f} excluded_pause_hours={t['pause_minutes']/60:.4f}")
+          print(f"AUDIT_WEEK_TOTAL cards={count_all} shifts={num_shifts} planned_gross_hours={gross/60:.4f} planned_net_hours={net/60:.4f} excluded_pause_hours={(gross-net)/60:.4f}")
+          assert count_all > 0
+          PY
+          REMOTE
