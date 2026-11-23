@@ -6,6 +6,7 @@ from .premium_approval_models import ShiftReleaseRequest
 from .shift_slots import ShiftSlot
 from .shift_plan_models import ShiftPlanAttachment
 from .shift_rules import automatic_break_minutes, normalized_groups
+from .event_numbers import extract_event_number, normalize_event_number
 
 
 class ShiftApiSerializer(serializers.ModelSerializer):
@@ -391,13 +392,17 @@ class ShiftApiSerializer(serializers.ModelSerializer):
             attrs['break_minutes'] = automatic_break_minutes(starts_at, ends_at)
         if 'schedule_groups' in attrs:
             attrs['schedule_groups'] = normalized_groups(attrs.get('schedule_groups'))
+        if 'event_number' in attrs:
+            attrs['event_number'] = normalize_event_number(attrs['event_number'])
+        elif not (self.instance and self.instance.event_number):
+            attrs['event_number'] = extract_event_number(attrs.get('notes', getattr(self.instance, 'notes', '')))
         return attrs
 
     class Meta:
         model = Shift
         fields = [
             'id', 'order', 'order_title', 'client', 'client_name', 'location', 'location_name', 'geofence_required',
-            'position', 'position_name', 'starts_at', 'ends_at', 'break_minutes', 'status', 'notes',
+            'position', 'position_name', 'starts_at', 'ends_at', 'break_minutes', 'status', 'notes', 'event_number',
             'required_count', 'confirmation_required', 'schedule_groups', 'color_hue', 'open_count', 'filled_count',
             'assigned_workers', 'slot_cards', 'my_release_request', 'my_time_entry', 'admin_time_entries', 'plans',
         ]
