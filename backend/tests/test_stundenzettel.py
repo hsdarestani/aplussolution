@@ -213,3 +213,5 @@ def test_uses_latest_completed_submission_without_duplicating_shift(shift):
 def test_editable_total_matches_visible_rounded_rows():
     entries = [{'stunden': '1.33'}, {'stunden': '1.33'}, {'stunden': '1.33'}]
     assert displayed_total(entries) == '3.99'
+    assert displayed_total(entries + [{'stunden': ''}]) == '3.99'
+    assert displayed_total([{'stunden': ''}]) == '0'
