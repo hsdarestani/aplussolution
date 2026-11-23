@@ -226,7 +226,7 @@ def render_pdf(monday, group, hotels):
             start_name = f'{prefix}start_{suffix}'
             end_name = f'{prefix}ende_{suffix}'
             recalc = (
-                'function m(t){var a=/^(\\\\d{1,2}):(\\\\d{2})$/.exec(String(t).trim());'
+                'function m(t){var a=/^(\\d{1,2}):(\\d{2})$/.exec(String(t).trim());'
                 'if(!a)return NaN;var h=Number(a[1]),n=Number(a[2]);'
                 'return h<24&&n<60?h*60+n:NaN;}'
                 'function fmt(t){t=((t%1440)+1440)%1440;'
