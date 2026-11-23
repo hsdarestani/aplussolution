@@ -31,7 +31,7 @@ export default function WeeklyStundenzettel() {
     finally { setBusy(''); }
   }
   return <section className="weekly-stundenzettel" aria-label="Stundenzettel exportieren">
-    <div><small>WOCHENEXPORT</small><h2>Stundenzettel</h2><p>Housekeeping und Front Office im gewohnten Formular. Alle zugewiesenen Schichten je Hotel. Beginn und Ende basieren auf IST-Zeiten der Mitarbeiter: Beginn wird auf die vorherige Viertelstunde abgerundet, Ende auf die nächste Viertelstunde aufgerundet. Ohne Pausenabzug. Ohne erfasste Endzeit bleiben die Zeitfelder leer; Dienstplanzeiten werden nicht als Arbeitszeit übernommen. Das PDF bleibt bearbeitbar.</p></div>
+    <div><small>WOCHENEXPORT</small><h2>Stundenzettel</h2><p>Housekeeping und Front Office im gewohnten Formular. Alle zugewiesenen Schichten je Hotel. Beginn und Ende basieren auf IST-Zeiten der Mitarbeiter: Beginn wird auf die vorherige Viertelstunde abgerundet, Ende auf die nächste Viertelstunde aufgerundet. Ohne Pausenabzug. Wenn keine vollständig erfasste IST-Zeit vorliegt, werden stattdessen die unveränderten PLAN-Zeiten angezeigt und ausdrücklich als PLAN (nicht erfasst) gekennzeichnet. Das PDF bleibt bearbeitbar.</p></div>
     <div className="weekly-stundenzettel-actions">
       <label>Kalenderwoche<input type="week" required value={week} disabled={Boolean(busy)} onChange={(event) => { setWeek(event.target.value); setMessage(''); }} /></label>
       <button type="button" disabled={Boolean(busy) || !week} onClick={() => void download('housekeeping')}>{busy === 'housekeeping' ? 'PDF wird erstellt …' : 'Housekeeping · PDF'}</button>
