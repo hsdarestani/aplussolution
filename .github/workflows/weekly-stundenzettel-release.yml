@@ -4,6 +4,10 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/weekly-stundenzettel-release.yml'
+      - 'backend/core/stundenzettel.py'
+      - 'backend/tests/test_stundenzettel.py'
+      - 'scripts/verify-weekly-stundenzettel.py'
+      - 'frontend/src/WeeklyStundenzettel.tsx'
 permissions:
   contents: read
   packages: write

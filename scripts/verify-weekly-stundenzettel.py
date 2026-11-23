@@ -27,7 +27,7 @@ for raw in schedule.data['shifts']:
     end = datetime.fromisoformat(str(raw['ends_at']).replace('Z', '+00:00')).astimezone(BERLIN)
     if model.status == Shift.Status.CANCELLED or not monday <= start.date() <= monday + timedelta(days=6):
         continue
-    minutes = max(0, int((model.ends_at - model.starts_at).total_seconds() // 60) - int(raw['break_minutes'] or 0))
+    minutes = max(0, int((model.ends_at - model.starts_at).total_seconds() // 60))
     cards = raw['slot_cards']
     if not cards and not model.slots.exists():
         cards = [{}] * max(1, int(model.required_count or 1))
@@ -48,7 +48,13 @@ for group in GROUPS:
             prefix, index = name.split('_datum_')
             actual.append(tuple(fields[f'{prefix}_{field}_{index}']['/V'] for field in ['datum', 'start', 'ende', 'stunden']))
     assert Counter(actual) == Counter(expected[group]), (group, 'PDF rows differ from visible Dienstplan cards')
-    for page in pdf.pages:
+    for page_no, page in enumerate(pdf.pages, 1):
+        ids = [name for name in fields if name.startswith(f'p{page_no}_stunden_')]
+        from decimal import Decimal
+        expected_page_sum = sum((Decimal(str(fields[name]['/V'])) for name in ids), Decimal('0'))
+        assert Decimal(str(fields[f'p{page_no}_gesamt']['/V'])) == expected_page_sum
+        assert fields[f'p{page_no}_hotel']['/V']
+        assert fields[f'p{page_no}_bereich']['/V'] == GROUPS[group][1]
         text = page.extract_text()
         assert all(value not in text for value in ['Summe Seite', 'Gesamt Hotel', 'KW ', 'Seite 1/'])
         assert 'Bestätigung Hotel' in text and '(Unterschrift)' in text
