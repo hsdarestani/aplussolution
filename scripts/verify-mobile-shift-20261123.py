@@ -34,8 +34,8 @@ for note, event_number in Shift.objects.exclude(notes='').values_list('notes', '
             unfilled += 1
 assert unfilled == 0, ('Unfilled recognized event numbers', unfilled)
 
-# Independently check gross PLAN totals on representative existing shifts and
-# allow overnight shifts: minutes are UTC elapsed, with no break subtraction.
+# Independently check net PLAN totals on representative existing shifts and
+# overnight shifts: count UTC scheduled minutes and exclude configured Pause.
 checked = 0
 for starts, ends, pause in Shift.objects.exclude(status=Shift.Status.CANCELLED).values_list(
     'starts_at', 'ends_at', 'break_minutes'
@@ -44,12 +44,14 @@ for starts, ends, pause in Shift.objects.exclude(status=Shift.Status.CANCELLED).
         continue
     minutes = int((ends.astimezone(utc.utc) - starts.astimezone(utc.utc)).total_seconds() // 60)
     assert minutes > 0
-    assert (minutes / 60) >= 0
-    assert int(pause or 0) >= 0  # Pause is metadata, not a deduction here
+    pause = max(0, int(pause or 0))
+    net_minutes = max(0, minutes - pause)
+    assert net_minutes <= minutes
+    assert net_minutes >= 0
     checked += 1
 print('MOBILE_SHIFT_RELEASE_VERIFIED',
       'marketing_super_admin', True,
       'info_account_exists', info is not None,
       'recognized_event_notes', candidates,
       'unfilled_event_numbers', unfilled,
-      'gross_plan_sample', checked)
+      'net_plan_sample', checked)
