@@ -98,6 +98,10 @@
   .wiw-extra-options label{display:grid;gap:7px;font-size:11px;color:#888}
   .wiw-extra-options textarea{min-height:88px;padding:10px;border:1px solid #d7d7d7;border-radius:8px;resize:vertical;background:#fafafa;color:#333;font:inherit;font-size:14px}
   .wiw-note-editor{padding:0;background:#fff;border-bottom:1px solid #ddd}
+  .wiw-event-number-field{display:flex;align-items:center;gap:12px;padding:11px 14px;background:#fff;border-bottom:1px solid #ededed;font-size:14px;color:#444}
+  .wiw-event-number-field span{flex:0 0 44%;font-weight:600}
+  .wiw-event-number-field input{width:56%;min-width:0;height:36px;border:1px solid #d5dbe2;border-radius:7px;padding:6px 9px;font-size:15px;color:#1f2937;background:#f9fafb;text-align:left;direction:ltr}
+  .wiw-event-number-field input:focus{border-color:#5d9d49;outline:2px solid rgba(93,157,73,.13)}
   .wiw-note-editor-toolbar{min-height:42px;padding:0 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #ededed}
   .wiw-note-editor-title{display:flex;align-items:center;gap:8px;color:#454545;font-size:15px}
   .wiw-note-editor-title ion-icon{font-size:18px;color:#9b9b9b}
