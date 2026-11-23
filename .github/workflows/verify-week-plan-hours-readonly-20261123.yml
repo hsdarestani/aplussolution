@@ -44,7 +44,7 @@ jobs:
           if user is None:
               user = User.objects.filter(role=User.Role.ADMIN, is_active=True).first()
           assert user is not None, 'No active admin'
-          request = APIRequestFactory().get('/api/admin/mobile-schedule/', {'date_from': days[0], 'date_to': days[-1]})
+          request = APIRequestFactory().get('/api/admin/mobile-schedule/', {'date_from': days[0], 'date_to': days[-1]}, HTTP_HOST='app.aplus-solution.de', secure=True)
           force_authenticate(request, user=user)
           response = mobile_schedule(request)
           assert response.status_code == 200, f'API status {response.status_code}; selected role={user.role}; detail={response.data.get("detail")}'
