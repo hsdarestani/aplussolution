@@ -1,0 +1,38 @@
+name: Stundenzettel release resource diagnostic (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/stundenzettel-release-resources-20261123.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      HOST: ${{ secrets.STRATO_HOST }}
+      KEY: ${{ secrets.STRATO_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Read-only resource report from STRATO primary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$KEY"
+          umask 077
+          key="$RUNNER_TEMP/aplus-diag.key"
+          printf '%s\n' "$KEY" > "$key"
+          trap 'rm -f "$key"' EXIT
+          ssh -i "$key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 root@"$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo '=== MEMORY ==='
+          awk '/^Mem(Total|Available|Free):/ {print $1,int($2/1024),"MB"}' /proc/meminfo
+          echo '=== STAGING CONTAINERS (NAMES / STATE) ==='
+          docker ps -a --format '{{.Names}} {{.State}}' | grep -E 'staging|staging_' || true
+          echo '=== CONTAINER MEMORY ==='
+          docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' | grep -E 'staging|aplussolution-' || true
+          echo '=== DISK AVAILABLE MB ==='
+          df -Pm /var/lib/docker | awk 'END{print $4}'
+          echo '=== PRIMARY HEALTH (LOCAL ONLY) ==='
+          curl -fsS --max-time 12 --resolve app.aplus-solution.de:443:127.0.0.1 https://app.aplus-solution.de/api/status/ready/ >/dev/null && echo READY_OK
+          REMOTE
