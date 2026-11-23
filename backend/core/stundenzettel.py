@@ -96,6 +96,7 @@ def render_pdf(monday, group, hotels):
     c.setTitle(f'Stundenzettel - {GROUPS[group][0]} - KW{monday.isocalendar().week:02}')
     c.setAuthor('A+ Solution GmbH')
     page_number = 0
+    source_rows_by_page = {}
     for key, rows in sorted(hotels.items(), key=lambda item: (item[0][2].casefold(), item[0][:2])):
         for offset in range(0, len(rows), 14):
             page_number += 1
@@ -122,6 +123,7 @@ def render_pdf(monday, group, hotels):
             )
             c.setFont('Helvetica', 8)
             chunk = rows[offset:offset + 14]
+            source_rows_by_page[page_number] = chunk
             for index, row in enumerate(chunk):
                 for field, (x, width) in zip(FIELDS, COLUMNS):
                     value = str(row[field])
@@ -171,7 +173,7 @@ def render_pdf(monday, group, hotels):
             'var s=String(f.value).replace(",",".").trim();'
             'if(s!=="" && isFinite(Number(s)))sum+=Number(s);}'
             'this.getField("' + total + '").value='
-            'String(Math.round((sum+Number.EPSILON)*100)/100);'
+            'String(Math.round(sum*100)/100);'
         )
         for i in rows:
             suffix = f'{i:02}'
@@ -188,8 +190,17 @@ def render_pdf(monday, group, hotels):
                 'this.getField("' + hours_name + '").value='
                 'String(Math.round(d/60*100)/100);}'
             )
+            # When a shift spans a daylight-saving change or >=24 hours,
+            # wall-clock start/end alone cannot reconstruct its true duration.
+            # Preserve the initially correct UTC duration; operators can edit
+            # Stunden directly, and that still updates the footer.
+            row = source_rows_by_page[page_index][i - 1]
+            start_h, start_m = map(int, row['start'].split(':'))
+            end_h, end_m = map(int, row['ende'].split(':'))
+            wall_minutes = (end_h * 60 + end_m - start_h * 60 - start_m) % 1440
+            safe_clock_recalc = row['minutes'] == wall_minutes
             for field in (start_name, end_name, hours_name):
-                js = (recalc if field != hours_name else '') + update_total
+                js = (recalc if field != hours_name and safe_clock_recalc else '') + update_total
                 widgets[field][NameObject('/AA')] = DictionaryObject({
                     NameObject('/Bl'): DictionaryObject({
                         NameObject('/S'): NameObject('/JavaScript'),
