@@ -14,6 +14,14 @@ export function scheduledShiftHours(shift: ScheduledShift): number {
   return (end - start) / 3600000;
 }
 
+/** Keep quarter-hour precision visible instead of 0.25h -> 0.3h. */
+export function formatScheduledHours(value: number): string {
+  if (!Number.isFinite(value)) return '0';
+  return (Math.round(value * 100) / 100).toLocaleString('de-DE', {
+    maximumFractionDigits: 2,
+  });
+}
+
 export function sumScheduledCardHours(cards: readonly { shift: ScheduledShift }[]): number {
   return cards.reduce((sum, card) => sum + scheduledShiftHours(card.shift), 0);
 }
