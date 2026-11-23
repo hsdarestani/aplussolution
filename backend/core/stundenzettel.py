@@ -56,10 +56,14 @@ def _rounded_recorded_interval(entry):
     multiples of 15 minutes; this also handles DST gaps/folds and overnight
     entries without creating imaginary Berlin local times.
     """
-    if not entry or entry.clock_out is None or entry.clock_out <= entry.clock_in:
+    if not entry or entry.clock_out is None:
         return None
-    start_utc = entry.clock_in.astimezone(dt_timezone.utc).replace(second=0, microsecond=0)
-    end_utc = entry.clock_out.astimezone(dt_timezone.utc).replace(second=0, microsecond=0)
+    actual_start_utc = entry.clock_in.astimezone(dt_timezone.utc)
+    actual_end_utc = entry.clock_out.astimezone(dt_timezone.utc)
+    if actual_end_utc <= actual_start_utc:
+        return None
+    start_utc = actual_start_utc.replace(second=0, microsecond=0)
+    end_utc = actual_end_utc.replace(second=0, microsecond=0)
     first_utc = start_utc - timedelta(minutes=start_utc.minute % 15)
     last_utc = end_utc + timedelta(minutes=(-end_utc.minute) % 15)
     minutes = int((last_utc - first_utc).total_seconds() // 60)
