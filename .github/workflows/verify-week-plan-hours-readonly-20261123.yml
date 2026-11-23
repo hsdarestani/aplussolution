@@ -40,14 +40,14 @@ jobs:
           berlin = ZoneInfo('Europe/Berlin')
           monday = date(2026, 11, 23)
           days = [(monday + timedelta(days=i)).isoformat() for i in range(7)]
-          user = User.objects.filter(email__iexact='info@aplus-solution.de', is_active=True).first()
+          user = User.objects.filter(email__iexact='marketing@aplus-solution.de', role=User.Role.ADMIN, is_active=True).first()
           if user is None:
               user = User.objects.filter(role=User.Role.ADMIN, is_active=True).first()
           assert user is not None, 'No active admin'
           request = APIRequestFactory().get('/api/admin/mobile-schedule/', {'date_from': days[0], 'date_to': days[-1]})
           force_authenticate(request, user=user)
           response = mobile_schedule(request)
-          assert response.status_code == 200, f'API status {response.status_code}'
+          assert response.status_code == 200, f'API status {response.status_code}; selected role={user.role}; detail={response.data.get("detail")}'
           shifts = response.data['shifts']
           totals = defaultdict(lambda: {'gross_minutes': 0, 'net_minutes': 0, 'cards': 0, 'pause_minutes': 0})
           num_shifts = 0
