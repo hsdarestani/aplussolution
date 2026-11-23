@@ -1,4 +1,4 @@
-"""Weekly planned-shift export using the original emailed A+ Stundenzettel form."""
+"""Weekly editable hotel Stundenzettel based on workers\u0027 recorded times."""
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone as dt_timezone
 from decimal import Decimal
@@ -46,48 +46,89 @@ def displayed_total(rows):
     return formatted_hours(sum((Decimal(row['stunden']) for row in rows), Decimal('0')))
 
 
+def _rounded_recorded_interval(entry):
+    """Use the entered HH:MM minute precision, not scheduled times.
+
+    Self-reported shifts are already entered in HH:MM. Actual clock stamps may
+    contain seconds; use the HH:MM that appears on the form to calculate its
+    hours, so displayed start/end always reconcile with the visible total.
+    Convert to UTC for overnight shifts and DST transitions.
+    """
+    if not entry or entry.clock_out is None or entry.clock_out <= entry.clock_in:
+        return None
+    first = entry.clock_in.astimezone(BERLIN).replace(second=0, microsecond=0)
+    last = entry.clock_out.astimezone(BERLIN).replace(second=0, microsecond=0)
+    minutes = int((last.astimezone(dt_timezone.utc) - first.astimezone(dt_timezone.utc)).total_seconds() // 60)
+    if minutes <= 0:
+        return None
+    return first, last, minutes
+
+
 def weekly_rows(monday, group):
     start = datetime.combine(monday, time.min, BERLIN)
     end = datetime.combine(monday + timedelta(days=7), time.min, BERLIN)
-    # The Dienstplan is authoritative: attendance/approval must never filter,
-    # override, or duplicate scheduled rows in this export.
+    # The Dienstplan selects the relevant scheduled assignments and hotel;
+    # completed employee-submitted TimeEntry records supply Start/Ende/Stunden.
+    # A scheduled shift with no completed entry has blank hours, never PLAN
+    # fallback. Approval is not a filter for this operational hotel form.
     shifts = Shift.objects.filter(starts_at__gte=start, starts_at__lt=end).exclude(
         status=Shift.Status.CANCELLED,
     ).select_related('worker__user', 'position', 'location', 'client').prefetch_related(
-        'slots__worker__user',
+        'slots__worker__user', 'time_entries__worker__user',
     ).order_by('starts_at', 'client__name', 'location__name', 'id')
+
     hotels = defaultdict(list)
     for shift in shifts:
         if group not in _shift_groups(shift) or shift.ends_at <= shift.starts_at:
             continue
-        all_slots = list(shift.slots.all())
-        active_slots = [slot for slot in all_slots if slot.status != ShiftSlot.Status.CANCELLED]
-        if all_slots:
-            # Slot cards are the same authoritative assignments used by Dienstplan.
-            # Do not resurrect a released/cancelled worker from the legacy mirror.
-            assignments = [(slot.worker, str(slot.pk)) for slot in active_slots]
+
+        slots = list(shift.slots.all())
+        active_slots = [slot for slot in slots if slot.status != ShiftSlot.Status.CANCELLED]
+        if slots:
+            assigned = [(slot.worker, str(slot.pk)) for slot in active_slots if slot.worker_id]
         else:
-            # Historical direct assignment without slot rows.
-            assignments = [(shift.worker, '')]
-            assignments += [(None, '')] * max(0, int(shift.required_count or 1) - 1)
-        first = shift.starts_at.astimezone(BERLIN)
-        last = shift.ends_at.astimezone(BERLIN)
-        gross = int((shift.ends_at.astimezone(dt_timezone.utc) - shift.starts_at.astimezone(dt_timezone.utc)).total_seconds() // 60)
-        # Stundenzettel lists the complete scheduled start-to-end interval.
-        # Unlike payroll/attendance reports, breaks are NOT deducted here.
-        minutes = max(0, gross)
+            assigned = [(shift.worker, '')] if shift.worker_id else []
+
+        # One row per employee/shift. Choose the latest completed TimeEntry if
+        # duplicates exist, ignoring still-running/incomplete timers. Historical
+        # WIW imported entries are included as they are stored in TimeEntry.
+        latest_by_worker = {}
+        for entry in sorted(
+            shift.time_entries.all(),
+            key=lambda item: (item.updated_at, str(item.pk)),
+        ):
+            if _rounded_recorded_interval(entry) is not None:
+                latest_by_worker[entry.worker_id] = entry
+
+        # Include recorded employees even if an old slot was later released.
+        # Never resurrect a cancelled worker merely from Shift.worker.
+        assignments = []
+        seen = set()
+        for worker, slot_id in assigned:
+            if str(worker.pk) not in seen:
+                assignments.append((worker, slot_id))
+                seen.add(str(worker.pk))
+        for entry in sorted(latest_by_worker.values(), key=lambda item: (item.clock_in, str(item.pk))):
+            if str(entry.worker_id) not in seen:
+                assignments.append((entry.worker, ''))
+                seen.add(str(entry.worker_id))
+
         key = (str(shift.client_id), str(shift.location_id), shift.location.name)
         for worker, slot_id in assignments:
+            record = _rounded_recorded_interval(latest_by_worker.get(worker.pk))
+            first, last, minutes = record if record else (None, None, None)
             hotels[key].append({
-                'datum': first.strftime('%d.%m.%Y'),
-                'vorname': worker.user.first_name if worker else 'OpenShift',
-                'nachname': worker.user.last_name if worker else '',
-                'start': first.strftime('%H:%M'), 'ende': last.strftime('%H:%M'),
-                'stunden': decimal_hours(minutes), 'bestaetigung': 'bestätigt',
+                'datum': (first or shift.starts_at.astimezone(BERLIN)).strftime('%d.%m.%Y'),
+                'vorname': worker.user.first_name,
+                'nachname': worker.user.last_name,
+                'start': first.strftime('%H:%M') if first else '',
+                'ende': last.strftime('%H:%M') if last else '',
+                'stunden': decimal_hours(minutes) if minutes is not None else '',
+                'bestaetigung': 'bestätigt',
                 'minutes': minutes, 'shift_id': str(shift.pk), 'slot_id': slot_id,
-                'worker_id': str(worker.pk) if worker else '',
+                'worker_id': str(worker.pk),
             })
-    return hotels
+    return {key: rows for key, rows in hotels.items() if rows}
 
 
 def render_pdf(monday, group, hotels):
@@ -195,10 +236,14 @@ def render_pdf(monday, group, hotels):
             # Preserve the initially correct UTC duration; operators can edit
             # Stunden directly, and that still updates the footer.
             row = source_rows_by_page[page_index][i - 1]
-            start_h, start_m = map(int, row['start'].split(':'))
-            end_h, end_m = map(int, row['ende'].split(':'))
-            wall_minutes = (end_h * 60 + end_m - start_h * 60 - start_m) % 1440
-            safe_clock_recalc = row['minutes'] == wall_minutes
+            if row['start'] and row['ende']:
+                start_h, start_m = map(int, row['start'].split(':'))
+                end_h, end_m = map(int, row['ende'].split(':'))
+                wall_minutes = (end_h * 60 + end_m - start_h * 60 - start_m) % 1440
+                safe_clock_recalc = row['minutes'] == wall_minutes
+            else:
+                # Manual completion of an initially empty report row.
+                safe_clock_recalc = True
             for field in (start_name, end_name, hours_name):
                 js = (recalc if field != hours_name and safe_clock_recalc else '') + update_total
                 widgets[field][NameObject('/AA')] = DictionaryObject({
