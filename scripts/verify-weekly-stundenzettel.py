@@ -40,8 +40,9 @@ for group in GROUPS:
     assert rows, f'No assigned shifts in {group} for chosen week'
     assert all(row['vorname'] != 'OpenShift' for row in rows)
 
-    # Independent check: each output interval must come from the latest
-    # finished employee TimeEntry for that shift, not from planned clock time.
+    # Independent source check: finished employee TimeEntry takes precedence;
+    # when absent, show the exact shift PLAN without extra quarter rounding.
+    # PLAN-only output must not be presented as recorded/verified IST.
     shifts = {
         str(shift.pk): shift for shift in Shift.objects.filter(
             pk__in=[row['shift_id'] for row in rows]
@@ -72,15 +73,23 @@ for group in GROUPS:
         assert group in _shift_groups(shift)
         recorded = time_entries.get((row['shift_id'], row['worker_id']))
         if recorded is None:
-            assert row['start'] == row['ende'] == row['stunden'] == ''
-            assert row['minutes'] is None
+            first = shift.starts_at.astimezone(BERLIN)
+            last = shift.ends_at.astimezone(BERLIN)
+            minutes = max(0, int(
+                (shift.ends_at.astimezone(utc_timezone.utc) -
+                 shift.starts_at.astimezone(utc_timezone.utc)).total_seconds() // 60
+            ))
+            assert row['source'] == 'PLAN'
+            assert row['bestaetigung'] == 'PLAN (nicht erfasst)'
         else:
             first, last, minutes = recorded
-            assert row['datum'] == first.strftime('%d.%m.%Y')
-            assert row['start'] == first.strftime('%H:%M')
-            assert row['ende'] == last.strftime('%H:%M')
-            assert row['stunden'] == decimal_hours(minutes)
-            assert row['minutes'] == minutes
+            assert row['source'] == 'IST'
+            assert row['bestaetigung'] == 'bestätigt'
+        assert row['datum'] == first.strftime('%d.%m.%Y')
+        assert row['start'] == first.strftime('%H:%M')
+        assert row['ende'] == last.strftime('%H:%M')
+        assert row['stunden'] == decimal_hours(minutes)
+        assert row['minutes'] == minutes
 
     request = factory.get(
         '/api/reports/stundenzettel.pdf', {'week': week, 'group': group},
@@ -105,7 +114,7 @@ for group in GROUPS:
             'datum', 'vorname', 'nachname', 'start', 'ende', 'stunden',
         )) for row in rows
     ]
-    assert Counter(actual) == Counter(expected), (group, 'PDF differs from recorded worker hours')
+    assert Counter(actual) == Counter(expected), (group, 'PDF differs from recorded IST with exact PLAN fallback')
 
     for page_no, page in enumerate(reader.pages, 1):
         ids = [name for name in fields if name.startswith(f'p{page_no}_stunden_')]
@@ -119,19 +128,22 @@ for group in GROUPS:
         content = page.extract_text()
         assert 'Bestätigung Hotel' in content
         assert '(Unterschrift)' in content
-    assert all(
-        field['/V'] == 'bestätigt' for name, field in fields.items()
+    expected_confirmations = Counter(row['bestaetigung'] for row in rows)
+    actual_confirmations = Counter(
+        str(field['/V']) for name, field in fields.items()
         if '_bestaetigung_' in name
     )
+    assert actual_confirmations == expected_confirmations
     assert all(
-        not field['/V'] for name, field in fields.items()
-        if '_stunden_' in name and not field['/V']
+        str(field['/V']).strip() for name, field in fields.items()
+        if '_stunden_' in name
     )
     total = sum(Decimal(row['stunden']) for row in rows if row['stunden'])
     print(
-        'LIVE_REPORTED_STUNDENZETTEL_MATCHES_EMPLOYEE_TIMES',
+        'LIVE_STUNDENZETTEL_IST_WITH_PLAN_FALLBACK_VERIFIED',
         group, 'week', week, 'rows', len(rows),
-        'reported_rows', sum(bool(row['stunden']) for row in rows),
+        'ist_rows', sum(row['source'] == 'IST' for row in rows),
+        'plan_fallback_rows', sum(row['source'] == 'PLAN' for row in rows),
         'hours', str(total), 'pages', len(reader.pages),
     )
-print('LIVE_REPORTED_STUNDENZETTEL_BOTH_DEPARTMENTS_VERIFIED')
+print('LIVE_STUNDENZETTEL_IST_AND_PLAN_FALLBACK_BOTH_DEPARTMENTS_VERIFIED')
