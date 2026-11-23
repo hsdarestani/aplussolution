@@ -289,7 +289,7 @@ function ScheduleWeekPane({
         };
         if (tab === 'filled' && (!card.worker || shift.status === 'draft')) return;
         if (tab === 'draft' && shift.status !== 'draft') return;
-        const haystack = `${shift.position_name || ''} ${shift.client_name || ''} ${shift.location_name || ''} ${card.worker?.name || ''}`.toLocaleLowerCase('de-DE');
+        const haystack = `${shift.position_name || ''} ${shift.client_name || ''} ${shift.location_name || ''} ${shift.event_number || ''} ${card.worker?.name || ''}`.toLocaleLowerCase('de-DE');
         if (q && !haystack.includes(q)) return;
         const day = dateKeyFromIso(shift.starts_at);
         if (map[day]) map[day].push(card);
@@ -922,7 +922,6 @@ export default function WiwScheduleMobile() {
     isOpen: Boolean(slot.is_open || (slot.status === 'open' && !slot.worker)),
   }))), [rows]);
   const selectedClientName = clients.find((item: any) => String(item.id) === form.client)?.name || '';
-  const selectedPositionName = positions.find((item: any) => String(item.id) === form.position)?.name || '';
   const liveLocalShiftIds = useMemo(() => new Set(rows.filter((row: any) => row?.source === 'wiw-live' && row?.local_shift_id).map((row: any) => String(row.local_shift_id))), [rows]);
   const visibleCards = useMemo(() => cards.filter((card) => {
     const shiftDay = dateKeyFromIso(card.shift.starts_at);
@@ -941,7 +940,7 @@ export default function WiwScheduleMobile() {
     if (groupFilter.length && !cardGroups.some((group) => groupFilter.includes(group))) return false;
     if (!groupFilter.length) return false;
     if (query.trim()) {
-      const haystack = `${card.shift.position_name || ''} ${card.shift.client_name || ''} ${card.shift.location_name || ''} ${card.worker?.name || ''}`.toLowerCase();
+      const haystack = `${card.shift.position_name || ''} ${card.shift.client_name || ''} ${card.shift.location_name || ''} ${card.shift.event_number || ''} ${card.worker?.name || ''}`.toLowerCase();
       if (!haystack.includes(query.trim().toLowerCase())) return false;
     }
     return true;
