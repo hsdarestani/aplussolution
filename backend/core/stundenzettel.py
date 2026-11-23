@@ -47,21 +47,25 @@ def displayed_total(rows):
 
 
 def _rounded_recorded_interval(entry):
-    """Use the entered HH:MM minute precision, not scheduled times.
+    """Round only the Stundenzettel display, always increasing its interval.
 
-    Self-reported shifts are already entered in HH:MM. Actual clock stamps may
-    contain seconds; use the HH:MM that appears on the form to calculate its
-    hours, so displayed start/end always reconcile with the visible total.
-    Convert to UTC for overnight shifts and DST transitions.
+    The saved TimeEntry remains unchanged. Start floors to the previous
+    15-minute boundary; end ceils to the next boundary (exact boundaries stay
+    unchanged). Employee-entered HH:MM is authoritative, so discard sub-minute
+    clock noise before rounding. Round in UTC because Berlin UTC offsets are
+    multiples of 15 minutes; this also handles DST gaps/folds and overnight
+    entries without creating imaginary Berlin local times.
     """
     if not entry or entry.clock_out is None or entry.clock_out <= entry.clock_in:
         return None
-    first = entry.clock_in.astimezone(BERLIN).replace(second=0, microsecond=0)
-    last = entry.clock_out.astimezone(BERLIN).replace(second=0, microsecond=0)
-    minutes = int((last.astimezone(dt_timezone.utc) - first.astimezone(dt_timezone.utc)).total_seconds() // 60)
+    start_utc = entry.clock_in.astimezone(dt_timezone.utc).replace(second=0, microsecond=0)
+    end_utc = entry.clock_out.astimezone(dt_timezone.utc).replace(second=0, microsecond=0)
+    first_utc = start_utc - timedelta(minutes=start_utc.minute % 15)
+    last_utc = end_utc + timedelta(minutes=(-end_utc.minute) % 15)
+    minutes = int((last_utc - first_utc).total_seconds() // 60)
     if minutes <= 0:
         return None
-    return first, last, minutes
+    return first_utc.astimezone(BERLIN), last_utc.astimezone(BERLIN), minutes
 
 
 def weekly_rows(monday, group):
@@ -222,12 +226,19 @@ def render_pdf(monday, group, hotels):
             start_name = f'{prefix}start_{suffix}'
             end_name = f'{prefix}ende_{suffix}'
             recalc = (
-                'function m(t){var a=/^(\\d{1,2}):(\\d{2})$/.exec(String(t).trim());'
+                'function m(t){var a=/^(\\\\d{1,2}):(\\\\d{2})$/.exec(String(t).trim());'
                 'if(!a)return NaN;var h=Number(a[1]),n=Number(a[2]);'
                 'return h<24&&n<60?h*60+n:NaN;}'
-                'var a=m(this.getField("' + start_name + '").value);'
-                'var b=m(this.getField("' + end_name + '").value);'
-                'if(isFinite(a)&&isFinite(b)){var d=b-a;if(d<0)d+=1440;'
+                'function fmt(t){t=((t%1440)+1440)%1440;'
+                'return ("0"+Math.floor(t/60)).slice(-2)+":"'
+                '+("0"+(t%60)).slice(-2);}'
+                'var sf=this.getField("' + start_name + '");'
+                'var ef=this.getField("' + end_name + '");'
+                'var a=m(sf.value),b=m(ef.value);'
+                'if(isFinite(a)&&isFinite(b)){'
+                'var start=15*Math.floor(a/15),end=15*Math.ceil(b/15);'
+                'sf.value=fmt(start);ef.value=fmt(end);'
+                'var d=end-start;if(d<0)d+=1440;'
                 'this.getField("' + hours_name + '").value='
                 'String(Math.round(d/60*100)/100);}'
             )
