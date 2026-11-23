@@ -197,15 +197,13 @@ def test_uses_latest_completed_submission_without_duplicating_shift(shift):
         clock_in=stamp('2026-11-10T08:00'), clock_out=stamp('2026-11-10T17:00'),
         approved=True,
     )
-    earlier.updated_at = stamp('2026-11-11T08:00')
-    earlier.save(update_fields=['updated_at'])
+    TimeEntry.objects.filter(pk=earlier.pk).update(updated_at=stamp('2026-11-11T08:00'))
     later = TimeEntry.objects.create(
         shift=planned, worker=planned.worker,
         clock_in=stamp('2026-11-10T09:00'), clock_out=stamp('2026-11-10T15:00'),
         approved=False,
     )
-    later.updated_at = stamp('2026-11-12T08:00')
-    later.save(update_fields=['updated_at'])
+    TimeEntry.objects.filter(pk=later.pk).update(updated_at=stamp('2026-11-12T08:00'))
     rows = [row for group in weekly_rows(monday, 'front_office').values() for row in group]
     assert len(rows) == 1
     assert rows[0]['stunden'] == '6'
