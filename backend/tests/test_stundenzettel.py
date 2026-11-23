@@ -78,10 +78,13 @@ def test_uses_employee_entered_time_not_plan_even_if_pending(auth_admin, worker_
     assert fields['p1_bereich']['/V'] == 'FRONT OFFICE'
     assert fields['p1_hotel']['/V']
 
-    # The no-report shift retains an employee row but never masquerades as
-    # the planned 14:30-22:45 working time.
+    # No completed employee time: exact unrounded PLAN appears, explicitly
+    # marked as a plan estimate rather than verified employee attendance.
     assert fields['p1_datum_01']['/V'] == '06.11.2026'
-    assert [fields[f'p1_{field}_01']['/V'] for field in ('start', 'ende', 'stunden')] == ['', '', '']
+    assert [fields[f'p1_{field}_01']['/V'] for field in ('start', 'ende', 'stunden')] == [
+        '14:30', '22:45', '8.25',
+    ]
+    assert fields['p1_bestaetigung_01']['/V'] == 'PLAN (nicht erfasst)'
 
     for field, value in (
         ('vorname', 'Anna'), ('nachname', 'Becker'),
@@ -89,7 +92,7 @@ def test_uses_employee_entered_time_not_plan_even_if_pending(auth_admin, worker_
         ('ende', '04:00'), ('stunden', '5'), ('bestaetigung', 'bestätigt'),
     ):
         assert fields[f'p1_{field}_02']['/V'] == value
-    assert fields['p1_gesamt']['/V'] == '5'
+    assert fields['p1_gesamt']['/V'] == '13.25'
     assert fields['p1_gesamt'].get('/Ff', 0) & 1 == 0
     annot = next(
         ref.get_object() for ref in reader.pages[0]['/Annots']
@@ -120,8 +123,11 @@ def test_slots_only_actual_workers_no_openshift_but_keep_recorded_released_worke
     rows = [row for hotel in weekly_rows(monday, 'housekeeping').values() for row in hotel]
     assert len(rows) == 1
     assert rows[0]['vorname'] == 'Lukas'
-    assert rows[0]['stunden'] == ''
-    assert rows[0]['start'] == ''
+    assert rows[0]['stunden'] == '5'
+    assert rows[0]['start'] == '08:00'
+    assert rows[0]['ende'] == '13:00'
+    assert rows[0]['source'] == 'PLAN'
+    assert rows[0]['bestaetigung'] == 'PLAN (nicht erfasst)'
     assert all(row['vorname'] != 'OpenShift' for row in rows)
 
     # A completed submitted time is evidence, even after the assignment was
@@ -135,6 +141,7 @@ def test_slots_only_actual_workers_no_openshift_but_keep_recorded_released_worke
     assert len(rows) == 2
     assert {row['vorname'] for row in rows} == {'Lukas', 'Anna'}
     assert next(row for row in rows if row['vorname'] == 'Anna')['stunden'] == '4.5'
+    assert next(row for row in rows if row['vorname'] == 'Anna')['source'] == 'IST'
     planned.slots.update(status=ShiftSlot.Status.CANCELLED)
     rows = [row for hotel in weekly_rows(monday, 'housekeeping').values() for row in hotel]
     assert len(rows) == 1 and rows[0]['vorname'] == 'Anna'
@@ -182,6 +189,7 @@ def test_employee_entered_rounded_hhmm_gross_hours_and_no_break_deduction(shift)
     assert rows[0]['ende'] == '16:45'
     assert rows[0]['stunden'] == '8.5'
     assert rows[0]['minutes'] == 510
+    assert rows[0]['source'] == 'IST'
     fields = PdfReader(BytesIO(render_pdf(monday, 'housekeeping', hotels))).get_fields()
     assert fields['p1_start_01']['/V'] == '08:15'
     assert fields['p1_ende_01']['/V'] == '16:45'
@@ -209,6 +217,7 @@ def test_uses_latest_completed_submission_without_duplicating_shift(shift):
     assert len(rows) == 1
     assert rows[0]['stunden'] == '6'
     assert rows[0]['start'] == '09:00'
+    assert rows[0]['source'] == 'IST'
 
 
 def test_editable_total_matches_visible_rounded_rows():
@@ -282,3 +291,80 @@ def test_report_rounds_submitted_hhmm_outwards_without_changing_timeentry(shift)
     assert 'Math.floor(a/15)' in script
     assert 'Math.ceil(b/15)' in script
     assert r'\d{1,2}' in script
+
+
+@pytest.mark.django_db
+def test_no_submitted_ist_uses_exact_plan_for_each_department_and_sums(shift):
+    monday = parse_week('2026-W46')
+    planned = plan(
+        shift, '2026-11-10T08:07', '2026-11-10T17:11',
+        group='housekeeping', break_minutes=60,
+    )
+    TimeEntry.objects.create(
+        shift=planned, worker=planned.worker,
+        clock_in=stamp('2026-11-10T08:30'), clock_out=None,
+        approved=False,
+    )  # a running but incomplete timer is NOT a valid completed IST record
+
+    rows = [r for group in weekly_rows(monday, 'housekeeping').values() for r in group]
+    assert len(rows) == 1
+    assert [rows[0][key] for key in ('start', 'ende', 'stunden', 'source', 'minutes')] == [
+        '08:07', '17:11', '9.07', 'PLAN', 544,
+    ]
+    assert rows[0]['bestaetigung'] == 'PLAN (nicht erfasst)'
+    fields = PdfReader(BytesIO(
+        render_pdf(monday, 'housekeeping', weekly_rows(monday, 'housekeeping'))
+    )).get_fields()
+    assert fields['p1_start_01']['/V'] == '08:07'
+    assert fields['p1_ende_01']['/V'] == '17:11'
+    assert fields['p1_stunden_01']['/V'] == '9.07'
+    assert fields['p1_gesamt']['/V'] == '9.07'
+    assert fields['p1_bestaetigung_01']['/V'] == 'PLAN (nicht erfasst)'
+
+    # The second department uses the same fallback rule; the original
+    # employee time and shift schedule are never modified.
+    another = plan(
+        shift, '2026-11-11T09:05', '2026-11-11T15:05',
+        group='front_office', break_minutes=30,
+    )
+    front = [r for group in weekly_rows(monday, 'front_office').values() for r in group]
+    assert len(front) == 1
+    assert front[0]['source'] == 'PLAN'
+    assert (front[0]['start'], front[0]['ende'], front[0]['stunden']) == ('09:05', '15:05', '6')
+    assert TimeEntry.objects.filter(shift=another).count() == 0
+    assert TimeEntry.objects.filter(shift=planned, clock_out__isnull=True).count() == 1
+
+
+@pytest.mark.django_db
+def test_mixed_ist_and_plan_rows_only_round_ist_and_total_both(shift, second_worker):
+    monday = parse_week('2026-W46')
+    scheduled = plan(
+        shift, '2026-11-10T08:07', '2026-11-10T17:11', group='front_office',
+        break_minutes=60,
+    )
+    ShiftSlot.objects.create(
+        shift=scheduled, worker=second_worker,
+        status=ShiftSlot.Status.CLAIMED,
+    )
+    TimeEntry.objects.create(
+        shift=scheduled, worker=scheduled.worker,
+        clock_in=stamp('2026-11-10T08:10'), clock_out=stamp('2026-11-10T17:10'),
+        break_minutes=60, approved=False,
+    )
+    hotels = weekly_rows(monday, 'front_office')
+    rows = [r for group in hotels.values() for r in group]
+    assert len(rows) == 2
+    by_name = {row['vorname']: row for row in rows}
+    assert (by_name['Anna']['start'], by_name['Anna']['ende'],
+            by_name['Anna']['stunden'], by_name['source']) == (
+        '08:00', '17:15', '9.25', 'IST')
+    assert (by_name['Lukas']['start'], by_name['Lukas']['ende'],
+            by_name['Lukas']['stunden'], by_name['source']) == (
+        '08:07', '17:11', '9.07', 'PLAN')
+    assert displayed_total(rows) == '18.32'
+    reader = PdfReader(BytesIO(render_pdf(monday, 'front_office', hotels)))
+    fields = reader.get_fields()
+    assert fields['p1_gesamt']['/V'] == '18.32'
+    assert sorted(fields[f'p1_bestaetigung_{i:02}']['/V'] for i in (1, 2)) == [
+        'PLAN (nicht erfasst)', 'bestätigt',
+    ]
