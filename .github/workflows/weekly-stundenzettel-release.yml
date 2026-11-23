@@ -85,36 +85,48 @@ jobs:
           mkdir -p "$HOME/.ssh"
           printf '%s\n' "$PRIVATE_KEY" > "$HOME/.ssh/aplus_time_entry_release"
           chmod 600 "$HOME/.ssh/aplus_time_entry_release"
-      - name: Free safe release headroom by pausing only staging Celery
+      - name: Free release headroom by temporarily pausing only verified staging services
         shell: bash
         run: |
           set -euo pipefail
           ssh -i "$HOME/.ssh/aplus_time_entry_release" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 root@"$PRIMARY_HOST" "RUN_ID='$GITHUB_RUN_ID' bash -s" <<'REMOTE'
           set -euo pipefail
-          staging='aplus_staging-staging_celery-1'
-          marker="/tmp/aplus-staging-celery-paused-${RUN_ID}.marker"
-          test ! -e "$marker"
           mem="$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)"
           echo "RELEASE_AVAILABLE_RAM_BEFORE_MB=$mem"
           if (( mem >= 850 )); then
-            echo STAGING_WORKER_LEFT_RUNNING_SUFFICIENT_RAM
+            echo STAGING_LEFT_RUNNING_SUFFICIENT_RAM
             exit 0
           fi
-          test "$(docker inspect -f '{{.State.Running}}' "$staging")" = true
-          test "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$staging")" = 'aplus_staging'
-          test "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$staging")" = 'staging_celery'
-          echo "$staging" > "$marker"
-          nohup sh -c "sleep 900; docker start '$staging' >/dev/null 2>&1 || true" </dev/null >/dev/null 2>&1 &
-          docker stop -t 20 "$staging"
-          mem="$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)"
-          echo "RELEASE_AVAILABLE_RAM_AFTER_MB=$mem"
+
+          # Never stop primary production containers. Validate both Compose
+          # labels and the exact known container name before staging mutations.
+          pause_staging() {
+            local service="$1" container="$2"
+            local marker="/tmp/aplus-${service}-paused-${RUN_ID}.marker"
+            test ! -e "$marker"
+            test "$(docker inspect -f '{{.State.Running}}' "$container")" = true
+            test "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$container")" = 'aplus_staging'
+            test "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$container")" = "$service"
+            echo "$container" > "$marker"
+            # Watchdog also restores staging if the runner loses connectivity.
+            nohup sh -c "sleep 900; docker start '$container' >/dev/null 2>&1 || true" </dev/null >/dev/null 2>&1 &
+            docker stop -t 20 "$container"
+            mem="$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)"
+            echo "AVAILABLE_RAM_AFTER_${service}_MB=$mem"
+          }
+          pause_staging staging_celery aplus_staging-staging_celery-1
           if (( mem < 750 )); then
-            docker start "$staging"
-            rm -f "$marker"
+            pause_staging staging_backend aplus_staging-staging_backend-1
+          fi
+          # Keep the original 750 MB safety threshold. On failure the
+          # workflow's always() cleanup restores every paused staging service.
+          if (( mem < 750 )); then
             echo ABORT_INSUFFICIENT_RAM_AFTER_SAFE_STAGING_PAUSE
             exit 2
           fi
+          echo STAGING_RELEASE_HEADROOM_OK
           REMOTE
+
       - name: Read-only production safety and resource gate
         shell: bash
         run: |
@@ -244,26 +256,29 @@ jobs:
           done
           test "$ok" -eq 1
 
-      - name: Restore staging Celery regardless of release outcome
+      - name: Restore all paused staging services regardless of release outcome
         if: always()
         shell: bash
         run: |
           if test -s "$HOME/.ssh/aplus_time_entry_release"; then
             ssh -i "$HOME/.ssh/aplus_time_entry_release" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=12 root@"$PRIMARY_HOST" "RUN_ID='$GITHUB_RUN_ID' bash -s" <<'REMOTE'
           set -euo pipefail
-          marker="/tmp/aplus-staging-celery-paused-${RUN_ID}.marker"
-          if test -f "$marker"; then
-            name="$(cat "$marker")"
-            test "$name" = 'aplus_staging-staging_celery-1'
-            docker start "$name" >/dev/null
-            test "$(docker inspect -f '{{.State.Running}}' "$name")" = true
-            rm -f "$marker"
-            echo STAGING_CELERY_RESTORED
-          else
-            echo STAGING_CELERY_NEVER_PAUSED
-          fi
+          for service in staging_backend staging_celery; do
+            marker="/tmp/aplus-${service}-paused-${RUN_ID}.marker"
+            if test -f "$marker"; then
+              name="$(cat "$marker")"
+              test "$name" = "aplus_staging-${service}-1"
+              test "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$name")" = 'aplus_staging'
+              docker start "$name" >/dev/null
+              test "$(docker inspect -f '{{.State.Running}}' "$name")" = true
+              rm -f "$marker"
+              echo "RESTORED_${service}"
+            fi
+          done
+          echo STAGING_RESTORE_CHECK_FINISHED
           REMOTE
           fi
+
       - name: Remove temporary credentials and release script
         if: always()
         shell: bash
