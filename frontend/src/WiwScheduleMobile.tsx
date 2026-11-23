@@ -15,7 +15,6 @@ import {
   calendarOutline,
   checkmarkOutline,
   chevronForwardOutline,
-  colorPaletteOutline,
   copyOutline,
   documentTextOutline,
   filterOutline,
@@ -34,13 +33,12 @@ import { saveSchedulePdf } from './saveSchedulePdf';
 import { openPdfDocument } from './openPdfDocument';
 import { ShiftPlanAttachments, ShiftPlanBulkUpload } from './ShiftPlanAttachments';
 import { isHotelClientName, schedulePalette } from './scheduleClientPalette';
-import { groupDayScheduleCards, type DayEventGroup } from './scheduleEventGrouping';
+import { extractShiftEventNumber, groupDayScheduleCards, type DayEventGroup } from './scheduleEventGrouping';
 import { sumAllWeeklyScheduledHours, sumScheduledCardHours } from './weeklyScheduledHours';
 import './wiw-schedule-mobile.css';
 
 type TabKey = 'all' | 'open' | 'filled' | 'draft';
 type Choice = { value: string; label: string };
-type ColorChoice = { value: string; label: string; hue: number | null };
 type EditingCard = { shiftId: string; slotId: string; parentCount: number; workerName?: string; workerId?: string; isOpen: boolean; timeEntries?: any[]; shift?: any };
 type FormState = {
   client: string;
@@ -54,7 +52,7 @@ type FormState = {
   confirmation_required: boolean;
   workers: string[];
   schedule_groups: string[];
-  color_hue: number | null;
+  event_number: string;
   notes: string;
   apply_all: boolean;
 };
@@ -121,18 +119,6 @@ const HOTEL_TIME_PRESETS = [
 ];
 const clientRank = (name?: string) => { const key = normalize(String(name || '')); const index = CLIENT_ORDER.findIndex((item) => key.includes(item) || item.includes(key)); return index < 0 ? CLIENT_ORDER.length : index; };
 const sortClients = (items: any[]) => [...items].sort((a, b) => clientRank(a?.name) - clientRank(b?.name) || String(a?.name || '').localeCompare(String(b?.name || ''), 'de'));
-const COLOR_CHOICES: ColorChoice[] = [
-  { value: 'auto', label: 'Kundenfarbe · automatisch', hue: null },
-  { value: 'navy', label: 'Navy', hue: 205 },
-  { value: 'blue', label: 'Blau', hue: 220 },
-  { value: 'teal', label: 'Türkis', hue: 180 },
-  { value: 'green', label: 'Grün', hue: 120 },
-  { value: 'yellow', label: 'Gelb', hue: 48 },
-  { value: 'orange', label: 'Orange', hue: 28 },
-  { value: 'red', label: 'Rot', hue: 0 },
-  { value: 'pink', label: 'Pink', hue: 330 },
-  { value: 'violet', label: 'Violett', hue: 275 },
-];
 const unpack = (value: any): any[] => value?.results || value || [];
 const pad = (value: number) => String(value).padStart(2, '0');
 const normalize = (value: string) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -225,7 +211,7 @@ function CardTimeMeta({ card, showRecordedTime = false }: { card: CardRow; showR
 }
 
 function shiftCardStyle(shift: any, eventStripe?: string | null) {
-  const palette = schedulePalette(shift?.client_name, shift?.position_name, shift?.color_hue);
+  const palette = schedulePalette(shift?.client_name, shift?.position_name);
   return {
     '--wiw-client-hue': String(palette.hue),
     '--wiw-card-accent': palette.accent,
@@ -587,24 +573,6 @@ function ChoiceSheet({ title, choices, selected, onSelect, onClose }: { title: s
   );
 }
 
-function ColorSheet({ selected, autoHue, onSelect, onClose }: { selected: number | null; autoHue: number; onSelect: (hue: number | null) => void; onClose: () => void }) {
-  return (
-    <div className="wiw-sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="wiw-choice-sheet wiw-color-sheet">
-        <header><b>Standardfarbe</b><button type="button" onClick={onClose}>Fertig</button></header>
-        <div>{COLOR_CHOICES.map((choice) => {
-          const active = choice.hue === selected;
-          const hue = choice.hue ?? autoHue;
-          return <button type="button" key={choice.value} className={active ? 'selected' : ''} onClick={() => onSelect(choice.hue)}>
-            <span className="wiw-color-choice"><i style={{ '--wiw-color-hue': String(hue) } as React.CSSProperties} /><span>{choice.label}</span></span>
-            {active ? <IonIcon icon={checkmarkOutline} /> : null}
-          </button>;
-        })}</div>
-      </section>
-    </div>
-  );
-}
-
 function MultiChoiceSheet({ title, choices, selected, limit, onChange, onClose }: { title: string; choices: Choice[]; selected: string[]; limit?: number; onChange: (values: string[]) => void; onClose: () => void }) {
   return (
     <div className="wiw-sheet-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
@@ -635,6 +603,8 @@ export default function WiwScheduleMobile() {
   const [mobile, setMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches);
   const [manager, setManager] = useState(() => ['admin', 'manager'].includes(initialRole));
   const [isAdmin, setIsAdmin] = useState(() => initialRole === 'admin');
+  const [accountEmail, setAccountEmail] = useState('');
+  const showRestrictedAdminRows = isAdmin && Boolean(accountEmail) && accountEmail !== 'info@aplus-solution.de';
   const [rows, setRows] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
@@ -659,7 +629,7 @@ export default function WiwScheduleMobile() {
   const [recentCopyShiftId, setRecentCopyShiftId] = useState('');
   const [form, setForm] = useState<FormState>(() => emptyForm(berlinToday()));
   const [timeOpen, setTimeOpen] = useState(false);
-  const [sheet, setSheet] = useState<'client' | 'position' | 'location' | 'workers' | 'groups' | 'color' | ''>('');
+  const [sheet, setSheet] = useState<'client' | 'position' | 'location' | 'workers' | 'groups' | ''>('');
   const [pdfOpen, setPdfOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdf, setPdf] = useState<PdfState>(() => ({ dateFrom: monday(berlinToday()), dateTo: addDays(monday(berlinToday()), 6), workers: [], clients: [], groups: [] }));
@@ -869,6 +839,7 @@ export default function WiwScheduleMobile() {
       if (!cancelled) {
         setManager(['admin', 'manager'].includes(user?.role));
         setIsAdmin(user?.role === 'admin');
+        setAccountEmail(String(user?.email || '').trim().toLowerCase());
       }
     }).catch((error) => {
       // The app shell already carries the authenticated role. A temporary
@@ -952,8 +923,6 @@ export default function WiwScheduleMobile() {
   }))), [rows]);
   const selectedClientName = clients.find((item: any) => String(item.id) === form.client)?.name || '';
   const selectedPositionName = positions.find((item: any) => String(item.id) === form.position)?.name || '';
-  const formPalette = schedulePalette(selectedClientName, selectedPositionName, form.color_hue);
-  const formAutoHue = 215;
   const liveLocalShiftIds = useMemo(() => new Set(rows.filter((row: any) => row?.source === 'wiw-live' && row?.local_shift_id).map((row: any) => String(row.local_shift_id))), [rows]);
   const visibleCards = useMemo(() => cards.filter((card) => {
     const shiftDay = dateKeyFromIso(card.shift.starts_at);
@@ -1065,7 +1034,7 @@ export default function WiwScheduleMobile() {
       confirmation_required: Boolean(card.shift.confirmation_required),
       workers: card.worker?.id ? [String(card.worker.id)] : [],
       schedule_groups: Array.isArray(card.shift.schedule_groups) && card.shift.schedule_groups.length ? card.shift.schedule_groups : [positionGroup(card.shift.position_name)],
-      color_hue: card.shift.color_hue == null ? null : Number(card.shift.color_hue),
+      event_number: String(card.shift.event_number || extractShiftEventNumber(card.shift.notes) || ''),
       notes: card.shift.notes || '',
       apply_all: false,
     });
@@ -1249,6 +1218,7 @@ export default function WiwScheduleMobile() {
           && dateKeyFromIso(item.ends_at) === addDays(form.date, Math.floor(Number(form.endAbsolute) / 1440))
           && timeMinuteFromIso(item.ends_at) === Number(form.endAbsolute) % 1440
           && String(item.notes || '').trim() === String(form.notes || '').trim()
+          && String(item.event_number || '').trim().toUpperCase() === String(form.event_number || '').trim().toUpperCase()
           && Boolean(item.confirmation_required) === Boolean(form.confirmation_required)
           // Read-back confirms the stable shift identity. Server-computed status,
           // colors and scheduling groups may legitimately change on assignment.
@@ -1266,9 +1236,9 @@ export default function WiwScheduleMobile() {
         starts_at: localDateTime(form.date, form.startMinute),
         ends_at: localDateTime(form.date, form.endAbsolute),
         notes: form.notes || '',
+        event_number: form.event_number.trim().toUpperCase(),
         confirmation_required: form.confirmation_required,
         schedule_groups: form.schedule_groups,
-        color_hue: form.color_hue,
       };
       if (editing) {
         payload.status = form.publish_now ? 'published' : 'draft';
@@ -1291,12 +1261,11 @@ export default function WiwScheduleMobile() {
             const normalizeGroups = (groups: any) =>
               (Array.isArray(groups) ? groups : []).map(String).sort().join('|');
             const groupsChanged = normalizeGroups(original?.schedule_groups) !== normalizeGroups(form.schedule_groups);
-            const colorChanged = (original?.color_hue == null ? null : Number(original.color_hue)) !== form.color_hue;
             const publishChanged = Boolean(original?.status !== 'draft') !== form.publish_now;
-            // When a PATCH only changes color, groups or publication, a stale
+            // When a PATCH only changes event number, groups or publication, a stale
             // GET can match all ordinary form fields. Require proof of that
             // specific change; never interpret unchanged pre-write data as success.
-            if (!split && !workerChanged && matchesForm(original) && !groupsChanged && !colorChanged && !publishChanged) {
+            if (!split && !workerChanged && matchesForm(original) && !groupsChanged && !publishChanged) {
               return undefined;
             }
             const persisted = split
@@ -1305,7 +1274,6 @@ export default function WiwScheduleMobile() {
             const rows = persisted.filter((item: any) =>
               matchesForm(item)
               && (!groupsChanged || normalizeGroups(item.schedule_groups) === normalizeGroups(form.schedule_groups))
-              && (!colorChanged || (item.color_hue == null ? null : Number(item.color_hue)) === form.color_hue)
               && (!publishChanged || (form.publish_now ? ['published', 'confirmed'].includes(String(item.status)) : item.status === 'draft'))
               && (!workerChanged
                 || (item.assigned_workers || []).length === (nextWorkerId ? 1 : 0)
@@ -1650,7 +1618,7 @@ export default function WiwScheduleMobile() {
 
           <div className="wiw-form-separator" />
           <Row icon={personOutline} label="OpenShift" value={form.publish_now ? 'Für passende Mitarbeiter sichtbar' : 'Aus · ohne Zuweisung nur als Entwurf'} trailing={<Switch checked={form.publish_now} onChange={(value) => setForm((current) => ({ ...current, publish_now: value }))} />} />
-          {!editing ? <Row icon={layersOutline} label={`${form.required_count} Schicht${form.required_count === 1 ? '' : 'en'}`} trailing={<div className="wiw-count-stepper"><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: Math.max(current.workers.length || 1, current.required_count - 1) }))}>−</button><b>{form.required_count}</b><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: current.required_count + 1 }))}>+</button></div>} /> : <Row icon={layersOutline} label="1 Schichtkarte" value={editing.workerName || 'OpenShift'} emphasizeValue={Boolean(editing.workerName)} />}
+          {!editing ? <Row icon={layersOutline} label={`${form.required_count} Schicht${form.required_count === 1 ? '' : 'en'}`} trailing={<div className="wiw-count-stepper"><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: Math.max(current.workers.length || 1, current.required_count - 1) }))}>−</button><b>{form.required_count}</b><button type="button" onClick={() => setForm((current) => ({ ...current, required_count: current.required_count + 1 }))}>+</button></div>} /> : (showRestrictedAdminRows ? <Row icon={layersOutline} label="1 Schichtkarte" value={editing.workerName || 'OpenShift'} emphasizeValue={Boolean(editing.workerName)} /> : null)
           <Row icon={checkmarkOutline} label="Erfordere Übernahme-Bestätigung" trailing={<Switch checked={form.confirmation_required} onChange={(value) => setForm((current) => ({ ...current, confirmation_required: value }))} />} />
           <Row icon={peopleOutline} label={editing ? (form.workers.length ? 'Mitarbeiter ändern' : 'Mitarbeiter zuweisen') : (form.workers.length ? `${form.workers.length} Benutzer direkt zugewiesen` : 'Geeignete Benutzer anzeigen')} value={selectedWorkerNames || undefined} emphasizeValue={Boolean(selectedWorkerNames)} muted={!form.workers.length} onClick={() => setSheet('workers')} />
 
@@ -1663,27 +1631,28 @@ export default function WiwScheduleMobile() {
               emphasizeValue
               onClick={openAdminTimeEditor}
             />
-            <Row
+            {showRestrictedAdminRows ? <Row
               field="admin-time-log"
               icon={documentTextOutline}
               label="Zeitlog"
               value={editingTimeEntries.length ? `${editingTimeEntries.length} Eintrag${editingTimeEntries.length === 1 ? '' : 'e'} · Anzeigen` : 'Anzeigen'}
               emphasizeValue={Boolean(editingTimeEntries.length)}
               onClick={() => setTimeLogOpen(true)}
-            />
+            /> : null}
           </> : null}
 
           {editing && editing.parentCount > 1 && !editing.isOpen ? <div className="wiw-bulk-edit-row"><div><b>Alle Karten dieser Schicht mitändern</b><span>Wenn aus, wird nur diese Person / OpenShift-Karte geändert.</span></div><Switch checked={form.apply_all} onChange={(value) => setForm((current) => ({ ...current, apply_all: value }))} /></div> : null}
 
           <div className="wiw-form-separator" />
-          <Row
-            icon={colorPaletteOutline}
-            label="Standardfarbe"
-            colorManaged
-            onClick={() => setSheet('color')}
-            trailing={<span className="wiw-color-row-tail"><i style={form.color_hue == null ? ({ background: formPalette.accent } as React.CSSProperties) : ({ '--wiw-color-hue': String(form.color_hue ?? formAutoHue) } as React.CSSProperties)} /><b>{form.color_hue == null ? 'Kundenfarbe · automatisch' : (COLOR_CHOICES.find((choice) => choice.hue === form.color_hue)?.label || 'Individuell')}</b><IonIcon className="wiw-row-chevron" icon={chevronForwardOutline} /></span>}
-          />
           <div className="wiw-note-editor">
+            <label className="wiw-event-number-field">
+              <span>Veranstaltungsnummer</span>
+              <input type="text" inputMode="text" maxLength={64} autoComplete="off"
+                aria-label="Veranstaltungsnummer" value={form.event_number}
+                placeholder="z. B. 12345"
+                onChange={(event) => setForm((current) => ({ ...current, event_number: event.target.value }))}
+              />
+            </label>
             <div className="wiw-note-editor-toolbar">
               <span className="wiw-note-editor-title"><IonIcon icon={documentTextOutline} /><span>Notiz</span></span>
               <button type="button" onClick={() => { noteRef.current?.blur(); setToast('Notiz übernommen.'); }}>Fertig</button>
@@ -1693,7 +1662,7 @@ export default function WiwScheduleMobile() {
               aria-label="Notiz"
               value={form.notes}
               onFocus={() => window.setTimeout(() => noteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 120)}
-              onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+              onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value, event_number: current.event_number || extractShiftEventNumber(event.target.value) || '' }))}
               placeholder="Hinweis für Mitarbeiter …"
             />
           </div>
@@ -1711,7 +1680,6 @@ export default function WiwScheduleMobile() {
         {sheet === 'position' ? <ChoiceSheet title="Position" choices={positionChoices} selected={form.position} onClose={() => setSheet('')} onSelect={(choice) => { setForm((current) => ({ ...current, position: choice.value })); setSheet(''); }} /> : null}
         {sheet === 'location' ? <ChoiceSheet title="Jobstandort" choices={locationChoices} selected={form.location} onClose={() => setSheet('')} onSelect={(choice) => { setForm((current) => ({ ...current, location: choice.value })); setSheet(''); }} /> : null}
         {sheet === 'groups' ? <MultiChoiceSheet title="Zeitplan" choices={SCHEDULE_GROUPS} selected={form.schedule_groups} onClose={() => setSheet('')} onChange={(values) => setForm((current) => { const currentPosition = positions.find((item: any) => String(item.id) === current.position); const keepPosition = !current.position || !values.length || values.includes(positionGroup(currentPosition?.name)); return { ...current, schedule_groups: values, position: keepPosition ? current.position : '' }; })} /> : null}
-        {sheet === 'color' ? <ColorSheet selected={form.color_hue} autoHue={formAutoHue} onClose={() => setSheet('')} onSelect={(hue) => setForm((current) => ({ ...current, color_hue: hue }))} /> : null}
         {sheet === 'workers' ? <MultiChoiceSheet title={editing ? 'Mitarbeiter auswählen / ändern' : 'Geeignete Benutzer'} choices={workerChoices} selected={form.workers} limit={editing ? 1 : form.required_count} onClose={() => setSheet('')} onChange={(values) => setForm((current) => ({ ...current, workers: values, apply_all: editing ? false : current.apply_all }))} /> : null}
       </div> : null}
 
@@ -1756,7 +1724,7 @@ export default function WiwScheduleMobile() {
         onClose={() => setTimeEditorDateOpen(false)}
       /> : null}
 
-      {timeLogOpen && isAdmin && editing?.workerId ? <div className="wiw-sheet-backdrop wiw-admin-time-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setTimeLogOpen(false); }}>
+      {timeLogOpen && showRestrictedAdminRows && editing?.workerId ? <div className="wiw-sheet-backdrop wiw-admin-time-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setTimeLogOpen(false); }}>
         <section className="wiw-admin-log-sheet" role="dialog" aria-modal="true" aria-label="Zeitlog">
           <header><div><small>ZEITLOG · NUR ADMIN</small><b>Arbeitszeit-Verlauf</b><span>{editing.workerName || 'Mitarbeiter'}</span></div><button type="button" onClick={() => setTimeLogOpen(false)}>Fertig</button></header>
           <div className="wiw-admin-log-scroll" data-testid="wiw-admin-time-log">
@@ -1813,7 +1781,7 @@ function emptyForm(date: string): FormState {
     confirmation_required: false,
     workers: [],
     schedule_groups: ['service'],
-    color_hue: null,
+    event_number: '',
     notes: '',
     apply_all: false,
   };
