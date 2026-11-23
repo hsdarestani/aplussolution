@@ -75,10 +75,12 @@ def _rounded_recorded_interval(entry):
 def weekly_rows(monday, group):
     start = datetime.combine(monday, time.min, BERLIN)
     end = datetime.combine(monday + timedelta(days=7), time.min, BERLIN)
-    # The Dienstplan selects the relevant scheduled assignments and hotel;
-    # completed employee-submitted TimeEntry records supply Start/Ende/Stunden.
-    # A scheduled shift with no completed entry has blank hours, never PLAN
-    # fallback. Approval is not a filter for this operational hotel form.
+    # The Dienstplan selects the relevant assignments and hotel. Completed
+    # TimeEntries supply IST start/end with outward quarter-hour rounding.
+    # Where a worker has no completed TimeEntry for a scheduled shift, use that
+    # shift's *exact* PLAN start/end as a visibly identified fallback instead
+    # of leaving hours blank. Do not create or modify attendance records.
+    # Approval is not a filter for this operational hotel form.
     shifts = Shift.objects.filter(starts_at__gte=start, starts_at__lt=end).exclude(
         status=Shift.Status.CANCELLED,
     ).select_related('worker__user', 'position', 'location', 'client').prefetch_related(
@@ -122,18 +124,31 @@ def weekly_rows(monday, group):
                 seen.add(str(entry.worker_id))
 
         key = (str(shift.client_id), str(shift.location_id), shift.location.name)
+        planned_start = shift.starts_at.astimezone(BERLIN)
+        planned_end = shift.ends_at.astimezone(BERLIN)
+        planned_minutes = max(0, int(
+            (shift.ends_at.astimezone(dt_timezone.utc) -
+             shift.starts_at.astimezone(dt_timezone.utc)).total_seconds() // 60
+        ))
         for worker, slot_id in assignments:
-            record = _rounded_recorded_interval(latest_by_worker.get(worker.pk))
-            first, last, minutes = record if record else (None, None, None)
+            recorded = _rounded_recorded_interval(latest_by_worker.get(worker.pk))
+            if recorded is not None:
+                first, last, minutes = recorded
+                source = 'IST'
+            else:
+                # Show PLAN exactly as entered; only IST gets outward rounding.
+                first, last, minutes = planned_start, planned_end, planned_minutes
+                source = 'PLAN'
             hotels[key].append({
-                'datum': (first or shift.starts_at.astimezone(BERLIN)).strftime('%d.%m.%Y'),
+                'datum': first.strftime('%d.%m.%Y'),
                 'vorname': worker.user.first_name,
                 'nachname': worker.user.last_name,
-                'start': first.strftime('%H:%M') if first else '',
-                'ende': last.strftime('%H:%M') if last else '',
-                'stunden': decimal_hours(minutes) if minutes is not None else '',
-                'bestaetigung': 'bestätigt',
-                'minutes': minutes, 'shift_id': str(shift.pk), 'slot_id': slot_id,
+                'start': first.strftime('%H:%M'),
+                'ende': last.strftime('%H:%M'),
+                'stunden': decimal_hours(minutes),
+                'bestaetigung': 'bestätigt' if source == 'IST' else 'PLAN (nicht erfasst)',
+                'minutes': minutes, 'source': source,
+                'shift_id': str(shift.pk), 'slot_id': slot_id,
                 'worker_id': str(worker.pk),
             })
     return {key: rows for key, rows in hotels.items() if rows}
@@ -257,7 +272,6 @@ def render_pdf(monday, group, hotels):
                 wall_minutes = (end_h * 60 + end_m - start_h * 60 - start_m) % 1440
                 safe_clock_recalc = row['minutes'] == wall_minutes
             else:
-                # Manual completion of an initially empty report row.
                 safe_clock_recalc = True
             for field in (start_name, end_name, hours_name):
                 js = (recalc if field != hours_name and safe_clock_recalc else '') + update_total
