@@ -43,7 +43,7 @@ def decimal_hours(minutes):
 
 def displayed_total(rows):
     """Match the visible decimal-hour entries, including rounding per entry."""
-    return formatted_hours(sum((Decimal(row['stunden']) for row in rows), Decimal('0')))
+    return formatted_hours(sum((Decimal(row['stunden']) for row in rows if str(row['stunden']).strip()), Decimal('0')))
 
 
 def _rounded_recorded_interval(entry):
