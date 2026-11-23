@@ -9,6 +9,7 @@ import re
 
 from django.http import HttpResponse, JsonResponse
 from pypdf import PdfReader, PdfWriter
+from pypdf.generic import DictionaryObject, NameObject, TextStringObject
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from rest_framework.decorators import api_view
@@ -32,8 +33,17 @@ def parse_week(value):
     return date.fromisocalendar(int(value[:4]), int(value[6:]), 1)
 
 
+def formatted_hours(hours):
+    return format(Decimal(hours).quantize(Decimal('0.01')), 'f').rstrip('0').rstrip('.') or '0'
+
+
 def decimal_hours(minutes):
-    return format((Decimal(minutes) / 60).quantize(Decimal('0.01')), 'f').rstrip('0').rstrip('.') or '0'
+    return formatted_hours(Decimal(minutes) / 60)
+
+
+def displayed_total(rows):
+    """Match the visible decimal-hour entries, including rounding per entry."""
+    return formatted_hours(sum((Decimal(row['stunden']) for row in rows), Decimal('0')))
 
 
 def weekly_rows(monday, group):
@@ -63,7 +73,9 @@ def weekly_rows(monday, group):
         first = shift.starts_at.astimezone(BERLIN)
         last = shift.ends_at.astimezone(BERLIN)
         gross = int((shift.ends_at.astimezone(dt_timezone.utc) - shift.starts_at.astimezone(dt_timezone.utc)).total_seconds() // 60)
-        minutes = max(0, gross - max(0, int(shift.break_minutes or 0)))
+        # Stundenzettel lists the complete scheduled start-to-end interval.
+        # Unlike payroll/attendance reports, breaks are NOT deducted here.
+        minutes = max(0, gross)
         key = (str(shift.client_id), str(shift.location_id), shift.location.name)
         for worker, slot_id in assignments:
             hotels[key].append({
@@ -89,14 +101,25 @@ def render_pdf(monday, group, hotels):
             page_number += 1
             c.setFont('Helvetica-Bold', 10)
             c.setFillColorRGB(.72, .54, .08)
-            c.drawString(167.24, 519, GROUPS[group][1])
+            c.acroForm.textfield(
+                name=f'p{page_number}_bereich', value=GROUPS[group][1],
+                x=167.24, y=514, width=180, height=18,
+                fontName='Helvetica-Bold', fontSize=10, borderWidth=0,
+                fillColor=colors.white, textColor=colors.HexColor('#B88A14'),
+                forceBorder=False,
+            )
             c.setFillColorRGB(0, 0, 0)
             c.setFont('Helvetica', 8)
             hotel_size = 8
             while c.stringWidth(key[2], 'Helvetica', hotel_size) > 285 and hotel_size > 5:
                 hotel_size -= .25
             c.setFont('Helvetica', hotel_size)
-            c.drawString(85, 446, key[2])
+            c.acroForm.textfield(
+                name=f'p{page_number}_hotel', value=key[2], x=85, y=440,
+                width=285, height=18, fontName='Helvetica',
+                fontSize=hotel_size, borderWidth=0, fillColor=colors.white,
+                textColor=colors.black, forceBorder=False,
+            )
             c.setFont('Helvetica', 8)
             chunk = rows[offset:offset + 14]
             for index, row in enumerate(chunk):
@@ -110,10 +133,16 @@ def render_pdf(monday, group, hotels):
                         value=value, x=x, y=381.3543 - 24 * index, width=width, height=18.33,
                         fontName='Helvetica', fontSize=size, borderWidth=0,
                         fillColor=colors.white, textColor=colors.black, forceBorder=False)
-            # Preserve the emailed form: only the numeric sum, without a caption.
+            # Keep the original numeric-only footer, but make it editable.
+            # Sum the displayed values to prevent misleading visible mismatches.
             y = 381.3543 - 24 * len(chunk)
-            c.setFont('Helvetica', 8)
-            c.drawString(506.23, y + 6, decimal_hours(sum(row['minutes'] for row in chunk)))
+            c.acroForm.textfield(
+                name=f'p{page_number}_gesamt', value=displayed_total(chunk),
+                x=506.23, y=y, width=77.42, height=18.33,
+                fontName='Helvetica', fontSize=8, borderWidth=0,
+                fillColor=colors.white, textColor=colors.black,
+                forceBorder=False, tooltip='Summe Stunden',
+            )
             c.showPage()
     c.save()
     writer = PdfWriter()
@@ -121,6 +150,52 @@ def render_pdf(monday, group, hotels):
     background = PdfReader(TEMPLATE).pages[0]
     for page in writer.pages:
         page.merge_page(background, over=False)
+    # Adobe Acrobat/Reader performs on-blur updates when a time or hours
+    # entry is edited. Browser PDF viewers may ignore PDF JavaScript, but all
+    # fields (including the calculated total) remain editable everywhere.
+    for page_index, page in enumerate(writer.pages, 1):
+        widgets = {}
+        for annot_ref in page.get('/Annots', []):
+            widget = annot_ref.get_object()
+            if widget.get('/Subtype') == '/Widget' and widget.get('/T'):
+                widgets[str(widget['/T'])] = widget
+        prefix = f'p{page_index}_'
+        rows = [i for i in range(1, 15) if f'{prefix}stunden_{i:02}' in widgets]
+        if not rows:
+            continue
+        total = f'{prefix}gesamt'
+        update_total = (
+            'var ids=' + repr([f'{prefix}stunden_{i:02}' for i in rows]).replace("'", '"') + ';'
+            'var sum=0; for(var i=0;i<ids.length;i++){'
+            'var f=this.getField(ids[i]);if(!f)continue;'
+            'var s=String(f.value).replace(",",".").trim();'
+            'if(s!=="" && isFinite(Number(s)))sum+=Number(s);}'
+            'this.getField("' + total + '").value='
+            'String(Math.round((sum+Number.EPSILON)*100)/100);'
+        )
+        for i in rows:
+            suffix = f'{i:02}'
+            hours_name = f'{prefix}stunden_{suffix}'
+            start_name = f'{prefix}start_{suffix}'
+            end_name = f'{prefix}ende_{suffix}'
+            recalc = (
+                'function m(t){var a=/^(\\d{1,2}):(\\d{2})$/.exec(String(t).trim());'
+                'if(!a)return NaN;var h=Number(a[1]),n=Number(a[2]);'
+                'return h<24&&n<60?h*60+n:NaN;}'
+                'var a=m(this.getField("' + start_name + '").value);'
+                'var b=m(this.getField("' + end_name + '").value);'
+                'if(isFinite(a)&&isFinite(b)){var d=b-a;if(d<0)d+=1440;'
+                'this.getField("' + hours_name + '").value='
+                'String(Math.round(d/60*100)/100);}'
+            )
+            for field in (start_name, end_name, hours_name):
+                js = (recalc if field != hours_name else '') + update_total
+                widgets[field][NameObject('/AA')] = DictionaryObject({
+                    NameObject('/Bl'): DictionaryObject({
+                        NameObject('/S'): NameObject('/JavaScript'),
+                        NameObject('/JS'): TextStringObject(js),
+                    })
+                })
     result = BytesIO()
     writer.write(result)
     return result.getvalue()
