@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { scheduledShiftHours, sumAllWeeklyScheduledHours, sumScheduledCardHours } from './weeklyScheduledHours';
+import { formatScheduledHours, scheduledShiftHours, sumAllWeeklyScheduledHours, sumScheduledCardHours } from './weeklyScheduledHours';
 
 const weekDays = ['2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19', '2026-11-20', '2026-11-21', '2026-11-22'];
 const day = (iso: string) => iso.slice(0, 10);
@@ -7,6 +7,11 @@ const slotCount = (shift: any) =>
   shift.slot_cards?.length || ((shift.assigned_workers?.length || 0) + (shift.open_count || 0)) || 1;
 
 describe('scheduled hours in manager Dienstplan', () => {
+  it('displays quarter-hour totals without one-decimal drift', () => {
+    expect(formatScheduledHours(8.25)).toBe('8,25');
+    expect(formatScheduledHours(8.75)).toBe('8,75');
+    expect(formatScheduledHours(9)).toBe('9');
+  });
   it('adds the net scheduled duration once for EACH person/slot, even if unapproved', () => {
     const shifts = [
       {
@@ -56,6 +61,7 @@ describe('scheduled hours in manager Dienstplan', () => {
   it('guards invalid or reversed times and never produces negative hours', () => {
     expect(scheduledShiftHours({ starts_at: 'bad', ends_at: 'bad' })).toBe(0);
     expect(scheduledShiftHours({ starts_at: '2026-11-16T13:00:00+01:00', ends_at: '2026-11-16T08:00:00+01:00' })).toBe(0);
+
     expect(scheduledShiftHours({ starts_at: '2026-11-16T08:00:00+01:00', ends_at: '2026-11-16T09:00:00+01:00', break_minutes: 120 })).toBe(0);
   });
 });

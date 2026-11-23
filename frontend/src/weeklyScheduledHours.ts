@@ -10,8 +10,17 @@ export function scheduledShiftHours(shift: ScheduledShift): number {
   const start = new Date(shift.starts_at || '').getTime();
   const end = new Date(shift.ends_at || '').getTime();
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+  // Admin day/week totals count scheduled work, excluding the planned Pause.
   const breakMinutes = Math.max(0, Number(shift.break_minutes || 0) || 0);
   return Math.max(0, (end - start) / 3600000 - breakMinutes / 60);
+}
+
+/** Keep quarter-hour precision visible instead of 0.25h -> 0.3h. */
+export function formatScheduledHours(value: number): string {
+  if (!Number.isFinite(value)) return '0';
+  return (Math.round(value * 100) / 100).toLocaleString('de-DE', {
+    maximumFractionDigits: 2,
+  });
 }
 
 export function sumScheduledCardHours(cards: readonly { shift: ScheduledShift }[]): number {

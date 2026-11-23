@@ -82,6 +82,18 @@ describe('mobile admin day grouping', () => {
     expect(groups.every((g) => g.stripe === null)).toBe(true);
   });
 
+  it('prioritizes the short explicit Veranstaltungsnummer over long free-text notes', () => {
+    const first = makeCard(20, '07:00', 'Sehr langer Hinweis ohne Nummer', 'Dominikankloster');
+    const second = makeCard(21, '09:00', 'Event-Nr. 99999 aber aktualisiert', 'Evangelische Akademie');
+    const groups = groupDayScheduleCards([
+      { ...first, shift: { ...first.shift, event_number: 'ABC-123' } },
+      { ...second, shift: { ...second.shift, event_number: 'abc-123' } },
+    ], rank);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].eventNumber).toBe('ABC-123');
+    expect(groups[0].cards).toHaveLength(2);
+  });
+
   it('keeps multiple employee slots of one shift together', () => {
     const first = makeCard(1, '08:00', 'Event #100', 'Dominikankloster');
     const second = { ...first, key: '1:another-slot' };
