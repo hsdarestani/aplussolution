@@ -32,7 +32,7 @@ def _shift_with_counts(pk):
 
 def _editable_payload(data):
     allowed = {
-        'client', 'location', 'position', 'starts_at', 'ends_at', 'notes',
+        'client', 'location', 'position', 'starts_at', 'ends_at', 'notes', 'event_number',
         'confirmation_required', 'schedule_groups', 'color_hue', 'status',
     }
     return {key: value for key, value in data.items() if key in allowed}
@@ -142,6 +142,7 @@ def edit_shift_slot(request, shift_id, slot_id):
             status=shift.status,
             is_open=False,
             notes=shift.notes,
+            event_number=shift.event_number,
             required_count=1,
             confirmation_required=shift.confirmation_required,
             schedule_groups=shift.schedule_groups,
