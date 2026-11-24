@@ -34,7 +34,7 @@ import { openPdfDocument } from './openPdfDocument';
 import { ShiftPlanAttachments, ShiftPlanBulkUpload } from './ShiftPlanAttachments';
 import { isHotelClientName, schedulePalette } from './scheduleClientPalette';
 import { extractShiftEventNumber, groupDayScheduleCards, type DayEventGroup } from './scheduleEventGrouping';
-import { formatScheduledHours, sumAllWeeklyScheduledHours, sumScheduledCardHours } from './weeklyScheduledHours';
+import { formatScheduledHours, sumScheduledCardHours } from './weeklyScheduledHours';
 import { canViewAdminShiftExtraRows } from './adminScheduleVisibility';
 import './wiw-schedule-mobile.css';
 
@@ -957,11 +957,12 @@ export default function WiwScheduleMobile() {
     Object.values(map).forEach((dayCards) => dayCards.sort(sortScheduleCards));
     return map;
   }, [visibleDays, visibleCards]);
-  // The bottom total is for ALL slots/shifts in the selected week, not only
-  // cards still visible after search, status or service filters.
+  // The bottom total must use the same visible shift cards as daily totals.
+  // Keep service, status and search filters in sync without double-counting
+  // supplementary WIW live rows. Admin planned hours include breaks.
   const weekHours = useMemo(
-    () => sumAllWeeklyScheduledHours(rows, days, dateKeyFromIso, (shift) => activeSlots(shift).length),
-    [rows, days],
+    () => sumScheduledCardHours(visibleCards),
+    [visibleCards],
   );
 
   const positionChoices = useMemo<Choice[]>(() => {
