@@ -36,6 +36,38 @@ async function mobileAdmin(page: Page) {
   return shifts;
 }
 
+test('mobile filtered daily and weekly hours always describe the same visible shifts', async ({ page }) => {
+  await mobileAdmin(page);
+  const schedule = page.getByTestId('wiw-native-schedule');
+  const filters = schedule.locator('.wiw-group-filters');
+  const cards = schedule.locator('.wiw-shift-card');
+  const weekTotal = schedule.locator('.wiw-week-total strong');
+  const dayTotal = schedule.locator('.wiw-day-section:has(.wiw-shift-card) header em');
+
+  await expect(cards).toHaveCount(3);
+  await expect(weekTotal).toHaveText('18');
+  await expect(dayTotal).toContainText('18 Std.');
+
+  await filters.getByRole('button', { name: 'Housekeeping', exact: true }).click();
+  await expect(cards).toHaveCount(2);
+  await expect(weekTotal).toHaveText('12');
+  await expect(dayTotal).toContainText('12 Std.');
+
+  await filters.getByRole('button', { name: 'Front Office', exact: true }).click();
+  await expect(cards).toHaveCount(1);
+  await expect(weekTotal).toHaveText('6');
+  await expect(dayTotal).toContainText('6 Std.');
+
+  await filters.getByRole('button', { name: 'Service', exact: true }).click();
+  await expect(cards).toHaveCount(0);
+  await expect(weekTotal).toHaveText('0');
+
+  await filters.getByRole('button', { name: 'Housekeeping', exact: true }).click();
+  await expect(cards).toHaveCount(1);
+  await expect(weekTotal).toHaveText('6');
+  await expect(dayTotal).toContainText('6 Std.');
+});
+
 test('mobile filters stay multi-select and worker reassignment replaces the current choice', async ({ page }) => {
   await mobileAdmin(page);
   const schedule = page.getByTestId('wiw-native-schedule');
